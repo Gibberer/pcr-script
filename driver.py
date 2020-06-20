@@ -26,6 +26,7 @@ class ADBDriver(Driver):
     
     def click(self, x, y):
         self._shell("input tap {} {}".format(x, y))
+        # print("click {} {}".format(x,y))
 
     def input(self, text):
         self._shell("input text {}".format(text))

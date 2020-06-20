@@ -1,5 +1,5 @@
 from simulator import Simulator
-from driver import Driver,ADBDriver
+from driver import Driver
 from robot import Robot
 import threading
 
