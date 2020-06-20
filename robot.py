@@ -8,6 +8,7 @@ import random
 
 BASE_WIDTH = 960
 BASE_HEIGHT = 540
+THRESHOLD = 0.8  # 如果使用960x540 匹配度一般在0.95以上,默认为0.8,,如果在480x270上可以调成0.65试试
 
 
 class Action:
@@ -88,16 +89,20 @@ class Robot:
         self._tohomepage()
         self._get_quest_reward()  # 先领取体力
         self._tohomepage()
-        self._close_ub_animation() # 关闭ub动画
+        self._close_ub_animation()  # 关闭ub动画
         self._tohomepage()
-        self._advanture_1(9, 9, 2, checkguide=False)  # 冒险一章刷10次
+        self._advanture_1(1, 10, 10, checkguide=True)  # 冒险一章刷10次
         self._tohomepage()
         self._get_quest_reward()  # 刷10次后再领下任务
 
     def _log(self, msg: str):
         print("{}: {}".format(self._name, msg))
 
+    @trace
     def _real_name_auth(self):
+        '''
+        实名认证
+        '''
         if 'IDS' not in locals():
             self.IDS = []
             with open('IDS.txt', mode='r', encoding='utf-8') as f:
@@ -123,9 +128,9 @@ class Robot:
         '''
         self._action_squential(MatchAction('shop', unmatch_actions=(
             ClickAction(template='btn_close'),
-            ClickAction(template='btn_skip'),
+            ClickAction(template='btn_skip',threshold=min(0.8, 1.2 * THRESHOLD)),
             ClickAction(template='tab_home_page'),
-            ClickAction(pos=self._pos(300, 200)),
+            ClickAction(pos=self._pos(50, 300)),
         )))
 
     @trace
@@ -140,7 +145,7 @@ class Robot:
             MatchAction('page_battle_selected'),
             ClickAction(pos=self._pos(772, 239)),
             SleepAction(1),
-            ClickAction(pos=self._pos(772, 350)),
+            ClickAction(pos=self._pos(772, 370)),
             SleepAction(1),
             ClickAction(template='btn_close')
         )
@@ -189,7 +194,7 @@ class Robot:
                         ClickAction(template='btn_close')]),
             ClickAction(template='btn_main_plot'),
             MatchAction('chapter1', unmatch_actions=[
-                        ClickAction(template="arrow_left")])
+                        ClickAction(template="arrow_left")], timeout=10)
         )
         # 进入第一章
         check_auto = True
@@ -216,8 +221,10 @@ class Robot:
                     time.sleep(3)
                     ClickAction(template='btn_close').do(
                         self.driver.screenshot(), self)
-                self._action_squential(MatchAction('chapter1', unmatch_actions=[
-                                       ClickAction(template="arrow_left")]))
+                self._action_squential(
+                    MatchAction('chapter1', unmatch_actions=[
+                        ClickAction(template="arrow_left")], timeout=10)
+                )
             count += (right - left) + 1
 
     @trace
@@ -230,7 +237,7 @@ class Robot:
         actions.append(ClickAction(template='btn_challenge'))
         actions.append(ClickAction(template='btn_combat_start'))
         if check_auto:
-            actions.append(MatchAction(template='icon_wave', matched_actions=[ClickAction(template='btn_speed'),
+            actions.append(MatchAction(template='btn_caidan', matched_actions=[ClickAction(template='btn_speed'),
                                                                               ClickAction(template='btn_auto')], timeout=10))
         actions.append(SleepAction(35))
         actions.append(MatchAction('btn_next_step', matched_actions=[ClickAction()], unmatch_actions=[
@@ -283,7 +290,7 @@ class Robot:
 
     def _create_skip_guide_action(self) -> Action:
         return MatchAction('arrow_down', matched_actions=[ClickAction(offset=(
-            self._pos(0, 100))), SleepAction(3)], unmatch_actions=[ClickAction(pos=self._pos(480, 270))], threshold=0.7)
+            self._pos(0, 100))), SleepAction(3)], unmatch_actions=[ClickAction(pos=self._pos(480, 270))], threshold=(7/8)*THRESHOLD)
 
     def _pos(self, x, y) -> (int, int):
         return(int((x/BASE_WIDTH)*self.devicewidth), int((y/BASE_HEIGHT)*self.deviceheight))
@@ -295,7 +302,7 @@ class Robot:
                 if delay > 0:
                     time.sleep(delay)
 
-    def _find_match_pos(self, screenshot, template, threshold=0.8) -> (int, int):
+    def _find_match_pos(self, screenshot, template, threshold=THRESHOLD) -> (int, int):
         name = template
         source: np.ndarray = cv.imread(screenshot)
         template: np.ndarray = cv.imread("images/{}.png".format(template))
@@ -309,7 +316,7 @@ class Robot:
         theight, twidth = template.shape[:2]
         ret = cv.matchTemplate(source, template, cv.TM_CCOEFF_NORMED)
         min_val, max_val, min_loc, max_loc = cv.minMaxLoc(ret)
-        self._log("{}:{}:{}".format(name, max_val, threshold))
+        # self._log("{}:{}:{}".format(name, max_val, threshold))
         if max_val > threshold:
             return (max_loc[0] + twidth/2, max_loc[1] + theight/2)
         else:
@@ -317,7 +324,7 @@ class Robot:
 
 
 class MatchAction(Action):
-    def __init__(self, template, matched_actions=None, unmatch_actions=None, delay=0, timeout=0, threshold=0.8):
+    def __init__(self, template, matched_actions=None, unmatch_actions=None, delay=0, timeout=0, threshold=THRESHOLD):
         super().__init__()
         self.template = template
         self.matched_actions = matched_actions
@@ -359,15 +366,16 @@ class SleepAction(Action):
 
 
 class ClickAction(Action):
-    def __init__(self, template=None, pos=None, offset=(0, 0)):
+    def __init__(self, template=None, pos=None, offset=(0, 0), threshold=THRESHOLD):
         super().__init__()
         self.template = template
         self.pos = pos
         self.offset = offset
+        self.threshold = threshold
 
     def do(self, screenshot, robot: Robot):
         if self.template:
-            ret = robot._find_match_pos(screenshot, self.template)
+            ret = robot._find_match_pos(screenshot, self.template, threshold=self.threshold)
             if ret:
                 robot.driver.click(ret[0] + self.offset[0],
                                    ret[1] + self.offset[1])
