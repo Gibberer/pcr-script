@@ -1,15 +1,14 @@
 from driver import ADBDriver, Driver
 import os
-class Simulator():
+import types
+class DNSimulator():
     
-    def __init__(self):
+    def __init__(self, path):#N:\dnplayer2
         super().__init__()
-        self.connect()
-
-    def connect(self):
-        # mumu 模拟器这么连接
-        # os.system("adb connect 127.0.0.1:7555")
-        pass
+        self.path = path
+    
+    def dninput(self, msg, index = 0):
+        os.system('{}\dnconsole.exe action --index {} --key call.input --value "{}"'.format(self.path,index,msg))
 
     def get_dirvers(self)->Driver:
         lines = os.popen("adb devices").readlines()
@@ -21,5 +20,20 @@ class Simulator():
             if '\t' in line:
                 name, status = line.split('\t')
                 if 'device' in status:
-                    devices.append(ADBDriver(name))
+                    driver = ADBDriver(name)
+                    input_func = driver.input
+                    input_code = compile('''def input(it, msg):
+                            zhongwen = False
+                            for char in msg:
+                                if '\u4e00' <= char <= '\u9fa5':
+                                    zhongwen = True
+                                    break
+                            if zhongwen:
+                                self.dninput(msg,index)
+                            else:
+                                input_func(msg)
+                    ''',"<string>","exec")
+                    input = types.FunctionType(input_code.co_consts[0],{'self':self,'input_func':input_func,'index':len(devices)},'input')
+                    driver.input = types.MethodType(input, driver)
+                    devices.append(driver)
         return devices

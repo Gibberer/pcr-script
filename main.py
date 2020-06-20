@@ -1,4 +1,4 @@
-from simulator import Simulator
+from simulator import DNSimulator
 from driver import Driver
 from robot import Robot
 import threading
@@ -7,7 +7,7 @@ def getaccount():
     with open("account.txt", 'r') as f:
         return [ line.strip('\n').split(' ') for line in f.readlines()]
 
-drivers = Simulator().get_dirvers()
+drivers = DNSimulator("N:\dnplayer2").get_dirvers()
 account_list = getaccount()
 thread_list = []
 lock = threading.Lock()

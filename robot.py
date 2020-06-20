@@ -4,6 +4,7 @@ import numpy as np
 import time
 from typing import Iterable
 import functools
+import random
 
 BASE_WIDTH = 960
 BASE_HEIGHT = 540
@@ -73,33 +74,54 @@ class Robot:
                         ClickAction(template='btn_ok_blue')
                     )
                 ret = self._find_match_pos(
-                    screenshot, 'tab_main_menu_selected')
+                    screenshot, 'btn_back_welcome')
                 if ret:
                     self._action_squential(
                         ClickAction(template='btn_back_welcome'),
                         ClickAction(template='btn_ok_blue')
                     )
+            time.sleep(3)
 
     @trace
     def work(self, tasklist=None):
+        # self._real_name_auth()
         self._tohomepage()
         self._get_quest_reward()  # 先领取体力
         self._tohomepage()
         self._close_ub_animation() # 关闭ub动画
         self._tohomepage()
-        self._advanture_1(1, 10, 10, checkguide=False)  # 冒险一章刷10次
+        self._advanture_1(9, 9, 2, checkguide=False)  # 冒险一章刷10次
         self._tohomepage()
         self._get_quest_reward()  # 刷10次后再领下任务
 
     def _log(self, msg: str):
         print("{}: {}".format(self._name, msg))
 
+    def _real_name_auth(self):
+        if 'IDS' not in locals():
+            self.IDS = []
+            with open('IDS.txt', mode='r', encoding='utf-8') as f:
+                self.IDS = [line.strip('\n').split(' ')
+                            for line in f.readlines()]
+        _id, name = random.choice(self.IDS)
+        start_time = time.time()
+        self._action_squential(MatchAction('edit_real_name', matched_actions=[
+                               ClickAction(), InputAction(name)], timeout=20))
+        if time.time() - start_time > 20:
+            return
+        self._action_squential(
+            ClickAction(template='edit_id_card'),
+            InputAction(_id),
+            ClickAction(template='btn_submit'),
+            ClickAction(template='btn_confirm')
+        )
+
     @trace
     def _tohomepage(self):
         '''
         进入游戏主页面
         '''
-        self._action_squential(MatchAction('tab_home_page_selected', unmatch_actions=(
+        self._action_squential(MatchAction('shop', unmatch_actions=(
             ClickAction(template='btn_close'),
             ClickAction(template='btn_skip'),
             ClickAction(template='tab_home_page'),
@@ -118,8 +140,8 @@ class Robot:
             MatchAction('page_battle_selected'),
             ClickAction(pos=self._pos(772, 239)),
             SleepAction(1),
-            ClickAction(pos=self._pos(769, 330)),
-            SleepAction(3),
+            ClickAction(pos=self._pos(772, 350)),
+            SleepAction(1),
             ClickAction(template='btn_close')
         )
 
@@ -163,7 +185,8 @@ class Robot:
         level_pos = [(106, 281), (227, 237), (314, 331), (379, 235), (479, 294),
                      (545, 376), (611, 305), (622, 204), (749, 245), (821, 353)]
         self._action_squential(
-            ClickAction(template='tab_adventure'),
+            MatchAction('tab_adventure', matched_actions=[ClickAction()], unmatch_actions=[
+                        ClickAction(template='btn_close')]),
             ClickAction(template='btn_main_plot'),
             MatchAction('chapter1', unmatch_actions=[
                         ClickAction(template="arrow_left")])
@@ -265,12 +288,13 @@ class Robot:
     def _pos(self, x, y) -> (int, int):
         return(int((x/BASE_WIDTH)*self.devicewidth), int((y/BASE_HEIGHT)*self.deviceheight))
 
-    def _action_squential(self, *actions: Iterable[Action], delay = 1):
+    def _action_squential(self, *actions: Iterable[Action], delay=1):
         for action in actions:
             while not action.done():
                 action.do(self.driver.screenshot(), self)
-                time.sleep(delay)
-    
+                if delay > 0:
+                    time.sleep(delay)
+
     def _find_match_pos(self, screenshot, template, threshold=0.8) -> (int, int):
         name = template
         source: np.ndarray = cv.imread(screenshot)
@@ -285,7 +309,7 @@ class Robot:
         theight, twidth = template.shape[:2]
         ret = cv.matchTemplate(source, template, cv.TM_CCOEFF_NORMED)
         min_val, max_val, min_loc, max_loc = cv.minMaxLoc(ret)
-        # self._log("{}:{}:{}".format(name, max_val, threshold))
+        self._log("{}:{}:{}".format(name, max_val, threshold))
         if max_val > threshold:
             return (max_loc[0] + twidth/2, max_loc[1] + theight/2)
         else:
