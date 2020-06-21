@@ -62,4 +62,4 @@ class DNSimulator2(DNSimulator):
     def get_dirvers(self) -> Driver:
         devices = self.get_devices()
         if devices:
-            return [DNADBDriver(device, self, i) for i, device in enumerate(devices)]
+            return [DNADBDriver(device, self.path, i) for i, device in enumerate(devices)]

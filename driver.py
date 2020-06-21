@@ -1,12 +1,17 @@
 from abc import ABCMeta, abstractmethod
-from simulator import DNSimulator
+from win32 import win32gui, win32api, win32console
+from win32.lib import win32con
+from pythonwin import win32ui
+import numpy as np
+import matplotlib.pyplot as plt
 import os
+
 
 class Driver(metaclass=ABCMeta):
     @abstractmethod
     def click(self, x, y):
         pass
-    
+
     @abstractmethod
     def input(self, text):
         pass
@@ -16,7 +21,7 @@ class Driver(metaclass=ABCMeta):
         pass
 
     @abstractmethod
-    def getScreenSize(self)->(int,int):
+    def getScreenSize(self) -> (int, int):
         pass
 
 
@@ -24,7 +29,7 @@ class ADBDriver(Driver):
     def __init__(self, device_name):
         super().__init__()
         self.device_name = device_name
-    
+
     def click(self, x, y):
         self._shell("input tap {} {}".format(x, y))
         # print("click {} {}".format(x,y))
@@ -34,16 +39,16 @@ class ADBDriver(Driver):
 
     def screenshot(self, output="screen_shot.png"):
         self._shell("screencap -p /sdcard/opsd.png")
-        output = "{}-{}".format(self.device_name,output)
+        output = "{}-{}".format(self.device_name, output)
         self._cmd("pull /sdcard/opsd.png {}".format(output))
         return output
 
-    def getScreenSize(self)->(int,int):
-        return map(lambda x:int(x),self._shell("wm size", True).split(":")[-1].split("x"))
+    def getScreenSize(self) -> (int, int):
+        return map(lambda x: int(x), self._shell("wm size", True).split(":")[-1].split("x"))
 
     def _shell(self, cmd, ret=False):
         return self._cmd("shell {}".format(cmd))
-    
+
     def _cmd(self, cmd, ret=False):
         cmd = "adb -s {} {}".format(self.device_name, cmd)
         if ret:
@@ -51,15 +56,17 @@ class ADBDriver(Driver):
         else:
             return os.popen(cmd).read()
 
+
 class DNADBDriver(ADBDriver):
     '''
     基于ADB的雷电模拟器扩展驱动
     '''
-    def __init__(self, device_name, dnsimulator:DNSimulator, index):
+
+    def __init__(self, device_name, dnpath, index):
         super().__init__(device_name)
+        self.dnpath = dnpath
         self.index = index
-        self.dnsimulator = dnsimulator
-    
+
     def input(self, text):
         '''
         adb 不支持中文使用dnconsole接口
@@ -70,11 +77,33 @@ class DNADBDriver(ADBDriver):
                 contain_hanzi = True
                 break
         if contain_hanzi:
-            self.dnsimulator.dninput(text)
+            os.system(
+                '{}\dnconsole.exe action --index {} --key call.input --value "{}"'.format(self.dnpath, self.index, text))
         else:
             super().input(text)
-    
+
     def screenshot(self, output='screen_shot.png'):
-        #TODO use win32api
+        # TODO use win32api
         return super().screenshot(output=output)
 
+
+if __name__ == "__main__":
+    # test win 32 grap screen
+    width, height, left, top = 500, 500, 200, 200
+    hwin = win32gui.GetDesktopWindow()
+    hwindc = win32gui.GetWindowDC(hwin)
+    srcdc = win32ui.CreateDCFromHandle(hwindc)
+    memdc = srcdc.CreateCompatibleDC()
+    bmp = win32ui.CreateBitmap()
+    bmp.CreateCompatibleBitmap(srcdc, width, height)
+    memdc.SelectObject(bmp)
+    memdc.BitBlt((0, 0), (width, height), srcdc, (left, top), win32con.SRCCOPY)
+    signedIntsArray = bmp.GetBitmapBits(True)
+    img = np.frombuffer(signedIntsArray, dtype='uint8')
+    img.shape = (height, width, 4)
+    srcdc.DeleteDC()
+    memdc.DeleteDC()
+    win32gui.ReleaseDC(hwin, hwindc)
+    win32gui.DeleteObject(bmp.GetHandle())
+    plt.imshow(img)
+    plt.show()

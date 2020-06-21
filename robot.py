@@ -159,10 +159,10 @@ class Robot:
         获取任务奖励
         '''
         self._action_squential(
-            ClickAction(template = 'quest'),
-            ClickAction(template= 'btn_all_rec'),
+            ClickAction(template='quest'),
+            ClickAction(template='btn_all_rec'),
             MatchAction('btn_close', matched_actions=[
-                                ClickAction()], timeout=5)
+                ClickAction()], timeout=5)
         )
 
     @trace
@@ -229,7 +229,7 @@ class Robot:
         actions.append(SleepAction(5))
         if check_auto:
             actions.append(MatchAction(template='btn_caidan', matched_actions=[ClickAction(template='btn_speed'),
-                                                                              ClickAction(template='btn_auto')], timeout=10))
+                                                                               ClickAction(template='btn_auto')], timeout=10))
         actions.append(SleepAction(35))
         actions.append(MatchAction('btn_next_step', matched_actions=[ClickAction()], unmatch_actions=[
             ClickAction(template='btn_close'), ClickAction(pos=self._pos(200, 250))]))
@@ -366,7 +366,8 @@ class ClickAction(Action):
 
     def do(self, screenshot, robot: Robot):
         if self.template:
-            ret = robot._find_match_pos(screenshot, self.template, threshold=self.threshold)
+            ret = robot._find_match_pos(
+                screenshot, self.template, threshold=self.threshold)
             if ret:
                 robot.driver.click(ret[0] + self.offset[0],
                                    ret[1] + self.offset[1])
