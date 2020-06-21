@@ -1,5 +1,4 @@
 from simulator import DNSimulator
-from driver import Driver
 from robot import Robot
 import threading
 
@@ -17,7 +16,7 @@ def dostaff(robot:Robot):
             if len(account_list) == 0:
                 break
             account, password = account_list.pop(0)
-        robot.changeaccount(account, password)
+        robot.changeaccount(account, password, logpath='output.log')
         robot.work()
 for driver in drivers:
     robot = Robot(driver)

@@ -48,7 +48,10 @@ class Robot:
         self._name = name
 
     @trace
-    def changeaccount(self, account, password):
+    def changeaccount(self, account, password, logpath=None):
+        if logpath:
+            with open(logpath, 'a') as f:
+                f.write("{}:{}\n".format(self._name, account))
         while True:
             screenshot = self.driver.screenshot()
             if self._find_match_pos(screenshot, 'welcome_main_menu'):
@@ -87,11 +90,14 @@ class Robot:
     def work(self, tasklist=None):
         # self._real_name_auth()
         self._tohomepage()
+        # 第一次进入的时候等下公告
+        time.sleep(5)
+        ClickAction(template='btn_close').do(self.driver.screenshot(), self)
         self._get_quest_reward()  # 先领取体力
         self._tohomepage()
         self._close_ub_animation()  # 关闭ub动画
         self._tohomepage()
-        self._advanture_1(1, 10, 10, checkguide=True)  # 冒险一章刷10次
+        self._advanture_1(10, 10, 1, checkguide=True)  # 冒险一章刷10次
         self._tohomepage()
         self._get_quest_reward()  # 刷10次后再领下任务
 
@@ -128,7 +134,6 @@ class Robot:
         '''
         self._action_squential(MatchAction('shop', unmatch_actions=(
             ClickAction(template='btn_close'),
-            ClickAction(template='btn_skip',threshold=min(0.8, 1.2 * THRESHOLD)),
             ClickAction(template='tab_home_page'),
             ClickAction(pos=self._pos(50, 300)),
         )))
@@ -144,9 +149,7 @@ class Robot:
             ClickAction(template='page_battle'),
             MatchAction('page_battle_selected'),
             ClickAction(pos=self._pos(772, 239)),
-            SleepAction(1),
             ClickAction(pos=self._pos(772, 370)),
-            SleepAction(1),
             ClickAction(template='btn_close')
         )
 
@@ -155,25 +158,12 @@ class Robot:
         '''
         获取任务奖励
         '''
-        # 点击任务
         self._action_squential(
-            MatchAction('quest', matched_actions=[ClickAction()], unmatch_actions=[
-                        ClickAction(template='btn_close')]),
-        )
-        while True:
-            screenshot = self.driver.screenshot()
-            ret = self._find_match_pos(screenshot, 'btn_all_rec')
-            if ret:
-                self._action_squential(
-                    ClickAction(pos=ret),
-                    MatchAction('btn_close', matched_actions=[
+            ClickAction(template = 'quest'),
+            ClickAction(template= 'btn_all_rec'),
+            MatchAction('btn_close', matched_actions=[
                                 ClickAction()], timeout=5)
-                )
-                break
-            else:
-                ret = self._find_match_pos(screenshot, 'btn_all_rec_disable')
-                if ret:
-                    break
+        )
 
     @trace
     def _get_gift(self):
@@ -236,6 +226,7 @@ class Robot:
         actions.append(ClickAction(pos=self._pos(*trigger_pos)))
         actions.append(ClickAction(template='btn_challenge'))
         actions.append(ClickAction(template='btn_combat_start'))
+        actions.append(SleepAction(5))
         if check_auto:
             actions.append(MatchAction(template='btn_caidan', matched_actions=[ClickAction(template='btn_speed'),
                                                                               ClickAction(template='btn_auto')], timeout=10))

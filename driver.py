@@ -1,4 +1,5 @@
 from abc import ABCMeta, abstractmethod
+from simulator import DNSimulator
 import os
 
 class Driver(metaclass=ABCMeta):
@@ -49,4 +50,31 @@ class ADBDriver(Driver):
             os.system(cmd)
         else:
             return os.popen(cmd).read()
+
+class DNADBDriver(ADBDriver):
+    '''
+    基于ADB的雷电模拟器扩展驱动
+    '''
+    def __init__(self, device_name, dnsimulator:DNSimulator, index):
+        super().__init__(device_name)
+        self.index = index
+        self.dnsimulator = dnsimulator
+    
+    def input(self, text):
+        '''
+        adb 不支持中文使用dnconsole接口
+        '''
+        contain_hanzi = False
+        for char in text:
+            if '\u4e00' <= char <= '\u9fa5':
+                contain_hanzi = True
+                break
+        if contain_hanzi:
+            self.dnsimulator.dninput(text)
+        else:
+            super().input(text)
+    
+    def screenshot(self, output='screen_shot.png'):
+        #TODO use win32api
+        return super().screenshot(output=output)
 
