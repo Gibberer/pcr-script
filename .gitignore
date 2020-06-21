@@ -1,4 +1,5 @@
 *screen_shot.png
-/__pycache__/*
+__pycache__/
 account.txt
 IDS.txt
+.vscode/
