@@ -50,7 +50,7 @@ class DNSimulator():
                 input = types.FunctionType(input_code.co_consts[0], {
                                            'self': self, 'input_func': input_func, 'index': len(devices)}, 'input')
                 driver.input = types.MethodType(input, driver)
-                devices.append(driver)
+                drivers.append(driver)
             return drivers
 
 

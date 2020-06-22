@@ -4,7 +4,10 @@ from win32.lib import win32con
 from pythonwin import win32ui
 import numpy as np
 import matplotlib.pyplot as plt
+from cv2 import cv2 as cv
 import os
+import config
+import time
 
 
 class Driver(metaclass=ABCMeta):
@@ -38,6 +41,7 @@ class ADBDriver(Driver):
         self._shell("input text {}".format(text))
 
     def screenshot(self, output="screen_shot.png"):
+        # 每次要花1-2秒
         self._shell("screencap -p /sdcard/opsd.png")
         output = "{}-{}".format(self.device_name, output)
         self._cmd("pull /sdcard/opsd.png {}".format(output))
@@ -83,27 +87,53 @@ class DNADBDriver(ADBDriver):
             super().input(text)
 
     def screenshot(self, output='screen_shot.png'):
-        # TODO use win32api
-        return super().screenshot(output=output)
+        window_title = '雷电模拟器'
+        if self.index > 0:
+            window_title = "{}-{}".format(window_title, self.index)
+        width,height = config.BASE_WIDTH,config.BASE_HEIGHT
+        toolbar_height = 35
+        try:
+            hwin = win32gui.FindWindow('LDPlayerMainFrame',window_title)
+            hwindc = win32gui.GetWindowDC(hwin)
+            srcdc = win32ui.CreateDCFromHandle(hwindc)
+            memdc = srcdc.CreateCompatibleDC()
+            bmp = win32ui.CreateBitmap()
+            bmp.CreateCompatibleBitmap(srcdc, width, height)
+            memdc.SelectObject(bmp)
+            memdc.BitBlt((0, 0), (width, height), srcdc, (0, toolbar_height), win32con.SRCCOPY)
+            signedIntsArray = bmp.GetBitmapBits(True)
+            img = np.frombuffer(signedIntsArray, dtype='uint8')
+            img.shape = (height, width, 4)
+            srcdc.DeleteDC()
+            memdc.DeleteDC()
+            win32gui.ReleaseDC(hwin, hwindc)
+            win32gui.DeleteObject(bmp.GetHandle())
+            return img[:,:,:3]
+        except:
+            return super().screenshot(output=output)
 
 
-if __name__ == "__main__":
-    # test win 32 grap screen
-    width, height, left, top = 500, 500, 200, 200
-    hwin = win32gui.GetDesktopWindow()
-    hwindc = win32gui.GetWindowDC(hwin)
-    srcdc = win32ui.CreateDCFromHandle(hwindc)
-    memdc = srcdc.CreateCompatibleDC()
-    bmp = win32ui.CreateBitmap()
-    bmp.CreateCompatibleBitmap(srcdc, width, height)
-    memdc.SelectObject(bmp)
-    memdc.BitBlt((0, 0), (width, height), srcdc, (left, top), win32con.SRCCOPY)
-    signedIntsArray = bmp.GetBitmapBits(True)
-    img = np.frombuffer(signedIntsArray, dtype='uint8')
-    img.shape = (height, width, 4)
-    srcdc.DeleteDC()
-    memdc.DeleteDC()
-    win32gui.ReleaseDC(hwin, hwindc)
-    win32gui.DeleteObject(bmp.GetHandle())
-    plt.imshow(img)
-    plt.show()
+# if __name__ == "__main__":
+#     # test win 32 grap screen
+#     while True:
+#         width= 960
+#         height = 575
+#         hwin = win32gui.FindWindow('LDPlayerMainFrame','雷电模拟器')
+#         hwindc = win32gui.GetWindowDC(hwin)
+#         srcdc = win32ui.CreateDCFromHandle(hwindc)
+#         memdc = srcdc.CreateCompatibleDC()
+#         bmp = win32ui.CreateBitmap()
+#         bmp.CreateCompatibleBitmap(srcdc, width, height-35)
+#         memdc.SelectObject(bmp)
+#         memdc.BitBlt((0, 0), (width, height-35), srcdc, (0, 35), win32con.SRCCOPY)
+#         signedIntsArray = bmp.GetBitmapBits(True)
+#         img = np.frombuffer(signedIntsArray, dtype='uint8')
+#         img.shape = (height-35, width, 4)
+#         srcdc.DeleteDC()
+#         memdc.DeleteDC()
+#         win32gui.ReleaseDC(hwin, hwindc)
+#         win32gui.DeleteObject(bmp.GetHandle())
+#         cv.imshow('window', img)
+#         if cv.waitKey(25) & 0xFF == ord('q'):
+#             cv.destroyAllWindows()
+#             break

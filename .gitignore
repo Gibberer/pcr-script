@@ -2,4 +2,5 @@
 __pycache__/
 account.txt
 IDS.txt
+*.log
 .vscode/

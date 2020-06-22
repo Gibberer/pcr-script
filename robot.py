@@ -5,10 +5,7 @@ import time
 from typing import Iterable
 import functools
 import random
-
-BASE_WIDTH = 960
-BASE_HEIGHT = 540
-THRESHOLD = 0.8  # 如果使用960x540 匹配度一般在0.95以上,默认为0.8,,如果在480x270上可以调成0.65试试
+from config import *
 
 
 class Action:
@@ -91,13 +88,13 @@ class Robot:
         # self._real_name_auth()
         self._tohomepage()
         # 第一次进入的时候等下公告
-        time.sleep(5)
+        time.sleep(3)
         ClickAction(template='btn_close').do(self.driver.screenshot(), self)
         self._get_quest_reward()  # 先领取体力
         self._tohomepage()
         self._close_ub_animation()  # 关闭ub动画
         self._tohomepage()
-        self._advanture_1(10, 10, 1, checkguide=True)  # 冒险一章刷10次
+        self._advanture_1(9, 9, 20)  # 冒险一章刷
         self._tohomepage()
         self._get_quest_reward()  # 刷10次后再领下任务
 
@@ -160,6 +157,7 @@ class Robot:
         '''
         self._action_squential(
             ClickAction(template='quest'),
+            SleepAction(1),
             ClickAction(template='btn_all_rec'),
             MatchAction('btn_close', matched_actions=[
                 ClickAction()], timeout=5)
@@ -223,6 +221,7 @@ class Robot:
         处理战斗界面相关
         '''
         actions = []
+        actions.append(SleepAction(1))#战斗结束后的弹窗影响点击，延迟一秒
         actions.append(ClickAction(pos=self._pos(*trigger_pos)))
         actions.append(ClickAction(template='btn_challenge'))
         actions.append(ClickAction(template='btn_combat_start'))
@@ -233,6 +232,7 @@ class Robot:
         actions.append(SleepAction(35))
         actions.append(MatchAction('btn_next_step', matched_actions=[ClickAction()], unmatch_actions=[
             ClickAction(template='btn_close'), ClickAction(pos=self._pos(200, 250))]))
+        actions.append(SleepAction(1))
         actions.append(ClickAction('btn_next_step'))
         self._action_squential(*actions)
 
@@ -286,7 +286,7 @@ class Robot:
     def _pos(self, x, y) -> (int, int):
         return(int((x/BASE_WIDTH)*self.devicewidth), int((y/BASE_HEIGHT)*self.deviceheight))
 
-    def _action_squential(self, *actions: Iterable[Action], delay=1):
+    def _action_squential(self, *actions: Iterable[Action], delay=0.2):
         for action in actions:
             while not action.done():
                 action.do(self.driver.screenshot(), self)
@@ -295,7 +295,11 @@ class Robot:
 
     def _find_match_pos(self, screenshot, template, threshold=THRESHOLD) -> (int, int):
         name = template
-        source: np.ndarray = cv.imread(screenshot)
+        source: np.ndarray
+        if isinstance(screenshot, np.ndarray):
+            source = screenshot
+        else:
+            source = cv.imread(screenshot)
         template: np.ndarray = cv.imread("images/{}.png".format(template))
         # 这里需要对template resize，template是在960x540的设备上截屏的
         height, width = source.shape[:2]
@@ -315,7 +319,7 @@ class Robot:
 
 
 class MatchAction(Action):
-    def __init__(self, template, matched_actions=None, unmatch_actions=None, delay=0, timeout=0, threshold=THRESHOLD):
+    def __init__(self, template, matched_actions=None, unmatch_actions=None, delay=1, timeout=0, threshold=THRESHOLD):
         super().__init__()
         self.template = template
         self.matched_actions = matched_actions
