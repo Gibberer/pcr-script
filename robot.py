@@ -7,6 +7,9 @@ import functools
 import random
 from config import *
 
+CHAPTER_1 = ((106, 281), (227, 237), (314, 331), (379, 235), (479, 294),
+                     (545, 376), (611, 305), (622, 204), (749, 245), (821, 353))
+CHAPTERS = (CHAPTER_1,)
 
 class Action:
     def __init__(self):
@@ -90,13 +93,11 @@ class Robot:
         # 第一次进入的时候等下公告
         time.sleep(3)
         ClickAction(template='btn_close').do(self.driver.screenshot(), self)
-        self._get_quest_reward()  # 先领取体力
-        self._tohomepage()
-        self._close_ub_animation()  # 关闭ub动画
-        self._tohomepage()
-        self._advanture_1(9, 9, 20)  # 冒险一章刷
-        self._tohomepage()
-        self._get_quest_reward()  # 刷10次后再领下任务
+        if tasklist:
+            for funcname,*args in tasklist:
+                getattr(self,"_" + funcname)(*args)
+            time.sleep(3)
+            ClickAction(template='btn_close').do(self.driver.screenshot(), self)
 
     def _log(self, msg: str):
         print("{}: {}".format(self._name, msg))
@@ -169,14 +170,72 @@ class Robot:
         领取礼物
         '''
         pass
+    
+    @trace
+    def _buy_mana(self, count):
+        '''
+        购买mana
+        '''
+        # 先确认进入mana购买界面
+        self._action_squential(
+            SleepAction(1),
+            ClickAction(pos=self._pos(187,63)),
+            MatchAction('icon_mana',unmatch_actions=[ClickAction(pos=self._pos(50,300))])
+        )
+        one =self._pos(*[598,478]) 
+        mul =self._pos(*[818,477])
+        actions = []
+        if count >= 1:
+            actions.append(ClickAction(pos=one))
+            actions.append(SleepAction(.5))
+            actions.append(ClickAction(template='btn_ok_blue'))
+            actions.append(SleepAction(3))
+        if count >= 10:
+            actions.append(ClickAction(pos=mul))
+            actions.append(SleepAction(.5))
+            actions.append(ClickAction(template='btn_ok_blue'))
+            actions.append(SleepAction(20))
+        if count >= 20:
+            actions.append(ClickAction(pos=mul))
+            actions.append(SleepAction(.5))
+            actions.append(ClickAction(template='btn_ok_blue'))
+            actions.append(SleepAction(20))
+        actions.append(ClickAction('btn_cancel'))
+        self._action_squential(*actions)
+    
+    @trace
+    def _saodang(self, chapter = 1, level = 1, count = 1):
+        pos = CHAPTERS[chapter - 1][level - 1]
+        self._action_squential(
+            MatchAction('tab_adventure', matched_actions=[ClickAction()], unmatch_actions=[
+                        ClickAction(template='btn_close')]),
+            ClickAction(template='btn_main_plot'),
+            MatchAction('chapter{}'.format(chapter), unmatch_actions=[
+                        ClickAction(template="arrow_left")], timeout=10),
+            SleepAction(1)
+        )
+        actions = []
+        actions.append(ClickAction(pos = self._pos(*pos)))
+        actions.append(MatchAction('btn_challenge'))
+        for _ in range(count):
+            actions.append(ClickAction(pos=self._pos(877,330)))
+        actions.append(ClickAction(pos=self._pos(757,330)))
+        actions.append(ClickAction(template='btn_ok_blue'))
+        actions.append(ClickAction(template='btn_skip_ok'))
+        actions.append(SleepAction(1))
+        actions.append(ClickAction(template='btn_ok'))
+        actions.append(SleepAction(1))
+        actions.append(MatchAction(template='btn_ok', matched_actions=[ClickAction()], timeout=3))
+        actions.append(SleepAction(2))
+        actions.append(ClickAction(pos= self._pos(666,457)))
+        self._action_squential(*actions)
 
     @trace
     def _advanture_1(self, left, right, totalcount, checkguide=False):
         '''
         冒险主线关卡第一章
         '''
-        level_pos = [(106, 281), (227, 237), (314, 331), (379, 235), (479, 294),
-                     (545, 376), (611, 305), (622, 204), (749, 245), (821, 353)]
+        level_pos = CHAPTER_1
         self._action_squential(
             MatchAction('tab_adventure', matched_actions=[ClickAction()], unmatch_actions=[
                         ClickAction(template='btn_close')]),
@@ -211,7 +270,8 @@ class Robot:
                         self.driver.screenshot(), self)
                 self._action_squential(
                     MatchAction('chapter1', unmatch_actions=[
-                        ClickAction(template="arrow_left")], timeout=10)
+                        ClickAction(template="arrow_left")], timeout=10),
+                        SleepAction(3)
                 )
             count += (right - left) + 1
 
@@ -221,7 +281,6 @@ class Robot:
         处理战斗界面相关
         '''
         actions = []
-        actions.append(SleepAction(1))#战斗结束后的弹窗影响点击，延迟一秒
         actions.append(ClickAction(pos=self._pos(*trigger_pos)))
         actions.append(ClickAction(template='btn_challenge'))
         actions.append(ClickAction(template='btn_combat_start'))
