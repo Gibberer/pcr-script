@@ -10,20 +10,21 @@ def getaccount():
 
 def getTaskDict()->FloorDict:
     floor_dict = FloorDict()
+    # floor_dict[1] = [
+    #     # ('get_quest_reward',),#领任务体力
+    #     # ('tohomepage',),#回首页
+    #     ('close_ub_animation',),#关ub动画
+    #     ('tohomepage',),#回首页
+    #     ('adventure',2,1,12,12,True),
+    #     ('adventure',3,1,1,1,True),#刷冒险
+    #     # ('tohomepage',),
+    #     # ('get_quest_reward',),#领任务
+    # ]
     floor_dict[1] = [
-        ('get_quest_reward',),#领任务体力
-        ('tohomepage',),#回首页
-        ('close_ub_animation',),#关ub动画
-        ('tohomepage',),#回首页
-        ('advanture_1',9,9,30),#刷一章冒险
-        ('tohomepage',),
-        ('get_quest_reward',),#领任务
-    ]
-    floor_dict[2] = [
         ('get_quest_reward',),
         ('tohomepage',),
         ('buy_mana',20),
-        ('saodang',1,3,40),#扫荡
+        ('saodang',1,9,40),#扫荡
         ('tohomepage',),
         ('get_quest_reward',)
     ]

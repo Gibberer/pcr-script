@@ -6,10 +6,23 @@ from typing import Iterable
 import functools
 import random
 from config import *
+from floordict import FloorDict
 
 CHAPTER_1 = ((106, 281), (227, 237), (314, 331), (379, 235), (479, 294),
-                     (545, 376), (611, 305), (622, 204), (749, 245), (821, 353))
-CHAPTERS = (CHAPTER_1,)
+             (545, 376), (611, 305), (622, 204), (749, 245), (821, 353))
+CHAPTER_2 = ((120, 410), (253, 410), (382, 378), (324, 274), (235, 216), (349, 162), (457, 229),
+             (500, 319), (600, 375), (722, 370), (834, 348), (816, 227))
+CHAPTER_2_ZOOM = ((48, 410), (180, 412), (302, 381), (256, 276), (157, 210), (275, 170), (377, 230),
+                  (426, 321), (526, 377), (648, 377), (755, 341), (742, 226))
+CHAPTER_3 = ((135, 185), (192, 309), (284, 229), (414, 230), (379, 343), (488, 411), (532, 289),
+             (615, 194), (691, 272), (675, 390), (821, 339), (835, 211))
+CHAPTERS = (
+    FloorDict({0: CHAPTER_1}),
+    FloorDict({0: CHAPTER_2, 8: CHAPTER_2_ZOOM}),
+    FloorDict({0: CHAPTER_3}),
+)
+CHAPTER_SYMBOLS = ('chapter1', 'chapter2', 'chapter3')
+
 
 class Action:
     def __init__(self):
@@ -94,10 +107,8 @@ class Robot:
         time.sleep(3)
         ClickAction(template='btn_close').do(self.driver.screenshot(), self)
         if tasklist:
-            for funcname,*args in tasklist:
-                getattr(self,"_" + funcname)(*args)
-            time.sleep(3)
-            ClickAction(template='btn_close').do(self.driver.screenshot(), self)
+            for funcname, *args in tasklist:
+                getattr(self, "_" + funcname)(*args)
 
     def _log(self, msg: str):
         print("{}: {}".format(self._name, msg))
@@ -158,10 +169,12 @@ class Robot:
         '''
         self._action_squential(
             ClickAction(template='quest'),
-            SleepAction(1),
-            ClickAction(template='btn_all_rec'),
+            SleepAction(3),
+            MatchAction('btn_all_rec', matched_actions=[
+                        ClickAction()], timeout=3),
             MatchAction('btn_close', matched_actions=[
-                ClickAction()], timeout=5)
+                        ClickAction()], timeout=5),
+            MatchAction('btn_ok', matched_actions=[ClickAction()], timeout=3)
         )
 
     @trace
@@ -170,7 +183,7 @@ class Robot:
         领取礼物
         '''
         pass
-    
+
     @trace
     def _buy_mana(self, count):
         '''
@@ -179,11 +192,12 @@ class Robot:
         # 先确认进入mana购买界面
         self._action_squential(
             SleepAction(1),
-            ClickAction(pos=self._pos(187,63)),
-            MatchAction('icon_mana',unmatch_actions=[ClickAction(pos=self._pos(50,300))])
+            ClickAction(pos=self._pos(187, 63)),
+            MatchAction('icon_mana', unmatch_actions=[
+                        ClickAction(pos=self._pos(50, 300))])
         )
-        one =self._pos(*[598,478]) 
-        mul =self._pos(*[818,477])
+        one = self._pos(*[598, 478])
+        mul = self._pos(*[818, 477])
         actions = []
         if count >= 1:
             actions.append(ClickAction(pos=one))
@@ -202,78 +216,145 @@ class Robot:
             actions.append(SleepAction(20))
         actions.append(ClickAction('btn_cancel'))
         self._action_squential(*actions)
-    
+
     @trace
-    def _saodang(self, chapter = 1, level = 1, count = 1):
+    def _saodang(self, chapter=1, level=1, count=1):
         pos = CHAPTERS[chapter - 1][level - 1]
         self._action_squential(
             MatchAction('tab_adventure', matched_actions=[ClickAction()], unmatch_actions=[
                         ClickAction(template='btn_close')]),
             ClickAction(template='btn_main_plot'),
             MatchAction('chapter{}'.format(chapter), unmatch_actions=[
-                        ClickAction(template="arrow_left")], timeout=10),
-            SleepAction(1)
+                        ClickAction(pos=self._pos(36, 271))], timeout=10),
+            SleepAction(1),
+            ClickAction(pos=self._pos(*pos)),
+            MatchAction('btn_challenge')
         )
         actions = []
-        actions.append(ClickAction(pos = self._pos(*pos)))
-        actions.append(MatchAction('btn_challenge'))
         for _ in range(count):
-            actions.append(ClickAction(pos=self._pos(877,330)))
-        actions.append(ClickAction(pos=self._pos(757,330)))
+            actions.append(ClickAction(pos=self._pos(877, 330)))
+        self._action_squential(*actions, delay=0)
+        actions = []
+        actions.append(ClickAction(pos=self._pos(757, 330)))
         actions.append(ClickAction(template='btn_ok_blue'))
         actions.append(ClickAction(template='btn_skip_ok'))
         actions.append(SleepAction(1))
         actions.append(ClickAction(template='btn_ok'))
         actions.append(SleepAction(1))
-        actions.append(MatchAction(template='btn_ok', matched_actions=[ClickAction()], timeout=3))
+        actions.append(MatchAction(template='btn_ok',
+                                   matched_actions=[ClickAction()], timeout=3))
         actions.append(SleepAction(2))
-        actions.append(ClickAction(pos= self._pos(666,457)))
+        actions.append(ClickAction(pos=self._pos(666, 457)))
         self._action_squential(*actions)
 
     @trace
-    def _advanture_1(self, left, right, totalcount, checkguide=False):
+    def _adventure(self, chapter, start, end=None, totalcount=1, checkguide=False):
         '''
-        冒险主线关卡第一章
+        刷冒险
+        Parameters
+        ---------
+        chapter: 冒险章节
+        start: 起始关卡
+        end: 结束关卡
+        checkguide: 是否做跳过教程检测
         '''
-        level_pos = CHAPTER_1
-        self._action_squential(
-            MatchAction('tab_adventure', matched_actions=[ClickAction()], unmatch_actions=[
-                        ClickAction(template='btn_close')]),
-            ClickAction(template='btn_main_plot'),
-            MatchAction('chapter1', unmatch_actions=[
-                        ClickAction(template="arrow_left")], timeout=10)
-        )
-        # 进入第一章
+        chapter = chapter - 1
+        if not end:
+            end = start
+        # 从主页进入冒险页面
+        self._enture_advanture()
+        chapter_symbol = CHAPTER_SYMBOLS[chapter]
+        # 移动到选中目标的关卡
+        ret = self._find_match_template(CHAPTER_SYMBOLS, timeout=10)
+        if not ret:
+            return
+        pos, _ = ret
+        actions = []
+        if chapter > pos:
+            actions.append(MatchAction(chapter_symbol, unmatch_actions=[
+                           ClickAction(pos=self._pos(928, 271)), SleepAction(3)], timeout=15))
+        elif chapter < pos:
+            actions.append(MatchAction(chapter_symbol, unmatch_actions=[
+                           ClickAction(pos=self._pos(36, 271)), SleepAction(3)], timeout=15))
+        # 确保移动到对应页面
+        actions.append(SleepAction(1))
+        self._action_squential(*actions)
+        level_pos = CHAPTERS[chapter][0]
+        if pos == chapter:
+            # 修正level pos
+            ret = self._find_match_pos(self.driver.screenshot(), 'peiko')
+            if ret:
+                bar = ret[0] + 15
+                for i, pos in enumerate(level_pos):
+                    if pos[0] > bar:
+                        level_pos = CHAPTERS[chapter][i]
+                        break
+
         check_auto = True
         count = 0
         while count < totalcount:
-            for i in range(left - 1, right):
+            for i in range(start - 1, end):
                 pos = level_pos[i]
                 self._combat(pos, check_auto=check_auto)
                 check_auto = False
-                if checkguide:
-                    time.sleep(5)
-                    if i == 3:
-                        # ignore guide here
-                        if self._find_match_pos(self.driver.screenshot(), 'kkr_guide'):
-                            self._skip_guide_1_4()
-                    if i == 5:
-                        if self._find_match_pos(self.driver.screenshot(), 'kkr_guide'):
-                            self._skip_guide_1_6()
-                    if i in [6, 7, 8]:
-                        ClickAction(template='btn_close').do(
-                            self.driver.screenshot(), self)
-                else:
-                    # 有可能好感度弹的剧情提示
-                    time.sleep(3)
-                    ClickAction(template='btn_close').do(
-                        self.driver.screenshot(), self)
                 self._action_squential(
-                    MatchAction('chapter1', unmatch_actions=[
-                        ClickAction(template="arrow_left")], timeout=10),
-                        SleepAction(3)
+                    MatchAction(chapter_symbol, unmatch_actions=[
+                        ClickAction(pos=self._pos(36, 271)), SleepAction(2)], timeout=10),
+                    SleepAction(3)
                 )
-            count += (right - left) + 1
+                ClickAction(template='btn_close').do(
+                    self.driver.screenshot(), self)
+                if checkguide:
+                    time.sleep(2)
+                    self._skip_guide(chapter + 1, i + 1)
+                level_pos = CHAPTERS[chapter][i]
+            count += (end - start) + 1
+
+    def _enture_advanture(self, normal=True):
+        actions = []
+        actions.append(MatchAction('tab_adventure', matched_actions=[ClickAction()], unmatch_actions=[
+            ClickAction(template='btn_close')]))
+        actions.append(SleepAction(2))
+        actions.append(ClickAction(template='btn_main_plot'))
+        actions.append(SleepAction(2))
+        if normal:
+            actions.append(MatchAction('btn_normal_selected', unmatch_actions=[
+                           ClickAction(template='btn_normal')]))
+        self._action_squential(*actions)
+
+    @trace
+    def _skip_guide(self, chapter, level):
+        if chapter == 1:
+            if level in (4, 6) and self._find_match_pos(self.driver.screenshot(), 'kkr_guide'):
+                if level == 4:
+                    self._skip_guide_1_4()
+                if level == 6:
+                    self._skip_guide_1_6()
+        elif chapter == 2:
+            if level in (1, 2, 5, 8) and self._find_match_pos(self.driver.screenshot(), 'kkr_guide'):
+                if level == 1:
+                    self._skip_guide_2_1()
+                if level == 2:
+                    self._skip_guide_2_2()
+                if level == 5:
+                    self._skip_guide_2_5()
+                if level == 8:
+                    self._skip_guide_2_8()
+                if level == 12:
+                    self._skip_guide_2_12()
+
+    def _find_match_template(self, templates, timeout=15, delay=1) -> (int, str):
+        start_time = time.time()
+        while True:
+            if delay > 0:
+                time.sleep(delay)
+            screenshot = self.driver.screenshot()
+            for i, template in enumerate(templates):
+                ret = self._find_match_pos(screenshot, template)
+                if ret:
+                    return i, template
+            if time.time() - start_time > timeout:
+                break
 
     @trace
     def _combat(self, trigger_pos, check_auto=False):
@@ -297,9 +378,6 @@ class Robot:
 
     @trace
     def _skip_guide_1_4(self):
-        '''
-        跳过1-4的引导
-        '''
         self._action_squential(
             self._create_skip_guide_action(),
             self._create_skip_guide_action(),
@@ -337,6 +415,68 @@ class Robot:
             MatchAction('chapter1', unmatch_actions=[
                         ClickAction(pos=self._pos(480, 220))])
         )
+
+    @trace
+    def _skip_guide_2_1(self):
+        self._action_squential(
+            self._create_skip_guide_action(),
+            SleepAction(1),
+            ClickAction(template='btn_menu'),
+            ClickAction(template='btn_skip_with_text'),
+            ClickAction(template='btn_skip_ok'),
+            self._create_skip_guide_action(),
+            ClickAction(template="btn_close")
+        )
+        # 再回到冒险页面
+        self._enture_advanture()
+
+    @trace
+    def _skip_guide_2_2(self):
+        self._action_squential(
+            self._create_skip_guide_action(),
+            MatchAction('quest', unmatch_actions=[
+                        ClickAction(pos=self._pos(310, 50))], timeout=10)  # 为了点几下屏幕没有好的标志位
+        )
+        # 再回到冒险页面
+        self._enture_advanture()
+
+    @trace
+    def _skip_guide_2_5(self):
+        self._action_squential(
+            self._create_skip_guide_action(),
+            self._create_skip_guide_action(),
+            MatchAction('quest', unmatch_actions=[
+                        ClickAction(pos=self._pos(310, 50))], timeout=5)  # 为了点几下屏幕没有好的标志位
+        )
+        # 回首页，这里稍微绕下远
+        self._tohomepage()
+        # 再去冒险
+        self._enture_advanture()
+
+    @trace
+    def _skip_guide_2_8(self):
+        self._action_squential(
+            self._create_skip_guide_action(),
+        )
+        # 回首页，这里稍微绕下远
+        self._tohomepage()
+        # 再去冒险
+        self._enture_advanture()
+
+    @trace
+    def _skip_guide_2_12(self):
+        self._action_squential(
+            self._create_skip_guide_action(),
+            self._create_skip_guide_action(),
+            MatchAction(template='btn_menu', matched_actions=[
+                        ClickAction()], unmatch_actions=[ClickAction(pos=self._pos(480, 270))]),
+            ClickAction(template='btn_skip_with_text'),
+            ClickAction(template='btn_skip_ok')
+        )
+        # 回首页，这里稍微绕下远
+        self._tohomepage()
+        # 再去冒险
+        self._enture_advanture()
 
     def _create_skip_guide_action(self) -> Action:
         return MatchAction('arrow_down', matched_actions=[ClickAction(offset=(
