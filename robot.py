@@ -355,7 +355,7 @@ class Robot:
                 if level == 6:
                     self._skip_guide_1_6()
         elif chapter == 2:
-            if level in (1, 2, 5, 8) and self._find_match_pos(self.driver.screenshot(), 'kkr_guide'):
+            if level in (1, 2, 5, 8, 12) and self._find_match_pos(self.driver.screenshot(), 'kkr_guide'):
                 if level == 1:
                     self._skip_guide_2_1()
                 if level == 2:
@@ -366,6 +366,10 @@ class Robot:
                     self._skip_guide_2_8()
                 if level == 12:
                     self._skip_guide_2_12()
+        elif chapter == 3:
+            if level in (1,) and self._find_match_pos(self.driver.screenshot(), 'kkr_guide'):
+                if level == 1:
+                    self._skip_guide_3_1()
 
     def _find_match_template(self, templates, timeout=15, delay=1) -> (int, str):
         start_time = time.time()
@@ -482,7 +486,7 @@ class Robot:
     @trace
     def _skip_guide_2_8(self):
         self._action_squential(
-            self._create_skip_guide_action(),
+            self._create_skip_guide_action(template='arrow_down_short'),
         )
         # 回首页，这里稍微绕下远
         self._tohomepage()
@@ -503,10 +507,21 @@ class Robot:
         self._tohomepage()
         # 再去冒险
         self._enture_advanture()
+    
+    @trace
+    def _skip_guide_3_1(self):
+        self._action_squential(
+            self._create_skip_guide_action(),
+            self._create_skip_guide_action(),
+            MatchAction('quest', unmatch_actions=[
+                        ClickAction(pos=self._pos(310, 50))], timeout=5)  # 为了点几下屏幕没有好的标志位
+        )
+        # 再去冒险
+        self._enture_advanture()
 
-    def _create_skip_guide_action(self) -> Action:
-        return MatchAction('arrow_down', matched_actions=[ClickAction(offset=(
-            self._pos(0, 100))), SleepAction(3)], unmatch_actions=[ClickAction(pos=self._pos(480, 270))], threshold=(7/8)*THRESHOLD)
+    def _create_skip_guide_action(self, template='arrow_down',threshold = (7/8)*THRESHOLD) -> Action:
+        return MatchAction(template, matched_actions=[ClickAction(offset=(
+            self._pos(0, 100))), SleepAction(3)], unmatch_actions=[ClickAction(pos=self._pos(480, 270))], threshold=threshold)
 
     def _pos(self, x, y) -> (int, int):
         return(int((x/BASE_WIDTH)*self.devicewidth), int((y/BASE_HEIGHT)*self.deviceheight))

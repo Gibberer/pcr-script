@@ -15,7 +15,7 @@ def getTaskDict()->FloorDict:
         # ('tohomepage',),#回首页
         ('close_ub_animation',),#关ub动画
         ('tohomepage',),#回首页
-        ('adventure',2,1,12,12,True),
+        ('adventure',2,1,12,1,True),
         ('adventure',3,1,1,1,True),#刷冒险
         # ('tohomepage',),
         # ('get_quest_reward',),#领任务
