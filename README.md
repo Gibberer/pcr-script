@@ -21,7 +21,7 @@
 
 ## 配置信息
 
-配置默认的账号等信息，需要在工程目录下创建`config.yml`的文件，具体可参考根目录下`sample.yml`文件
+配置默认的账号及需要做哪些任务等信息，需要在工程目录下创建`config.yml`的文件，具体可参考根目录下`sample.yml`文件
 
 ```yaml
 Accounts: #存账号信息
@@ -36,10 +36,45 @@ IDS: #用于实名认证的信息
     id: 身份证号
     name: 张三
 Extra:
-  guildname: 行会名称
+  guildname: &guidename 行会名称
+Task: #配置执行任务,配置任务名称，如果需要传入参数在下面增加参数，可以根据不同的账号序号配置任务。
+      #账号会执行小于等于并且离它最近的序号的任务列表
+  1: #配置账号大于等于1的进行以下操作
+    -
+      - get_quest_reward #领取任务奖励
+    -
+      - tohomepage #回到首页
+    -
+      - buy_mana #购买mana
+      - 20 #买20次
+    -
+      - saodang
+      - 1 #第一章
+      - 9 #level 9
+      - 60 #扫荡60次
+    -
+      - tohomepage
+    -
+      - get_quest_reward
+      
+  5: #配置账号大鱼等于5的进行以下操作
+    -
+      - get_quest_reward #领取任务奖励
+    -
+      - tohomepage #回到首页
+    - 
+      - join_guild
+      - *guidename
+    -
+      - saodang
+      - 1 #第一章
+      - 9 #level 9
+      - 60 #扫荡60次
+    -
+      - tohomepage
+    -
+      - get_quest_reward
 ```
-
-
 
 ## 其他
 

@@ -10,37 +10,10 @@ with open('config.yml', encoding='utf-8') as f:
 
 def getTaskDict() -> FloorDict:
     floor_dict = FloorDict()
-    floor_dict[1] = [
-        # ('get_quest_reward',),#领任务体力
-        # ('tohomepage',),#回首页
-        # ('close_ub_animation',),#关ub动画
-        # ('tohomepage',),#回首页
-        # ('adventure',2,9,12,1,True),
-        # ('adventure',3,1,1,1,True),#刷冒险
-        ('join_guild', config['Extra']['guildname']),
-        # ('tohomepage',),
-        # ('get_quest_reward',),#领任务
-    ]
-    # floor_dict[1] = [
-    #     ('get_quest_reward',),
-    #     ('tohomepage',),
-    #     ('saodang',1,3,40),#扫荡
-    #     ('tohomepage',),
-    #     ('get_quest_reward',)
-    # ]
-    # floor_dict[1] = [
-    #     ('get_quest_reward',),
-    #     ('tohomepage',),
-    #     ('buy_mana',20),
-    #     ('saodang',1,9,60),#扫荡
-    #     ('tohomepage',),
-    #     ('get_quest_reward',)
-    # ]
-    # floor_dict[1] = [
-    #     ("role_intensify",),
-    # ]
+    task = config['Task']
+    for key, values in task.items():
+        floor_dict[key] = values
     return floor_dict
-
 
 task_dict = getTaskDict()
 drivers = DNSimulator2("N:\dnplayer2").get_dirvers()
