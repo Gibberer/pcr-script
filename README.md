@@ -5,6 +5,7 @@
 
 ## 已有能力
 
+- [x] 增加申请加入工会功能
 - [x] 自动强化前五个角色
 - [x] 第三章支持到1图
 - [x] 第二章推图支持、剧情跳过支持
@@ -17,6 +18,28 @@
 - [x] 自动关闭战斗动画
 - [x] 自动领取任务奖励
 - [x] 多设备登录及切换账号
+
+## 配置信息
+
+配置默认的账号等信息，需要在工程目录下创建`config.yml`的文件，具体可参考根目录下`sample.yml`文件
+
+```yaml
+Accounts: #存账号信息
+  -
+    account: account1
+    password: password1
+  -
+    account: account2
+    password: password2
+IDS: #用于实名认证的信息
+  -
+    id: 身份证号
+    name: 张三
+Extra:
+  guildname: 行会名称
+```
+
+
 
 ## 其他
 

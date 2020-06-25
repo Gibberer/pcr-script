@@ -115,16 +115,13 @@ class Robot:
     
 
     @trace
-    def _real_name_auth(self):
+    def _real_name_auth(self, ids):
         '''
         实名认证
         '''
-        if 'IDS' not in locals():
-            self.IDS = []
-            with open('IDS.txt', mode='r', encoding='utf-8') as f:
-                self.IDS = [line.strip('\n').split(' ')
-                            for line in f.readlines()]
-        _id, name = random.choice(self.IDS)
+        r = random.choice(self.IDS)
+        _id = r['id']
+        name = r['name'] 
         start_time = time.time()
         self._action_squential(MatchAction('edit_real_name', matched_actions=[
                                ClickAction(), InputAction(name)], timeout=20))
@@ -403,6 +400,50 @@ class Robot:
         actions.append(SleepAction(1))
         actions.append(ClickAction('btn_next_step'))
         self._action_squential(*actions)
+    
+    @trace
+    def _join_guild(self,guild_name):
+        '''
+        加入行会
+        '''
+        self._action_squential(
+            ClickAction(template='guild'),
+            SleepAction(1),
+            MatchAction(template='join_guild_symbol',timeout=10)
+        )
+        ret = self._find_match_pos(self.driver.screenshot(), 'join_guild_symbol')
+        if not ret:
+            self._log('Join guild failed: maybe aready have guild')
+            return
+        actions = []
+        actions.append(ClickAction(pos=self._pos(860,78)))
+        actions.append(MatchAction('btn_cancel',matched_actions=[SleepAction(1)]))
+        actions.append(ClickAction(pos=self._pos(281,142)))
+        actions.append(ClickAction(pos=self._pos(380,182)))
+        actions.append(InputAction(guild_name))
+        actions.append(ClickAction(pos=self._pos(585,434)))
+        actions.append(SleepAction(1)) #收起软键盘
+        actions.append(ClickAction(pos=self._pos(585,434)))
+        actions.append(SleepAction(3))
+        actions.append(ClickAction(pos=self._pos(672,160)))
+        actions.append(SleepAction(1))
+        actions.append(ClickAction(template='btn_join'))
+        actions.append(ClickAction(template='btn_ok_blue'))
+        actions.append(SleepAction(1))
+        actions.append(ClickAction(template='btn_ok_blue'))
+        self._action_squential(*actions)
+        
+    
+    @trace
+    def _dungeon_mana(self):
+        '''
+        进入地下城，送mana
+        '''
+        actions = []
+        actions.append(MatchAction('tab_adventure', matched_actions=[ClickAction()], unmatch_actions=[
+            ClickAction(template='btn_close')]))
+        actions.append(SleepAction(2))
+        actions.append(ClickAction(template='dungeon'))
 
     @trace
     def _skip_guide_1_4(self):
@@ -486,7 +527,7 @@ class Robot:
     @trace
     def _skip_guide_2_8(self):
         self._action_squential(
-            self._create_skip_guide_action(template='arrow_down_short'),
+            self._create_skip_guide_action(template='arrow_down_short',offset=(0,50)),
         )
         # 回首页，这里稍微绕下远
         self._tohomepage()
@@ -498,10 +539,14 @@ class Robot:
         self._action_squential(
             self._create_skip_guide_action(),
             self._create_skip_guide_action(),
-            MatchAction(template='btn_menu', matched_actions=[
+            MatchAction('btn_menu', matched_actions=[
                         ClickAction()], unmatch_actions=[ClickAction(pos=self._pos(480, 270))]),
             ClickAction(template='btn_skip_with_text'),
-            ClickAction(template='btn_skip_ok')
+            ClickAction(template='btn_skip_ok'),
+            MatchAction('in_dungeon_symbol'),
+            SleepAction(1),
+            ClickAction(pos=self._pos(806,432)),
+            ClickAction(template='btn_ok_blue'),
         )
         # 回首页，这里稍微绕下远
         self._tohomepage()
@@ -519,9 +564,9 @@ class Robot:
         # 再去冒险
         self._enture_advanture()
 
-    def _create_skip_guide_action(self, template='arrow_down',threshold = (7/8)*THRESHOLD) -> Action:
+    def _create_skip_guide_action(self, template='arrow_down',offset = (0,100),threshold = (7/8)*THRESHOLD) -> Action:
         return MatchAction(template, matched_actions=[ClickAction(offset=(
-            self._pos(0, 100))), SleepAction(3)], unmatch_actions=[ClickAction(pos=self._pos(480, 270))], threshold=threshold)
+            self._pos(*offset))), SleepAction(3)], unmatch_actions=[ClickAction(pos=self._pos(480, 270))], threshold=threshold)
 
     def _pos(self, x, y) -> (int, int):
         return(int((x/BASE_WIDTH)*self.devicewidth), int((y/BASE_HEIGHT)*self.deviceheight))

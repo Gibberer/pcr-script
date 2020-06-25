@@ -3,20 +3,21 @@ from robot import Robot
 from floordict import FloorDict
 import threading
 import time
+import yaml
 
-def getaccount():
-    with open("account.txt", 'r') as f:
-        return [ line.strip('\n').split(' ') for line in f.readlines()]
+with open('config.yml', encoding='utf-8') as f:
+    config = yaml.load(f, Loader=yaml.FullLoader)
 
-def getTaskDict()->FloorDict:
+def getTaskDict() -> FloorDict:
     floor_dict = FloorDict()
     floor_dict[1] = [
         # ('get_quest_reward',),#领任务体力
         # ('tohomepage',),#回首页
-        ('close_ub_animation',),#关ub动画
-        ('tohomepage',),#回首页
-        ('adventure',2,1,12,1,True),
-        ('adventure',3,1,1,1,True),#刷冒险
+        # ('close_ub_animation',),#关ub动画
+        # ('tohomepage',),#回首页
+        # ('adventure',2,9,12,1,True),
+        # ('adventure',3,1,1,1,True),#刷冒险
+        ('join_guild', config['Extra']['guildname']),
         # ('tohomepage',),
         # ('get_quest_reward',),#领任务
     ]
@@ -40,13 +41,16 @@ def getTaskDict()->FloorDict:
     # ]
     return floor_dict
 
+
 task_dict = getTaskDict()
 drivers = DNSimulator2("N:\dnplayer2").get_dirvers()
-account_list = getaccount()
+account_list = [(account['account'], account['password'])
+                for account in config['Accounts']]
 total_size = len(account_list)
 thread_list = []
 lock = threading.Lock()
-def dostaff(robot:Robot):
+
+def dostaff(robot: Robot):
     while True:
         with lock:
             if len(account_list) == 0:
@@ -55,6 +59,8 @@ def dostaff(robot:Robot):
             no = total_size - len(account_list)
         robot.changeaccount(account, password, logpath='output.log')
         robot.work(task_dict[no])
+
+
 for driver in drivers:
     robot = Robot(driver)
     thread_list.append(threading.Thread(target=dostaff, args=(robot,)))
@@ -66,4 +72,3 @@ print("wait thread finish")
 for thread in thread_list:
     thread.join()
 print("consume time: {}".format(time.time() - start_time))
-

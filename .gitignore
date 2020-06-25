@@ -1,6 +1,5 @@
 *screen_shot.png
 __pycache__/
-account.txt
-IDS.txt
+config.yml
 *.log
 .vscode/

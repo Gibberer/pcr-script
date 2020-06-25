@@ -1,0 +1,13 @@
+Accounts: #存账号信息
+  -
+    account: account1
+    password: password1
+  -
+    account: account2
+    password: password2
+IDS: #用于实名认证的信息
+  -
+    id: 身份证号
+    name: 张三
+Extra:
+  guildname: 行会名称
