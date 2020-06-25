@@ -14,9 +14,8 @@ def getTaskDict() -> FloorDict:
     for key, values in task.items():
         floor_dict[key] = values
     return floor_dict
-
 task_dict = getTaskDict()
-drivers = DNSimulator2("N:\dnplayer2").get_dirvers()
+drivers = DNSimulator2(config['Extra']['dnpath']).get_dirvers()
 account_list = [(account['account'], account['password'])
                 for account in config['Accounts']]
 total_size = len(account_list)
