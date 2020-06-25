@@ -118,8 +118,11 @@ class Robot:
     def _real_name_auth(self, ids):
         '''
         实名认证
+        Paramters:
+        ---------
+        ids: 从配置文件中读取的内容
         '''
-        r = random.choice(self.IDS)
+        r = random.choice(ids)
         _id = r['id']
         name = r['name'] 
         start_time = time.time()

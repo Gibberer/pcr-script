@@ -1,4 +1,5 @@
-pywin32==228
+opencv_python==4.2.0.34
 matplotlib==3.1.2
 numpy==1.17.3
-opencv_python==4.2.0.34
+pywin32==228
+PyYAML==5.3.1
