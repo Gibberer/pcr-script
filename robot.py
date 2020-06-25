@@ -112,6 +112,7 @@ class Robot:
 
     def _log(self, msg: str):
         print("{}: {}".format(self._name, msg))
+    
 
     @trace
     def _real_name_auth(self):
@@ -161,6 +162,31 @@ class Robot:
             ClickAction(pos=self._pos(772, 370)),
             ClickAction(template='btn_close')
         )
+
+    @trace
+    def _role_intensify(self):
+        '''
+        角色强化默认前五个
+        '''
+        self._action_squential(
+            ClickAction(template='tab_role'),
+            SleepAction(1),
+            MatchAction('role_symbol'),
+            SleepAction(1),
+            ClickAction(pos=self._pos(177,142)),
+            SleepAction(1),
+            MatchAction('role_intensify_symbol'),
+            SleepAction(1)
+        )
+        #已经进入强化页面
+        actions = []
+        for _ in range(5):
+            actions.append(ClickAction(pos=self._pos(374,438)))
+            actions.append(MatchAction(template='btn_ok_blue',matched_actions=[ClickAction()],timeout=5,threshold=1.2*THRESHOLD))
+            actions.append(SleepAction(1))
+            actions.append(ClickAction(pos=self._pos(938,268)))
+            actions.append(SleepAction(1))
+        self._action_squential(*actions)
 
     @trace
     def _get_quest_reward(self):
@@ -219,18 +245,12 @@ class Robot:
 
     @trace
     def _saodang(self, chapter=1, level=1, count=1):
-        pos = CHAPTERS[chapter - 1][level - 1]
-        self._action_squential(
-            MatchAction('tab_adventure', matched_actions=[ClickAction()], unmatch_actions=[
-                        ClickAction(template='btn_close')]),
-            ClickAction(template='btn_main_plot'),
-            MatchAction('chapter{}'.format(chapter), unmatch_actions=[
-                        ClickAction(pos=self._pos(36, 271))], timeout=10),
-            SleepAction(1),
-            ClickAction(pos=self._pos(*pos)),
-            MatchAction('btn_challenge')
-        )
+        self._enture_advanture()
+        level_pos = self._move_to_chapter(chapter - 1)
+        pos = level_pos[level - 1]
         actions = []
+        actions.append(ClickAction(pos=self._pos(*pos)))
+        actions.append(MatchAction('btn_challenge'))
         for _ in range(count):
             actions.append(ClickAction(pos=self._pos(877, 330)))
         self._action_squential(*actions, delay=0)
@@ -264,32 +284,7 @@ class Robot:
         # 从主页进入冒险页面
         self._enture_advanture()
         chapter_symbol = CHAPTER_SYMBOLS[chapter]
-        # 移动到选中目标的关卡
-        ret = self._find_match_template(CHAPTER_SYMBOLS, timeout=10)
-        if not ret:
-            return
-        pos, _ = ret
-        actions = []
-        if chapter > pos:
-            actions.append(MatchAction(chapter_symbol, unmatch_actions=[
-                           ClickAction(pos=self._pos(928, 271)), SleepAction(3)], timeout=15))
-        elif chapter < pos:
-            actions.append(MatchAction(chapter_symbol, unmatch_actions=[
-                           ClickAction(pos=self._pos(36, 271)), SleepAction(3)], timeout=15))
-        # 确保移动到对应页面
-        actions.append(SleepAction(1))
-        self._action_squential(*actions)
-        level_pos = CHAPTERS[chapter][0]
-        if pos == chapter:
-            # 修正level pos
-            ret = self._find_match_pos(self.driver.screenshot(), 'peiko')
-            if ret:
-                bar = ret[0] + 15
-                for i, pos in enumerate(level_pos):
-                    if pos[0] > bar:
-                        level_pos = CHAPTERS[chapter][i]
-                        break
-
+        level_pos = self._move_to_chapter(chapter)
         check_auto = True
         count = 0
         while count < totalcount:
@@ -321,7 +316,36 @@ class Robot:
             actions.append(MatchAction('btn_normal_selected', unmatch_actions=[
                            ClickAction(template='btn_normal')]))
         self._action_squential(*actions)
-
+    
+    def _move_to_chapter(self, chapter_index):
+        chapter_symbol = CHAPTER_SYMBOLS[chapter_index]
+        # 移动到选中目标的关卡
+        ret = self._find_match_template(CHAPTER_SYMBOLS, timeout=10)
+        if not ret:
+            return
+        pos, _ = ret
+        actions = []
+        if chapter_index > pos:
+            actions.append(MatchAction(chapter_symbol, unmatch_actions=[
+                           ClickAction(pos=self._pos(928, 271)), SleepAction(3)], timeout=15))
+        elif chapter_index < pos:
+            actions.append(MatchAction(chapter_symbol, unmatch_actions=[
+                           ClickAction(pos=self._pos(36, 271)), SleepAction(3)], timeout=15))
+        # 确保移动到对应页面
+        actions.append(SleepAction(1))
+        self._action_squential(*actions)
+        level_pos = CHAPTERS[chapter_index][0]
+        if pos == chapter_index:
+            # 修正level pos
+            ret = self._find_match_pos(self.driver.screenshot(), 'peiko')
+            if ret:
+                bar = ret[0] + 15
+                for i, pos in enumerate(level_pos):
+                    if pos[0] > bar:
+                        level_pos = CHAPTERS[chapter_index][i]
+                        break
+        return level_pos
+    
     @trace
     def _skip_guide(self, chapter, level):
         if chapter == 1:
@@ -427,6 +451,8 @@ class Robot:
             self._create_skip_guide_action(),
             ClickAction(template="btn_close")
         )
+        # 回首页，这里稍微绕下远
+        self._tohomepage()
         # 再回到冒险页面
         self._enture_advanture()
 
