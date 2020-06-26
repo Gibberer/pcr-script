@@ -97,6 +97,7 @@ class Robot:
                         ClickAction(template='btn_back_welcome'),
                         ClickAction(template='btn_ok_blue')
                     )
+                ClickAction(pos=self._pos(50, 300)).do(screenshot, self)
             time.sleep(3)
 
     @trace
@@ -135,6 +136,22 @@ class Robot:
             InputAction(_id),
             ClickAction(template='btn_submit'),
             ClickAction(template='btn_confirm')
+        )
+        
+    @trace
+    def _choushilian(self):
+        '''
+        抽免费10连
+        '''
+        self._action_squential(
+            ClickAction(template='niudan'),
+            MatchAction('btn_setting_blue',matched_actions=[ClickAction()],unmatch_actions=[ClickAction(template='btn_close')],timeout=5),
+            MatchAction('btn_role_detail',unmatch_actions=[ClickAction(template='btn_close')]),
+            ClickAction(pos=self._pos(871,355)),
+            ClickAction(template='btn_ok_blue'),
+            MatchAction('btn_skip',matched_actions=[ClickAction()],unmatch_actions=[ClickAction(pos=self._pos(50, 300))]),
+            MatchAction('btn_ok',matched_actions=[ClickAction()],unmatch_actions=[ClickAction(pos=self._pos(50, 300))]),
+            MatchAction('btn_setting_blue',matched_actions=[ClickAction()],timeout=5),
         )
 
     @trace
@@ -260,6 +277,9 @@ class Robot:
         actions.append(ClickAction(template='btn_skip_ok'))
         actions.append(SleepAction(1))
         actions.append(ClickAction(template='btn_ok'))
+        actions.append(SleepAction(1))
+        actions.append(MatchAction(template='btn_ok',
+                                   matched_actions=[ClickAction()], timeout=3))
         actions.append(SleepAction(1))
         actions.append(MatchAction(template='btn_ok',
                                    matched_actions=[ClickAction()], timeout=3))
@@ -447,6 +467,31 @@ class Robot:
             ClickAction(template='btn_close')]))
         actions.append(SleepAction(2))
         actions.append(ClickAction(template='dungeon'))
+        actions.append(MatchAction('dungeon_symbol',matched_actions=[ClickAction(offset=self._pos(100,200))],timeout=10))#确认进入地下城
+        actions.append(MatchAction('btn_ok_blue',matched_actions=[ClickAction()],timeout=5))
+        actions.append(SleepAction(3))
+        actions.append(MatchAction('in_dungeon_symbol'))
+        actions.append(ClickAction(pos=self._pos(668,290)))
+        actions.append(ClickAction(template='btn_challenge_dungeon'))
+        actions.append(SleepAction(1))#选择4个人物
+        actions.append(ClickAction(pos=self._pos(105,170)))
+        actions.append(ClickAction(pos=self._pos(224,170)))
+        actions.append(ClickAction(pos=self._pos(315,170)))
+        actions.append(ClickAction(pos=self._pos(432,170)))
+        actions.append(ClickAction(pos=self._pos(478,89)))#点击支援
+        actions.append(SleepAction(1))
+        actions.append(ClickAction(pos=self._pos(105,170)))
+        actions.append(ClickAction(pos=self._pos(832,453)))#进入战斗
+        actions.append(MatchAction('btn_ok_blue',matched_actions=[ClickAction()],timeout=5))
+        actions.append(SleepAction(3))
+        actions.append(MatchAction('btn_caidan',matched_actions=[ClickAction()]))
+        actions.append(ClickAction(template='btn_give_up'))
+        actions.append(ClickAction(template='btn_give_up_blue'))
+        actions.append(SleepAction(3))
+        actions.append(MatchAction('in_dungeon_symbol'))
+        actions.append(ClickAction(template='btn_withdraw'))
+        actions.append(ClickAction(template='btn_ok_blue'))
+        self._action_squential(*actions)
 
     @trace
     def _skip_guide_1_4(self):
