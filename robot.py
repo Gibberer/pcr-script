@@ -137,7 +137,7 @@ class Robot:
             ClickAction(template='btn_submit'),
             ClickAction(template='btn_confirm')
         )
-        
+
     @trace
     def _choushilian(self):
         '''
@@ -198,8 +198,11 @@ class Robot:
         #已经进入强化页面
         actions = []
         for _ in range(5):
+            actions.append(ClickAction(pos=self._pos(247,337)))
+            actions.append(MatchAction('btn_cancel',matched_actions=[ClickAction(offset=self._pos(230,0)),SleepAction(6)],timeout=3))
+            actions.append(MatchAction('btn_ok',matched_actions=[ClickAction(),SleepAction(3)],timeout=3))
             actions.append(ClickAction(pos=self._pos(374,438)))
-            actions.append(MatchAction(template='btn_ok_blue',matched_actions=[ClickAction()],timeout=5,threshold=1.2*THRESHOLD))
+            actions.append(MatchAction(template='btn_ok_blue',matched_actions=[ClickAction()],unmatch_actions=[ClickAction(template='btn_ok')],timeout=5,threshold=1.2*THRESHOLD))
             actions.append(SleepAction(1))
             actions.append(ClickAction(pos=self._pos(938,268)))
             actions.append(SleepAction(1))
@@ -251,12 +254,12 @@ class Robot:
             actions.append(ClickAction(pos=mul))
             actions.append(SleepAction(.5))
             actions.append(ClickAction(template='btn_ok_blue'))
-            actions.append(SleepAction(20))
+            actions.append(SleepAction(13))
         if count >= 20:
             actions.append(ClickAction(pos=mul))
             actions.append(SleepAction(.5))
             actions.append(ClickAction(template='btn_ok_blue'))
-            actions.append(SleepAction(20))
+            actions.append(SleepAction(13))
         actions.append(ClickAction('btn_cancel'))
         self._action_squential(*actions)
 

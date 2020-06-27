@@ -5,12 +5,12 @@ Accounts: #存账号信息
   -
     account: account2
     password: password2
-IDS: #用于实名认证的信息
+IDS: &IDS #用于实名认证的信息
   -
     id: 身份证号
     name: 张三
 Extra:
-  guildname: &guidename 行会名称
+  guildname: &guildname 行会名称
   dnpath: 'N:\dnplayer2'
 Task: #配置执行任务,配置任务名称，如果需要传入参数在下面增加参数，可以根据不同的账号序号配置任务。
       #账号会执行小于等于并且离它最近的序号的任务列表
@@ -31,21 +31,39 @@ Task: #配置执行任务,配置任务名称，如果需要传入参数在下面
       - tohomepage
     -
       - get_quest_reward
-      
-  5: #配置账号大于等于5的进行以下操作
+  5: #配置大于等于5的账号执行以下操作，这里只是罗列功能
     -
       - get_quest_reward #领取任务奖励
     -
       - tohomepage #回到首页
-    - 
-      - join_guild
-      - *guidename
     -
-      - saodang
-      - 1 #第一章
-      - 9 #level 9
-      - 60 #扫荡60次
+      - join_guild #加公会
+      - *guildname #公会名
     -
-      - tohomepage
+      - saodang #扫荡
+      - 1 #章节
+      - 9 #level
+      - 60 #次数
     -
-      - get_quest_reward
+      - close_ub_animation #进设置页面关闭ub动画
+    -
+      - role_intensify #强化角色
+    -
+      - buy_mana #购买mana
+      - 20 #购买次数
+    -
+      - adventure #主线冒险图
+      - 1 #章节
+      - 1 #起始level
+      - 10 #结束level
+      - 10 #刷图总次数
+      - true #是否做跳过教程检测
+    -
+      - dungeon_man #进入地下城 选择支援
+    -
+      - choushilian #抽一次十连
+    -
+      - real_name_auth #实名认证
+      - *IDS #实名认证需要的信息
+
+    
