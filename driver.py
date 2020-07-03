@@ -26,6 +26,10 @@ class Driver(metaclass=ABCMeta):
     @abstractmethod
     def getScreenSize(self) -> (int, int):
         pass
+    
+    @abstractmethod
+    def swipe(self, start:(int,int), end:(int,int), duration:int):
+        pass
 
 
 class ADBDriver(Driver):
@@ -49,6 +53,11 @@ class ADBDriver(Driver):
 
     def getScreenSize(self) -> (int, int):
         return map(lambda x: int(x), self._shell("wm size", True).split(":")[-1].split("x"))
+    
+    def swipe(self, start, end=None, duration=500):
+        if not end:
+            end = start
+        self._shell("input swipe {} {} {} {} {}".format(*start,*end,duration))
 
     def _shell(self, cmd, ret=False):
         return self._cmd("shell {}".format(cmd))

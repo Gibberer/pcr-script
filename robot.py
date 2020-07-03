@@ -16,12 +16,15 @@ CHAPTER_2_ZOOM = ((48, 410), (180, 412), (302, 381), (256, 276), (157, 210), (27
                   (426, 321), (526, 377), (648, 377), (755, 341), (742, 226))
 CHAPTER_3 = ((135, 185), (192, 309), (284, 229), (414, 230), (379, 343), (488, 411), (532, 289),
              (615, 194), (691, 272), (675, 390), (821, 339), (835, 211))
+CHAPTER_4 = ((168,239),(259,312),(367,267),(487,340),(483,371),(605,345))
+CHAPTER_4_ZOOM = ((44,200),(136,317),(246,266),(361,242),(349,375),(483,345))
 CHAPTERS = (
     FloorDict({0: CHAPTER_1}),
     FloorDict({0: CHAPTER_2, 8: CHAPTER_2_ZOOM}),
     FloorDict({0: CHAPTER_3}),
+    FloorDict({0: CHAPTER_4, 5: CHAPTER_4_ZOOM}),
 )
-CHAPTER_SYMBOLS = ('chapter1', 'chapter2', 'chapter3')
+CHAPTER_SYMBOLS = ('chapter1', 'chapter2', 'chapter3','chapter4')
 
 
 class Action:
@@ -71,7 +74,7 @@ class Robot:
                 # 当前是欢迎页，执行登录操作
                 actions = (
                     MatchAction('edit_account', matched_actions=[ClickAction(), InputAction(
-                        account)], unmatch_actions=[ClickAction(pos=self._pos(900, 25))]),
+                        account)], unmatch_actions=[ClickAction(pos=self._pos(900, 25))],delay=0),
                     ClickAction(template='edit_password'),
                     InputAction(password),
                     ClickAction(template='btn_login')
@@ -272,14 +275,17 @@ class Robot:
 
     @trace
     def _saodang(self, chapter=1, level=1, count=1):
-        self._enture_advanture()
+        self._entre_advanture()
         level_pos = self._move_to_chapter(chapter - 1)
         pos = level_pos[level - 1]
         actions = []
         actions.append(ClickAction(pos=self._pos(*pos)))
         actions.append(MatchAction('btn_challenge'))
-        for _ in range(count):
-            actions.append(ClickAction(pos=self._pos(877, 330)))
+        if count == -1:#click forever change to long press
+            actions.append(SwipeAction(self._pos(877,330),self._pos(877,330), 6000))
+        else:    
+            for _ in range(count):
+                actions.append(ClickAction(pos=self._pos(877, 330)))
         self._action_squential(*actions, delay=0)
         actions = []
         actions.append(ClickAction(pos=self._pos(757, 330)))
@@ -312,7 +318,7 @@ class Robot:
         if not end:
             end = start
         # 从主页进入冒险页面
-        self._enture_advanture()
+        self._entre_advanture()
         chapter_symbol = CHAPTER_SYMBOLS[chapter]
         check_auto = True
         count = 0
@@ -334,7 +340,7 @@ class Robot:
                 level_pos = CHAPTERS[chapter][i]
             count += (end - start) + 1
 
-    def _enture_advanture(self, normal=True):
+    def _entre_advanture(self, normal=True):
         actions = []
         actions.append(MatchAction('tab_adventure', matched_actions=[ClickAction()], unmatch_actions=[
             ClickAction(template='btn_close')]))
@@ -565,7 +571,7 @@ class Robot:
         # 回首页，这里稍微绕下远
         self._tohomepage()
         # 再回到冒险页面
-        self._enture_advanture()
+        self._entre_advanture()
 
     @trace
     def _skip_guide_2_2(self):
@@ -575,7 +581,7 @@ class Robot:
                         ClickAction(pos=self._pos(310, 50))], timeout=10)  # 为了点几下屏幕没有好的标志位
         )
         # 再回到冒险页面
-        self._enture_advanture()
+        self._entre_advanture()
 
     @trace
     def _skip_guide_2_5(self):
@@ -588,7 +594,7 @@ class Robot:
         # 回首页，这里稍微绕下远
         self._tohomepage()
         # 再去冒险
-        self._enture_advanture()
+        self._entre_advanture()
 
     @trace
     def _skip_guide_2_8(self):
@@ -599,7 +605,7 @@ class Robot:
         # 回首页，这里稍微绕下远
         self._tohomepage()
         # 再去冒险
-        self._enture_advanture()
+        self._entre_advanture()
 
     @trace
     def _skip_guide_2_12(self):
@@ -627,7 +633,7 @@ class Robot:
             ClickAction(pos=self._pos(362,374))
         )
         # 再去冒险
-        self._enture_advanture()
+        self._entre_advanture()
         self._action_squential(
             MatchAction('btn_close', matched_actions=[
                         ClickAction()], timeout=5)
@@ -642,7 +648,7 @@ class Robot:
                         ClickAction(pos=self._pos(310, 50))], timeout=5)  # 为了点几下屏幕没有好的标志位
         )
         # 再去冒险
-        self._enture_advanture()
+        self._entre_advanture()
 
     def _create_skip_guide_action(self, template='arrow_down', offset=(0, 100), threshold=(7/8)*THRESHOLD) -> Action:
         return MatchAction(template, matched_actions=[ClickAction(offset=(
@@ -755,4 +761,15 @@ class InputAction(Action):
 
     def do(self, screenshot, robot: Robot):
         robot.driver.input(self._text)
+        self._done = True
+
+class SwipeAction(Action):
+    def __init__(self, start, end, duration):
+        super().__init__()
+        self.start = start
+        self.end = end
+        self.duration = duration 
+    
+    def do(self, screenshot, robot:Robot):
+        robot.driver.swipe(self.start,self.end,self.duration)
         self._done = True
