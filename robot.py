@@ -2,7 +2,7 @@ from driver import Driver
 from cv2 import cv2 as cv
 import numpy as np
 import time
-from typing import Iterable
+from typing import Iterable, Tuple
 import functools
 import random
 from config import *
@@ -407,7 +407,7 @@ class Robot:
                 if level == 1:
                     self._skip_guide_3_1()
 
-    def _find_match_template(self, templates, timeout=15, delay=1) -> (int, str):
+    def _find_match_template(self, templates, timeout=15, delay=1) -> Tuple[int, str]:
         start_time = time.time()
         while True:
             if delay > 0:
@@ -654,7 +654,7 @@ class Robot:
         return MatchAction(template, matched_actions=[ClickAction(offset=(
             self._pos(*offset))), SleepAction(3)], unmatch_actions=[ClickAction(pos=self._pos(100, 180))], threshold=threshold)
 
-    def _pos(self, x, y) -> (int, int):
+    def _pos(self, x, y) -> Tuple[int,int]:
         return(int((x/BASE_WIDTH)*self.devicewidth), int((y/BASE_HEIGHT)*self.deviceheight))
 
     def _action_squential(self, *actions: Iterable[Action], delay=0.2):
@@ -664,7 +664,7 @@ class Robot:
                 if delay > 0:
                     time.sleep(delay)
 
-    def _find_match_pos(self, screenshot, template, threshold=THRESHOLD) -> (int, int):
+    def _find_match_pos(self, screenshot, template, threshold=THRESHOLD) -> Tuple[int, int]:
         name = template
         source: np.ndarray
         if isinstance(screenshot, np.ndarray):

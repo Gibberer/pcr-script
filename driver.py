@@ -1,4 +1,5 @@
 from abc import ABCMeta, abstractmethod
+from typing import Tuple
 from win32 import win32gui, win32api, win32console
 from win32.lib import win32con
 from pythonwin import win32ui
@@ -24,11 +25,11 @@ class Driver(metaclass=ABCMeta):
         pass
 
     @abstractmethod
-    def getScreenSize(self) -> (int, int):
+    def getScreenSize(self) -> Tuple[int, int]:
         pass
     
     @abstractmethod
-    def swipe(self, start:(int,int), end:(int,int), duration:int):
+    def swipe(self, start:Tuple[int,int], end:Tuple[int,int], duration:int):
         pass
 
 
@@ -51,7 +52,7 @@ class ADBDriver(Driver):
         self._cmd("pull /sdcard/opsd.png {}".format(output))
         return output
 
-    def getScreenSize(self) -> (int, int):
+    def getScreenSize(self) -> Tuple[int, int]:
         return map(lambda x: int(x), self._shell("wm size", True).split(":")[-1].split("x"))
     
     def swipe(self, start, end=None, duration=500):

@@ -1,3 +1,4 @@
+from typing import Tuple
 from driver import ADBDriver, Driver, DNADBDriver
 import os
 import types
@@ -16,7 +17,7 @@ class DNSimulator():
         os.system(
             '{}\dnconsole.exe action --index {} --key call.input --value "{}"'.format(self.path, index, msg))
 
-    def get_devices(self) -> (str, str):
+    def get_devices(self) -> Tuple[str,str]:
         lines = os.popen("adb devices").readlines()
         if not lines or len(lines) < 2:
             print("没有设备信息：{}".format(lines[0] if lines else "None"))
@@ -29,7 +30,7 @@ class DNSimulator():
                     devices.append(name)
         return devices
 
-    def get_dirvers(self) -> Driver:
+    def get_dirvers(self) -> list[Driver]:
         devices = self.get_devices()
         if devices:
             drivers = []
@@ -59,7 +60,7 @@ class DNSimulator2(DNSimulator):
     雷电模拟器使用win32api
     '''
 
-    def get_dirvers(self) -> Driver:
+    def get_dirvers(self) -> list[Driver]:
         devices = self.get_devices()
         if devices:
             return [DNADBDriver(device, self.path, i) for i, device in enumerate(devices)]
