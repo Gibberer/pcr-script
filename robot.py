@@ -2,7 +2,7 @@ from driver import Driver
 from cv2 import cv2 as cv
 import numpy as np
 import time
-from typing import Iterable, Tuple
+from typing import Iterable, Match, Tuple
 import functools
 import random
 from config import *
@@ -25,6 +25,15 @@ CHAPTERS = (
     FloorDict({0: CHAPTER_4, 5: CHAPTER_4_ZOOM}),
 )
 CHAPTER_SYMBOLS = ('chapter1', 'chapter2', 'chapter3','chapter4')
+
+ACTIVITY_YLY = ((168,322),(261,247),(334,356),(415,231),(488,317),(601,348),(651,239),(733,338),(832,301),(925,246))
+ACTIVITY_YLY_1 = ((57,328),(149,250),(229,351),(310,225),(378,316),(479,347),(546,237),(623,343),(712,296),(820,243),(879,337))
+
+ACTIVITIES = (
+    FloorDict({0:ACTIVITY_YLY,4:ACTIVITY_YLY_1}),
+)
+
+ACTIVITY_SYMBOLS = ('activity_symbol',)
 
 
 class Action:
@@ -139,6 +148,7 @@ class Robot:
             ClickAction(template='btn_submit'),
             ClickAction(template='btn_confirm')
         )
+
 
     @trace
     def _choushilian(self):
@@ -302,6 +312,31 @@ class Robot:
         actions.append(SleepAction(2))
         actions.append(ClickAction(pos=self._pos(666, 457)))
         self._action_squential(*actions)
+    
+    @trace
+    def _drama_activity(self,start,end):
+        # 不做了没啥收益
+        self._action_squential(
+            ClickAction(template='tab_adventure'),
+            SleepAction(1),
+            MatchAction('btn_main_plot'),
+            ClickAction(pos=self._pos(413,423)),
+            SleepAction(3)
+        )
+        ret = self._find_match_pos(self.driver.screenshot(), 'btn_no_voice')
+        if ret:
+            # 第一次进入出现引导
+            self._action_squential(
+                ClickAction(pos=ret),
+                ClickAction(template='btn_menu'),
+                ClickAction(template='btn_skip_with_text'),
+                ClickAction(template='btn_ok_blue'),
+                MatchAction(template='btn_close',matched_actions=[ClickAction()],unmatch_actions=[ClickAction(pos=self._pos(373,212))])
+            )
+        self._action_squential(
+            MatchAction('activity_symbol',unmatch_actions=[ClickAction(pos=self._pos(537,177))])
+        )
+        self._guotu(1,start,end,1,False,symbols=ACTIVITY_SYMBOLS,chapters=ACTIVITIES)
 
     @trace
     def _adventure(self, chapter, start, end=None, totalcount=1, checkguide=False):
@@ -314,16 +349,19 @@ class Robot:
         end: 结束关卡
         checkguide: 是否做跳过教程检测
         '''
+        # 从主页进入冒险页面
+        self._entre_advanture()
+        self._guotu(chapter, start, end, totalcount, checkguide)
+    
+    def _guotu(self, chapter, start, end, totalcount, checkguide, symbols=CHAPTER_SYMBOLS, chapters=CHAPTERS):
         chapter = chapter - 1
         if not end:
             end = start
-        # 从主页进入冒险页面
-        self._entre_advanture()
-        chapter_symbol = CHAPTER_SYMBOLS[chapter]
+        chapter_symbol = symbols[chapter]
         check_auto = True
         count = 0
         while count < totalcount:
-            level_pos = self._move_to_chapter(chapter)
+            level_pos = self._move_to_chapter(chapter,symbols=symbols,chapters=chapters)
             for i in range(start - 1, end):
                 pos = level_pos[i]
                 self._combat(pos, check_auto=check_auto)
@@ -337,7 +375,7 @@ class Robot:
                 if checkguide:
                     time.sleep(2)
                     self._skip_guide(chapter + 1, i + 1)
-                level_pos = CHAPTERS[chapter][i]
+                level_pos = chapters[chapter][i]
             count += (end - start) + 1
 
     def _entre_advanture(self, normal=True):
@@ -353,10 +391,10 @@ class Robot:
                            ClickAction(template='btn_normal')]))
         self._action_squential(*actions)
 
-    def _move_to_chapter(self, chapter_index):
-        chapter_symbol = CHAPTER_SYMBOLS[chapter_index]
+    def _move_to_chapter(self, chapter_index, symbols=CHAPTER_SYMBOLS, chapters=CHAPTERS):
+        chapter_symbol = symbols[chapter_index]
         # 移动到选中目标的关卡
-        ret = self._find_match_template(CHAPTER_SYMBOLS, timeout=10)
+        ret = self._find_match_template(symbols, timeout=10)
         if not ret:
             return
         pos, _ = ret
@@ -370,7 +408,7 @@ class Robot:
         # 确保移动到对应页面
         actions.append(SleepAction(1))
         self._action_squential(*actions)
-        level_pos = CHAPTERS[chapter_index][0]
+        level_pos = chapters[chapter_index][0]
         if pos == chapter_index:
             # 修正level pos
             ret = self._find_match_pos(self.driver.screenshot(), 'peiko')
@@ -378,7 +416,7 @@ class Robot:
                 bar = ret[0] + 15
                 for i, pos in enumerate(level_pos):
                     if pos[0] > bar:
-                        level_pos = CHAPTERS[chapter_index][i]
+                        level_pos = chapters[chapter_index][i]
                         break
         return level_pos
 

@@ -22,6 +22,21 @@
 - [x] 自动领取任务奖励
 - [x] 多设备登录及切换账号
 
+## 使用引导
+
+* 安装Python3环境，访问[Python官网](https://www.python.org/)安装
+* 使用git clone或网页下载本项目到电脑上
+* 进入项目根目录执行以下命令安装项目所需依赖
+  ```cmd
+  pip install -r .\requirements.txt
+  ```
+* 在项目根目录创建`config.yml`文件，根据yaml语法配置账号信息及需要做的任务模块，具体可参考`sample.yml`这个文件
+* 执行脚本之前，首先打开模拟器并打开游戏界面停留在欢迎页面
+* 在当前目录cmd中执行以下命令启动脚本
+  ```cmd
+  python main.py
+  ```
+
 ## 配置信息
 
 配置默认的账号及需要做哪些任务等信息，需要在工程目录下创建`config.yml`的文件，具体可参考根目录下`sample.yml`文件
