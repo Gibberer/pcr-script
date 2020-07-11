@@ -7,6 +7,7 @@ import functools
 import random
 from config import *
 from floordict import FloorDict
+import random
 
 CHAPTER_1 = ((106, 281), (227, 237), (314, 331), (379, 235), (479, 294),
              (545, 376), (611, 305), (622, 204), (749, 245), (821, 353))
@@ -114,7 +115,15 @@ class Robot:
 
     @trace
     def work(self, tasklist=None):
-        # self._real_name_auth()
+        pretasks = []
+        taskcount = len(tasklist)
+        for i in range(taskcount - 1, -1, -1):
+            if tasklist[i][0] in ('real_name_auth','landsol_cup'):
+                pretasks.insert(0,tasklist[i])
+                tasklist.pop(i)
+        if pretasks:
+            for funcname,*args in pretasks:
+                getattr(self, "_" + funcname)(*args)
         self._tohomepage()
         # 第一次进入的时候等下公告
         time.sleep(3)
@@ -125,6 +134,26 @@ class Robot:
 
     def _log(self, msg: str):
         print("{}: {}".format(self._name, msg))
+    
+    @trace
+    def _landsol_cup(self):
+        '''
+        兰德索尔杯
+        '''
+        start_time = time.time()
+        self._action_squential(
+            MatchAction('landsol_cup_symbol',unmatch_actions=[ClickAction(pos=self._pos(53,283))],timeout=30),
+            SleepAction(1)
+        )
+        if time.time() - start_time > 30:
+            return
+        pos = random.choice(((199,300),(400,300),(590,300),(790,300)))
+        self._action_squential(
+            ClickAction(pos=self._pos(*pos)),
+            SleepAction(2),
+            ClickAction(pos=self._pos(838,494))
+        )
+
 
     @trace
     def _real_name_auth(self, ids):
