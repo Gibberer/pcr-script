@@ -514,7 +514,7 @@ class Robot:
         加入行会
         '''
         self._action_squential(
-            ClickAction(template='guild'),
+            MatchAction('guild', matched_actions=[ClickAction()], timeout=5),
             SleepAction(1),
             MatchAction(template='join_guild_symbol',unmatch_actions=[ClickAction(pos=self._pos(50, 300))],timeout=10),
             ClickAction(pos=self._pos(50, 300)),
