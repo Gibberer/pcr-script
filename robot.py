@@ -115,6 +115,7 @@ class Robot:
 
     @trace
     def work(self, tasklist=None):
+        tasklist = tasklist[:]
         pretasks = []
         taskcount = len(tasklist)
         for i in range(taskcount - 1, -1, -1):
