@@ -36,6 +36,8 @@ ACTIVITIES = (
 
 ACTIVITY_SYMBOLS = ('activity_symbol',)
 
+DUNGEON_LEVEL_POS = ([(669,279),(475,256),(301,269),(542,287),(417,275),(597,275),(454,255)],) 
+
 
 class Action:
     def __init__(self):
@@ -264,6 +266,7 @@ class Robot:
         获取任务奖励
         '''
         self._action_squential(
+            SleepAction(1),
             ClickAction(template='quest'),
             SleepAction(3),
             MatchAction('btn_all_rec', matched_actions=[
@@ -312,6 +315,31 @@ class Robot:
             actions.append(SleepAction(13))
         actions.append(ClickAction('btn_cancel'))
         self._action_squential(*actions)
+    
+    @trace
+    def _buy_power(self, count):
+        '''
+        购买体力
+        '''
+        actions = []
+        for _ in range(count):
+            actions.append(SleepAction(1))
+            actions.append(ClickAction(pos=self._pos(320,30)))
+            actions.append(ClickAction(template='btn_ok_blue'))
+            actions.append(ClickAction(template='btn_ok'))
+        self._action_squential(*actions)
+    
+    @trace
+    def _get_power(self):
+        '''
+        公会之家领体力
+        '''
+        self._action_squential(
+            ClickAction(template='tab_society_home'),
+            SleepAction(3),
+            ClickAction(pos=self._pos(900,428)),
+            MatchAction('btn_close',matched_actions=[ClickAction()],timeout=5)
+        )
 
     @trace
     def _saodang(self, chapter=1, level=1, count=1):
@@ -546,7 +574,7 @@ class Robot:
         self._action_squential(*actions)
 
     @trace
-    def _dungeon_mana(self):
+    def _dungeon_mana(self, difficulty = 1,level = 0, supportindex = 1, withdraw = True):
         '''
         进入地下城，送mana
         '''
@@ -556,7 +584,7 @@ class Robot:
         actions.append(SleepAction(2))
         actions.append(ClickAction(template='dungeon'))
         actions.append(MatchAction('dungeon_symbol', matched_actions=[
-                       ClickAction(offset=self._pos(100, 200))], timeout=10))  # 确认进入地下城
+                       ClickAction(offset=self._pos(100, 200))], timeout=5))  # 确认进入地下城
         actions.append(MatchAction(
             'btn_ok_blue', matched_actions=[ClickAction()], timeout=5))
         actions.append(SleepAction(3))
@@ -570,19 +598,38 @@ class Robot:
         actions.append(ClickAction(pos=self._pos(432, 170)))
         actions.append(ClickAction(pos=self._pos(478, 89)))  # 点击支援
         actions.append(SleepAction(1))
-        actions.append(ClickAction(pos=self._pos(105, 170)))
+        yoffset = 110 * (supportindex // 8)
+        xoffset = 90 * ((supportindex - 1) % 8)
+        actions.append(ClickAction(pos=self._pos(105 + xoffset, 170 +yoffset)))
         actions.append(ClickAction(pos=self._pos(832, 453)))  # 进入战斗
         actions.append(MatchAction(
             'btn_ok_blue', matched_actions=[ClickAction()], timeout=5))
         actions.append(SleepAction(3))
-        actions.append(MatchAction(
-            'btn_caidan', matched_actions=[ClickAction()]))
-        actions.append(ClickAction(template='btn_give_up'))
-        actions.append(ClickAction(template='btn_give_up_blue'))
-        actions.append(SleepAction(3))
-        actions.append(MatchAction('in_dungeon_symbol'))
-        actions.append(ClickAction(template='btn_withdraw'))
-        actions.append(ClickAction(template='btn_ok_blue'))
+        if level == 0:    
+            actions.append(MatchAction(
+                'btn_caidan', matched_actions=[ClickAction()]))
+            actions.append(ClickAction(template='btn_give_up'))
+            actions.append(ClickAction(template='btn_give_up_blue'))
+            actions.append(SleepAction(3))
+        else:
+            for i in range(1, level + 1):
+                if i != 1:
+                    pos = DUNGEON_LEVEL_POS[difficulty - 1][i - 1]
+                    actions.append(ClickAction(pos=self._pos(*pos)))
+                    actions.append(ClickAction(template='btn_challenge_dungeon'))
+                    actions.append(SleepAction(1))
+                    actions.append(ClickAction(pos=self._pos(832, 453)))  # 进入战斗
+                actions.append(SleepAction(10))
+                actions.append(MatchAction('btn_next_step', matched_actions=[ClickAction()], unmatch_actions=[
+                        ClickAction(template='btn_close'), ClickAction(pos=self._pos(200, 250))]))
+                actions.append(SleepAction(8))
+                actions.append(ClickAction(template='btn_ok'))
+                actions.append(SleepAction(5))
+
+        if withdraw:
+            actions.append(MatchAction('in_dungeon_symbol'))
+            actions.append(ClickAction(template='btn_withdraw'))
+            actions.append(ClickAction(template='btn_ok_blue'))
         self._action_squential(*actions)
 
     @trace
