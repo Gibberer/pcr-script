@@ -338,7 +338,8 @@ class Robot:
             ClickAction(template='tab_society_home'),
             SleepAction(3),
             ClickAction(pos=self._pos(900,428)),
-            MatchAction('btn_close',matched_actions=[ClickAction()],timeout=5)
+            MatchAction('btn_close',matched_actions=[ClickAction()],timeout=5),
+            SleepAction(3)
         )
 
     @trace
@@ -350,7 +351,7 @@ class Robot:
         actions.append(ClickAction(pos=self._pos(*pos)))
         actions.append(MatchAction('btn_challenge'))
         if count == -1:#click forever change to long press
-            actions.append(SwipeAction(self._pos(877,330),self._pos(877,330), 6000))
+            actions.append(SwipeAction(self._pos(877,330),self._pos(877,330), 8000))
         else:    
             for _ in range(count):
                 actions.append(ClickAction(pos=self._pos(877, 330)))
@@ -599,7 +600,7 @@ class Robot:
         actions.append(ClickAction(pos=self._pos(478, 89)))  # 点击支援
         actions.append(SleepAction(1))
         yoffset = 110 * (supportindex // 8)
-        xoffset = 90 * ((supportindex - 1) % 8)
+        xoffset = 100 * ((supportindex - 1) % 8)
         actions.append(ClickAction(pos=self._pos(105 + xoffset, 170 +yoffset)))
         actions.append(ClickAction(pos=self._pos(832, 453)))  # 进入战斗
         actions.append(MatchAction(
