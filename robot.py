@@ -9,6 +9,13 @@ from config import *
 from floordict import FloorDict
 import random
 
+HARD_CHAPTER = (
+    (237,339),(469,263),(697,321),
+    (279,265),(475,358),(730,337),
+    (253,259),(478,342),(729,269),
+    (248,258),(483,223),(768,249),
+)
+
 CHAPTER_1 = ((106, 281), (227, 237), (314, 331), (379, 235), (479, 294),
              (545, 376), (611, 305), (622, 204), (749, 245), (821, 353))
 CHAPTER_2 = ((120, 410), (253, 410), (382, 378), (324, 274), (235, 216), (349, 162), (457, 229),
@@ -284,6 +291,27 @@ class Robot:
         pass
 
     @trace
+    def _guild_like(self, no=1):
+        '''
+        行会点赞
+        Paramters:
+        ----
+        no: 支持1/2/3
+        '''
+        x = 829
+        y = 110 * (no - 1) + 196
+        self._action_squential(
+            ClickAction(template="guild"),
+            MatchAction("guild_symbol"),
+            SleepAction(1),
+            ClickAction(pos=self._pos(234,349)),
+            SleepAction(3),
+            ClickAction(pos=self._pos(x,y)),
+            MatchAction("btn_ok_blue", matched_actions=[ClickAction()], timeout=5),
+        )
+
+
+    @trace
     def _buy_mana(self, count):
         '''
         购买mana
@@ -373,6 +401,42 @@ class Robot:
         self._action_squential(*actions)
     
     @trace
+    def _saodang_hard(self, start, end):
+        '''
+        扫荡hard图，由于hard固定没个level3个所以1-1定义为1 2-1定义为4这样来算
+        Paramters
+        ------
+        start: 开始
+        end: 结束
+        '''
+        self._entre_advanture(normal=False)
+        chapter,level = divmod(start - 1, 3)
+        self._move_to_chapter(chapter)
+        self._action_squential(
+            ClickAction(pos=self._pos(*HARD_CHAPTER[level])),
+            MatchAction('btn_challenge'),
+        )
+        for _ in range(start - 1, end):
+            self._action_squential(
+                SwipeAction(self._pos(877,330),self._pos(877,330), 2000),
+                ClickAction(pos=self._pos(757, 330)),
+                ClickAction(template='btn_ok_blue'),
+                ClickAction(template='btn_skip_ok'),
+                SleepAction(1),
+                ClickAction(template='btn_ok'),
+                SleepAction(1),
+                MatchAction(template='btn_ok',
+                                   matched_actions=[ClickAction()], timeout=1),
+                MatchAction(template='btn_ok',
+                                   matched_actions=[ClickAction()], timeout=1),
+                SleepAction(1),
+                ClickAction(pos=self._pos(939, 251)),
+                SleepAction(2),
+            )
+            
+
+    
+    @trace
     def _drama_activity(self,start,end):
         # 不做了没啥收益
         self._action_squential(
@@ -448,6 +512,9 @@ class Robot:
         if normal:
             actions.append(MatchAction('btn_normal_selected', unmatch_actions=[
                            ClickAction(template='btn_normal')]))
+        else:
+            actions.append(MatchAction('btn_hard_selected', unmatch_actions=[
+                ClickAction(template="btn_hard")]))
         self._action_squential(*actions)
 
     def _move_to_chapter(self, chapter_index, symbols=CHAPTER_SYMBOLS, chapters=CHAPTERS):
@@ -889,3 +956,12 @@ class SwipeAction(Action):
     def do(self, screenshot, robot:Robot):
         robot.driver.swipe(self.start,self.end,self.duration)
         self._done = True
+
+if __name__ == '__main__':
+    import yaml
+    from simulator import DNSimulator2
+    with open('config.yml', encoding='utf-8') as f:
+        config = yaml.load(f, Loader=yaml.FullLoader)
+    drivers = DNSimulator2(config['Extra']['dnpath']).get_dirvers()
+    robot = Robot(drivers[0])
+    robot._saodang_hard(6,7)
