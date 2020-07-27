@@ -217,8 +217,7 @@ class Robot:
         '''
         self._action_squential(MatchAction('shop', unmatch_actions=(
             ClickAction(template='btn_close'),
-            ClickAction(template='tab_home_page'),
-            ClickAction(pos=self._pos(50, 300)),
+            ClickAction(pos=self._pos(90, 500)),
         ),timeout=timeout))
 
     @trace
@@ -301,6 +300,7 @@ class Robot:
         x = 829
         y = 110 * (no - 1) + 196
         self._action_squential(
+            SleepAction(2),
             ClickAction(template="guild"),
             MatchAction("guild_symbol"),
             SleepAction(1),
@@ -379,7 +379,7 @@ class Robot:
         actions.append(ClickAction(pos=self._pos(*pos)))
         actions.append(MatchAction('btn_challenge'))
         if count == -1:#click forever change to long press
-            actions.append(SwipeAction(self._pos(877,330),self._pos(877,330), 8000))
+            actions.append(SwipeAction(self._pos(877,330),self._pos(877,330), 9000))
         else:    
             for _ in range(count):
                 actions.append(ClickAction(pos=self._pos(877, 330)))
@@ -403,7 +403,7 @@ class Robot:
     @trace
     def _saodang_hard(self, start, end):
         '''
-        扫荡hard图，由于hard固定没个level3个所以1-1定义为1 2-1定义为4这样来算
+        扫荡hard图，由于hard固定每个level3个所以1-1定义为1 2-1定义为4这样来算
         Paramters
         ------
         start: 开始
@@ -433,8 +433,6 @@ class Robot:
                 ClickAction(pos=self._pos(939, 251)),
                 SleepAction(2),
             )
-            
-
     
     @trace
     def _drama_activity(self,start,end):
@@ -619,7 +617,7 @@ class Robot:
         ret = self._find_match_pos(
             self.driver.screenshot(), 'join_guild_symbol')
         if not ret:
-            self._log('Join guild failed: maybe aready have guild')
+            self._log('Join guild failed: maybe already have guild')
             return
         actions = []
         actions.append(ClickAction(pos=self._pos(860, 78)))
