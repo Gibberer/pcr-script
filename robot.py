@@ -16,6 +16,8 @@ HARD_CHAPTER = (
     (248,258),(483,223),(768,249),
 )
 
+GUILD_BOSS_POS = ((115,291),(277,290),(460,168),(617,234),(833,248))
+
 CHAPTER_1 = ((106, 281), (227, 237), (314, 331), (379, 235), (479, 294),
              (545, 376), (611, 305), (622, 204), (749, 245), (821, 353))
 CHAPTER_2 = ((120, 410), (253, 410), (382, 378), (324, 274), (235, 216), (349, 162), (457, 229),
@@ -343,6 +345,7 @@ class Robot:
             actions.append(SleepAction(13))
         actions.append(ClickAction('btn_cancel'))
         self._action_squential(*actions)
+
     
     @trace
     def _buy_power(self, count):
@@ -640,7 +643,7 @@ class Robot:
         self._action_squential(*actions)
 
     @trace
-    def _dungeon_mana(self, difficulty = 1,level = 0, supportindex = 1, withdraw = True):
+    def _dungeon_mana(self, difficulty = 1,level = 0, support = 1, withdraw = True):
         '''
         进入地下城，送mana
         '''
@@ -664,8 +667,8 @@ class Robot:
         actions.append(ClickAction(pos=self._pos(432, 170)))
         actions.append(ClickAction(pos=self._pos(478, 89)))  # 点击支援
         actions.append(SleepAction(1))
-        yoffset = 110 * (supportindex // 8)
-        xoffset = 100 * ((supportindex - 1) % 8)
+        yoffset = 110 * ((support - 1) // 8)
+        xoffset = 100 * ((support - 1) % 8)
         actions.append(ClickAction(pos=self._pos(105 + xoffset, 170 +yoffset)))
         actions.append(ClickAction(pos=self._pos(832, 453)))  # 进入战斗
         actions.append(MatchAction(
@@ -696,6 +699,46 @@ class Robot:
             actions.append(MatchAction('in_dungeon_symbol'))
             actions.append(ClickAction(template='btn_withdraw'))
             actions.append(ClickAction(template='btn_ok_blue'))
+        self._action_squential(*actions)
+    
+    @trace
+    def _guild_battle(self, boss = 1, count = 1, support= 1):
+        '''
+        公会战
+        '''
+        self._action_squential(
+            ClickAction(template="tab_adventure"),
+            ClickAction(template="btn_guild_battle"),
+            MatchAction("guild_battle_symbol"),
+            MatchAction("shop",unmatch_actions=[ClickAction(pos=self._pos(480,46))],timeout=5),
+        )
+        actions = []
+        boss_pos = GUILD_BOSS_POS[boss - 1]
+        for i in range(count):
+            actions.append(ClickAction(pos=self._pos(*boss_pos)))
+            actions.append(SleepAction(2))
+            if i == 0:
+                actions.append(MatchAction("shop",unmatch_actions=[ClickAction(pos=self._pos(480,46))],timeout=5))
+            actions.append(ClickAction(template="btn_challenge"))
+            # 移除当前队伍人物
+            if i == 0:
+                actions.append(ClickAction(pos=self._pos(87,447)))
+            else:
+                for j in range(5):
+                    actions.append(ClickAction(pos=self._pos(87 + 110 * j, 447)))
+            actions.append(SleepAction(3))
+            actions.append(ClickAction(pos=self._pos(478, 89)))#点击支援
+            actions.append(SleepAction(1))
+            yoffset = 110 * ((support + i - 1) // 8)
+            xoffset = 100 * ((support + i - 1) % 8)
+            actions.append(ClickAction(pos=self._pos(105 + xoffset, 170 +yoffset)))
+            actions.append(ClickAction(pos=self._pos(832, 453)))  # 进入战斗
+            actions.append(MatchAction('btn_ok_blue', matched_actions=[ClickAction()], timeout=5))
+            actions.append(MatchAction('btn_battle',matched_actions=[ClickAction()], timeout=3))
+            actions.append(SleepAction(20))
+            actions.append(MatchAction('btn_next_step', matched_actions=[ClickAction()], unmatch_actions=[
+                    ClickAction(template='btn_close'), ClickAction(pos=self._pos(200, 250))]))
+            actions.append(SleepAction(5))
         self._action_squential(*actions)
 
     @trace
@@ -962,4 +1005,4 @@ if __name__ == '__main__':
         config = yaml.load(f, Loader=yaml.FullLoader)
     drivers = DNSimulator2(config['Extra']['dnpath']).get_dirvers()
     robot = Robot(drivers[0])
-    robot._saodang_hard(6,7)
+    robot._guild_battle(2,2,5)
