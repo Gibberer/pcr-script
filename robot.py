@@ -436,6 +436,10 @@ class Robot:
                 ClickAction(pos=self._pos(939, 251)),
                 SleepAction(2),
             )
+        self._action_squential(
+            SleepAction(2),
+            ClickAction(pos=self._pos(666, 457))
+        )
     
     @trace
     def _drama_activity(self,start,end):
