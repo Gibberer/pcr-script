@@ -29,8 +29,11 @@ def dostaff(robot: Robot):
                 break
             account, password = account_list.pop(0)
             no = total_size - len(account_list)
-        robot.changeaccount(account, password, logpath='output.log')
-        robot.work(task_dict[no])
+        try:
+            robot.changeaccount(account, password, logpath='output.log')
+            robot.work(task_dict[no])
+        except Exception as error:
+            print(error) #发生异常跳过
 
 
 for driver in drivers:

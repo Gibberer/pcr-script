@@ -34,7 +34,7 @@ CHAPTERS = (
     FloorDict({0: CHAPTER_3}),
     FloorDict({0: CHAPTER_4, 5: CHAPTER_4_ZOOM}),
 )
-CHAPTER_SYMBOLS = ('chapter1', 'chapter2', 'chapter3','chapter4')
+CHAPTER_SYMBOLS = ('chapter1', 'chapter2', 'chapter3','chapter4', 'chapter5')
 
 ACTIVITY_YLY = ((168,322),(261,247),(334,356),(415,231),(488,317),(601,348),(651,239),(733,338),(832,301),(925,246))
 ACTIVITY_YLY_1 = ((57,328),(149,250),(229,351),(310,225),(378,316),(479,347),(546,237),(623,343),(712,296),(820,243),(879,337))
@@ -399,7 +399,7 @@ class Robot:
         actions.append(SleepAction(1))
         actions.append(MatchAction(template='btn_ok',
                                    matched_actions=[ClickAction()], timeout=3))
-        actions.append(SleepAction(2))
+        actions.append(SleepAction(3))
         actions.append(ClickAction(pos=self._pos(666, 457)))
         self._action_squential(*actions)
     
@@ -429,10 +429,10 @@ class Robot:
                 ClickAction(template='btn_ok'),
                 SleepAction(1),
                 MatchAction(template='btn_ok',
-                                   matched_actions=[ClickAction()], timeout=1),
+                                   matched_actions=[ClickAction(),SleepAction(1)], timeout=1),
                 MatchAction(template='btn_ok',
-                                   matched_actions=[ClickAction()], timeout=1),
-                SleepAction(1),
+                                   matched_actions=[ClickAction(),SleepAction(1)], timeout=1),
+                MatchAction(template='btn_cancel', matched_actions=[ClickAction(),SleepAction(1)], timeout=1),#限时商店
                 ClickAction(pos=self._pos(939, 251)),
                 SleepAction(2),
             )
@@ -597,6 +597,7 @@ class Robot:
         actions = []
         actions.append(ClickAction(pos=self._pos(*trigger_pos)))
         actions.append(ClickAction(template='btn_challenge'))
+        actions.append(SleepAction(1))
         actions.append(ClickAction(template='btn_combat_start'))
         actions.append(SleepAction(5))
         if check_auto:
