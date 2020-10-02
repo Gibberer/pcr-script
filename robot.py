@@ -98,9 +98,18 @@ class Robot:
                         account)], unmatch_actions=[ClickAction(pos=self._pos(900, 25))],delay=0),
                     ClickAction(template='edit_password'),
                     InputAction(password),
-                    ClickAction(template='btn_login')
+                    ClickAction(template='btn_login'),
+                    SleepAction(2) #延迟下，后续需要判断是否出现用户协议弹窗
                 )
                 self._action_squential(*actions)
+                #执行登录操作之后判断是否出现用户协议
+                while self._find_match_pos(self.driver.screenshot(), 'user_agreement_symbol'):
+                    self._action_squential(
+                        ClickAction(pos=self._pos(704,334)),#滑动到底部
+                        SleepAction(2),
+                        ClickAction(pos=self._pos(536,388)),#点击同意
+                        SleepAction(2)
+                    )
                 break
             else:
                 # 在游戏里退出账号
