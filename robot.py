@@ -2,90 +2,11 @@ from driver import Driver
 from cv2 import cv2 as cv
 import numpy as np
 import time
-from typing import Iterable, Match, Tuple
+from typing import Iterable, Tuple
 import functools
 import random
-from config import *
-from floordict import FloorDict
+from constants import *
 import random
-
-HARD_CHAPTER = (
-    (237, 339), (469, 263), (697, 321),
-    (279, 265), (475, 358), (730, 337),
-    (253, 259), (478, 342), (729, 269),
-    (248, 258), (483, 223), (768, 249),
-    (244, 319), (455, 245), (698, 261),
-    (266, 298), (499, 304), (718, 248),
-    (275, 239), (481, 328), (759, 277),
-    (213, 390), (477, 355), (718, 286),
-    (221, 267), (484, 338), (768, 282),
-    (218, 350), (486, 246), (765, 326),
-    (220, 359), (482, 239), (771, 317),
-    (217, 252), (488, 346), (764, 238),
-    (217, 244), (485, 355), (781, 337),
-    (220, 343), (484, 245), (776, 332),
-    (213, 227), (488, 353), (774, 271),
-)
-
-GUILD_BOSS_POS = ((115, 291), (277, 290), (460, 168), (617, 234), (833, 248))
-CHAPTER_NONE = ((0, 0),)
-
-CHAPTER_1 = ((106, 281), (227, 237), (314, 331), (379, 235), (479, 294),
-             (545, 376), (611, 305), (622, 204), (749, 245), (821, 353))
-CHAPTER_2 = ((120, 410), (253, 410), (382, 378), (324, 274), (235, 216), (349, 162), (457, 229),
-             (500, 319), (600, 375), (722, 370), (834, 348), (816, 227))
-CHAPTER_2_ZOOM = ((48, 410), (180, 412), (302, 381), (256, 276), (157, 210), (275, 170), (377, 230),
-                  (426, 321), (526, 377), (648, 377), (755, 341), (742, 226))
-CHAPTER_3 = ((135, 185), (192, 309), (284, 229), (414, 230), (379, 343), (488, 411), (532, 289),
-             (615, 194), (691, 272), (675, 390), (821, 339), (835, 211))
-CHAPTER_4 = (
-    (168, 239), (259, 312), (367, 267),
-    (487, 340), (483, 371), (605, 345),
-)
-CHAPTER_4_ZOOM = (
-    (44, 200), (136, 317), (246, 266),
-    (361, 242), (349, 375), (483, 345),
-)
-CHAPTER_15 = (
-    (0,0),(0,0),(0,0),(0,0),(0,0),(0,0),(0,0),(0,0),(0,0),
-    (352,361),(498,401),(651,397),(753,302),(597,255)
-)
-CHAPTERS = (
-    FloorDict({0: CHAPTER_1}),
-    FloorDict({0: CHAPTER_2, 8: CHAPTER_2_ZOOM}),
-    FloorDict({0: CHAPTER_3}),
-    FloorDict({0: CHAPTER_4, 5: CHAPTER_4_ZOOM}),
-    FloorDict({0: CHAPTER_NONE}),
-    FloorDict({0: CHAPTER_NONE}),
-    FloorDict({0: CHAPTER_NONE}),
-    FloorDict({0: CHAPTER_NONE}),
-    FloorDict({0: CHAPTER_NONE}),
-    FloorDict({0: CHAPTER_NONE}),
-    FloorDict({0: CHAPTER_NONE}),
-    FloorDict({0: CHAPTER_NONE}),
-    FloorDict({0: CHAPTER_NONE}),
-    FloorDict({0: CHAPTER_NONE}),
-    FloorDict({0: CHAPTER_15}),
-)
-CHAPTER_SYMBOLS = (
-    'chapter1', 'chapter2', 'chapter3', 'chapter4', 'chapter5', 'chapter6', 'chapter7', 'chapter8',
-    'chapter9', 'chapter10', 'chapter11', 'chapter12', 'chapter13', 'chapter14', 'chapter15',
-)
-
-ACTIVITY_YLY = ((168, 322), (261, 247), (334, 356), (415, 231), (488, 317),
-                (601, 348), (651, 239), (733, 338), (832, 301), (925, 246))
-ACTIVITY_YLY_1 = ((57, 328), (149, 250), (229, 351), (310, 225), (378, 316),
-                  (479, 347), (546, 237), (623, 343), (712, 296), (820, 243), (879, 337))
-
-ACTIVITIES = (
-    FloorDict({0: ACTIVITY_YLY, 4: ACTIVITY_YLY_1}),
-)
-
-ACTIVITY_SYMBOLS = ('activity_symbol',)
-
-DUNGEON_LEVEL_POS = ([(669, 279), (475, 256), (301, 269),
-                      (542, 287), (417, 275), (597, 275), (454, 255)],)
-
 
 class Action:
     def __init__(self):
@@ -882,25 +803,26 @@ class Robot:
         self._action_squential(*actions)
 
     @trace
-    def _guild_battle(self, boss=1, count=1, support=1):
+    def _guild_battle(self, count=1, support=1):
         '''
         公会战
         '''
         self._action_squential(
             ClickAction(template="tab_adventure"),
             ClickAction(template="btn_guild_battle"),
-            MatchAction("guild_battle_symbol"),
+            MatchAction("guild_battle_symbol",unmatch_actions=[ClickAction(template='btn_close')]),
             MatchAction("shop", unmatch_actions=[
-                        ClickAction(pos=self._pos(480, 46))], timeout=5),
+                        ClickAction(template='btn_close'),ClickAction(template='btn_ok'),ClickAction(pos=self._pos(480, 46))], timeout=8),
         )
         actions = []
-        boss_pos = GUILD_BOSS_POS[boss - 1]
+        x,y = self._find_match_pos(self.driver.screenshot(), 'guild_boss_indicator')
+        boss_pos = (x,y+110)
         for i in range(count):
             actions.append(ClickAction(pos=self._pos(*boss_pos)))
             actions.append(SleepAction(2))
             if i == 0:
-                actions.append(MatchAction("shop", unmatch_actions=[
-                               ClickAction(pos=self._pos(480, 46))], timeout=5))
+                actions.append(MatchAction("shop", 
+                unmatch_actions=[ClickAction(template='btn_close'),ClickAction(pos=self._pos(480, 46))], timeout=3))
             actions.append(ClickAction(template="btn_challenge"))
             # 移除当前队伍人物
             if i == 0:
@@ -1193,4 +1115,4 @@ if __name__ == '__main__':
         config = yaml.load(f, Loader=yaml.FullLoader)
     drivers = DNSimulator2(config['Extra']['dnpath']).get_dirvers()
     robot = Robot(drivers[0])
-    robot._saodang(15,11,-1)
+    robot._guild_battle(2,1)

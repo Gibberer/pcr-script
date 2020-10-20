@@ -7,7 +7,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from cv2 import cv2 as cv
 import os
-import config
+import constants
 import time
 
 
@@ -100,7 +100,7 @@ class DNADBDriver(ADBDriver):
         window_title = '雷电模拟器'
         if self.index > 0:
             window_title = "{}-{}".format(window_title, self.index)
-        width,height = config.BASE_WIDTH,config.BASE_HEIGHT
+        width,height = constants.BASE_WIDTH,constants.BASE_HEIGHT
         toolbar_height = 35
         try:
             hwin = win32gui.FindWindow('LDPlayerMainFrame',window_title)
