@@ -10,10 +10,12 @@
 主线图支持进度
 
 - [x] 主线普通图支持1-1到4-5 15-10到15-14
-- [x] 主线困难图支持1-1到15-3
+- [x] 主线困难图支持1-1到20-3
 - [x] 主线图剧情引导跳过支持1-3至2-12
 
 ***
+- [x] 增加脚本用于大号清理日常
+- [x] 增加清地下城副本得能力
 - [x] 竞技场/公主竞技场
 - [x] 圣迹调查
 - [x] 探索
@@ -39,9 +41,9 @@
 * 操作需要依赖adb命令，请确保adb命令可用。如何安装可以百度搜索关键字“安装adb”
 * 安装Python3环境，访问[Python官网](https://www.python.org/)安装
 * 使用git clone或网页下载本项目到电脑上
-* 进入项目根目录执行以下命令安装项目所需依赖
+* 执行以下命令安装项目所需依赖
   ```cmd
-  pip install -r .\requirements.txt
+  pip install opencv_python matplotlib numpy pywin32 PyYAML
   ```
 * 在项目根目录创建`config.yml`文件，根据yaml语法配置账号信息及需要做的任务模块，具体可参考[sample.yml](sample.yml)这个文件
 * 执行脚本之前，首先打开模拟器并打开游戏界面停留在欢迎页面
@@ -57,39 +59,67 @@
 配置默认的账号及需要做哪些任务等信息，需要在工程目录下创建`config.yml`的文件，具体可参考根目录下[sample.yml](sample.yml)文件
 
 ```yaml
+# 这个是用于清日常的配置文件
 Accounts: #存账号信息
   -
-    account: account1
-    password: password1
-  -
-    account: account2
-    password: password2
-IDS: &IDS #用于实名认证的信息
-  -
-    id: 身份证号
-    name: 张三
+    account: 'YourAccount'
+    password: 'YourPassword'
 Extra:
-  guildname: &guildname 行会名称
-  dnpath: 'N:\dnplayer2'
+  dnpath: 'N:\dnplayer2' # 雷电模拟器路径，用于输入中文和快速获取图像
 Task: #配置执行任务,配置任务名称，如果需要传入参数在下面增加参数，可以根据不同的账号序号配置任务。
       #账号会执行小于等于并且离它最近的序号的任务列表
   1: #配置账号大于等于1的进行以下操作
+     #最好每个任务结束后设置tohomepage，因为每个任务都是按照当前在首页的情况执行的
     -
-      - get_quest_reward #领取任务奖励
+      - guild_like # 点赞行会成员
+    - 
+      - tohomepage
+    # 这里没判断是否是免费的十连，所以第二个参数最好不要传True
+    # 如果当前没有免费的十连的话就直接把钻石花光了
+    # -
+    #   - choushilian #抽取免费十连
+    #   - False #是否抽取所有免费十连
+    # -
+    #   - tohomepage
     -
-      - tohomepage #回到首页
+      - get_quest_reward
     -
-      - buy_mana #购买mana
-      - 20 #买20次
+      - get_power #去公会之家领体力
     -
-      - saodang
-      - 1 #第一章
-      - 9 #level 9
-      - 60 #扫荡60次
+      - arena #打一把竞技场
     -
       - tohomepage
     -
-      - get_quest_reward
+      - princess_arena #打一把公主竞技场
+    -
+      - tohomepage
+    -
+      - explore #探索
+    -
+      - tohomepage
+    -
+      - research #圣迹调查
+    -
+      - tohomepage
+    -
+      - dungeon_saodang  #扫荡地下城
+      - 4 # 极限难度地下城
+      - 1  #使用编号1队过小怪
+      - '2,3' #使用编号2和3队过boss，小队之间用','分割
+    -
+      - tohomepage
+    - 
+      - saodang_hard  #过困难难度地下城把体力用光，这里判断没体力后会自行终止
+      - 60 # 开始关卡 60对应 20-3
+      - 1  # 结束关卡
+    -
+      - tohomepage
+    -
+      - get_quest_reward #结束日常任务后 另任务奖励和礼物
+    -
+      - tohomepage
+    -
+      - git_gift
 ```
 
 ## 其他

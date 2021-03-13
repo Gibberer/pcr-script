@@ -4,25 +4,23 @@ from floordict import FloorDict
 import threading
 import time
 import yaml
+import getopt
+import sys
 
-with open('config.yml', encoding='utf-8') as f:
-    config = yaml.load(f, Loader=yaml.FullLoader)
+def usage():
+    print('''
+    -h help
+    -c 设置配置文件
+    ''')
 
-def getTaskDict() -> FloorDict:
+def getTaskDict(config) -> FloorDict:
     floor_dict = FloorDict()
     task = config['Task']
     for key, values in task.items():
         floor_dict[key] = values
     return floor_dict
-task_dict = getTaskDict()
-drivers = DNSimulator2(config['Extra']['dnpath']).get_dirvers()
-account_list = [(account['account'], account['password'])
-                for account in config['Accounts']]
-total_size = len(account_list)
-thread_list = []
-lock = threading.Lock()
 
-def dostaff(robot: Robot):
+def dostaff(robot: Robot, lock, account_list, total_size, task_dict):
     while True:
         with lock:
             if len(account_list) == 0:
@@ -35,15 +33,45 @@ def dostaff(robot: Robot):
         except Exception as error:
             print(error) #发生异常跳过
 
+def main():
+    config_file = 'config.yml'
+    try:
+        opts, args = getopt.getopt(sys.argv[1:], 'hc:', ['help','config='])
+        for name, value in opts:
+            if name in ('-h','--help'):
+                usage()
+            elif name in ('-c','--config'):
+                config_file = value
+    except getopt.GetoptError as error:
+        print(error)
+        usage()
+        return
 
-for driver in drivers:
-    robot = Robot(driver)
-    thread_list.append(threading.Thread(target=dostaff, args=(robot,)))
-start_time = time.time()
-print("start {} thread".format(len(thread_list)))
-for thread in thread_list:
-    thread.start()
-print("wait thread finish")
-for thread in thread_list:
-    thread.join()
-print("consume time: {}".format(time.time() - start_time))
+    with open(config_file, encoding='utf-8') as f:
+        config = yaml.load(f, Loader=yaml.FullLoader)
+    task_dict = getTaskDict(config)
+    drivers = DNSimulator2(config['Extra']['dnpath']).get_dirvers() 
+    account_list = [(account['account'], account['password'])
+                    for account in config['Accounts']]
+    total_size = len(account_list)
+    thread_list = []
+    lock = threading.Lock()
+
+    if not drivers:
+        print("Device not found")
+        return
+    for driver in drivers:
+        robot = Robot(driver)
+        thread_list.append(threading.Thread(target=dostaff, args=(robot, lock, account_list,total_size, task_dict)))
+    start_time = time.time()
+    print("start {} thread".format(len(thread_list)))
+    for thread in thread_list:
+        thread.start()
+    print("wait thread finish")
+    for thread in thread_list:
+        thread.join()
+    print("consume time: {}".format(time.time() - start_time))
+
+if __name__ =='__main__':
+    main()
+

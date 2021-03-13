@@ -1,5 +1,6 @@
 *screen_shot.png
 __pycache__/
 config.yml
+daily_config.yml
 *.log
 .vscode/

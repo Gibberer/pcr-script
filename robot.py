@@ -1,3 +1,4 @@
+from time import sleep
 from driver import Driver
 from cv2 import cv2 as cv
 import numpy as np
@@ -7,6 +8,7 @@ import functools
 import random
 from constants import *
 import random
+
 
 class Action:
     def __init__(self):
@@ -160,10 +162,15 @@ class Robot:
         )
 
     @trace
-    def _choushilian(self):
+    def _choushilian(self, multi=False):
         '''
         抽免费10连
         '''
+        draw_actions = [
+            ClickAction(template='btn_ok_blue'),
+            MatchAction('btn_skip', matched_actions=[ClickAction()], unmatch_actions=[
+                        ClickAction(pos=self._pos(50, 300))])
+        ]
         self._action_squential(
             ClickAction(template='niudan'),
             MatchAction('btn_setting_blue', matched_actions=[ClickAction()], unmatch_actions=[
@@ -171,11 +178,18 @@ class Robot:
             MatchAction('btn_role_detail', unmatch_actions=[
                         ClickAction(template='btn_close')]),
             ClickAction(pos=self._pos(871, 355)),
-            ClickAction(template='btn_ok_blue'),
-            MatchAction('btn_skip', matched_actions=[ClickAction()], unmatch_actions=[
-                        ClickAction(pos=self._pos(50, 300))]),
-            MatchAction('btn_ok', matched_actions=[ClickAction()], unmatch_actions=[
-                        ClickAction(pos=self._pos(50, 300))]),
+            *draw_actions,
+            MatchAction('btn_ok', matched_actions=[ClickAction()],
+                        unmatch_actions=[
+                        ClickAction(pos=self._pos(50, 300)),
+                        IfCondition('btn_draw_again', meet_actions=[
+                            ClickAction(template='btn_draw_again'),
+                            *draw_actions
+                        ]) if multi else IfCondition('btn_cancel', meet_actions=[
+                            ClickAction(template='btn_cancel'),
+                            SkipAction()
+                        ])
+                        ]),
             MatchAction('btn_setting_blue', matched_actions=[
                         ClickAction()], timeout=5),
         )
@@ -250,7 +264,8 @@ class Robot:
             MatchAction('btn_close', matched_actions=[
                         ClickAction()], timeout=5),
             MatchAction('btn_ok', matched_actions=[ClickAction()], timeout=3),
-            MatchAction('btn_cancel', matched_actions=[ClickAction()], timeout=3)
+            MatchAction('btn_cancel', matched_actions=[
+                        ClickAction()], timeout=3)
         )
 
     @trace
@@ -264,7 +279,8 @@ class Robot:
             SleepAction(3),
             MatchAction('btn_all_rec', matched_actions=[
                         ClickAction()], timeout=3),
-            MatchAction('btn_ok_blue', matched_actions=[ClickAction()], timeout=3),
+            MatchAction('btn_ok_blue', matched_actions=[
+                        ClickAction()], timeout=3),
             MatchAction('btn_ok', matched_actions=[ClickAction()], timeout=3),
         )
 
@@ -378,7 +394,7 @@ class Robot:
         actions.append(MatchAction(template='btn_ok',
                                    matched_actions=[ClickAction()], timeout=3))
         actions.append(MatchAction(template='btn_cancel', matched_actions=[
-                            ClickAction(), SleepAction(1)], timeout=1))#限时商店
+            ClickAction(), SleepAction(1)], timeout=1))  # 限时商店
         actions.append(SleepAction(2))
         actions.append(ClickAction(pos=self._pos(666, 457)))
         self._action_squential(*actions)
@@ -401,13 +417,24 @@ class Robot:
         self._move_to_chapter(chapter_index)
         self._action_squential(
             ClickAction(pos=self._pos(*HARD_CHAPTER[chapter_index*3 + level])),
-            MatchAction('btn_challenge'),
+            MatchAction('btn_challenge', threshold=0.9*THRESHOLD),
         )
-        for _ in range(start - 1, end):
+        _range = range(
+            start - 1, end) if start <= end else range(start - 1, end, -1)
+        next_pos = (939, 251) if start <= end else (36, 251)
+        for _ in _range:
             self._action_squential(
                 SwipeAction(self._pos(877, 330), self._pos(877, 330), 2000),
                 ClickAction(pos=self._pos(757, 330)),
                 ClickAction(template='btn_ok_blue'),
+                MatchAction(template='symbol_restore_power',
+                            matched_actions=[
+                                ClickAction(pos=self._pos(370, 370)),
+                                SleepAction(2),
+                                ClickAction(pos=self._pos(680, 454)),
+                                SleepAction(2),
+                                ThrowErrorAction("No power!!!")],
+                            timeout=2),
                 ClickAction(template='btn_skip_ok'),
                 SleepAction(1),
                 ClickAction(template='btn_ok'),
@@ -418,7 +445,7 @@ class Robot:
                             matched_actions=[ClickAction(), SleepAction(1)], timeout=1),
                 MatchAction(template='btn_cancel', matched_actions=[
                             ClickAction(), SleepAction(1)], timeout=1),  # 限时商店
-                ClickAction(pos=self._pos(939, 251)),
+                ClickAction(pos=self._pos(*next_pos)),
                 SleepAction(2),
             )
         self._action_squential(
@@ -435,25 +462,25 @@ class Robot:
                     *HARD_CHAPTER[(chapter - 1)*3 + section - 1])),
                 *self.__saodang_oneshot_actions()
             )
-    
+
     def __saodang_oneshot_actions(self):
         return [
-                MatchAction('btn_challenge'),
-                SwipeAction(self._pos(877, 330), self._pos(877, 330), 2000),
-                ClickAction(pos=self._pos(757, 330)),
-                ClickAction(template='btn_ok_blue'),
-                ClickAction(template='btn_skip_ok'),
-                SleepAction(1),
-                ClickAction(template='btn_ok'),
-                SleepAction(1),
-                MatchAction(template='btn_ok',
-                            matched_actions=[ClickAction(), SleepAction(1)], timeout=1),
-                MatchAction(template='btn_ok',
-                            matched_actions=[ClickAction(), SleepAction(1)], timeout=1),
-                MatchAction(template='btn_cancel', matched_actions=[
-                            ClickAction(), SleepAction(1)], timeout=1),  # 限时商店
-                SleepAction(2),
-                ClickAction(pos=self._pos(666, 457))
+            MatchAction('btn_challenge'),
+            SwipeAction(self._pos(877, 330), self._pos(877, 330), 2000),
+            ClickAction(pos=self._pos(757, 330)),
+            ClickAction(template='btn_ok_blue'),
+            ClickAction(template='btn_skip_ok'),
+            SleepAction(1),
+            ClickAction(template='btn_ok'),
+            SleepAction(1),
+            MatchAction(template='btn_ok',
+                        matched_actions=[ClickAction(), SleepAction(1)], timeout=1),
+            MatchAction(template='btn_ok',
+                        matched_actions=[ClickAction(), SleepAction(1)], timeout=1),
+            MatchAction(template='btn_cancel', matched_actions=[
+                ClickAction(), SleepAction(1)], timeout=1),  # 限时商店
+            SleepAction(2),
+            ClickAction(pos=self._pos(666, 457))
         ]
 
     @trace
@@ -666,7 +693,7 @@ class Robot:
         actions.append(ClickAction(template='btn_ok_blue'))
         actions.append(SleepAction(5))
         self._action_squential(*actions)
-    
+
     @trace
     def _explore(self):
         '''
@@ -674,33 +701,45 @@ class Robot:
         '''
         self._action_squential(
             MatchAction('tab_adventure', matched_actions=[ClickAction()], unmatch_actions=[
-            ClickAction(template='btn_close')]),
+                ClickAction(template='btn_close')]),
             SleepAction(2),
             ClickAction(template='explore'),
             MatchAction('explore_symbol', matched_actions=[
-                       ClickAction(offset=self._pos(100, 200))], timeout=5),
-            ClickAction(pos=self._pos(594,242)),#经验关卡
+                ClickAction(offset=self._pos(100, 200))], timeout=5),
+            ClickAction(pos=self._pos(594, 242)),  # 经验关卡
             SleepAction(3),
-            ClickAction(pos=self._pos(712,143)),
-            *self.__saodang_oneshot_actions(),
-            ClickAction(pos=self._pos(114,271)),
+            ClickAction(pos=self._pos(712, 143)),
+            MatchAction('btn_challenge'),
+            SwipeAction(self._pos(877, 330), self._pos(877, 330), 2000),
+            ClickAction(pos=self._pos(757, 330)),
+            ClickAction(template='btn_ok_blue'),
+            ClickAction(template='btn_skip_ok'),
+            SleepAction(1),
+            ClickAction(pos=self._pos(480, 480)),
             SleepAction(3),
-            ClickAction(pos=self._pos(813,230)),#玛娜关卡
+            ClickAction(pos=self._pos(813, 230)),  # 玛娜关卡
             SleepAction(3),
-            ClickAction(pos=self._pos(712,143)),
-            *self.__saodang_oneshot_actions(),
-            ClickAction(pos=self._pos(114,271)),
+            ClickAction(pos=self._pos(712, 143)),
+            MatchAction('btn_challenge'),
+            SwipeAction(self._pos(877, 330), self._pos(877, 330), 2000),
+            ClickAction(pos=self._pos(757, 330)),
+            ClickAction(template='btn_ok_blue'),
+            ClickAction(template='btn_skip_ok'),
+            SleepAction(1),
+            ClickAction(pos=self._pos(480, 480)),
+            SleepAction(3)
         )
+
     @trace
     def _research(self):
         self._action_squential(
             MatchAction('tab_adventure', matched_actions=[ClickAction()], unmatch_actions=[
-            ClickAction(template='btn_close')]),
+                ClickAction(template='btn_close')]),
             SleepAction(2),
             ClickAction(template='research'),
             MatchAction('research_symbol', matched_actions=[
-                       ClickAction(offset=self._pos(100, 200))], timeout=5),
-            ClickAction(pos=self._pos(712,143)),
+                ClickAction(offset=self._pos(100, 200))], timeout=5),
+            ClickAction(pos=self._pos(712, 143)),
             *self.__saodang_oneshot_actions(),
         )
 
@@ -708,39 +747,110 @@ class Robot:
     def _arena(self):
         self._action_squential(
             MatchAction('tab_adventure', matched_actions=[ClickAction()], unmatch_actions=[
-            ClickAction(template='btn_close')]),
+                ClickAction(template='btn_close')]),
             SleepAction(2),
-            ClickAction(pos=self._pos(587,411)),
+            ClickAction(pos=self._pos(587, 411)),
             SleepAction(3),
-            ClickAction(pos=self._pos(665,186)),
+            ClickAction(pos=self._pos(665, 186)),
             SleepAction(3),
-            ClickAction(pos=self._pos(849,454)),
+            ClickAction(pos=self._pos(849, 454)),
             SleepAction(10),
             MatchAction('btn_next_step', matched_actions=[ClickAction()], unmatch_actions=[
-                    ClickAction(template='btn_close')]),
+                ClickAction(template='btn_close')]),
         )
 
     @trace
     def _princess_arena(self):
         self._action_squential(
             MatchAction('tab_adventure', matched_actions=[ClickAction()], unmatch_actions=[
-            ClickAction(template='btn_close')]),
+                ClickAction(template='btn_close')]),
             SleepAction(2),
-            ClickAction(pos=self._pos(836,409)),
+            ClickAction(pos=self._pos(836, 409)),
             SleepAction(3),
-            ClickAction(pos=self._pos(665,186)),
+            ClickAction(pos=self._pos(665, 186)),
             SleepAction(3),
-            ClickAction(pos=self._pos(849,454)),
+            ClickAction(pos=self._pos(849, 454)),
             SleepAction(1),
-            ClickAction(pos=self._pos(849,454)),
+            ClickAction(pos=self._pos(849, 454)),
             SleepAction(1),
-            ClickAction(pos=self._pos(849,454)),
+            ClickAction(pos=self._pos(849, 454)),
             SleepAction(30),
             MatchAction('btn_next_step', matched_actions=[ClickAction()], unmatch_actions=[
-                    ClickAction(template='btn_close')]),
+                ClickAction(template='btn_close')]),
         )
 
     @trace
+    def _dungeon_saodang(self, difficulty=4, monster_team=1, boss_team='2,3'):
+        '''
+        大号用来过地下城
+        '''
+        level = [7, 0, 0, 5][difficulty-1]
+        boss_team = [int(team) for team in boss_team.split(',')]
+        actions = []
+        actions.append(MatchAction('tab_adventure', matched_actions=[ClickAction()], unmatch_actions=[
+            ClickAction(template='btn_close')]))
+        actions.append(SleepAction(2))
+        actions.append(ClickAction(template='dungeon'))
+        actions.append(MatchAction('dungeon_symbol', matched_actions=[
+                       ClickAction(offset=self._pos(*DUNGEON_LOCATION[difficulty - 1]))], timeout=5))  # 确认进入地下城
+        actions.append(MatchAction(
+            'btn_ok_blue', matched_actions=[ClickAction()], timeout=5))
+        actions.append(SleepAction(3))
+        actions.append(MatchAction('in_dungeon_symbol'))
+        actions.append(SleepAction(3))
+        for i in range(2, level + 1):
+            if i == level:
+                # boss 关卡
+                pos = DUNGEON_LEVEL_POS[difficulty - 1][i - 1]
+                for team in boss_team:
+                    meet_actions = [
+                        ClickAction(pos=self._pos(*pos)),
+                        ClickAction(
+                            template='btn_challenge_dungeon'),
+                        SleepAction(2),
+                        ClickAction(pos=self._pos(
+                            866, 86)),  # 点击我的队伍
+                        SleepAction(2),
+                        ClickAction(pos=self._pos(
+                            *TEAM_LOCATION[team-1])),
+                        SleepAction(1),
+                        ClickAction(pos=self._pos(
+                            832, 453)),  # 进战斗界面
+                        SleepAction(10),
+                        MatchAction('btn_damage_report', unmatch_actions=[
+                            ClickAction(template='btn_close'), ClickAction(pos=self._pos(200, 250))]),
+                        SleepAction(8),
+                        ClickAction(pos=self._pos(800, 500)),
+                        SleepAction(5),
+                        MatchAction(template='btn_ok', matched_actions=[
+                                    ClickAction()], timeout=2)
+                    ]
+                    actions.append(IfCondition(
+                        'in_dungeon_symbol', meet_actions=meet_actions))
+            else:
+                pos = DUNGEON_LEVEL_POS[difficulty - 1][i - 1]
+                actions.append(ClickAction(pos=self._pos(*pos)))
+                actions.append(ClickAction(
+                    template='btn_challenge_dungeon'))
+                if i == 1:
+                    actions.append(SleepAction(1))
+                    actions.append(ClickAction(
+                        pos=self._pos(866, 86)))  # 点击我的队伍
+                    actions.append(SleepAction(2))
+                    actions.append(ClickAction(
+                        pos=self._pos(*TEAM_LOCATION[monster_team-1])))
+                actions.append(SleepAction(1))
+                actions.append(ClickAction(
+                    pos=self._pos(832, 453)))  # 进入战斗
+                actions.append(SleepAction(10))
+                actions.append(MatchAction('btn_next_step', matched_actions=[ClickAction()], unmatch_actions=[
+                    ClickAction(template='btn_close'), ClickAction(pos=self._pos(200, 250))]))
+                actions.append(SleepAction(8))
+                actions.append(ClickAction(template='btn_ok'))
+                actions.append(SleepAction(5))
+        self._action_squential(*actions)
+
+    @ trace
     def _dungeon_mana(self, difficulty=1, level=0, support=1, withdraw=True):
         '''
         进入地下城，送mana
@@ -751,12 +861,13 @@ class Robot:
         actions.append(SleepAction(2))
         actions.append(ClickAction(template='dungeon'))
         actions.append(MatchAction('dungeon_symbol', matched_actions=[
-                       ClickAction(offset=self._pos(100, 200))], timeout=5))  # 确认进入地下城
+                       ClickAction(offset=self._pos(*DUNGEON_LOCATION[difficulty - 1]))], timeout=5))  # 确认进入地下城
         actions.append(MatchAction(
             'btn_ok_blue', matched_actions=[ClickAction()], timeout=5))
         actions.append(SleepAction(3))
         actions.append(MatchAction('in_dungeon_symbol'))
-        actions.append(ClickAction(pos=self._pos(668, 290)))
+        actions.append(ClickAction(pos=self._pos(
+            DUNGEON_LEVEL_POS[difficulty - 1][0])))
         actions.append(ClickAction(template='btn_challenge_dungeon'))
         actions.append(SleepAction(1))  # 选择4个人物
         actions.append(ClickAction(pos=self._pos(105, 170)))
@@ -802,7 +913,7 @@ class Robot:
             actions.append(ClickAction(template='btn_ok_blue'))
         self._action_squential(*actions)
 
-    @trace
+    @ trace
     def _guild_battle(self, count=1, support=1):
         '''
         公会战
@@ -810,19 +921,28 @@ class Robot:
         self._action_squential(
             ClickAction(template="tab_adventure"),
             ClickAction(template="btn_guild_battle"),
-            MatchAction("guild_battle_symbol",unmatch_actions=[ClickAction(template='btn_close')]),
+            MatchAction("guild_battle_symbol", unmatch_actions=[ClickAction(
+                template='btn_close'), ClickAction(template='btn_ok')], threshold=0.6),
             MatchAction("shop", unmatch_actions=[
-                        ClickAction(template='btn_close'),ClickAction(template='btn_ok'),ClickAction(pos=self._pos(480, 46))], timeout=8),
+                        ClickAction(template='btn_close'), ClickAction(template='btn_ok'), ClickAction(pos=self._pos(480, 46))], timeout=10),
         )
         actions = []
-        x,y = self._find_match_pos(self.driver.screenshot(), 'guild_boss_indicator')
-        boss_pos = (x,y+110)
+        retry_count = 0
+        activate_boss_pos = None
+        while retry_count < 10 and not activate_boss_pos:
+            activate_boss_pos = self._find_match_pos(
+                self.driver.screenshot(), 'guild_boss_indicator', threshold=0.6)
+            sleep(0.2)
+            retry_count += 1
+        self._log(
+            f"get activate boss pos {activate_boss_pos[0]} , {activate_boss_pos[1]}")
+        boss_pos = (activate_boss_pos[0], activate_boss_pos[1]+110)
         for i in range(count):
             actions.append(ClickAction(pos=self._pos(*boss_pos)))
             actions.append(SleepAction(2))
             if i == 0:
-                actions.append(MatchAction("shop", 
-                unmatch_actions=[ClickAction(template='btn_close'),ClickAction(pos=self._pos(480, 46))], timeout=3))
+                actions.append(MatchAction("shop",
+                                           unmatch_actions=[ClickAction(template='btn_close'), ClickAction(pos=self._pos(480, 46))], timeout=3))
             actions.append(ClickAction(template="btn_challenge"))
             # 移除当前队伍人物
             if i == 0:
@@ -849,7 +969,7 @@ class Robot:
             actions.append(SleepAction(5))
         self._action_squential(*actions)
 
-    @trace
+    @ trace
     def _skip_guide_1_4(self):
         self._action_squential(
             self._create_skip_guide_action(),
@@ -864,7 +984,7 @@ class Robot:
                         ClickAction(pos=self._pos(480, 220))])
         )
 
-    @trace
+    @ trace
     def _skip_guide_1_6(self):
         self._action_squential(
             self._create_skip_guide_action(),
@@ -889,7 +1009,7 @@ class Robot:
                         ClickAction(pos=self._pos(480, 220))])
         )
 
-    @trace
+    @ trace
     def _skip_guide_2_1(self):
         self._action_squential(
             self._create_skip_guide_action(),
@@ -905,7 +1025,7 @@ class Robot:
         # 再回到冒险页面
         self._entre_advanture()
 
-    @trace
+    @ trace
     def _skip_guide_2_2(self):
         self._action_squential(
             self._create_skip_guide_action(),
@@ -915,7 +1035,7 @@ class Robot:
         # 再回到冒险页面
         self._entre_advanture()
 
-    @trace
+    @ trace
     def _skip_guide_2_5(self):
         self._action_squential(
             self._create_skip_guide_action(),
@@ -928,7 +1048,7 @@ class Robot:
         # 再去冒险
         self._entre_advanture()
 
-    @trace
+    @ trace
     def _skip_guide_2_8(self):
         self._action_squential(
             self._create_skip_guide_action(
@@ -939,7 +1059,7 @@ class Robot:
         # 再去冒险
         self._entre_advanture()
 
-    @trace
+    @ trace
     def _skip_guide_2_12(self):
         self._action_squential(
             self._create_skip_guide_action(),
@@ -971,7 +1091,7 @@ class Robot:
                         ClickAction()], timeout=5)
         )
 
-    @trace
+    @ trace
     def _skip_guide_3_1(self):
         self._action_squential(
             self._create_skip_guide_action(),
@@ -1042,16 +1162,39 @@ class MatchAction(Action):
         if ret:
             if self.matched_actions:
                 for action in self.matched_actions:
-                    action.pos = ret
+                    if hasattr(action, 'pos') and action.pos is None:
+                        action.pos = ret
                     action.do(screenshot, robot)
             self._done = True
         elif self.unmatch_action:
             for action in self.unmatch_action:
                 action.do(screenshot, robot)
+                if isinstance(action, CanSkipMatchAction):
+                    if action.skip:
+                        self._done = True
+                        break
         if self.timeout > 0:
             if time.time() - self.starttime > self.timeout:
                 self._done = True
 
+
+class CanSkipMatchAction(Action):
+    def __init__(self, skip=False):
+        super().__init__()
+        self.skip = skip
+
+class SkipAction(CanSkipMatchAction):
+    def __init__(self):
+        super().__init__(True)
+
+class ThrowErrorAction(SkipAction):
+    def __init__(self, msg):
+        super().__init__()
+        self.msg = msg
+    
+    def do(self, *args):
+        raise Exception(self.msg)
+        self._done = True
 
 class SleepAction(Action):
     def __init__(self, duration):
@@ -1108,6 +1251,34 @@ class SwipeAction(Action):
         self._done = True
 
 
+class IfCondition(CanSkipMatchAction):
+    def __init__(self, condition_template, meet_actions: [Action] = None, unmeet_actions: [Action] = None, threshold=THRESHOLD):
+        super().__init__()
+        self._condition_template = condition_template
+        self._threshold = threshold
+        self._meet_actions = meet_actions
+        self._unmeet_actions = unmeet_actions
+
+    def do(self, screenshot, robot: Robot):
+        ret = robot._find_match_pos(
+            screenshot, self._condition_template, threshold=self._threshold)
+        if ret:
+            if self._meet_actions:
+                for action in self._meet_actions:
+                    action._done = False
+                    if isinstance(action, SkipAction):
+                        self.skip = True
+                robot._action_squential(*self._meet_actions)
+        else:
+            if self._unmeet_actions:
+                for action in self._unmeet_actions:
+                    action._done = False
+                    if isinstance(action, SkipAction):
+                        self.skip = True
+                robot._action_squential(*self._unmeet_actions)
+        self._done = True
+
+
 if __name__ == '__main__':
     import yaml
     from simulator import DNSimulator2
@@ -1115,4 +1286,4 @@ if __name__ == '__main__':
         config = yaml.load(f, Loader=yaml.FullLoader)
     drivers = DNSimulator2(config['Extra']['dnpath']).get_dirvers()
     robot = Robot(drivers[0])
-    robot._guild_battle(2,1)
+    robot._saodang_hard(start=30, end=1)
