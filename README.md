@@ -109,13 +109,13 @@ Task: #配置执行任务,配置任务名称，如果需要传入参数在下面
     -
       - tohomepage
     - 
-      - saodang_hard  #过困难难度地下城把体力用光，这里判断没体力后会自行终止
+      - saodang_hard  #过困难难度章节把体力用光，这里判断没体力后会自行终止
       - 60 # 开始关卡 60对应 20-3
       - 1  # 结束关卡
     -
       - tohomepage
     -
-      - get_quest_reward #结束日常任务后 另任务奖励和礼物
+      - get_quest_reward #结束日常任务后 领任务奖励和礼物
     -
       - tohomepage
     -
