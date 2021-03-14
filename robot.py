@@ -113,7 +113,10 @@ class Robot:
         ClickAction(template='btn_close').do(self.driver.screenshot(), self)
         if tasklist:
             for funcname, *args in tasklist:
-                getattr(self, "_" + funcname)(*args)
+                try:
+                    getattr(self, "_" + funcname)(*args)
+                except Exception as e:
+                    print(e)
 
     def _log(self, msg: str):
         print("{}: {}".format(self._name, msg))
@@ -260,7 +263,7 @@ class Robot:
             ClickAction(template='quest'),
             SleepAction(3),
             MatchAction('btn_all_rec', matched_actions=[
-                        ClickAction()], timeout=3),
+                        ClickAction()], timeout=5),
             MatchAction('btn_close', matched_actions=[
                         ClickAction()], timeout=5),
             MatchAction('btn_ok', matched_actions=[ClickAction()], timeout=3),
@@ -798,7 +801,7 @@ class Robot:
         actions.append(SleepAction(3))
         actions.append(MatchAction('in_dungeon_symbol'))
         actions.append(SleepAction(3))
-        for i in range(2, level + 1):
+        for i in range(1, level + 1):
             if i == level:
                 # boss 关卡
                 pos = DUNGEON_LEVEL_POS[difficulty - 1][i - 1]
