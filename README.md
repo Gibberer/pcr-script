@@ -66,22 +66,23 @@ Accounts: #存账号信息
     account: 'YourAccount'
     password: 'YourPassword'
 Extra:
-  dnpath: 'N:\dnplayer2' # 雷电模拟器路径，用于输入中文和快速获取图像
+  dnpath: 'N:\dnplayer2'
 Task: #配置执行任务,配置任务名称，如果需要传入参数在下面增加参数，可以根据不同的账号序号配置任务。
       #账号会执行小于等于并且离它最近的序号的任务列表
   1: #配置账号大于等于1的进行以下操作
      #最好每个任务结束后设置tohomepage，因为每个任务都是按照当前在首页的情况执行的
     -
       - guild_like # 点赞行会成员
-    - 
-      - tohomepage
+    # 下面注释部分用于有免费10连的时候用
     # 这里没判断是否是免费的十连，所以第二个参数最好不要传True
     # 如果当前没有免费的十连的话就直接把钻石花光了
+    # - 
+    #   - tohomepage
     # -
     #   - choushilian #抽取免费十连
     #   - False #是否抽取所有免费十连
-    # -
-    #   - tohomepage
+    -
+      - tohomepage
     -
       - get_quest_reward
     -
@@ -107,16 +108,23 @@ Task: #配置执行任务,配置任务名称，如果需要传入参数在下面
       - 4 # 极限难度地下城
       - 1  #使用编号1队过小怪
       - '2,3' #使用编号2和3队过boss，小队之间用','分割
+    # 下面部分用于活动期间清体力
+    # -
+    #   - tohomepage
+    # -
+    #   - activity_saodang  # 清活动图的日常，由于每次活动不一样，该任务每次活动更新一次做支持
+    #   - True # 是否刷活动困难章节和高难boss
+    #   - True # 是否将剩余体力花费在活动普通章节上
     -
       - tohomepage
     - 
-      - saodang_hard  #过困难难度章节把体力用光，这里判断没体力后会自行终止
+      - saodang_hard  #过困难章节把体力用光，这里判断没体力后会自行终止
       - 60 # 开始关卡 60对应 20-3
       - 1  # 结束关卡
     -
       - tohomepage
     -
-      - get_quest_reward #结束日常任务后 领任务奖励和礼物
+      - get_quest_reward
     -
       - tohomepage
     -
