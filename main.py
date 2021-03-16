@@ -1,6 +1,4 @@
-from simulator import DNSimulator2
-from robot import Robot
-from floordict import FloorDict
+from pcrscript import *
 import threading
 import time
 import yaml

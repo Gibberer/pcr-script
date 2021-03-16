@@ -128,7 +128,7 @@ Task: #配置执行任务,配置任务名称，如果需要传入参数在下面
     -
       - tohomepage
     -
-      - git_gift
+      - get_gift #领取礼物
 ```
 
 ## 其他
