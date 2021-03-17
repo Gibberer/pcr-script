@@ -22,6 +22,10 @@ Task: #配置执行任务,配置任务名称，如果需要传入参数在下面
     -
       - tohomepage
     -
+      - normal_gacha #普通扭蛋10连
+    -
+      - tohomepage
+    -
       - get_quest_reward
     -
       - get_power #去公会之家领体力

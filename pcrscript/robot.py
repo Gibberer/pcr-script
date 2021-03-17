@@ -10,7 +10,6 @@ import functools
 import random
 
 
-
 def trace(func):
     @functools.wraps(func)
     def wrapper(self, *args, **kwargs):
@@ -181,6 +180,29 @@ class Robot:
                             ClickAction(template='btn_cancel'),
                             SkipAction()
                         ])
+                        ]),
+            MatchAction('btn_setting_blue', matched_actions=[
+                        ClickAction()], timeout=5),
+        )
+
+    @trace
+    def _normal_gacha(self):
+        '''
+        普通扭蛋
+        '''
+        self._action_squential(
+            ClickAction(template='niudan'),
+            MatchAction('btn_setting_blue', matched_actions=[ClickAction()], unmatch_actions=[
+                        ClickAction(template='btn_close')], timeout=5),
+            MatchAction('btn_role_detail', unmatch_actions=[
+                        ClickAction(template='btn_close')]),
+            ClickAction(pos=self._pos(877, 72)),
+            SleepAction(2),
+            ClickAction(pos=self._pos(722,347)),
+            ClickAction(template='btn_ok_blue'),
+            MatchAction('btn_ok', matched_actions=[ClickAction()],
+                        unmatch_actions=[
+                        ClickAction(pos=self._pos(50, 300)),
                         ]),
             MatchAction('btn_setting_blue', matched_actions=[
                         ClickAction()], timeout=5),
@@ -482,6 +504,10 @@ class Robot:
         '''
         if hard_chapter:
             self._entre_advanture(normal=False, activity=True)
+            self._action_squential(
+                MatchAction(template='btn_close', matched_actions=[
+                            ClickAction()], timeout=3)
+            )
             # 清困难本
             self._action_squential(
                 ClickAction(pos=self._pos(108, 214)),  # 点击第一个活动困难本
@@ -523,6 +549,11 @@ class Robot:
             if hard_chapter:
                 self._tohomepage()
             self._entre_advanture(normal=True, activity=True)
+            if not hard_chapter:
+                self._action_squential(
+                    MatchAction(template='btn_close', matched_actions=[
+                                ClickAction()], timeout=3)
+                )
             self._action_squential(
                 ClickAction(pos=self._pos(690, 335)),
                 SleepAction(2),
@@ -614,12 +645,14 @@ class Robot:
             unmatch_actions = [ClickAction(template='btn_normal')]
             if activity:
                 unmatch_actions += [ClickAction(pos=self._pos(53, 283))]
-            actions.append(MatchAction('btn_normal_selected', unmatch_actions=unmatch_actions))
+            actions.append(MatchAction('btn_normal_selected',
+                                       unmatch_actions=unmatch_actions))
         else:
             unmatch_actions = [ClickAction(template="btn_hard")]
             if activity:
                 unmatch_actions += [ClickAction(pos=self._pos(53, 283))]
-            actions.append(MatchAction('btn_hard_selected', unmatch_actions=unmatch_actions))
+            actions.append(MatchAction('btn_hard_selected',
+                                       unmatch_actions=unmatch_actions))
         self._action_squential(*actions)
 
     def _move_to_chapter(self, chapter_index, symbols=CHAPTER_SYMBOLS, chapters=CHAPTERS):

@@ -6,4 +6,4 @@ if __name__ == '__main__':
         config = yaml.load(f, Loader=yaml.FullLoader)
     drivers = DNSimulator2(config['Extra']['dnpath']).get_dirvers()
     robot = Robot(drivers[0])
-    robot._dungeon_saodang(difficulty=5, boss_team='')
+    robot._normal_gacha()
