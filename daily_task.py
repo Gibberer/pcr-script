@@ -17,20 +17,20 @@ if __name__ == '__main__':
         time.sleep(5)
     simulator = DNSimulator2(dnpath)
     retry_count = 0
-    while retry_count < 5:
+    while retry_count < 10:
         if not simulator.get_devices():
-            print("未检测到设备，等待10秒再次检测")
-            time.sleep(10)
+            print("未检测到设备，等待20秒再次检测")
+            time.sleep(20)
             retry_count += 1
         else:
             break
-    if retry_count == 5:
+    if retry_count == 10:
         print("exit can't found device")
         exit(1)
     else:
         print("try start princess connect application")
         os.system(f'adb -s {simulator.get_devices()[0]} shell monkey -p com.bilibili.priconne 1')
-        time.sleep(5)
+        time.sleep(60)
         exit(0)
 
 

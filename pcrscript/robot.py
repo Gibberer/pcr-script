@@ -867,7 +867,7 @@ class Robot:
         )
 
     @trace
-    def _dungeon_saodang(self, difficulty=4, monster_team=1, boss_team='2,3'):
+    def _dungeon_saodang(self, difficulty=4, monster_team=1, boss_team='2,3'，withdraw=False):
         '''
         大号用来过地下城
         '''
@@ -946,6 +946,10 @@ class Robot:
                 actions.append(SleepAction(8))
                 actions.append(ClickAction(template='btn_ok'))
                 actions.append(SleepAction(5))
+        if withdraw:
+            actions.append(MatchAction('in_dungeon_symbol'))
+            actions.append(ClickAction(template='btn_withdraw'))
+            actions.append(ClickAction(template='btn_ok_blue'))
         self._action_squential(*actions)
 
     @ trace
