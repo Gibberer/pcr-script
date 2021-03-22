@@ -506,7 +506,7 @@ class Robot:
             self._entre_advanture(normal=False, activity=True)
             self._action_squential(
                 MatchAction(template='btn_close', matched_actions=[
-                            ClickAction()], timeout=3)
+                            ClickAction(),SleepAction(2)], timeout=3)
             )
             # 清困难本
             self._action_squential(
@@ -552,7 +552,7 @@ class Robot:
             if not hard_chapter:
                 self._action_squential(
                     MatchAction(template='btn_close', matched_actions=[
-                                ClickAction()], timeout=3)
+                                ClickAction(),SleepAction(2)], timeout=3)
                 )
             self._action_squential(
                 ClickAction(pos=self._pos(690, 335)),
@@ -838,6 +838,8 @@ class Robot:
             SleepAction(2),
             ClickAction(pos=self._pos(587, 411)),
             SleepAction(3),
+            MatchAction(template='btn_cancel', matched_actions=[
+                                ClickAction(), SleepAction(1)], timeout=1),
             ClickAction(pos=self._pos(665, 186)),
             SleepAction(3),
             ClickAction(pos=self._pos(849, 454)),
@@ -854,6 +856,8 @@ class Robot:
             SleepAction(2),
             ClickAction(pos=self._pos(836, 409)),
             SleepAction(3),
+            MatchAction(template='btn_cancel', matched_actions=[
+                                ClickAction(), SleepAction(1)], timeout=1),
             ClickAction(pos=self._pos(665, 186)),
             SleepAction(3),
             ClickAction(pos=self._pos(849, 454)),
@@ -903,6 +907,7 @@ class Robot:
                 for team in boss_team:
                     meet_actions = [
                         ClickAction(pos=self._pos(*pos)),
+                        SleepAction(2),
                         ClickAction(
                             template='btn_challenge_dungeon'),
                         SleepAction(2),
