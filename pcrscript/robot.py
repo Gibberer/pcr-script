@@ -936,13 +936,13 @@ class Robot:
                 actions.append(ClickAction(
                     template='btn_challenge_dungeon'))
                 if i == 1:
-                    actions.append(SleepAction(1))
+                    actions.append(SleepAction(2))
                     actions.append(ClickAction(
                         pos=self._pos(866, 86)))  # 点击我的队伍
                     actions.append(SleepAction(2))
                     actions.append(ClickAction(
                         pos=self._pos(*TEAM_LOCATION[monster_team-1])))
-                actions.append(SleepAction(1))
+                actions.append(SleepAction(3))
                 actions.append(ClickAction(
                     pos=self._pos(832, 453)))  # 进入战斗
                 actions.append(SleepAction(10))
