@@ -907,16 +907,16 @@ class Robot:
                 for team in boss_team:
                     meet_actions = [
                         ClickAction(pos=self._pos(*pos)),
-                        SleepAction(2),
+                        SleepAction(3),
                         ClickAction(
                             template='btn_challenge_dungeon'),
-                        SleepAction(2),
+                        SleepAction(3),
                         ClickAction(pos=self._pos(
                             866, 86)),  # 点击我的队伍
-                        SleepAction(2),
+                        SleepAction(3),
                         ClickAction(pos=self._pos(
                             *TEAM_LOCATION[team-1])),
-                        SleepAction(1),
+                        SleepAction(2),
                         ClickAction(pos=self._pos(
                             832, 453)),  # 进战斗界面
                         SleepAction(10),
@@ -933,13 +933,14 @@ class Robot:
             else:
                 pos = DUNGEON_LEVEL_POS[difficulty - 1][i - 1]
                 actions.append(ClickAction(pos=self._pos(*pos)))
+                actions.append(SleepAction(3))
                 actions.append(ClickAction(
                     template='btn_challenge_dungeon'))
                 if i == 1:
-                    actions.append(SleepAction(2))
+                    actions.append(SleepAction(3))
                     actions.append(ClickAction(
                         pos=self._pos(866, 86)))  # 点击我的队伍
-                    actions.append(SleepAction(2))
+                    actions.append(SleepAction(3))
                     actions.append(ClickAction(
                         pos=self._pos(*TEAM_LOCATION[monster_team-1])))
                 actions.append(SleepAction(3))
