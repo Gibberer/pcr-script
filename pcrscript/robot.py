@@ -449,7 +449,7 @@ class Robot:
                                 SleepAction(2),
                                 ThrowErrorAction("No power!!!")],
                             timeout=2),
-                ClickAction(template='btn_skip_ok'),
+                MatchAction(template='btn_skip_ok', matched_actions=[ClickAction()], timeout=3),
                 SleepAction(1),
                 ClickAction(template='btn_ok'),
                 SleepAction(1),
@@ -866,7 +866,7 @@ class Robot:
             SleepAction(1),
             ClickAction(pos=self._pos(849, 454)),
             SleepAction(30),
-            MatchAction('btn_next_step', matched_actions=[ClickAction()], unmatch_actions=[
+            MatchAction('btn_next_step_small', matched_actions=[ClickAction()], unmatch_actions=[
                 ClickAction(template='btn_close')]),
         )
 
