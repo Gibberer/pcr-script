@@ -448,10 +448,10 @@ class Robot:
                                 ClickAction(pos=self._pos(680, 454)),
                                 SleepAction(2),
                                 ThrowErrorAction("No power!!!")],
-                            timeout=2),
-                MatchAction(template='btn_skip_ok', matched_actions=[ClickAction()], timeout=3),
+                            timeout=1.5),
+                MatchAction(template='btn_skip_ok', matched_actions=[ClickAction()], timeout=2, delay=0.1),
                 SleepAction(1),
-                ClickAction(template='btn_ok'),
+                MatchAction(template='btn_ok', matched_actions=[ClickAction()], timeout=2, delay=0.1),
                 SleepAction(1),
                 MatchAction(template='btn_ok',
                             matched_actions=[ClickAction(), SleepAction(1)], timeout=1),
@@ -844,7 +844,7 @@ class Robot:
             SleepAction(3),
             ClickAction(pos=self._pos(849, 454)),
             SleepAction(10),
-            MatchAction('btn_next_step', matched_actions=[ClickAction()], unmatch_actions=[
+            MatchAction('btn_next_step_small', matched_actions=[ClickAction()], unmatch_actions=[
                 ClickAction(template='btn_close')]),
         )
 
