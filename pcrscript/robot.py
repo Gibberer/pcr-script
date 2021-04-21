@@ -198,7 +198,7 @@ class Robot:
                         ClickAction(template='btn_close')]),
             ClickAction(pos=self._pos(877, 72)),
             SleepAction(2),
-            ClickAction(pos=self._pos(722,347)),
+            ClickAction(pos=self._pos(722, 347)),
             ClickAction(template='btn_ok_blue'),
             MatchAction('btn_ok', matched_actions=[ClickAction()],
                         unmatch_actions=[
@@ -448,10 +448,12 @@ class Robot:
                                 ClickAction(pos=self._pos(680, 454)),
                                 SleepAction(2),
                                 ThrowErrorAction("No power!!!")],
-                            timeout=1.5),
-                MatchAction(template='btn_skip_ok', matched_actions=[ClickAction()], timeout=2, delay=0.1),
+                            timeout=1),
+                MatchAction(template='btn_skip_ok', matched_actions=[
+                            ClickAction()], timeout=2, delay=0.1),
                 SleepAction(1),
-                MatchAction(template='btn_ok', matched_actions=[ClickAction()], timeout=2, delay=0.1),
+                MatchAction(template='btn_ok', matched_actions=[
+                            ClickAction()], timeout=2, delay=0.1),
                 SleepAction(1),
                 MatchAction(template='btn_ok',
                             matched_actions=[ClickAction(), SleepAction(1)], timeout=1),
@@ -506,11 +508,11 @@ class Robot:
             self._entre_advanture(normal=False, activity=True)
             self._action_squential(
                 MatchAction(template='btn_close', matched_actions=[
-                            ClickAction(),SleepAction(2)], timeout=3)
+                            ClickAction(), SleepAction(2)], timeout=3)
             )
             # 清困难本
             self._action_squential(
-                ClickAction(pos=self._pos(108, 214)),  # 点击第一个活动困难本
+                ClickAction(pos=self._pos(114, 215)),  # 点击第一个活动困难本
                 MatchAction('btn_challenge', threshold=0.9*THRESHOLD),
             )
             for _ in range(5):
@@ -526,10 +528,12 @@ class Robot:
                                     ClickAction(pos=self._pos(680, 454)),
                                     SleepAction(2),
                                     ThrowErrorAction("No power!!!")],
-                                timeout=2),
-                    ClickAction(template='btn_skip_ok'),
+                                timeout=1),
+                    MatchAction(template='btn_skip_ok', matched_actions=[
+                                ClickAction()], timeout=2, delay=0.1),
                     SleepAction(1),
-                    ClickAction(template='btn_ok'),
+                    MatchAction(template='btn_ok', matched_actions=[
+                                ClickAction()], timeout=2, delay=0.1),
                     SleepAction(1),
                     MatchAction(template='btn_ok',
                                 matched_actions=[ClickAction(), SleepAction(1)], timeout=1),
@@ -552,10 +556,10 @@ class Robot:
             if not hard_chapter:
                 self._action_squential(
                     MatchAction(template='btn_close', matched_actions=[
-                                ClickAction(),SleepAction(2)], timeout=3)
+                                ClickAction(), SleepAction(2)], timeout=3)
                 )
             self._action_squential(
-                ClickAction(pos=self._pos(690, 335)),
+                ClickAction(pos=self._pos(627, 304)),
                 SleepAction(2),
                 *self.__saodang_oneshot_actions(duration=6000)
             )
@@ -839,7 +843,7 @@ class Robot:
             ClickAction(pos=self._pos(587, 411)),
             SleepAction(3),
             MatchAction(template='btn_cancel', matched_actions=[
-                                ClickAction(), SleepAction(1)], timeout=1),
+                ClickAction(), SleepAction(1)], timeout=1),
             ClickAction(pos=self._pos(665, 186)),
             SleepAction(3),
             ClickAction(pos=self._pos(849, 454)),
@@ -857,7 +861,7 @@ class Robot:
             ClickAction(pos=self._pos(836, 409)),
             SleepAction(3),
             MatchAction(template='btn_cancel', matched_actions=[
-                                ClickAction(), SleepAction(1)], timeout=1),
+                ClickAction(), SleepAction(1)], timeout=1),
             ClickAction(pos=self._pos(665, 186)),
             SleepAction(3),
             ClickAction(pos=self._pos(849, 454)),
@@ -871,7 +875,7 @@ class Robot:
         )
 
     @trace
-    def _dungeon_saodang(self, difficulty=4, monster_team=1, boss_team='2,3',withdraw=False):
+    def _dungeon_saodang(self, difficulty=4, monster_team=1, boss_team='2,3', withdraw=False):
         '''
         大号用来过地下城
         '''
