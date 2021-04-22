@@ -115,7 +115,7 @@ class InputAction(Action):
 
 
 class SwipeAction(Action):
-    def __init__(self, start, end, duration):
+    def __init__(self, start, end, duration = ''):
         super().__init__()
         self.start = start
         self.end = end

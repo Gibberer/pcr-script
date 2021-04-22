@@ -875,15 +875,11 @@ class Robot:
         )
 
     @trace
-    def _dungeon_saodang(self, difficulty=4, monster_team=1, boss_team='2,3', withdraw=False):
+    def _dungeon_saodang(self, difficulty=4, monster_team=1, boss_group='1', boss_team='2,3', withdraw=False):
         '''
         大号用来过地下城
         '''
         level = [7, 0, 0, 5, 5][difficulty-1]
-        if boss_team:
-            boss_team = [int(team) for team in boss_team.split(',')]
-        else:
-            boss_team = []
         actions = []
         actions.append(MatchAction('tab_adventure', matched_actions=[ClickAction()], unmatch_actions=[
             ClickAction(template='btn_close')]))
@@ -908,7 +904,11 @@ class Robot:
             if i == level:
                 # boss 关卡
                 pos = DUNGEON_LEVEL_POS[difficulty - 1][i - 1]
+                boss_team = boss_team.split(',')
                 for team in boss_team:
+                    if not team:
+                        continue
+                    team = int(team)
                     meet_actions = [
                         ClickAction(pos=self._pos(*pos)),
                         SleepAction(3),
@@ -918,8 +918,41 @@ class Robot:
                         ClickAction(pos=self._pos(
                             866, 86)),  # 点击我的队伍
                         SleepAction(3),
-                        ClickAction(pos=self._pos(
-                            *TEAM_LOCATION[team-1])),
+                    ]
+                    if boss_group:
+                        meet_actions += [
+                            ClickAction(pos=self._pos(*TEAM_GROUP_LOCATION[(int(boss_group) - 1) % len(TEAM_GROUP_LOCATION)] )),
+                            SleepAction(2),
+                        ]
+                    if team <= 3:
+                        meet_actions += [
+                            ClickAction(pos=self._pos(*TEAM_LOCATION[team - 1]))
+                        ]
+                    elif team <= 6:
+                        meet_actions += [
+                            SwipeAction(self._pos(440, 400), self._pos(440,130)),
+                            SleepAction(1),
+                            ClickAction(pos=self._pos(*TEAM_LOCATION[(team - 3 - 1)]))
+                        ]
+                    elif team <= 9:
+                        meet_actions += [
+                            SwipeAction(self._pos(440, 400), self._pos(440,130)),
+                            SleepAction(1),
+                            SwipeAction(self._pos(440, 400), self._pos(440,130)),
+                            SleepAction(1),
+                            ClickAction(pos=self._pos(*TEAM_LOCATION[(team - 6 - 1)]))
+                        ]
+                    else:
+                        meet_actions += [
+                            SwipeAction(self._pos(440, 400), self._pos(440,130)),
+                            SleepAction(1),
+                            SwipeAction(self._pos(440, 400), self._pos(440,130)),
+                            SleepAction(1),
+                            SwipeAction(self._pos(440, 400), self._pos(440,130)),
+                            SleepAction(1),
+                            ClickAction(pos=self._pos(796,371)) #暂时特殊给到
+                        ]
+                    meet_actions += [
                         SleepAction(2),
                         ClickAction(pos=self._pos(
                             832, 453)),  # 进战斗界面
@@ -930,7 +963,8 @@ class Robot:
                         ClickAction(pos=self._pos(800, 500)),
                         SleepAction(5),
                         MatchAction(template='btn_ok', matched_actions=[
-                                    ClickAction()], timeout=2)
+                                    ClickAction()], timeout=2),
+                        SleepAction(3),
                     ]
                     actions.append(IfCondition(
                         'in_dungeon_symbol', meet_actions=meet_actions))
