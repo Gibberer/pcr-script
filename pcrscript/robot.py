@@ -963,7 +963,7 @@ class Robot:
                         ClickAction(pos=self._pos(800, 500)),
                         SleepAction(5),
                         MatchAction(template='btn_ok', matched_actions=[
-                                    ClickAction()], timeout=2),
+                                    ClickAction(),SleepAction(8)], timeout=2),
                         SleepAction(3),
                     ]
                     actions.append(IfCondition(
