@@ -46,6 +46,11 @@
   ```cmd
   pip install opencv_python matplotlib numpy pywin32 PyYAML
   ```
+  如果使用打轴功能（目前无）需要依赖ocr库并且在配置文件开启ocr功能，这里使用[easyocr](https://github.com/JaidedAI/EasyOCR)。
+  注意：当第一次使用easyocr时需要下载模型数据
+  ```cmd
+  pip install easyocr
+  ```
 * 在项目根目录创建`config.yml`文件，根据yaml语法配置账号信息及需要做的任务模块，具体可参考[sample.yml](sample.yml)这个文件
 * 执行脚本之前，首先打开模拟器并打开游戏界面停留在欢迎页面
 * 在当前目录cmd中执行以下命令启动脚本
@@ -68,6 +73,7 @@ Accounts: #存账号信息
     password: 'YourPassword'
 Extra:
   dnpath: 'N:\dnplayer2' # 雷电模拟器的安装目录
+  ocr: False # 是否开启ocr功能，如果启用第一次会下载模型数据
 Task: #配置执行任务,配置任务名称，如果需要传入参数在下面增加参数，可以根据不同的账号序号配置任务。
       #账号会执行小于等于并且离它最近的序号的任务列表
   1: #配置账号大于等于1的进行以下操作

@@ -26,6 +26,7 @@ num = 0
 class Robot:
     def __init__(self, driver: Driver, name=None):
         super().__init__()
+        self.ocr = None
         self.driver = driver
         self.devicewidth, self.deviceheight = driver.getScreenSize()
         global num
@@ -921,36 +922,46 @@ class Robot:
                     ]
                     if boss_group:
                         meet_actions += [
-                            ClickAction(pos=self._pos(*TEAM_GROUP_LOCATION[(int(boss_group) - 1) % len(TEAM_GROUP_LOCATION)] )),
+                            ClickAction(pos=self._pos(
+                                *TEAM_GROUP_LOCATION[(int(boss_group) - 1) % len(TEAM_GROUP_LOCATION)])),
                             SleepAction(2),
                         ]
                     if team <= 3:
                         meet_actions += [
-                            ClickAction(pos=self._pos(*TEAM_LOCATION[team - 1]))
+                            ClickAction(pos=self._pos(
+                                *TEAM_LOCATION[team - 1]))
                         ]
                     elif team <= 6:
                         meet_actions += [
-                            SwipeAction(self._pos(440, 400), self._pos(440,130)),
+                            SwipeAction(self._pos(440, 400),
+                                        self._pos(440, 130)),
                             SleepAction(1),
-                            ClickAction(pos=self._pos(*TEAM_LOCATION[(team - 3 - 1)]))
+                            ClickAction(pos=self._pos(
+                                *TEAM_LOCATION[(team - 3 - 1)]))
                         ]
                     elif team <= 9:
                         meet_actions += [
-                            SwipeAction(self._pos(440, 400), self._pos(440,130)),
+                            SwipeAction(self._pos(440, 400),
+                                        self._pos(440, 130)),
                             SleepAction(1),
-                            SwipeAction(self._pos(440, 400), self._pos(440,130)),
+                            SwipeAction(self._pos(440, 400),
+                                        self._pos(440, 130)),
                             SleepAction(1),
-                            ClickAction(pos=self._pos(*TEAM_LOCATION[(team - 6 - 1)]))
+                            ClickAction(pos=self._pos(
+                                *TEAM_LOCATION[(team - 6 - 1)]))
                         ]
                     else:
                         meet_actions += [
-                            SwipeAction(self._pos(440, 400), self._pos(440,130)),
+                            SwipeAction(self._pos(440, 400),
+                                        self._pos(440, 130)),
                             SleepAction(1),
-                            SwipeAction(self._pos(440, 400), self._pos(440,130)),
+                            SwipeAction(self._pos(440, 400),
+                                        self._pos(440, 130)),
                             SleepAction(1),
-                            SwipeAction(self._pos(440, 400), self._pos(440,130)),
+                            SwipeAction(self._pos(440, 400),
+                                        self._pos(440, 130)),
                             SleepAction(1),
-                            ClickAction(pos=self._pos(796,371)) #暂时特殊给到
+                            ClickAction(pos=self._pos(796, 371))  # 暂时特殊给到
                         ]
                     meet_actions += [
                         SleepAction(2),
@@ -963,7 +974,7 @@ class Robot:
                         ClickAction(pos=self._pos(800, 500)),
                         SleepAction(5),
                         MatchAction(template='btn_ok', matched_actions=[
-                                    ClickAction(),SleepAction(8)], timeout=2),
+                                    ClickAction(), SleepAction(8)], timeout=2),
                         SleepAction(3),
                     ]
                     actions.append(IfCondition(
@@ -1263,6 +1274,9 @@ class Robot:
     def _pos(self, x, y) -> Tuple[int, int]:
         return(int((x/BASE_WIDTH)*self.devicewidth), int((y/BASE_HEIGHT)*self.deviceheight))
 
+    def _roi(self, left, top, right, bottom) -> Tuple[int, int, int, int]:
+        return (*self._pos(left, top), self._pos(right, bottom))
+
     def _action_squential(self, *actions: Iterable[Action], delay=0.2):
         for action in actions:
             while not action.done():
@@ -1293,3 +1307,10 @@ class Robot:
             return (max_loc[0] + twidth/2, max_loc[1] + theight/2)
         else:
             return None
+
+    def _get_text(self, screenshot, roi):
+        if not self.ocr:
+            return None
+        if not isinstance(screenshot, np.ndarray):
+            screenshot = cv.imread(screenshot)
+        return self.ocr.recognize(screenshot, roi)
