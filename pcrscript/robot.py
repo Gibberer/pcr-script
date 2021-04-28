@@ -297,6 +297,7 @@ class Robot:
             MatchAction('btn_ok_blue', matched_actions=[
                         ClickAction()], timeout=3),
             MatchAction('btn_ok', matched_actions=[ClickAction()], timeout=3),
+            MatchAction('btn_cancel', matched_actions=[ClickAction()], timeout=3)
         )
 
     @trace
@@ -845,11 +846,14 @@ class Robot:
             SleepAction(3),
             MatchAction(template='btn_cancel', matched_actions=[
                 ClickAction(), SleepAction(1)], timeout=1),
+            ClickAction(pos=self._pos(295,336)),
+            MatchAction(template='btn_ok', matched_actions=[
+                ClickAction(), SleepAction(1)], timeout=2),
             ClickAction(pos=self._pos(665, 186)),
             SleepAction(3),
             ClickAction(pos=self._pos(849, 454)),
             SleepAction(10),
-            MatchAction('btn_next_step_small', matched_actions=[ClickAction()], unmatch_actions=[
+            MatchAction(['btn_next_step_small','btn_next_step'], matched_actions=[ClickAction()], unmatch_actions=[
                 ClickAction(template='btn_close')]),
         )
 
@@ -863,6 +867,9 @@ class Robot:
             SleepAction(3),
             MatchAction(template='btn_cancel', matched_actions=[
                 ClickAction(), SleepAction(1)], timeout=1),
+            ClickAction(pos=self._pos(295,336)),
+            MatchAction(template='btn_ok', matched_actions=[
+                ClickAction(), SleepAction(1)], timeout=2),
             ClickAction(pos=self._pos(665, 186)),
             SleepAction(3),
             ClickAction(pos=self._pos(849, 454)),
@@ -871,7 +878,7 @@ class Robot:
             SleepAction(1),
             ClickAction(pos=self._pos(849, 454)),
             SleepAction(30),
-            MatchAction('btn_next_step_small', matched_actions=[ClickAction()], unmatch_actions=[
+            MatchAction(['btn_next_step_small','btn_next_step'], matched_actions=[ClickAction()], unmatch_actions=[
                 ClickAction(template='btn_close')]),
         )
 

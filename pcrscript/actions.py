@@ -29,8 +29,16 @@ class MatchAction(Action):
             self.starttime = time.time()
         if self.delay > 0:
             time.sleep(self.delay)
-        ret = robot._find_match_pos(
-            screenshot, self.template, threshold=self.threshold)
+        ret = None
+        if isinstance(self.template, list):
+            for temp in self.template:
+                ret = robot._find_match_pos(
+                    screenshot, temp, threshold=self.threshold)
+                if ret:
+                    break
+        else:
+            ret = robot._find_match_pos(
+                screenshot, self.template, threshold=self.threshold)
         if ret:
             if self.matched_actions:
                 for action in self.matched_actions:
