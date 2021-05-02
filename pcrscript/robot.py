@@ -883,7 +883,7 @@ class Robot:
         )
 
     @trace
-    def _dungeon_saodang(self, difficulty=4, monster_team=1, boss_group='1', boss_team='2,3', withdraw=False):
+    def _dungeon_saodang(self, difficulty=5, monster_team=1, boss_group='1', boss_team='2,3', withdraw=False):
         '''
         大号用来过地下城
         '''
@@ -977,7 +977,7 @@ class Robot:
                         SleepAction(10),
                         MatchAction('btn_damage_report', unmatch_actions=[
                             ClickAction(template='btn_close'), ClickAction(pos=self._pos(200, 250))]),
-                        SleepAction(8),
+                        SleepAction(3),
                         ClickAction(pos=self._pos(800, 500)),
                         SleepAction(5),
                         MatchAction(template='btn_ok', matched_actions=[
@@ -1282,7 +1282,7 @@ class Robot:
         return(int((x/BASE_WIDTH)*self.devicewidth), int((y/BASE_HEIGHT)*self.deviceheight))
 
     def _roi(self, left, top, right, bottom) -> Tuple[int, int, int, int]:
-        return (*self._pos(left, top), self._pos(right, bottom))
+        return (*self._pos(left, top), *self._pos(right, bottom))
 
     def _action_squential(self, *actions: Iterable[Action], delay=0.2):
         for action in actions:
@@ -1314,10 +1314,3 @@ class Robot:
             return (max_loc[0] + twidth/2, max_loc[1] + theight/2)
         else:
             return None
-
-    def _get_text(self, screenshot, roi):
-        if not self.ocr:
-            return None
-        if not isinstance(screenshot, np.ndarray):
-            screenshot = cv.imread(screenshot)
-        return self.ocr.recognize(screenshot, roi)

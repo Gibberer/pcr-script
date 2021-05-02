@@ -1,12 +1,12 @@
 import sys
 
 class Ocr():
-    def __init__(self):
+    def __init__(self, languagelist=['ch_sim','en'], **kwargs):
         if 'easyocr' not in sys.modules:
             import easyocr
-        self.reader = easyocr.Reader(['ch_sim','en'])
+        self.reader = easyocr.Reader(languagelist, **kwargs)
     
-    def recognize(self, img, roi):
-        result = self.reader.readtext(img[roi[1]:roi[3],roi[0]:roi[2]])
+    def recognize(self, img):
+        result = self.reader.readtext(img)
         if result:
             return [r[1] for r in result] 
