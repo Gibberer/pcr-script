@@ -23,7 +23,8 @@ HARD_CHAPTER = (
     (226, 270), (490, 350), (766, 283),
     (226, 330), (490, 270), (766, 320),
     (226, 280), (490, 320), (766, 264),
-    (226, 266), (490, 320), (766, 260)
+    (226, 266), (490, 320), (766, 260),
+    (217, 330), (483, 269), (769, 321),
 )
 
 GUILD_BOSS_POS = ((115, 291), (277, 290), (460, 168), (617, 234), (833, 248))
@@ -70,12 +71,13 @@ CHAPTERS = (
     FloorDict({0: CHAPTER_NONE}),
     FloorDict({0: CHAPTER_NONE}),
     FloorDict({0: CHAPTER_NONE}),
-    FloorDict({0: CHAPTER_NONE})
+    FloorDict({0: CHAPTER_NONE}),
+    FloorDict({0: CHAPTER_NONE}),
 )
 CHAPTER_SYMBOLS = (
     'chapter1', 'chapter2', 'chapter3', 'chapter4', 'chapter5', 'chapter6', 'chapter7', 'chapter8',
     'chapter9', 'chapter10', 'chapter11', 'chapter12', 'chapter13', 'chapter14', 'chapter15', 'chapter16',
-    'chapter17', 'chapter18', 'chapter19', 'chapter20','chapter21'
+    'chapter17', 'chapter18', 'chapter19', 'chapter20','chapter21','chapter22'
 )
 
 ACTIVITY_YLY = ((168, 322), (261, 247), (334, 356), (415, 231), (488, 317),
