@@ -58,11 +58,13 @@ class AutoBattle:
         self._config = None
         self._operations = collections.defaultdict(list)
         self._pending = []
+        self._jobs = []
 
     def load(self, config_file):
         print("加载配置文件中...")
         with open(config_file, encoding='utf-8') as f:
             self._config = yaml.load(f, Loader=yaml.FullLoader)
+            self._jobs.clear()
             self._operations.clear()
             if 'ub_check_threshold' in self._config:
                 UB_THRESHOLD = float(self._config['ub_check_threshold'])
@@ -72,14 +74,8 @@ class AutoBattle:
                 INTERVAL = float(self._config['click_interval'])
             if 'read_time_interval' in self._config:
                 LONG_INTERVAL = float(self._config['read_time_interval'])
-            for operation in self._config['operation_list']:
-                splits = operation.split()
-                seconds = int(float(splits[0]))
-                location = int(splits[1]) - 1
-                delay = 0
-                if len(splits) > 2:
-                    delay = float(splits[2])
-                self._operations[seconds].append((location, delay))
+            for name,operations in self._config['job_list'].items():
+                self._jobs.append((name, operations))
 
     def start(self):
         print("准备启动脚本")
@@ -91,7 +87,7 @@ class AutoBattle:
         self._pause = False
         self._thread = threading.Thread(target=self._run)
         self._thread.start()
-        print("AutoBattle script run key commands:\n\033[1mp\033[0m  Pause.\n\033[1mr\033[0m  Resume.\n\033[1ms\033[0m  Stop.")
+        print("AutoBattle script run key commands:\n\033[1mp\033[0m  Pause.\n\033[1mr\033[0m  Resume.\n\033[1ms\033[0m  Stop.\n\033[1mc\033[0m  Show config list.")
         self._waitinput()
 
     def pause(self):
@@ -112,6 +108,20 @@ class AutoBattle:
         if self._thread:
             self._thread.join()
             self._thread = None
+    
+    def choiceConfig(self, no):
+        name, operations = self._jobs[no]
+        self._operations.clear()
+        for operation in operations:
+            splits = operation.split()
+            seconds = int(float(splits[0]))
+            location = int(splits[1]) - 1
+            delay = 0
+            if len(splits) > 2:
+                delay = float(splits[2])
+            self._operations[seconds].append((location, delay))
+        print(f"已选择{name}, 按r恢复运行")
+
 
     def _waitinput(self):            
         while True:
@@ -124,6 +134,15 @@ class AutoBattle:
                 self.resume()
             elif opt == 'p':
                 self.pause()
+            elif opt.isdigit():
+                if self._pending:
+                    self._pending.clear()
+                self.choiceConfig(int(opt))
+            elif opt == 'c':
+                if self._pause:
+                    self._showconfiglist()
+                else:
+                    print("请先暂停")
             else:
                 if opt:
                     print(f"收到未知操作符:{opt}")
@@ -133,6 +152,7 @@ class AutoBattle:
 
     def _run(self):
         last_seconds,remain_seconds = None, None
+        remain_seconds_time = 0
         last_readtime = 0
         battle_start_time = 0
         symbol_error_count = 0
@@ -140,29 +160,38 @@ class AutoBattle:
             sys.stdout.flush()
             starttime = time.time()
             screenshot = self._driver.screenshot()
+            if not self._operations:
+                self._pause = True
+                print("选择配置：")
+                self._showconfiglist()
             if self._pause:
                 self._dopause(screenshot)
+                if remain_seconds:
+                    print(f"当前时间{remain_seconds}，偏移时间：{starttime - remain_seconds_time}")
                 with self._condition:
                     self._condition.wait()
             else:
                 self._doresume(screenshot)
-            has_symbol = self._find_match_pos(screenshot, "btn_auto")
-            if not has_symbol:
-                symbol_error_count += 1
-                if symbol_error_count > 20:
-                    symbol_error_count = 0
-                    self._pending.clear()
-                    print("当前不处于战斗界面，已暂停")
-                    with self._condition:
-                        self._condition.wait()
-            elif battle_start_time == 0:
-                battle_start_time = starttime
-                print("已处于战斗界面，开始执行任务")
+            # has_symbol = self._find_match_pos(screenshot, "btn_auto")
+            # if not has_symbol:
+            #     symbol_error_count += 1
+            #     if symbol_error_count > 20:
+            #         symbol_error_count = 0
+            #         self._pending.clear()
+            #         print("当前不处于战斗界面，已暂停")
+            #         self._pause = True
+            #         with self._condition:
+            #             self._condition.wait()
+            # elif battle_start_time == 0:
+            #     battle_start_time = starttime
+            #     print("已处于战斗界面，开始执行任务")
             self._errorcheck(screenshot)
             last_seconds = remain_seconds
             if not remain_seconds or starttime - last_readtime >= LONG_INTERVAL:
-                remain_seconds = self._readtime(screenshot)
-                last_readtime = time.time()
+                _read_time = self._readtime(screenshot)
+                if _read_time:
+                    remain_seconds = _read_time
+                    last_readtime = time.time()
             if not remain_seconds:
                 self._waitnext(starttime)
                 continue
@@ -190,6 +219,7 @@ class AutoBattle:
                         self._clickub(task.loc)
                         
             if last_seconds != remain_seconds:
+                remain_seconds_time = starttime
                 newoperations = self._operations[remain_seconds]
                 if newoperations:
                     for loc, delay in newoperations:
@@ -201,6 +231,12 @@ class AutoBattle:
                         self._pending.append(task)
 
             self._waitnext(starttime)
+
+    
+    def _showconfiglist(self):
+        for i, job in enumerate(self._jobs):
+            print(f"{i}:{job[0]}")
+
 
     def _logtask(self,task, isexpired=False):
         no = task.loc + 1
