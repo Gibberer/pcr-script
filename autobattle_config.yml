@@ -4,7 +4,7 @@
 ub_check_threshold: 0.85 #sp条大于0.85确认为可释放UB状态
 ub_check_timeout: 5 #如果UB未释放成功则在3秒内重复尝试
 click_interval: 0.05 #每100毫秒尝试做一次点击操作 最好不要小于0.05
-read_time_interval: 0.3 #每0.5秒读取一次战斗记录时间 最好不要小于0.5
+read_time_interval: 0.25 #每0.5秒读取一次战斗记录时间 最好不要小于0.5
 job_list:
     # 操作列表：不同操作属性之间用空格隔开
     # 时间 位置 偏移

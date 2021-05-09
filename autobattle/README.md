@@ -1,3 +1,9 @@
+### 介绍
+
+> 基本可用，如果没太高要求
+
+![demo](demo.webp)
+
 ### 使用步骤
 
 1. 在配置文件中[autobattle_config](../autobattle_config.yml)配置时间轴
@@ -71,6 +77,7 @@ job_list:
 * 日志输出有点糟糕，操控和日志混在一起
 * 战斗界面不能开启二倍/四倍速和AUTO
 * 第一次启动时需要下载OCR模型，下载失败可以去[easy ocr](https://www.jaided.ai/easyocr/modelhub/)下载english_g2模型，然后解压放在用户目录的.EasyOCR/model下。
+* 会出现漏掉一秒解析不出来的情况
 
 ### 调研
 

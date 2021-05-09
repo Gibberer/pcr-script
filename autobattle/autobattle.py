@@ -220,7 +220,13 @@ class AutoBattle:
                         
             if last_seconds != remain_seconds:
                 remain_seconds_time = starttime
-                newoperations = self._operations[remain_seconds]
+                newoperations = []
+                if last_seconds and last_seconds - remain_seconds > 1:
+                    print(f"Error:{last_seconds} - {remain_seconds}中的时间未解析到")
+                    for i in range(last_seconds - 1, remain_seconds - 1, -1):
+                        newoperations += self._operations[i]
+                else:
+                    newoperations = self._operations[remain_seconds]
                 if newoperations:
                     for loc, delay in newoperations:
                         task = Task(remain_seconds, loc, starttime)
