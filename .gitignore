@@ -4,3 +4,4 @@ config.yml
 daily_config.yml
 *.log
 .vscode/
+autobattle/gui
