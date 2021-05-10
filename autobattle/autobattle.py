@@ -18,11 +18,11 @@ UB_THRESHOLD = 0.85
 INTERVAL = 0.1
 LONG_INTERVAL = 1
 SP_REGIONS = (
-    (677, 518, 763, 525),
-    (557, 518, 645, 525),
-    (438, 518, 524, 525),
-    (317, 518, 404, 525),
-    (197, 518, 284, 525),
+    (680, 518, 762, 525),
+    (558, 518, 644, 525),
+    (439, 518, 523, 525),
+    (320, 518, 403, 525),
+    (199, 518, 283, 525),
 )
 UB_LOCATIONS = (
     (718, 446),
@@ -258,6 +258,8 @@ class AutoBattle:
         consume = time.time() - starttime
         if consume < INTERVAL:
             time.sleep(INTERVAL - consume)
+        else:
+            print(f"卡帧：{consume}")
 
     def _dopause(self, screenshot):
         self._driver.click(*self._pos(900, 27))
@@ -299,6 +301,7 @@ class AutoBattle:
     def _clickub(self, index):
         x, y = self._pos(*UB_LOCATIONS[index])
         self._driver.click(x, y)
+        time.sleep(0.005)
 
     def _readsp(self, screenshot):
         '''

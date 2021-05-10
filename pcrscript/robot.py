@@ -450,7 +450,7 @@ class Robot:
                                 ClickAction(pos=self._pos(680, 454)),
                                 SleepAction(2),
                                 ThrowErrorAction("No power!!!")],
-                            timeout=1),
+                            timeout=2),
                 MatchAction(template='btn_skip_ok', matched_actions=[
                             ClickAction()], timeout=2, delay=0.1),
                 SleepAction(1),

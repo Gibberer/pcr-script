@@ -57,6 +57,12 @@ class DNSimulator():
 
 
 class DNSimulator2(DNSimulator):
+
+
+    def __init__(self, path, fastclick=False):
+        super().__init__(path)
+        self.fastclick = fastclick
+
     '''
     雷电模拟器使用win32api
     '''
@@ -64,4 +70,4 @@ class DNSimulator2(DNSimulator):
     def get_dirvers(self) -> List[Driver]:
         devices = self.get_devices()
         if devices:
-            return [DNADBDriver(device, self.path, i) for i, device in enumerate(devices)]
+            return [DNADBDriver(device, self.path, i, click_by_mouse=self.fastclick) for i, device in enumerate(devices)]

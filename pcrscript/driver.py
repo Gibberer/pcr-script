@@ -40,7 +40,6 @@ class ADBDriver(Driver):
 
     def click(self, x, y):
         self._shell("input tap {} {}".format(x, y))
-        # print("click {} {}".format(x,y))
 
     def input(self, text):
         self._shell("input text {}".format(text))
@@ -77,10 +76,32 @@ class DNADBDriver(ADBDriver):
     基于ADB的雷电模拟器扩展驱动
     '''
 
-    def __init__(self, device_name, dnpath, index):
+    def __init__(self, device_name, dnpath, index, click_by_mouse=False):
         super().__init__(device_name)
         self.dnpath = dnpath
         self.index = index
+        self.click_by_mouse = click_by_mouse
+    
+    def click(self, x, y):
+        if self.click_by_mouse:
+            window_title = self._getWindowTitle()
+            try:
+                hwin = win32gui.FindWindow('LDPlayerMainFrame', window_title)
+                ret = win32gui.GetWindowRect(hwin)
+                height = ret[3] - ret[1]
+                width = ret[2] - ret[0]
+                height -= int(self._getDnToolbarHeight() * height/ constants.BASE_HEIGHT)
+                tx = int(x * width/constants.BASE_WIDTH)
+                ty = int(y * height/constants.BASE_HEIGHT)
+                # os.system('{}\ldconsole.exe adb --index {} --command "shell input tap {} {}"'.format(self.dnpath, self.index, tx, ty))
+                win32api.SetCursorPos([ret[0] + tx, ret[3] - height + ty])
+                win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+                win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+            except Exception as e:
+                print(f"fallback adb click:{e}")
+                super().click(x,y)
+        else:
+            super().click(x, y)
 
     def input(self, text):
         '''
@@ -93,16 +114,13 @@ class DNADBDriver(ADBDriver):
                 break
         if contain_hanzi:
             os.system(
-                '{}\dnconsole.exe action --index {} --key call.input --value "{}"'.format(self.dnpath, self.index, text))
+                '{}\ldconsole.exe action --index {} --key call.input --value "{}"'.format(self.dnpath, self.index, text))
         else:
             super().input(text)
 
     def screenshot(self, output='screen_shot.png'):
-        window_title = '雷电模拟器'
-        if self.index > 0:
-            window_title = "{}-{}".format(window_title, self.index)
+        window_title = self._getWindowTitle()
         width, height = constants.BASE_WIDTH, constants.BASE_HEIGHT
-        toolbar_height = 35
         try:
             hwin = win32gui.FindWindow('LDPlayerMainFrame', window_title)
             hwindc = win32gui.GetWindowDC(hwin)
@@ -112,7 +130,7 @@ class DNADBDriver(ADBDriver):
             bmp.CreateCompatibleBitmap(srcdc, width, height)
             memdc.SelectObject(bmp)
             memdc.BitBlt((0, 0), (width, height), srcdc,
-                         (0, toolbar_height), win32con.SRCCOPY)
+                         (0, self._getDnToolbarHeight()), win32con.SRCCOPY)
             signedIntsArray = bmp.GetBitmapBits(True)
             img = np.frombuffer(signedIntsArray, dtype='uint8')
             img.shape = (height, width, 4)
@@ -123,6 +141,15 @@ class DNADBDriver(ADBDriver):
             return img[:, :, :3]
         except:
             return super().screenshot(output=output)
+    
+    def _getDnToolbarHeight(self):
+        return 35
+    
+    def _getWindowTitle(self):
+        window_title = '雷电模拟器'
+        if self.index > 0:
+            window_title = "{}-{}".format(window_title, self.index)
+        return window_title
 
 
 # if __name__ == "__main__":
