@@ -62,6 +62,10 @@ class AutoBattle:
 
     def load(self, config_file):
         print("加载配置文件中...")
+        global UB_THRESHOLD
+        global UB_ERROR_CHECK_DURATION
+        global INTERVAL
+        global LONG_INTERVAL
         with open(config_file, encoding='utf-8') as f:
             self._config = yaml.load(f, Loader=yaml.FullLoader)
             self._jobs.clear()
@@ -347,6 +351,7 @@ class AutoBattle:
     def _readtext(self, screenshot, left, top, right, bottom):
         roi = self._roi(left, top, right, bottom)
         img = screenshot[roi[1]:roi[3], roi[0]:roi[2]]
+        self._showimg(img)
         return self._ocr.recognize(img)
 
     def _showimg(self, img):

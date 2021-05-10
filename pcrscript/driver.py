@@ -87,16 +87,20 @@ class DNADBDriver(ADBDriver):
             window_title = self._getWindowTitle()
             try:
                 hwin = win32gui.FindWindow('LDPlayerMainFrame', window_title)
-                ret = win32gui.GetWindowRect(hwin)
+                self._subhwin = None
+                def winfun(hwnd, lparam):
+                    subtitle = win32gui.GetWindowText(hwnd)
+                    if subtitle == 'TheRender':
+                        self._subhwin = hwnd
+                win32gui.EnumChildWindows(hwin, winfun, None)
+                ret = win32gui.GetWindowRect(self._subhwin)
                 height = ret[3] - ret[1]
                 width = ret[2] - ret[0]
-                height -= int(self._getDnToolbarHeight() * height/ constants.BASE_HEIGHT)
                 tx = int(x * width/constants.BASE_WIDTH)
                 ty = int(y * height/constants.BASE_HEIGHT)
-                # os.system('{}\ldconsole.exe adb --index {} --command "shell input tap {} {}"'.format(self.dnpath, self.index, tx, ty))
-                win32api.SetCursorPos([ret[0] + tx, ret[3] - height + ty])
-                win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
-                win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+                positon = win32api.MAKELONG(tx, ty)
+                win32api.SendMessage(self._subhwin, win32con.WM_LBUTTONDOWN, win32con.MK_LBUTTON, positon)
+                win32api.SendMessage(self._subhwin, win32con.WM_LBUTTONUP, win32con.MK_LBUTTON,positon)
             except Exception as e:
                 print(f"fallback adb click:{e}")
                 super().click(x,y)
@@ -150,6 +154,26 @@ class DNADBDriver(ADBDriver):
         if self.index > 0:
             window_title = "{}-{}".format(window_title, self.index)
         return window_title
+
+# if __name__ == "__main__":
+#     _subhwin = None
+#     hwin = win32gui.FindWindow('LDPlayerMainFrame', "雷电模拟器")
+#     def winfun(hwnd, lparam):
+#         global _subhwin
+#         subtitle = win32gui.GetWindowText(hwnd)
+#         print(f'{subtitle}:{hwnd}')
+#         if subtitle == 'sub':
+#             _subhwin = hwnd
+#     win32gui.EnumChildWindows(hwin, winfun, None)
+#     print(_subhwin)
+#     ret = win32gui.GetWindowRect(_subhwin)
+#     height = ret[3] - ret[1]
+#     width = ret[2] - ret[0]
+#     tx = int(900 * width/960)
+#     ty = int(27 * height/540)
+#     positon = win32api.MAKELONG(tx, ty)
+#     win32api.SendMessage(1770076, win32con.WM_LBUTTONDOWN, win32con.MK_LBUTTON, positon)
+#     win32api.SendMessage(1770076, win32con.WM_LBUTTONUP, None,positon)
 
 
 # if __name__ == "__main__":

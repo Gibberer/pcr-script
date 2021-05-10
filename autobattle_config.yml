@@ -3,8 +3,8 @@
 # manual_last_check: True #如果设置为True则在[last_check_time]时暂停
 ub_check_threshold: 0.85 #sp条大于0.85确认为可释放UB状态
 ub_check_timeout: 5 #如果UB未释放成功则在5秒内重复尝试
-click_interval: 0.1 #每100毫秒尝试做一次点击操作 最好不要小于0.05
-read_time_interval: 0.25 #每0.25秒读取一次战斗记录时间 最好不要小于0.2
+click_interval: 0.2 #每200毫秒尝试做一次点击操作 最好不要小于0.1
+read_time_interval: 0.5 #每0.5秒读取一次战斗记录时间 最好不要小于0.5
 job_list:
     # 操作列表：不同操作属性之间用空格隔开
     # 时间 位置 偏移
@@ -14,6 +14,8 @@ job_list:
     # 偏移：给小于1的小数，正常到指定时间就会释放UB，如果希望延后(押技能)可以设置这个值
     # 例如：1:00 中时 二号位需要释放UB
     # 60 2
+    "空":
+        - -1 1
     "B4狗狼智克普白":
         - 67 3
         - 64 1
