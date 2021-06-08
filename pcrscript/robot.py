@@ -940,6 +940,7 @@ class Robot:
                         ]
                     elif team <= 6:
                         meet_actions += [
+                            SleepAction(1),
                             SwipeAction(self._pos(440, 400),
                                         self._pos(440, 130)),
                             SleepAction(1),
@@ -948,6 +949,7 @@ class Robot:
                         ]
                     elif team <= 9:
                         meet_actions += [
+                            SleepAction(1),
                             SwipeAction(self._pos(440, 400),
                                         self._pos(440, 130)),
                             SleepAction(1),
@@ -959,6 +961,7 @@ class Robot:
                         ]
                     else:
                         meet_actions += [
+                            SleepAction(1),
                             SwipeAction(self._pos(440, 400),
                                         self._pos(440, 130)),
                             SleepAction(1),

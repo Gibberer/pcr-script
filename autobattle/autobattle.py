@@ -19,9 +19,9 @@ INTERVAL = 0.1
 LONG_INTERVAL = 1
 SP_REGIONS = (
     (680, 518, 762, 525),
-    (558, 518, 644, 525),
-    (439, 518, 523, 525),
-    (320, 518, 403, 525),
+    (562, 518, 644, 525),
+    (444, 518, 523, 525),
+    (324, 518, 403, 525),
     (199, 518, 283, 525),
 )
 UB_LOCATIONS = (
@@ -315,10 +315,11 @@ class AutoBattle:
         for i in range(len(SP_REGIONS)):
             roi = self._roi(*SP_REGIONS[i])
             img = screenshot[roi[1]:roi[3], roi[0]:roi[2]]
+            img = cv.cvtColor(img, cv.COLOR_BGR2GRAY)
             _, img = cv.threshold(img, 80, 255, cv.THRESH_BINARY)
             center = (img.shape[0] - 1) // 2
             for j in range(img.shape[1]):
-                if (img[center, j] == 0).all():
+                if (img[center:center + 1, j : j + 1] == 0).all():
                     ret[i] = float(j) / img.shape[1]
                     break
                 ret[i] = 1
@@ -351,7 +352,6 @@ class AutoBattle:
     def _readtext(self, screenshot, left, top, right, bottom):
         roi = self._roi(left, top, right, bottom)
         img = screenshot[roi[1]:roi[3], roi[0]:roi[2]]
-        self._showimg(img)
         return self._ocr.recognize(img)
 
     def _showimg(self, img):
