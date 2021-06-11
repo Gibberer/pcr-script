@@ -5,4 +5,4 @@ if __name__ == '__main__':
     drivers = DNSimulator2("", fastclick=True).get_dirvers()
     auto_battle = AutoBattle(drivers[0])
     auto_battle.load("autobattle_config.yml")
-    auto_battle.start()
+    auto_battle.start()     

@@ -47,7 +47,6 @@ class AutoBattle:
     def __init__(self, driver: Driver):
         print("初始化...")
         self._driver = driver
-        self._ocr = Ocr(['en'], gpu=False, recog_network='english_g2')
         self._devicewidth, self._deviceheight = driver.getScreenSize()
         self._running = False
         self._pause = False
@@ -80,6 +79,7 @@ class AutoBattle:
                 LONG_INTERVAL = float(self._config['read_time_interval'])
             for name,operations in self._config['job_list'].items():
                 self._jobs.append((name, operations))
+        self._ocr = Ocr(['en'], gpu=self._config['gpu'], recog_network='english_g2')
 
     def start(self):
         print("准备启动脚本")
