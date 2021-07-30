@@ -45,12 +45,14 @@ class Robot:
             if self._find_match_pos(screenshot, 'welcome_main_menu'):
                 # 当前是欢迎页，执行登录操作
                 actions = (
-                    MatchAction('edit_account', matched_actions=[ClickAction(), InputAction(
-                        account)], unmatch_actions=[ClickAction(pos=self._pos(900, 25))], delay=0),
+                    MatchAction('btn_change_account', matched_actions=[ClickAction()], unmatch_actions=[ClickAction(pos=self._pos(850, 30))], delay=0),
+                    ClickAction(template='symbol_bilibili_logo'),
+                    ClickAction(template='edit_account'),
+                    InputAction(account),
                     ClickAction(template='edit_password'),
                     InputAction(password),
                     ClickAction(template='btn_login'),
-                    SleepAction(2)  # 延迟下，后续需要判断是否出现用户协议弹窗
+                    SleepAction(5)  # 延迟下，后续需要判断是否出现用户协议弹窗
                 )
                 self._action_squential(*actions)
                 # 执行登录操作之后判断是否出现用户协议
@@ -321,6 +323,40 @@ class Robot:
             MatchAction("btn_ok_blue", matched_actions=[
                         ClickAction()], timeout=5),
         )
+    
+    @trace
+    def _shop_buy(self, rule):
+        '''
+        商店购买
+        Paramters:
+        ---
+        rule: 规则
+        '''
+        actions = []
+        # 首先进入商店页
+        actions.append(ClickAction(template='shop'))
+        actions.append(MatchAction(template='symbol_shop', unmatch_actions=[ClickAction(pos=self._pos(77, 258)), ClickAction(template='shop')]))
+        actions.append(SleepAction(1))
+        for tab, items in rule.items():
+            actions += [
+                ClickAction(pos=self._pos(*SHOP_TAB_LOCATION[tab - 1])),
+                SleepAction(1)
+            ]
+            for item in items:
+                actions += [
+                    ClickAction(pos=self._pos(*SHOP_ITEM_LOCATION[item - 1])),
+                    SleepAction(0.1)
+                ]
+            actions += [
+                ClickAction(pos=self._pos(833, 438)),
+                SleepAction(0.2),
+                ClickAction(template='btn_ok_blue'),
+                SleepAction(1.5),
+                ClickAction(template='btn_ok_blue'),
+                SleepAction(1.5)
+            ]
+        self._action_squential(*actions)
+        
 
     @trace
     def _buy_mana(self, count):
@@ -514,7 +550,7 @@ class Robot:
             )
             # 清困难本
             self._action_squential(
-                ClickAction(pos=self._pos(114, 215)),  # 点击第一个活动困难本
+                ClickAction(pos=self._pos(90, 226)),  # 点击第一个活动困难本
                 MatchAction('btn_challenge', threshold=0.9*THRESHOLD),
             )
             for _ in range(5):
@@ -561,7 +597,7 @@ class Robot:
                                 ClickAction(), SleepAction(2)], timeout=3)
                 )
             self._action_squential(
-                ClickAction(pos=self._pos(627, 304)),
+                ClickAction(pos=self._pos(660, 290)),
                 SleepAction(2),
                 *self.__saodang_oneshot_actions(duration=6000)
             )

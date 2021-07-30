@@ -26,6 +26,8 @@ HARD_CHAPTER = (
     (226, 266), (490, 320), (766, 260),
     (217, 330), (483, 269), (769, 321),
     (218, 274), (490, 328), (769, 258),
+    (218, 280), (490, 356), (769, 251),
+    (218, 290), (490, 350), (769, 240),
 )
 
 GUILD_BOSS_POS = ((115, 291), (277, 290), (460, 168), (617, 234), (833, 248))
@@ -75,11 +77,14 @@ CHAPTERS = (
     FloorDict({0: CHAPTER_NONE}),
     FloorDict({0: CHAPTER_NONE}),
     FloorDict({0: CHAPTER_NONE}),
+    FloorDict({0: CHAPTER_NONE}),
+    FloorDict({0: CHAPTER_NONE}),
 )
 CHAPTER_SYMBOLS = (
     'chapter1', 'chapter2', 'chapter3', 'chapter4', 'chapter5', 'chapter6', 'chapter7', 'chapter8',
     'chapter9', 'chapter10', 'chapter11', 'chapter12', 'chapter13', 'chapter14', 'chapter15', 'chapter16',
-    'chapter17', 'chapter18', 'chapter19', 'chapter20','chapter21','chapter22', 'chapter23',
+    'chapter17', 'chapter18', 'chapter19', 'chapter20','chapter21','chapter22', 'chapter23','chapter24',
+    'chapter25'
 )
 
 ACTIVITY_YLY = ((168, 322), (261, 247), (334, 356), (415, 231), (488, 317),
@@ -115,4 +120,13 @@ DUNGEON_LEVEL_POS = (
      (679, 290), (300, 185)],
     [(471, 245), (643, 267), (495, 286),
      (424, 249), (500, 266)],
+)
+
+SHOP_TAB_LOCATION = (
+    (279, 69),(358, 69),(456, 69),(547, 69),(634, 69),(734, 69),(824, 69),(913, 69),
+)
+
+SHOP_ITEM_LOCATION = (
+    (387, 149), (560, 149), (729, 149), (900, 149),
+    (387, 407), (560, 407), (729, 407), (900, 407),
 )
