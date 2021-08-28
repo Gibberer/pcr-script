@@ -597,7 +597,7 @@ class Robot:
                                 ClickAction(), SleepAction(2)], timeout=3)
                 )
             self._action_squential(
-                ClickAction(pos=self._pos(660, 290)),
+                ClickAction(pos=self._pos(547, 224)),
                 SleepAction(2),
                 *self.__saodang_oneshot_actions(duration=6000)
             )
