@@ -338,15 +338,27 @@ class Robot:
         actions.append(MatchAction(template='symbol_shop', unmatch_actions=[ClickAction(pos=self._pos(77, 258)), ClickAction(template='shop')]))
         actions.append(SleepAction(1))
         for tab, items in rule.items():
+            items.sort()
             actions += [
                 ClickAction(pos=self._pos(*SHOP_TAB_LOCATION[tab - 1])),
                 SleepAction(1)
             ]
+            page_count = 8
+            page = 1
             for item in items:
+                if item > page * page_count:
+                    for _ in range(2*page):
+                        actions += [
+                            SwipeAction(start=self._pos(580, 380), end = self._pos(580, 180), duration=300),
+                            SleepAction(1)
+                        ]
+                    page += 1
+                    
                 actions += [
-                    ClickAction(pos=self._pos(*SHOP_ITEM_LOCATION[item - 1])),
+                    ClickAction(pos=self._pos(*SHOP_ITEM_LOCATION[(item - 1) % page_count])),
                     SleepAction(0.1)
                 ]
+
             actions += [
                 ClickAction(pos=self._pos(833, 438)),
                 SleepAction(0.2),
