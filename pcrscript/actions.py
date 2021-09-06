@@ -90,17 +90,18 @@ class SleepAction(Action):
 
 
 class ClickAction(Action):
-    def __init__(self, template=None, pos=None, offset=(0, 0), threshold=THRESHOLD):
+    def __init__(self, template=None, pos=None, offset=(0, 0), threshold=THRESHOLD, binarization=False):
         super().__init__()
         self.template = template
         self.pos = pos
         self.offset = offset
         self.threshold = threshold
+        self.binarization = binarization
 
     def do(self, screenshot, robot):
         if self.template:
             ret = robot._find_match_pos(
-                screenshot, self.template, threshold=self.threshold)
+                screenshot, self.template, threshold=self.threshold, binarization=self.binarization)
             if ret:
                 robot.driver.click(ret[0] + self.offset[0],
                                    ret[1] + self.offset[1])

@@ -1,8 +1,15 @@
 from .floordict import FloorDict
+from enum import Enum
+
+class Difficulty(Enum):
+    NORMAL = 0
+    HARD = 1
+    VERY_HARD = 2
+
 BASE_WIDTH = 960
 BASE_HEIGHT = 540
 THRESHOLD = 0.8  # 如果使用960x540 匹配度一般在0.95以上,默认为0.8,,如果在480x270上可以调成0.65试试
-HARD_CHAPTER = (
+HARD_CHAPTER_POS = (
     (237, 339), (469, 263), (697, 321),
     (279, 265), (475, 358), (730, 337),
     (253, 259), (478, 342), (729, 269),
@@ -29,6 +36,10 @@ HARD_CHAPTER = (
     (218, 280), (490, 356), (769, 251),
     (218, 290), (490, 350), (769, 240),
     (218, 290), (490, 241), (769, 333)
+)
+
+VH_CHAPTER_POS = (
+    (216, 266), (483, 363), (780, 293)
 )
 
 GUILD_BOSS_POS = ((115, 291), (277, 290), (460, 168), (617, 234), (833, 248))
@@ -87,6 +98,14 @@ CHAPTER_SYMBOLS = (
     'chapter9', 'chapter10', 'chapter11', 'chapter12', 'chapter13', 'chapter14', 'chapter15', 'chapter16',
     'chapter17', 'chapter18', 'chapter19', 'chapter20','chapter21','chapter22', 'chapter23','chapter24',
     'chapter25', 'chapter26'
+)
+
+VH_CHAPTERS = (
+    FloorDict({0: CHAPTER_NONE}),
+)
+
+VH_CHAPTER_SYMBOLS = (
+    'chapter18',
 )
 
 ACTIVITY_YLY = ((168, 322), (261, 247), (334, 356), (415, 231), (488, 317),
