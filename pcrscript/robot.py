@@ -1417,7 +1417,7 @@ class Robot:
             _, template = cv.threshold(template, 127, 255, cv.THRESH_BINARY)
         ret = cv.matchTemplate(source, template, cv.TM_CCOEFF_NORMED)
         min_val, max_val, min_loc, max_loc = cv.minMaxLoc(ret)
-        self._log("{}:{}:{}".format(name, max_val, threshold))
+        # self._log("{}:{}:{}".format(name, max_val, threshold))
         if max_val > threshold:
             return (max_loc[0] + twidth/2, max_loc[1] + theight/2)
         else:
