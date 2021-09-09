@@ -499,7 +499,7 @@ class Robot:
             MatchAction('btn_challenge', threshold=0.9*THRESHOLD),
         )
         _range = range(
-            start - 1, end) if start <= end else range(start - 1, end, -1)
+            start - 1, end) if start <= end else range(start, end - 1, -1)
         next_pos = (939, 251) if start <= end else (36, 251)
         for _ in _range:
             self._action_squential(
@@ -636,6 +636,7 @@ class Robot:
                 SleepAction(2),
                 *self.__saodang_oneshot_actions(duration=6000)
             )
+        self._action_squential(SleepAction(2))
         self._get_quest_reward()
 
     @trace
@@ -744,7 +745,6 @@ class Robot:
         ret = self._find_match_template(symbols, timeout=10)
         if not ret:
             return
-        print(ret)
         pos, _ = ret
         actions = []
         if chapter_index > pos:
