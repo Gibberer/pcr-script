@@ -79,7 +79,11 @@ class AutoBattle:
                 LONG_INTERVAL = float(self._config['read_time_interval'])
             for name,operations in self._config['job_list'].items():
                 self._jobs.append((name, operations))
-        self._ocr = Ocr(['en'], gpu=self._config['gpu'], recog_network='english_g2')
+            if 'use_ocr' in self._config and self._config['use_ocr']:
+                self._ocr = Ocr(['en'], gpu=self._config['gpu'], recog_network='english_g2')
+            else:
+                self._ocr = None
+                self._precache_time_template()            
 
     def start(self):
         print("准备启动脚本")
@@ -276,14 +280,14 @@ class AutoBattle:
     def _errorcheck(self, screenshot):
         pass
 
-    def _find_match_pos(self, screenshot, template, threshold=THRESHOLD) -> Tuple[int, int]:
+    def _find_match_pos(self, screenshot, template, threshold=THRESHOLD, directory="images") -> Tuple[int, int]:
         name = template
         source: np.ndarray
         if isinstance(screenshot, np.ndarray):
             source = screenshot
         else:
             source = cv.imread(screenshot)
-        templatepath = "images/{}.png".format(template)
+        templatepath = f"{directory}/{template}.png"
         if templatepath in self._imagecache:
             template = self._imagecache[templatepath]
         else:
@@ -301,6 +305,22 @@ class AutoBattle:
             return (max_loc[0] + twidth/2, max_loc[1] + theight/2)
         else:
             return None
+    
+    def _similar(self, src:np.ndarray, template, directory="images"):
+        # 判断余弦相似度
+        templatepath = f"{directory}/{template}.png"
+        if templatepath in self._imagecache:
+            template = self._imagecache[templatepath]
+        else:
+            template = cv.imread(templatepath)
+            fx = self._devicewidth/BASE_WIDTH
+            fy = self._deviceheight/BASE_HEIGHT
+            template = cv.resize(template, None, fx=fx, fy=fy,
+                                 interpolation=cv.INTER_AREA)
+            self._imagecache[templatepath] = template
+        x = src.astype(np.int32).flatten()
+        y = template.astype(np.int32).flatten()
+        return np.dot(x,y)/(np.linalg.norm(x)*np.linalg.norm(y))
 
     def _clickub(self, index):
         x, y = self._pos(*UB_LOCATIONS[index])
@@ -326,6 +346,8 @@ class AutoBattle:
         return ret
 
     def _readtime(self, screenshot):
+        if self._ocr is None:
+            return self._readtime_from_template(screenshot, 809, 15, 841, 35)
         ret = self._readtext(screenshot, 809, 15, 841, 35)
         if not ret:
             return None
@@ -353,6 +375,31 @@ class AutoBattle:
         roi = self._roi(left, top, right, bottom)
         img = screenshot[roi[1]:roi[3], roi[0]:roi[2]]
         return self._ocr.recognize(img)
+    
+    def _precache_time_template(self):
+        for i in range(1, 91):
+            path = f'autobattle/images/time/{i}.png'
+            template = cv.imread(path)
+            fx = self._devicewidth/BASE_WIDTH
+            fy = self._deviceheight/BASE_HEIGHT
+            template = cv.resize(template, None, fx=fx, fy=fy,
+                                 interpolation=cv.INTER_AREA)
+            self._imagecache[path] = template
+
+
+    def _readtime_from_template(self, screenshot, left, top, right, bottom):
+        start = time.time()
+        roi = self._roi(left, top, right, bottom)
+        img = screenshot[roi[1]:roi[3], roi[0]:roi[2]]
+        cur = None
+        cur_max_value = 0
+        for i in range(1, 91):
+            ret = self._similar(img, f"{i}", directory="autobattle/images/time")
+            if ret > cur_max_value:
+                cur_max_value = ret
+                cur = i
+        return int(cur)
+
 
     def _showimg(self, img):
         cv.imshow('window', img)

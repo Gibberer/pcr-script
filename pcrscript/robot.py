@@ -719,22 +719,22 @@ class Robot:
             actions.append(ClickAction(
                 template='btn_main_plot', threshold=0.8*THRESHOLD))
         actions.append(SleepAction(2))
+        unmatch_actions = []
+        if activity:
+                unmatch_actions += [
+                    IfCondition('btn_activity_plot',
+                                meet_actions=[ClickAction(template='btn_activity_plot')],
+                                unmeet_actions=[ClickAction(pos=self._pos(53, 283))])]
         if difficulty == Difficulty.NORMAL:
-            unmatch_actions = [ClickAction(template='btn_normal')]
-            if activity:
-                unmatch_actions += [ClickAction(pos=self._pos(53, 283))]
+            unmatch_actions = [ClickAction(template='btn_normal')] + unmatch_actions
             actions.append(MatchAction('btn_normal_selected',
                                        unmatch_actions=unmatch_actions))
         elif difficulty == Difficulty.HARD:
-            unmatch_actions = [ClickAction(template="btn_hard")]
-            if activity:
-                unmatch_actions += [ClickAction(pos=self._pos(53, 283))]
+            unmatch_actions = [ClickAction(template="btn_hard")] + unmatch_actions
             actions.append(MatchAction('btn_hard_selected',
                                        unmatch_actions=unmatch_actions))
         else:
-            unmatch_actions = [ClickAction(template="btn_very_hard")]
-            if activity:
-                unmatch_actions += [ClickAction(pos=self._pos(53, 283))]
+            unmatch_actions = [ClickAction(template="btn_very_hard")] + unmatch_actions
             actions.append(MatchAction('btn_very_hard_selected',
                                        unmatch_actions=unmatch_actions))
         self._action_squential(*actions)
@@ -768,7 +768,7 @@ class Robot:
                         break
         return level_pos
 
-    @trace
+    @ trace
     def _skip_guide(self, chapter, level):
         if chapter == 1:
             if level in (4, 6) and self._find_match_pos(self.driver.screenshot(), 'kkr_guide'):
@@ -806,7 +806,7 @@ class Robot:
             if time.time() - start_time > timeout:
                 break
 
-    @trace
+    @ trace
     def _combat(self, trigger_pos, check_auto=False):
         '''
         处理战斗界面相关
@@ -827,7 +827,7 @@ class Robot:
         actions.append(ClickAction('btn_next_step'))
         self._action_squential(*actions)
 
-    @trace
+    @ trace
     def _join_guild(self, guild_name):
         '''
         加入行会
