@@ -724,7 +724,7 @@ class Robot:
                 unmatch_actions += [
                     IfCondition('btn_activity_plot',
                                 meet_actions=[ClickAction(template='btn_activity_plot')],
-                                unmeet_actions=[ClickAction(pos=self._pos(53, 283))])]
+                                unmeet_actions=[ClickAction(template='btn_close'), ClickAction(pos=self._pos(53, 283))])]
         if difficulty == Difficulty.NORMAL:
             unmatch_actions = [ClickAction(template='btn_normal')] + unmatch_actions
             actions.append(MatchAction('btn_normal_selected',
