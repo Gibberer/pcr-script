@@ -21,9 +21,9 @@ listen_mouse_event: False # 设置为True时在鼠标点击后打印日志，押
 use_ocr: False # 是否使用ocr识别时间
 gpu: True # 是否开启GPU加速， 只有在使用ocr时才有效果
 ub_check_threshold: 0.85 #sp条大于0.85确认为可释放UB状态
-ub_check_timeout: 3 #如果UB未释放成功则在5秒内重复尝试
-click_interval: 0.1 #每200毫秒尝试做一次点击操作 最好不要小于0.1
-read_time_interval: 0.1 #每0.5秒读取一次战斗记录时间 最好不要小于0.5
+ub_check_timeout: 3 #如果UB未释放成功则在3秒内重复尝试
+click_interval: 0.1 #每0.1秒尝试做一次点击操作 最好不要小于0.1
+read_time_interval: 0.1 #每0.1秒读取一次战斗记录时间 最好不要小于0.1
 job_list:
     # 操作列表：不同操作属性之间用空格隔开
     # 时间 位置 偏移
