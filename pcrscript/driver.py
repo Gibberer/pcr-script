@@ -31,6 +31,11 @@ class Driver(metaclass=ABCMeta):
     @abstractmethod
     def swipe(self, start: Tuple[int, int], end: Tuple[int, int], duration: int):
         pass
+    
+    @abstractmethod
+    def getRootWindowLocation(self) -> Tuple[int, int]:
+        # 获取根窗口的位置坐标
+        return (0,0)
 
 
 class ADBDriver(Driver):
@@ -53,6 +58,7 @@ class ADBDriver(Driver):
 
     def getScreenSize(self) -> Tuple[int, int]:
         return map(lambda x: int(x), self._shell("wm size", True).split(":")[-1].split("x"))
+    
 
     def swipe(self, start, end=None, duration=500):
         if not end:
@@ -145,6 +151,21 @@ class DNADBDriver(ADBDriver):
             return img[:, :, :3]
         except:
             return super().screenshot(output=output)
+    
+    def getRootWindowLocation(self):
+        window_title = self._getWindowTitle()
+        try:
+            hwin = win32gui.FindWindow('LDPlayerMainFrame', window_title)
+            self._subhwin = None
+            def winfun(hwnd, lparam):
+                subtitle = win32gui.GetWindowText(hwnd)
+                if subtitle == 'TheRender':
+                    self._subhwin = hwnd
+            win32gui.EnumChildWindows(hwin, winfun, None)
+            ret = win32gui.GetWindowRect(self._subhwin)
+            return (ret[0], ret[1])
+        except:
+            return super().getRootWindowLocation()
     
     def _getDnToolbarHeight(self):
         return 35

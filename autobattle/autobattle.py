@@ -14,7 +14,9 @@ from cv2 import cv2 as cv
 
 
 UB_ERROR_CHECK_DURATION = 3
+UB_MIN_CHECK_DURATION = 1
 UB_THRESHOLD = 0.85
+UB_THRESHOLD_LOWER_BOUND = 0.4
 INTERVAL = 0.1
 LONG_INTERVAL = 1
 SP_REGIONS = (
@@ -25,11 +27,11 @@ SP_REGIONS = (
     (199, 518, 283, 525),
 )
 UB_LOCATIONS = (
-    (718, 446),
-    (597, 446),
-    (483, 446),
-    (361, 446),
-    (239, 446),
+    (718, 400),
+    (597, 400),
+    (483, 400),
+    (361, 400),
+    (239, 400),
 )
 
 class Task:
@@ -58,6 +60,10 @@ class AutoBattle:
         self._operations = collections.defaultdict(list)
         self._pending = []
         self._jobs = []
+        self._lastsp = [0] * len(SP_REGIONS)
+        self._listener = None
+        self._cur_seconds = 0
+        self._cur_time = 0
 
     def load(self, config_file):
         print("加载配置文件中...")
@@ -77,6 +83,26 @@ class AutoBattle:
                 INTERVAL = float(self._config['click_interval'])
             if 'read_time_interval' in self._config:
                 LONG_INTERVAL = float(self._config['read_time_interval'])
+            if 'listen_mouse_event' in self._config and self._config['listen_mouse_event']:
+                from pynput.mouse import Listener
+
+                def on_click(x,y, button, pressed):
+                    wx, wy = self._driver.getRootWindowLocation()
+                    tx, ty = x - wx, y - wy
+                    if tx < 0 or tx > self._devicewidth or ty < 0 or ty > self._deviceheight:
+                        # 设备外区域忽略
+                        pass
+                    else:
+                        if (150 < tx < 800) and (350 < ty < 500):
+                            # ub区域
+                            no = int(5 - (tx - 150) / 150)
+                            cur_time = time.time()
+                            print(f"点击第{no}位，当前时间：{self._cur_seconds}，偏移时间: {cur_time - self._cur_time}")
+                        else:
+                            pass 
+                
+                self._listener = Listener(on_click=on_click)
+
             for name,operations in self._config['job_list'].items():
                 self._jobs.append((name, operations))
             if 'use_ocr' in self._config and self._config['use_ocr']:
@@ -95,6 +121,8 @@ class AutoBattle:
         self._pause = False
         self._thread = threading.Thread(target=self._run)
         self._thread.start()
+        if self._listener:
+            self._listener.start()
         print("AutoBattle script run key commands:\n\033[1mp\033[0m  Pause.\n\033[1mr\033[0m  Resume.\n\033[1ms\033[0m  Stop.\n\033[1mc\033[0m  Show config list.")
         self._waitinput()
 
@@ -116,6 +144,8 @@ class AutoBattle:
         if self._thread:
             self._thread.join()
             self._thread = None
+        if self._listener:
+            self._listener.stop()
     
     def choiceConfig(self, no):
         name, operations = self._jobs[no]
@@ -164,6 +194,7 @@ class AutoBattle:
         last_readtime = 0
         battle_start_time = 0
         symbol_error_count = 0
+        sp = None
         while self._running:
             sys.stdout.flush()
             starttime = time.time()
@@ -198,12 +229,22 @@ class AutoBattle:
             if not remain_seconds or starttime - last_readtime >= LONG_INTERVAL:
                 _read_time = self._readtime(screenshot)
                 if _read_time:
-                    remain_seconds = _read_time
                     last_readtime = time.time()
+                    if last_seconds != None:
+                        expect_time = last_seconds - 1
+                        if (_read_time > last_seconds) or ( _read_time < expect_time - 3):
+                            print(f"读取到错误的时间，期望:{expect_time},实际读取:{_read_time}")
+                            self._waitnext(starttime)
+                            continue
+                    remain_seconds = _read_time
             if not remain_seconds:
                 self._waitnext(starttime)
-                continue
+                continue 
+            
             sp = self._readsp(screenshot)
+            if sp == None:
+                self._waitnext(starttime)
+                continue
             if self._pending:
                 for i in range(len(self._pending) - 1, -1, -1):
                     task = self._pending[i]
@@ -211,22 +252,26 @@ class AutoBattle:
                         # 过期
                         self._pending.pop(i)
                         self._logtask(task, isexpired=True)
-                    elif task.triggertime >= 0 and sp[task.loc] < UB_THRESHOLD:
+                    elif task.triggertime >= 0 and sp[task.loc] <= UB_THRESHOLD_LOWER_BOUND:
                         # 释放UB成功
-                        self._pending.pop(i)
-                        self._logtask(task)
-            if self._pending:
-                for task in self._pending:
-                    clickable = True
-                    if task.triggertime < 0:
-                        if starttime - task.createtime - task.delay>= 0 and sp[task.loc] >= UB_THRESHOLD:
-                            task.triggertime = starttime
-                        elif task.delay > 0:
-                            clickable = False
-                    if clickable:
-                        self._clickub(task.loc)
-                        
+                        if task.expecttime - remain_seconds >= UB_MIN_CHECK_DURATION: 
+                            self._pending.pop(i)
+                            self._logtask(task)
+                if self._pending:        
+                    for task in self._pending:
+                        clickable = True
+                        if task.triggertime < 0:
+                            if starttime - task.createtime - task.delay>= 0 and sp[task.loc] >= UB_THRESHOLD:
+                                task.triggertime = starttime
+                            elif task.delay > 0:
+                                clickable = False
+                        if clickable:
+                            self._clickub(task.loc) 
+                          
             if last_seconds != remain_seconds:
+                print(f"剩余时间: {remain_seconds}")
+                self._cur_time = starttime
+                self._cur_seconds = remain_seconds
                 remain_seconds_time = starttime
                 newoperations = []
                 if last_seconds and last_seconds - remain_seconds > 1:
@@ -267,7 +312,8 @@ class AutoBattle:
         if consume < INTERVAL:
             time.sleep(INTERVAL - consume)
         else:
-            print(f"卡帧：{consume}")
+            # print(f"卡帧：{consume}")
+            pass
 
     def _dopause(self, screenshot):
         self._driver.click(*self._pos(900, 27))
@@ -325,25 +371,40 @@ class AutoBattle:
     def _clickub(self, index):
         x, y = self._pos(*UB_LOCATIONS[index])
         self._driver.click(x, y)
-        time.sleep(0.005)
+        time.sleep(0.001)
 
     def _readsp(self, screenshot):
         '''
         返回当前5个角色对应的能量条状态
         '''
         ret = [0] * len(SP_REGIONS)
+        error_detected = False
         for i in range(len(SP_REGIONS)):
             roi = self._roi(*SP_REGIONS[i])
             img = screenshot[roi[1]:roi[3], roi[0]:roi[2]]
-            img = cv.cvtColor(img, cv.COLOR_BGR2GRAY)
-            _, img = cv.threshold(img, 80, 255, cv.THRESH_BINARY)
             center = (img.shape[0] - 1) // 2
+            found = 0
             for j in range(img.shape[1]):
-                if (img[center:center + 1, j : j + 1] == 0).all():
+                color = img[center, j]
+                gray = self._gray(color)
+                if gray < 60:
                     ret[i] = float(j) / img.shape[1]
+                    found = 1
                     break
+                elif color[0] >= 145 and 125 <= color[1] <= 230 and 40 <= color[2] <= 70:
+                    pass
+                else:
+                    found = 2
+                    break
+            if found == 0:
                 ret[i] = 1
+            elif found != 1:
+                ret[i] = self._lastsp[i]
+        self._lastsp = ret
         return ret
+    
+    def _gray(self, color):
+        return color[0] * 0.299 + color[1] * 0.587 + color[2] * 0.114
 
     def _readtime(self, screenshot):
         if self._ocr is None:
@@ -398,6 +459,8 @@ class AutoBattle:
             if ret > cur_max_value:
                 cur_max_value = ret
                 cur = i
+        if cur_max_value < 0.99:
+            return None
         return int(cur)
 
 
