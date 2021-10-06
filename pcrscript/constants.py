@@ -40,7 +40,8 @@ HARD_CHAPTER_POS = (
 )
 
 VH_CHAPTER_POS = (
-    (216, 266), (483, 363), (780, 293)
+    (216, 266), (483, 363), (780, 293),
+    (218, 336), (483, 255), (780, 290)
 )
 
 GUILD_BOSS_POS = ((115, 291), (277, 290), (460, 168), (617, 234), (833, 248))
@@ -104,10 +105,11 @@ CHAPTER_SYMBOLS = (
 
 VH_CHAPTERS = (
     FloorDict({0: CHAPTER_NONE}),
+    FloorDict({0: CHAPTER_NONE})
 )
 
 VH_CHAPTER_SYMBOLS = (
-    'chapter18',
+    'chapter18','chapter19'
 )
 
 ACTIVITY_YLY = ((168, 322), (261, 247), (334, 356), (415, 231), (488, 317),

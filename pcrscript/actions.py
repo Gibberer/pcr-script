@@ -13,6 +13,43 @@ class Action:
         return self._done
     
 
+class MatchTextAction(Action):
+
+    def __init__(self, text, matched_actions=None, unmatch_actions=None, delay=1, timeout=0):
+        super().__init__()
+        self.text = text
+        self.matched_actions = matched_actions
+        self.unmatch_action = unmatch_actions
+        self.delay = delay
+        self.starttime = 0
+    
+    def do(self, screen_shot, robot):
+        ocr = robot.ocr
+        if not ocr:
+            self._done = True
+            return
+        if self.starttime == 0:
+            self.starttime = time.time()
+        if self.delay > 0:
+            time.sleep(self.delay)
+
+        ret = ocr.findMatchTextPos()
+
+        if ret:
+            if self.matched_actions:
+                for action in self.matched_actions:
+                    if hasattr(action, 'pos') and action.pos is None:
+                        action.pos = ret
+                    action.do(screenshot, robot)
+            self._done = True
+        elif self.unmatch_action:
+            for action in self.unmatch_action:
+                action.do(screenshot, robot)
+                if isinstance(action, CanSkipMatchAction):
+                    if action.skip:
+                        self._done = True
+                        break
+
 class MatchAction(Action):
     def __init__(self, template, matched_actions=None, unmatch_actions=None, delay=1, timeout=0, threshold=THRESHOLD):
         super().__init__()

@@ -711,7 +711,7 @@ class Robot:
     def _entre_advanture(self, difficulty=Difficulty.NORMAL, activity=False):
         actions = []
         actions.append(MatchAction('tab_adventure', matched_actions=[ClickAction()], unmatch_actions=[
-            ClickAction(template='btn_close')]))
+            ClickAction(template='btn_close'), ClickAction(pos=self._pos(50, 300))]))
         actions.append(SleepAction(2))
         if activity:
             actions.append(ClickAction(pos=self._pos(413, 423)))

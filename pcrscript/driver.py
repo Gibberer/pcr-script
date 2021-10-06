@@ -1,6 +1,7 @@
 from abc import ABCMeta, abstractmethod
 from typing import Tuple
 from win32 import win32gui, win32api, win32console
+import ctypes
 from win32.lib import win32con
 from pythonwin import win32ui
 import numpy as np
@@ -32,7 +33,6 @@ class Driver(metaclass=ABCMeta):
     def swipe(self, start: Tuple[int, int], end: Tuple[int, int], duration: int):
         pass
     
-    @abstractmethod
     def getRootWindowLocation(self) -> Tuple[int, int]:
         # 获取根窗口的位置坐标
         return (0,0)
@@ -77,6 +77,7 @@ class ADBDriver(Driver):
             return os.popen(cmd).read()
 
 
+
 class DNADBDriver(ADBDriver):
     '''
     基于ADB的雷电模拟器扩展驱动
@@ -87,6 +88,14 @@ class DNADBDriver(ADBDriver):
         self.dnpath = dnpath
         self.index = index
         self.click_by_mouse = click_by_mouse
+        shcore = ctypes.windll.shcore
+        monitor = win32api.MonitorFromPoint((0,0),1)
+        scale = ctypes.c_int()
+        shcore.GetScaleFactorForMonitor(
+            monitor.handle,
+            ctypes.byref(scale)
+        )
+        self.scale = float(scale.value / 100)
     
     def click(self, x, y):
         if self.click_by_mouse:
@@ -131,6 +140,8 @@ class DNADBDriver(ADBDriver):
     def screenshot(self, output='screen_shot.png'):
         window_title = self._getWindowTitle()
         width, height = constants.BASE_WIDTH, constants.BASE_HEIGHT
+        width *= self.scale
+        height *= self.scale
         try:
             hwin = win32gui.FindWindow('LDPlayerMainFrame', window_title)
             hwindc = win32gui.GetWindowDC(hwin)
@@ -149,7 +160,8 @@ class DNADBDriver(ADBDriver):
             win32gui.ReleaseDC(hwin, hwindc)
             win32gui.DeleteObject(bmp.GetHandle())
             return img[:, :, :3]
-        except:
+        except Exception as e:
+            # print(e)
             return super().screenshot(output=output)
     
     def getRootWindowLocation(self):
@@ -168,7 +180,7 @@ class DNADBDriver(ADBDriver):
             return super().getRootWindowLocation()
     
     def _getDnToolbarHeight(self):
-        return 35
+        return 35 * self.scale
     
     def _getWindowTitle(self):
         window_title = '雷电模拟器'
