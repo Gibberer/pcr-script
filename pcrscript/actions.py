@@ -11,47 +11,9 @@ class Action:
 
     def done(self) -> bool:
         return self._done
-    
-
-class MatchTextAction(Action):
-
-    def __init__(self, text, matched_actions=None, unmatch_actions=None, delay=1, timeout=0):
-        super().__init__()
-        self.text = text
-        self.matched_actions = matched_actions
-        self.unmatch_action = unmatch_actions
-        self.delay = delay
-        self.starttime = 0
-    
-    def do(self, screen_shot, robot):
-        ocr = robot.ocr
-        if not ocr:
-            self._done = True
-            return
-        if self.starttime == 0:
-            self.starttime = time.time()
-        if self.delay > 0:
-            time.sleep(self.delay)
-
-        ret = ocr.findMatchTextPos()
-
-        if ret:
-            if self.matched_actions:
-                for action in self.matched_actions:
-                    if hasattr(action, 'pos') and action.pos is None:
-                        action.pos = ret
-                    action.do(screenshot, robot)
-            self._done = True
-        elif self.unmatch_action:
-            for action in self.unmatch_action:
-                action.do(screenshot, robot)
-                if isinstance(action, CanSkipMatchAction):
-                    if action.skip:
-                        self._done = True
-                        break
 
 class MatchAction(Action):
-    def __init__(self, template, matched_actions=None, unmatch_actions=None, delay=1, timeout=0, threshold=THRESHOLD):
+    def __init__(self, template, matched_actions=None, unmatch_actions=None, delay=1, timeout=0, threshold=THRESHOLD, match_text=None):
         super().__init__()
         self.template = template
         self.matched_actions = matched_actions
@@ -60,6 +22,7 @@ class MatchAction(Action):
         self.threshold = threshold
         self.timeout = timeout
         self.starttime = 0
+        self.match_text = match_text
 
     def do(self, screenshot, robot):
         if self.starttime == 0:
@@ -67,7 +30,9 @@ class MatchAction(Action):
         if self.delay > 0:
             time.sleep(self.delay)
         ret = None
-        if isinstance(self.template, list):
+        if self.match_text and robot.ocr:
+            ret = robot.ocr.find_match_text_pos(self.match_text)
+        elif isinstance(self.template, list):
             for temp in self.template:
                 ret = robot._find_match_pos(
                     screenshot, temp, threshold=self.threshold)
@@ -127,18 +92,22 @@ class SleepAction(Action):
 
 
 class ClickAction(Action):
-    def __init__(self, template=None, pos=None, offset=(0, 0), threshold=THRESHOLD, binarization=False):
+    def __init__(self, template=None, pos=None, offset=(0, 0), threshold=THRESHOLD, binarization=False, match_text=None):
         super().__init__()
         self.template = template
         self.pos = pos
         self.offset = offset
         self.threshold = threshold
         self.binarization = binarization
+        self.match_text = match_text
 
     def do(self, screenshot, robot):
-        if self.template:
-            ret = robot._find_match_pos(
-                screenshot, self.template, threshold=self.threshold, binarization=self.binarization)
+        if self.template or self.match_text:
+            if self.match_text and robot.ocr:
+                ret = robot.ocr.find_match_text_pos(self.match_text)
+            else:
+                ret = robot._find_match_pos(
+                    screenshot, self.template, threshold=self.threshold, binarization=self.binarization)
             if ret:
                 robot.driver.click(ret[0] + self.offset[0],
                                    ret[1] + self.offset[1])

@@ -561,6 +561,8 @@ class Robot:
                         matched_actions=[ClickAction(), SleepAction(1)], timeout=1),
             MatchAction(template='btn_cancel', matched_actions=[
                 ClickAction(), SleepAction(1)], timeout=1),  # 限时商店
+            MatchAction(template='btn_cancel', matched_actions=[
+                ClickAction(), SleepAction(1)], timeout=1),  # 可能有二次弹窗
             SleepAction(2),
             ClickAction(pos=self._pos(666, 457))
         ]
@@ -578,7 +580,8 @@ class Robot:
             )
             # 清困难本
             self._action_squential(
-                ClickAction(template='1-1', offset=self._pos(0, -20),
+                SleepAction(2),
+                ClickAction(template='1-1', match_text='1-1', offset=self._pos(0, -20),
                             threshold=0.65, binarization=True),  # 点击第一个活动困难本
                 MatchAction('btn_challenge', threshold=0.9*THRESHOLD),
             )
@@ -617,7 +620,7 @@ class Robot:
             )
             # 高难
             self._action_squential(
-                ClickAction(template='very', offset=self._pos(0, -20),
+                ClickAction(template='very', match_text='VERY', offset=self._pos(0, -20),
                             threshold=0.65, binarization=True)
             )
             self._combat((0, 0))
@@ -631,7 +634,7 @@ class Robot:
                                 ClickAction(), SleepAction(2)], timeout=3)
                 )
             self._action_squential(
-                ClickAction(template='15', offset=self._pos(0, -20),
+                ClickAction(template="15", match_text='1-15', offset=self._pos(0, -20),
                             threshold=0.65, binarization=True),
                 SleepAction(2),
                 *self.__saodang_oneshot_actions(duration=6000)
