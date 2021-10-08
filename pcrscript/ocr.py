@@ -12,7 +12,7 @@ class Ocr():
         if result:
             return [r[1] for r in result]
 
-    def find_match_text_pos(self, text):
+    def find_match_text_pos(self, img, text):
         result = self.reader.readtext(img)
         for r in result:
             if r[1] == text:

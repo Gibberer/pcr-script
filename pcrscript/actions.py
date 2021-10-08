@@ -31,7 +31,7 @@ class MatchAction(Action):
             time.sleep(self.delay)
         ret = None
         if self.match_text and robot.ocr:
-            ret = robot.ocr.find_match_text_pos(self.match_text)
+            ret = robot.ocr.find_match_text_pos(screenshot, self.match_text)
         elif isinstance(self.template, list):
             for temp in self.template:
                 ret = robot._find_match_pos(
@@ -104,7 +104,7 @@ class ClickAction(Action):
     def do(self, screenshot, robot):
         if self.template or self.match_text:
             if self.match_text and robot.ocr:
-                ret = robot.ocr.find_match_text_pos(self.match_text)
+                ret = robot.ocr.find_match_text_pos(screenshot, self.match_text)
             else:
                 ret = robot._find_match_pos(
                     screenshot, self.template, threshold=self.threshold, binarization=self.binarization)
