@@ -581,8 +581,8 @@ class Robot:
             # 清困难本
             self._action_squential(
                 SleepAction(2),
-                ClickAction(template='1-1', match_text='1-1', offset=self._pos(0, -20),
-                            threshold=0.65, binarization=True),  # 点击第一个活动困难本
+                ClickAction(template='1-1', offset=self._pos(0, -20),
+                            threshold=0.6, mode='binarization'),  # 点击第一个活动困难本
                 MatchAction('btn_challenge', threshold=0.9*THRESHOLD),
             )
             for _ in range(5):
@@ -620,10 +620,10 @@ class Robot:
             )
             # 高难
             self._action_squential(
-                ClickAction(template='very', match_text='VERY', offset=self._pos(0, -20),
-                            threshold=0.65, binarization=True)
+                ClickAction(template='very',offset=self._pos(0, -20),
+                            threshold=0.6, mode='binarization')
             )
-            self._combat((0, 0))
+            self._combat(None)
         if exhaust_power:
             if hard_chapter:
                 self._tohomepage()
@@ -634,8 +634,8 @@ class Robot:
                                 ClickAction(), SleepAction(2)], timeout=3)
                 )
             self._action_squential(
-                ClickAction(template="15", match_text='1-15', offset=self._pos(0, -20),
-                            threshold=0.65, binarization=True),
+                ClickAction(template="15", offset=self._pos(0, -20),
+                            threshold=0.6, mode="binarization"),
                 SleepAction(2),
                 *self.__saodang_oneshot_actions(duration=6000)
             )
@@ -815,7 +815,8 @@ class Robot:
         处理战斗界面相关
         '''
         actions = []
-        actions.append(ClickAction(pos=self._pos(*trigger_pos)))
+        if trigger_pos:
+            actions.append(ClickAction(pos=self._pos(*trigger_pos)))
         actions.append(ClickAction(template='btn_challenge'))
         actions.append(SleepAction(1))
         actions.append(ClickAction(template='btn_combat_start'))
@@ -1397,7 +1398,7 @@ class Robot:
                 if delay > 0:
                     time.sleep(delay)
 
-    def _find_match_pos(self, screenshot, template, threshold=THRESHOLD, binarization=False) -> Tuple[int, int]:
+    def _find_match_pos(self, screenshot, template, threshold=THRESHOLD, mode=None) -> Tuple[int, int]:
         name = template
         source: np.ndarray
         if isinstance(screenshot, np.ndarray):
@@ -1413,11 +1414,15 @@ class Robot:
         template = cv.resize(template, None, fx=fx, fy=fy,
                              interpolation=cv.INTER_AREA)
         theight, twidth = template.shape[:2]
-        if binarization:
-            source = cv.cvtColor(source, cv.COLOR_BGR2GRAY)
-            _, source = cv.threshold(source, 127, 255, cv.THRESH_BINARY)
-            template = cv.cvtColor(template, cv.COLOR_BGR2GRAY)
-            _, template = cv.threshold(template, 127, 255, cv.THRESH_BINARY)
+        if mode:
+            if mode == 'binarization':
+                source = cv.cvtColor(source, cv.COLOR_BGR2GRAY)
+                _, source = cv.threshold(source, 127, 255, cv.THRESH_BINARY)
+                template = cv.cvtColor(template, cv.COLOR_BGR2GRAY)
+                _, template = cv.threshold(template, 127, 255, cv.THRESH_BINARY)
+            elif mode == 'canny':
+                source = cv.Canny(source, 180, 220)
+                template = cv.Canny(template, 180, 220)
         ret = cv.matchTemplate(source, template, cv.TM_CCOEFF_NORMED)
         min_val, max_val, min_loc, max_loc = cv.minMaxLoc(ret)
         # self._log("{}:{}:{}".format(name, max_val, threshold))

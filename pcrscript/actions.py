@@ -92,13 +92,13 @@ class SleepAction(Action):
 
 
 class ClickAction(Action):
-    def __init__(self, template=None, pos=None, offset=(0, 0), threshold=THRESHOLD, binarization=False, match_text=None):
+    def __init__(self, template=None, pos=None, offset=(0, 0), threshold=THRESHOLD, mode=None, match_text=None):
         super().__init__()
         self.template = template
         self.pos = pos
         self.offset = offset
         self.threshold = threshold
-        self.binarization = binarization
+        self.mode = mode
         self.match_text = match_text
 
     def do(self, screenshot, robot):
@@ -107,7 +107,7 @@ class ClickAction(Action):
                 ret = robot.ocr.find_match_text_pos(screenshot, self.match_text)
             else:
                 ret = robot._find_match_pos(
-                    screenshot, self.template, threshold=self.threshold, binarization=self.binarization)
+                    screenshot, self.template, threshold=self.threshold, mode=self.mode)
             if ret:
                 robot.driver.click(ret[0] + self.offset[0],
                                    ret[1] + self.offset[1])
