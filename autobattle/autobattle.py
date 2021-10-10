@@ -364,6 +364,10 @@ class AutoBattle:
             template = cv.resize(template, None, fx=fx, fy=fy,
                                  interpolation=cv.INTER_AREA)
             self._imagecache[templatepath] = template
+        src = cv.cvtColor(src, cv.COLOR_BGR2GRAY)
+        template = cv.cvtColor(template, cv.COLOR_BGR2GRAY)
+        _, src = cv.threshold(src, 200, 255, cv.THRESH_BINARY)
+        _, template = cv.threshold(template, 200, 255, cv.THRESH_BINARY)
         x = src.astype(np.int32).flatten()
         y = template.astype(np.int32).flatten()
         return np.dot(x,y)/(np.linalg.norm(x)*np.linalg.norm(y))
@@ -459,7 +463,7 @@ class AutoBattle:
             if ret > cur_max_value:
                 cur_max_value = ret
                 cur = i
-        if cur_max_value < 0.99:
+        if cur_max_value < 0.9:
             return None
         return int(cur)
 

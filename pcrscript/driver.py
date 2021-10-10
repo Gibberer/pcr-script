@@ -163,7 +163,6 @@ class DNADBDriver(ADBDriver):
             memdc.DeleteDC()
             win32gui.ReleaseDC(hwin, hwindc)
             win32gui.DeleteObject(bmp.GetHandle())
-            cv.imwrite(output, img)
             return img[:, :, :3]
         except Exception as e:
             print(e)
