@@ -142,14 +142,20 @@ class DNADBDriver(ADBDriver):
         width, height = constants.BASE_WIDTH, constants.BASE_HEIGHT
         try:
             hwin = win32gui.FindWindow('LDPlayerMainFrame', window_title)
-            hwindc = win32gui.GetWindowDC(hwin)
+            self._subhwin = None
+            def winfun(hwnd, lparam):
+                subtitle = win32gui.GetWindowText(hwnd)
+                if subtitle == 'TheRender':
+                    self._subhwin = hwnd
+            win32gui.EnumChildWindows(hwin, winfun, None)
+            hwindc = win32gui.GetWindowDC(self._subhwin)
             srcdc = win32ui.CreateDCFromHandle(hwindc)
             memdc = srcdc.CreateCompatibleDC()
             bmp = win32ui.CreateBitmap()
             bmp.CreateCompatibleBitmap(srcdc, width, height)
             memdc.SelectObject(bmp)
             memdc.BitBlt((0, 0), (width, height), srcdc,
-                         (0, self._getDnToolbarHeight()), win32con.SRCCOPY)
+                         (0, 0), win32con.SRCCOPY)
             signedIntsArray = bmp.GetBitmapBits(True)
             img = np.frombuffer(signedIntsArray, dtype='uint8')
             img.shape = (height, width, 4)
@@ -157,6 +163,7 @@ class DNADBDriver(ADBDriver):
             memdc.DeleteDC()
             win32gui.ReleaseDC(hwin, hwindc)
             win32gui.DeleteObject(bmp.GetHandle())
+            cv.imwrite(output, img)
             return img[:, :, :3]
         except Exception as e:
             print(e)
