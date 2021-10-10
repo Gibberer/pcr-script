@@ -140,8 +140,6 @@ class DNADBDriver(ADBDriver):
     def screenshot(self, output='screen_shot.png'):
         window_title = self._getWindowTitle()
         width, height = constants.BASE_WIDTH, constants.BASE_HEIGHT
-        width *= self.scale
-        height *= self.scale
         try:
             hwin = win32gui.FindWindow('LDPlayerMainFrame', window_title)
             hwindc = win32gui.GetWindowDC(hwin)
@@ -161,7 +159,7 @@ class DNADBDriver(ADBDriver):
             win32gui.DeleteObject(bmp.GetHandle())
             return img[:, :, :3]
         except Exception as e:
-            # print(e)
+            print(e)
             return super().screenshot(output=output)
     
     def getRootWindowLocation(self):
@@ -180,7 +178,7 @@ class DNADBDriver(ADBDriver):
             return super().getRootWindowLocation()
     
     def _getDnToolbarHeight(self):
-        return 35 * self.scale
+        return int(30 * self.scale)
     
     def _getWindowTitle(self):
         window_title = '雷电模拟器'

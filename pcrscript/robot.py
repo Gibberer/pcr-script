@@ -547,7 +547,7 @@ class Robot:
 
     def __saodang_oneshot_actions(self, duration=2000):
         return [
-            MatchAction('btn_challenge'),
+            MatchAction('btn_challenge', threshold=0.75),
             SwipeAction(self._pos(877, 330), self._pos(877, 330), duration),
             ClickAction(pos=self._pos(757, 330)),
             ClickAction(template='btn_ok_blue'),
@@ -727,7 +727,7 @@ class Robot:
                 unmatch_actions += [
                     IfCondition('btn_activity_plot',
                                 meet_actions=[ClickAction(template='btn_activity_plot')],
-                                unmeet_actions=[ClickAction(template='btn_close'), ClickAction(pos=self._pos(53, 283))])]
+                                unmeet_actions=[ClickAction(pos=self._pos(53, 283)), MatchAction('btn_close', matched_actions=[ClickAction()], timeout=1)])]
         if difficulty == Difficulty.NORMAL:
             unmatch_actions = [ClickAction(template='btn_normal')] + unmatch_actions
             actions.append(MatchAction('btn_normal_selected',
