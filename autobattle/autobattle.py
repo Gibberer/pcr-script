@@ -20,11 +20,11 @@ UB_THRESHOLD_LOWER_BOUND = 0.4
 INTERVAL = 0.1
 LONG_INTERVAL = 1
 SP_REGIONS = (
-    (680, 518, 762, 525),
-    (562, 518, 644, 525),
-    (444, 518, 523, 525),
-    (324, 518, 403, 525),
-    (199, 518, 283, 525),
+    (680, 520, 762, 527),
+    (562, 520, 644, 527),
+    (444, 520, 523, 527),
+    (324, 520, 403, 527),
+    (199, 520, 283, 527),
 )
 UB_LOCATIONS = (
     (718, 400),
@@ -375,7 +375,7 @@ class AutoBattle:
     def _clickub(self, index):
         x, y = self._pos(*UB_LOCATIONS[index])
         self._driver.click(x, y)
-        time.sleep(0.001)
+        time.sleep(0.015)
 
     def _readsp(self, screenshot):
         '''
@@ -398,6 +398,7 @@ class AutoBattle:
                 elif color[0] >= 145 and 125 <= color[1] <= 230 and 40 <= color[2] <= 70:
                     pass
                 else:
+                    cv.imwrite(f"{i}_a.png", img)
                     found = 2
                     break
             if found == 0:
