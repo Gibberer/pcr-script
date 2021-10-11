@@ -398,7 +398,6 @@ class AutoBattle:
                 elif color[0] >= 145 and 125 <= color[1] <= 230 and 40 <= color[2] <= 70:
                     pass
                 else:
-                    cv.imwrite(f"{i}_a.png", img)
                     found = 2
                     break
             if found == 0:
