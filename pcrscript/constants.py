@@ -37,6 +37,7 @@ HARD_CHAPTER_POS = (
     (218, 290), (490, 350), (769, 240),
     (218, 290), (490, 241), (769, 333),
     (218, 290), (490, 360), (769, 300),
+    (250, 231), (490, 350), (770, 280),
 )
 
 VH_CHAPTER_POS = (
@@ -95,12 +96,13 @@ CHAPTERS = (
     FloorDict({0: CHAPTER_NONE}),
     FloorDict({0: CHAPTER_NONE}),
     FloorDict({0: CHAPTER_NONE}),
+    FloorDict({0: CHAPTER_NONE}),
 )
 CHAPTER_SYMBOLS = (
     'chapter1', 'chapter2', 'chapter3', 'chapter4', 'chapter5', 'chapter6', 'chapter7', 'chapter8',
     'chapter9', 'chapter10', 'chapter11', 'chapter12', 'chapter13', 'chapter14', 'chapter15', 'chapter16',
     'chapter17', 'chapter18', 'chapter19', 'chapter20','chapter21','chapter22', 'chapter23','chapter24',
-    'chapter25', 'chapter26','chapter27'
+    'chapter25', 'chapter26','chapter27','chapter28'
 )
 
 VH_CHAPTERS = (

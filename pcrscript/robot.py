@@ -729,15 +729,15 @@ class Robot:
                                 meet_actions=[ClickAction(template='btn_activity_plot')],
                                 unmeet_actions=[ClickAction(pos=self._pos(53, 283)), MatchAction('btn_close', matched_actions=[ClickAction()], timeout=1)])]
         if difficulty == Difficulty.NORMAL:
-            unmatch_actions = [ClickAction(template='btn_normal')] + unmatch_actions
+            unmatch_actions = [ClickAction(template='btn_normal',threshold=0.9)] + unmatch_actions
             actions.append(MatchAction('btn_normal_selected',
                                        unmatch_actions=unmatch_actions))
         elif difficulty == Difficulty.HARD:
-            unmatch_actions = [ClickAction(template="btn_hard")] + unmatch_actions
+            unmatch_actions = [ClickAction(template="btn_hard", threshold=0.9)] + unmatch_actions
             actions.append(MatchAction('btn_hard_selected',
                                        unmatch_actions=unmatch_actions))
         else:
-            unmatch_actions = [ClickAction(template="btn_very_hard")] + unmatch_actions
+            unmatch_actions = [ClickAction(template="btn_very_hard",threshold=0.9)] + unmatch_actions
             actions.append(MatchAction('btn_very_hard_selected',
                                        unmatch_actions=unmatch_actions))
         self._action_squential(*actions)
