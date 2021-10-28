@@ -36,6 +36,9 @@ class Driver(metaclass=ABCMeta):
     def getRootWindowLocation(self) -> Tuple[int, int]:
         # 获取根窗口的位置坐标
         return (0,0)
+    
+    def getScale(self):
+        return 1
 
 
 class ADBDriver(Driver):
@@ -172,25 +175,22 @@ class DNADBDriver(ADBDriver):
         window_title = self._getWindowTitle()
         try:
             hwin = win32gui.FindWindow('LDPlayerMainFrame', window_title)
-            self._subhwin = None
-            def winfun(hwnd, lparam):
-                subtitle = win32gui.GetWindowText(hwnd)
-                if subtitle == 'TheRender':
-                    self._subhwin = hwnd
-            win32gui.EnumChildWindows(hwin, winfun, None)
-            ret = win32gui.GetWindowRect(self._subhwin)
-            return (ret[0], ret[1])
+            ret = win32gui.GetWindowRect(hwin)
+            return (ret[0], ret[1] + self._getDnToolbarHeight())
         except:
             return super().getRootWindowLocation()
     
     def _getDnToolbarHeight(self):
-        return int(30 * self.scale)
+        return 27
     
     def _getWindowTitle(self):
         window_title = '雷电模拟器'
         if self.index > 0:
             window_title = "{}-{}".format(window_title, self.index)
         return window_title
+    
+    def getScale(self):
+        return self.scale
 
 # if __name__ == "__main__":
 #     _subhwin = None

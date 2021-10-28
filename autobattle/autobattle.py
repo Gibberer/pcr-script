@@ -87,17 +87,22 @@ class AutoBattle:
                 from pynput.mouse import Listener
 
                 def on_click(x,y, button, pressed):
+                    x = x / self._driver.getScale()
+                    y = y / self._driver.getScale()
                     wx, wy = self._driver.getRootWindowLocation()
                     tx, ty = x - wx, y - wy
+                    tx *= self._driver.getScale()
+                    ty *= self._driver.getScale()
                     if tx < 0 or tx > self._devicewidth or ty < 0 or ty > self._deviceheight:
                         # 设备外区域忽略
                         pass
                     else:
-                        if (150 < tx < 800) and (350 < ty < 500):
+                        if (190 < tx < 780) and (350 < ty < 500):
                             # ub区域
-                            no = int(5 - (tx - 150) / 150)
+                            no = int(5 - (tx - 190) / 120)
                             cur_time = time.time()
-                            print(f"点击第{no}位，当前时间：{self._cur_seconds}，偏移时间: {cur_time - self._cur_time}")
+                            if pressed:
+                                print(f"点击第{no}位，当前时间：{self._cur_seconds}，偏移时间: {cur_time - self._cur_time}")
                         else:
                             pass 
                 
@@ -257,7 +262,8 @@ class AutoBattle:
                         if task.expecttime - remain_seconds >= UB_MIN_CHECK_DURATION: 
                             self._pending.pop(i)
                             self._logtask(task)
-                if self._pending:        
+                if self._pending:
+                    index = 0        
                     for task in self._pending:
                         clickable = True
                         if task.triggertime < 0:
@@ -266,7 +272,10 @@ class AutoBattle:
                             elif task.delay > 0:
                                 clickable = False
                         if clickable:
-                            self._clickub(task.loc) 
+                            if index > 0:
+                                time.sleep(0.01)
+                            self._clickub(task.loc)
+                            index += 1 
                           
             if last_seconds != remain_seconds:
                 print(f"剩余时间: {remain_seconds}")
@@ -375,7 +384,6 @@ class AutoBattle:
     def _clickub(self, index):
         x, y = self._pos(*UB_LOCATIONS[index])
         self._driver.click(x, y)
-        time.sleep(0.015)
 
     def _readsp(self, screenshot):
         '''
