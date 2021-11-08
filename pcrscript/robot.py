@@ -8,6 +8,9 @@ import time
 from typing import Iterable, Tuple
 import functools
 import random
+import collections
+import copy
+import re
 
 
 def trace(func):
@@ -340,31 +343,103 @@ class Robot:
         actions.append(MatchAction(template='symbol_shop', unmatch_actions=[
                        ClickAction(pos=self._pos(77, 258)), ClickAction(template='shop')]))
         actions.append(SleepAction(1))
-        for tab, items in rule.items():
-            items.sort()
+        tabs = collections.defaultdict(dict)
+        for key, value in rule.items():
+            if isinstance(key, int):
+                tabs[key]['items'] = value 
+            else:
+                tabs[int(key.split("_")[0])].update(value)
+        Item = collections.namedtuple("Item", ["pos", "threshold"], defaults=[0, -1])
+        times = collections.defaultdict(int)
+        for key in tabs:
+            value = tabs[key]
+            tabs[key] = []
+            items = tabs[key]
+            if 'items' in value:
+                for normal_item in value['items']:
+                    items.append(Item(normal_item))
+            if self.ocr and 'buy_equip' in value and value['buy_equip']:
+                first = value['first_equip']
+                end = value['end_equip']
+                threshold = value['buy_threshold']
+                for i in range(first, end + 1):
+                    items.append(Item(i, threshold))
+            items.sort(key = lambda item: item.pos)
+            if 'time' in value :
+                times[key] = value['time']
+        for tab,items in tabs.items():
             actions += [
                 ClickAction(pos=self._pos(*SHOP_TAB_LOCATION[tab - 1])),
                 SleepAction(1)
             ]
-            page_count = 8
-            page = 1
+            
+            tab_actions = []
+
+            line_count = 4
+            line = 1
+            slow_swipe = False
             for item in items:
-                if item > page * page_count:
-                    for _ in range(2*page):
-                        actions += [
-                            SwipeAction(start=self._pos(580, 380),
-                                        end=self._pos(580, 180), duration=300),
-                            SleepAction(1)
-                        ]
-                    page += 1
-
-                actions += [
-                    ClickAction(pos=self._pos(
-                        *SHOP_ITEM_LOCATION[(item - 1) % page_count])),
-                    SleepAction(0.1)
-                ]
-
-            actions += [
+                if item.threshold > 0:
+                    slow_swipe = True
+                    break
+            last_line = 100000
+            if slow_swipe:
+                last_line = int((items[-1].pos - 1) / line_count) + 1
+            for item in items:
+                swipe_time = 0
+                if item.pos > line * line_count:
+                    for _ in range(int((item.pos - line * line_count - 1) / line_count) + 1):
+                        if slow_swipe:
+                            tab_actions += [
+                                SwipeAction(start=self._pos(580, 377),
+                                            end=self._pos(580, 114), duration=5000),
+                                SleepAction(1)
+                            ]
+                        else:
+                            tab_actions += [
+                                SwipeAction(start=self._pos(580, 380),
+                                            end=self._pos(580, 180), duration=300),
+                                SleepAction(1)
+                            ]
+                        line += 1
+                        swipe_time += 1
+                if line == last_line:
+                    click_pos = SHOP_ITEM_LOCATION_FOR_LAST_LINE[(item.pos - 1) % line_count]
+                else:
+                    click_pos = SHOP_ITEM_LOCATION[(item.pos - 1) % line_count]
+                
+                if item.threshold <= 0:
+                    tab_actions += [
+                        ClickAction(pos=self._pos(*click_pos)),
+                        SleepAction(0.1)
+                    ]
+                else:
+                    def condition_function(screenshot, item, click_pos):
+                        rb = self._pos(click_pos[0], click_pos[1] + 120)
+                        lt = self._pos(click_pos[0] - 110, click_pos[1] + 90)
+                        roi = screenshot[lt[1]:rb[1],lt[0]:rb[0]]
+                        cv.imwrite(f"{item.pos}.png", roi)
+                        ret = self.ocr.recognize(roi)
+                        print(ret)
+                        if ret:
+                            if len(ret) > 1:
+                                ret = ret[1]
+                            else:
+                                ret = ret[0]
+                                ret = re.sub(r'[;:孑持自有数敫敖致方敛寺故敌氮女^]',"",ret)
+                            ret = ret.replace("|","1").replace("&", "8")
+                            ret = ret.strip()
+                            count = int(ret)
+                            if count < item.threshold:
+                                return True
+                        return False
+                    
+                    tab_actions += [
+                        SleepAction(swipe_time * 1 + 1),
+                        CustomIfCondition(condition_function, item, click_pos, meet_actions = [ClickAction(pos=self._pos(*click_pos))]),
+                        SleepAction(0.3),
+                    ]
+            tab_actions += [
                 ClickAction(pos=self._pos(833, 438)),
                 SleepAction(0.2),
                 ClickAction(template='btn_ok_blue'),
@@ -372,6 +447,16 @@ class Robot:
                 ClickAction(template='btn_ok_blue'),
                 SleepAction(1.5)
             ]
+            actions += tab_actions
+            if times[tab]:
+                for i in range(times[tab] - 1):
+                    copy_tab_actions = [
+                        ClickAction(pos=self._pos(550, 440)),
+                        SleepAction(0.2),
+                        ClickAction(template='btn_ok_blue'),
+                    ]
+                    copy_tab_actions += copy.deepcopy(tab_actions)
+                    actions += copy_tab_actions
         self._action_squential(*actions)
 
     @trace

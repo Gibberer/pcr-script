@@ -167,3 +167,26 @@ class IfCondition(CanSkipMatchAction):
                         self.skip = True
                 robot._action_squential(*self._unmeet_actions)
         self._done = True
+
+class CustomIfCondition(Action):
+
+    def __init__(self, condition_function, *args, meet_actions=None, unmeet_actions=None):
+        super().__init__()
+        self._condition_function = condition_function
+        self._args = args
+        self._meet_actions = meet_actions
+        self._unmeet_actions = unmeet_actions
+
+    def do(self, screenshot, robot):
+        ret = self._condition_function(screenshot, *self._args)
+        if ret:
+            if self._meet_actions:
+                for action in self._meet_actions:
+                    action._done = False
+                robot._action_squential(*self._meet_actions)
+        else:
+            if self._unmeet_actions:
+                for action in self._unmeet_actions:
+                    action._done = False
+                robot._action_squential(*self._unmeet_actions)
+        self._done = True
