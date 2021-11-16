@@ -418,7 +418,6 @@ class Robot:
                         rb = self._pos(click_pos[0], click_pos[1] + 120)
                         lt = self._pos(click_pos[0] - 110, click_pos[1] + 90)
                         roi = screenshot[lt[1]:rb[1],lt[0]:rb[0]]
-                        cv.imwrite(f"{item.pos}.png", roi)
                         ret = self.ocr.recognize(roi)
                         print(ret)
                         if ret:
@@ -426,9 +425,11 @@ class Robot:
                                 ret = ret[1]
                             else:
                                 ret = ret[0]
-                                ret = re.sub(r'[;:孑持自有数敫敖致方敛寺故敌氮女^]',"",ret)
+                                ret = re.sub(r'[;:孑持自有数敫敖致方敛寺故敌氮故女效^]',"",ret)
                             ret = ret.replace("|","1").replace("&", "8")
                             ret = ret.strip()
+                            if not ret.isdigit():
+                                return False
                             count = int(ret)
                             if count < item.threshold:
                                 return True
@@ -437,7 +438,7 @@ class Robot:
                     tab_actions += [
                         SleepAction(swipe_time * 1 + 1),
                         CustomIfCondition(condition_function, item, click_pos, meet_actions = [ClickAction(pos=self._pos(*click_pos))]),
-                        SleepAction(0.3),
+                        SleepAction(0.8),
                     ]
             tab_actions += [
                 ClickAction(pos=self._pos(833, 438)),
