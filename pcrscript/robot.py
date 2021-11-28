@@ -6,6 +6,7 @@ from cv2 import cv2 as cv
 import numpy as np
 import time
 from typing import Iterable, Tuple
+from .tasks import taskKeyMapping, BaseTask
 import functools
 import random
 import collections
@@ -108,10 +109,24 @@ class Robot:
         ClickAction(template='btn_close').do(self.driver.screenshot(), self)
         if tasklist:
             for funcname, *args in tasklist:
+                if funcname in taskKeyMapping:
+                    self._runTask(funcname, taskKeyMapping[funcname], args)
                 try:
                     getattr(self, "_" + funcname)(*args)
                 except Exception as e:
                     print(e)
+
+    def _runTask(self, taskname, taskclass: BaseTask, args):
+        self._log(f"start task: {taskname}")
+        try:
+            task = taskclass(self)
+            if args:
+                task.run(*args)
+            else:
+                task.run()
+        except Exception as e:
+            print(e)
+        self._log(f"end task: {taskname}")
 
     def _log(self, msg: str):
         print("{}: {}".format(self._name, msg))
@@ -160,62 +175,6 @@ class Robot:
         )
 
     @trace
-    def _choushilian(self, multi=False):
-        '''
-        抽免费10连
-        '''
-        draw_actions = [
-            ClickAction(template='btn_ok_blue'),
-            MatchAction('btn_skip', matched_actions=[ClickAction()], unmatch_actions=[
-                        ClickAction(pos=self._pos(50, 300))])
-        ]
-        self._action_squential(
-            ClickAction(template='niudan'),
-            MatchAction('btn_setting_blue', matched_actions=[ClickAction()], unmatch_actions=[
-                        ClickAction(template='btn_close')], timeout=5),
-            MatchAction('btn_role_detail', unmatch_actions=[
-                        ClickAction(template='btn_close')]),
-            ClickAction(pos=self._pos(871, 355)),
-            *draw_actions,
-            MatchAction('btn_ok', matched_actions=[ClickAction()],
-                        unmatch_actions=[
-                        ClickAction(pos=self._pos(50, 300)),
-                        IfCondition('btn_draw_again', meet_actions=[
-                            ClickAction(template='btn_draw_again'),
-                            *draw_actions
-                        ]) if multi else IfCondition('btn_cancel', meet_actions=[
-                            ClickAction(template='btn_cancel'),
-                            SkipAction()
-                        ])
-                        ]),
-            MatchAction('btn_setting_blue', matched_actions=[
-                        ClickAction()], timeout=5),
-        )
-
-    @trace
-    def _normal_gacha(self):
-        '''
-        普通扭蛋
-        '''
-        self._action_squential(
-            ClickAction(template='niudan'),
-            MatchAction('btn_setting_blue', matched_actions=[ClickAction()], unmatch_actions=[
-                        ClickAction(template='btn_close')], timeout=5),
-            MatchAction('btn_role_detail', unmatch_actions=[
-                        ClickAction(template='btn_close')]),
-            ClickAction(pos=self._pos(877, 72)),
-            SleepAction(2),
-            ClickAction(pos=self._pos(722, 347)),
-            ClickAction(template='btn_ok_blue'),
-            MatchAction('btn_ok', matched_actions=[ClickAction()],
-                        unmatch_actions=[
-                        ClickAction(pos=self._pos(50, 300)),
-                        ]),
-            MatchAction('btn_setting_blue', matched_actions=[
-                        ClickAction()], timeout=5),
-        )
-
-    @trace
     def _tohomepage(self, timeout=0):
         '''
         进入游戏主页面
@@ -241,37 +200,6 @@ class Robot:
         )
 
     @trace
-    def _role_intensify(self):
-        '''
-        角色强化默认前五个
-        '''
-        self._action_squential(
-            ClickAction(template='tab_role'),
-            SleepAction(1),
-            MatchAction('role_symbol'),
-            SleepAction(1),
-            ClickAction(pos=self._pos(177, 142)),
-            SleepAction(1),
-            MatchAction('role_intensify_symbol'),
-            SleepAction(1)
-        )
-        # 已经进入强化页面
-        actions = []
-        for _ in range(5):
-            actions.append(ClickAction(pos=self._pos(247, 337)))
-            actions.append(MatchAction('btn_cancel', matched_actions=[
-                           ClickAction(offset=self._pos(230, 0)), SleepAction(6)], timeout=3))
-            actions.append(MatchAction('btn_ok', matched_actions=[
-                           ClickAction(), SleepAction(3)], timeout=3))
-            actions.append(ClickAction(pos=self._pos(374, 438)))
-            actions.append(MatchAction(template='btn_ok_blue', matched_actions=[ClickAction(
-            )], unmatch_actions=[ClickAction(template='btn_ok')], timeout=5, threshold=1.2*THRESHOLD))
-            actions.append(SleepAction(1))
-            actions.append(ClickAction(pos=self._pos(938, 268)))
-            actions.append(SleepAction(1))
-        self._action_squential(*actions)
-
-    @trace
     def _get_quest_reward(self):
         '''
         获取任务奖励
@@ -284,24 +212,6 @@ class Robot:
                         ClickAction()], timeout=5),
             MatchAction('btn_close', matched_actions=[
                         ClickAction()], timeout=5),
-            MatchAction('btn_ok', matched_actions=[ClickAction()], timeout=3),
-            MatchAction('btn_cancel', matched_actions=[
-                        ClickAction()], timeout=3)
-        )
-
-    @trace
-    def _get_gift(self):
-        '''
-        领取礼物
-        '''
-        self._action_squential(
-            SleepAction(1),
-            ClickAction(template='gift'),
-            SleepAction(3),
-            MatchAction('btn_all_rec', matched_actions=[
-                        ClickAction()], timeout=3),
-            MatchAction('btn_ok_blue', matched_actions=[
-                        ClickAction()], timeout=3),
             MatchAction('btn_ok', matched_actions=[ClickAction()], timeout=3),
             MatchAction('btn_cancel', matched_actions=[
                         ClickAction()], timeout=3)
@@ -346,10 +256,11 @@ class Robot:
         tabs = collections.defaultdict(dict)
         for key, value in rule.items():
             if isinstance(key, int):
-                tabs[key]['items'] = value 
+                tabs[key]['items'] = value
             else:
                 tabs[int(key.split("_")[0])].update(value)
-        Item = collections.namedtuple("Item", ["pos", "threshold"], defaults=[0, -1])
+        Item = collections.namedtuple(
+            "Item", ["pos", "threshold"], defaults=[0, -1])
         times = collections.defaultdict(int)
         for key in tabs:
             value = tabs[key]
@@ -364,15 +275,15 @@ class Robot:
                 threshold = value['buy_threshold']
                 for i in range(first, end + 1):
                     items.append(Item(i, threshold))
-            items.sort(key = lambda item: item.pos)
-            if 'time' in value :
+            items.sort(key=lambda item: item.pos)
+            if 'time' in value:
                 times[key] = value['time']
-        for tab,items in tabs.items():
+        for tab, items in tabs.items():
             actions += [
                 ClickAction(pos=self._pos(*SHOP_TAB_LOCATION[tab - 1])),
                 SleepAction(1)
             ]
-            
+
             tab_actions = []
 
             line_count = 4
@@ -404,10 +315,11 @@ class Robot:
                         line += 1
                         swipe_time += 1
                 if line == last_line:
-                    click_pos = SHOP_ITEM_LOCATION_FOR_LAST_LINE[(item.pos - 1) % line_count]
+                    click_pos = SHOP_ITEM_LOCATION_FOR_LAST_LINE[(
+                        item.pos - 1) % line_count]
                 else:
                     click_pos = SHOP_ITEM_LOCATION[(item.pos - 1) % line_count]
-                
+
                 if item.threshold <= 0:
                     tab_actions += [
                         ClickAction(pos=self._pos(*click_pos)),
@@ -417,7 +329,7 @@ class Robot:
                     def condition_function(screenshot, item, click_pos):
                         rb = self._pos(click_pos[0], click_pos[1] + 120)
                         lt = self._pos(click_pos[0] - 110, click_pos[1] + 90)
-                        roi = screenshot[lt[1]:rb[1],lt[0]:rb[0]]
+                        roi = screenshot[lt[1]:rb[1], lt[0]:rb[0]]
                         ret = self.ocr.recognize(roi)
                         print(ret)
                         if ret:
@@ -425,8 +337,9 @@ class Robot:
                                 ret = ret[1]
                             else:
                                 ret = ret[0]
-                                ret = re.sub(r'[;:孑持自有数敫敖致方敛寺故敌氮故女效^]',"",ret)
-                            ret = ret.replace("|","1").replace("&", "8")
+                                ret = re.sub(
+                                    r'[;:孑持自有数敫敖致方敛寺故敌氮故女效^]', "", ret)
+                            ret = ret.replace("|", "1").replace("&", "8")
                             ret = ret.strip()
                             if not ret.isdigit():
                                 return False
@@ -434,10 +347,11 @@ class Robot:
                             if count < item.threshold:
                                 return True
                         return False
-                    
+
                     tab_actions += [
                         SleepAction(swipe_time * 1 + 1),
-                        CustomIfCondition(condition_function, item, click_pos, meet_actions = [ClickAction(pos=self._pos(*click_pos))]),
+                        CustomIfCondition(condition_function, item, click_pos, meet_actions=[
+                                          ClickAction(pos=self._pos(*click_pos))]),
                         SleepAction(0.8),
                     ]
             tab_actions += [
@@ -702,11 +616,12 @@ class Robot:
                 )
             self._action_squential(
                 SleepAction(2),
-                ClickAction(pos=self._pos(666, 457))
+                ClickAction(pos=self._pos(666, 457)),
+                SleepAction(2)
             )
             # 高难
             self._action_squential(
-                ClickAction(template='very',offset=self._pos(0, -20),
+                ClickAction(template='very', offset=self._pos(0, -40),
                             threshold=0.6, mode='binarization')
             )
             self._combat(None)
@@ -810,20 +725,24 @@ class Robot:
         actions.append(SleepAction(2))
         unmatch_actions = []
         if activity:
-                unmatch_actions += [
-                    IfCondition('btn_activity_plot',
-                                meet_actions=[ClickAction(template='btn_activity_plot')],
-                                unmeet_actions=[ClickAction(pos=self._pos(53, 283)), MatchAction('btn_close', matched_actions=[ClickAction()], timeout=1)])]
+            unmatch_actions += [
+                IfCondition('btn_activity_plot',
+                            meet_actions=[ClickAction(
+                                template='btn_activity_plot')],
+                            unmeet_actions=[ClickAction(pos=self._pos(53, 283)), MatchAction('btn_close', matched_actions=[ClickAction()], timeout=1)])]
         if difficulty == Difficulty.NORMAL:
-            unmatch_actions = [ClickAction(template='btn_normal',threshold=0.9)] + unmatch_actions
+            unmatch_actions = [ClickAction(
+                template='btn_normal', threshold=0.9)] + unmatch_actions
             actions.append(MatchAction('btn_normal_selected',
                                        unmatch_actions=unmatch_actions))
         elif difficulty == Difficulty.HARD:
-            unmatch_actions = [ClickAction(template="btn_hard", threshold=0.9)] + unmatch_actions
+            unmatch_actions = [ClickAction(
+                template="btn_hard", threshold=0.9)] + unmatch_actions
             actions.append(MatchAction('btn_hard_selected',
                                        unmatch_actions=unmatch_actions))
         else:
-            unmatch_actions = [ClickAction(template="btn_very_hard",threshold=0.9)] + unmatch_actions
+            unmatch_actions = [ClickAction(
+                template="btn_very_hard", threshold=0.9)] + unmatch_actions
             actions.append(MatchAction('btn_very_hard_selected',
                                        unmatch_actions=unmatch_actions))
         self._action_squential(*actions)
@@ -1484,7 +1403,7 @@ class Robot:
                 if delay > 0:
                     time.sleep(delay)
 
-    def _find_match_pos(self, screenshot, template, threshold=THRESHOLD, mode=None) -> Tuple[int, int]:
+    def _find_match_pos(self, screenshot, template, threshold=THRESHOLD, mode=None, base_width=BASE_WIDTH, base_height=BASE_HEIGHT) -> Tuple[int, int]:
         name = template
         source: np.ndarray
         if isinstance(screenshot, np.ndarray):
@@ -1495,8 +1414,8 @@ class Robot:
         # 这里需要对template resize，template是在960x540的设备上截屏的
         height, width = source.shape[:2]
         theight, twidth = template.shape[:2]
-        fx = width/BASE_WIDTH
-        fy = height/BASE_HEIGHT
+        fx = width/base_width
+        fy = height/base_height
         template = cv.resize(template, None, fx=fx, fy=fy,
                              interpolation=cv.INTER_AREA)
         theight, twidth = template.shape[:2]
@@ -1505,7 +1424,8 @@ class Robot:
                 source = cv.cvtColor(source, cv.COLOR_BGR2GRAY)
                 _, source = cv.threshold(source, 127, 255, cv.THRESH_BINARY)
                 template = cv.cvtColor(template, cv.COLOR_BGR2GRAY)
-                _, template = cv.threshold(template, 127, 255, cv.THRESH_BINARY)
+                _, template = cv.threshold(
+                    template, 127, 255, cv.THRESH_BINARY)
             elif mode == 'canny':
                 source = cv.Canny(source, 180, 220)
                 template = cv.Canny(template, 180, 220)

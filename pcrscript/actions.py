@@ -1,16 +1,30 @@
 from .constants import *
+from typing import Tuple
 import time
 
 class Action:
     def __init__(self):
         super().__init__()
         self._done = False
+        self.task = None
+    
+    def bindTask(self, task):
+        self.task = task
 
     def do(self, screenshot, robot):
         self._done = True
 
     def done(self) -> bool:
         return self._done
+    
+    def _pos(self, robot, x, y) -> Tuple[int, int]:
+        if self.task:
+            device_width = robot.devicewidth
+            device_height = robot.deviceheight
+            base_width = self.task.define_width
+            base_height = self.task.define_height
+            return(int((x/base_width)*device_width), int((y/base_height)*device_height))
+        return (x, y)
 
 class MatchAction(Action):
     def __init__(self, template, matched_actions=None, unmatch_actions=None, delay=1, timeout=0, threshold=THRESHOLD, match_text=None):
@@ -109,13 +123,16 @@ class ClickAction(Action):
                 ret = robot._find_match_pos(
                     screenshot, self.template, threshold=self.threshold, mode=self.mode)
             if ret:
-                robot.driver.click(ret[0] + self.offset[0],
-                                   ret[1] + self.offset[1])
+                offset = self._pos(robot, *self.offset)
+                robot.driver.click(ret[0] + offset[0],
+                                   ret[1] + offset[1])
                 self._done = True
         else:
             if self.pos:
-                robot.driver.click(self.pos[0] + self.offset[0],
-                                   self.pos[1] + self.offset[1])
+                pos = self._pos(robot, *self.pos)
+                offset = self._pos(robot, *self.offset)
+                robot.driver.click(pos[0] + offset[0],
+                                   pos[1] + offset[1])
             self._done = True
 
 
@@ -137,7 +154,7 @@ class SwipeAction(Action):
         self.duration = duration
 
     def do(self, screenshot, robot):
-        robot.driver.swipe(self.start, self.end, self.duration)
+        robot.driver.swipe(self._pos(robot, *self.start), self._pos(robot, *self.end), self.duration)
         self._done = True
 
 
