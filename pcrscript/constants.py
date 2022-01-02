@@ -39,11 +39,13 @@ HARD_CHAPTER_POS = (
     (218, 290), (490, 360), (769, 300),
     (250, 231), (490, 350), (770, 280),
     (180, 353), (451, 217), (770, 300),
+    (180, 267), (481, 241), (770, 320),
 )
 
 VH_CHAPTER_POS = (
     (216, 266), (483, 363), (780, 293),
-    (218, 336), (483, 255), (780, 290)
+    (218, 336), (483, 255), (780, 290),
+    (218, 269), (483, 255), (780, 290)
 )
 
 GUILD_BOSS_POS = ((115, 291), (277, 290), (460, 168), (617, 234), (833, 248))
@@ -99,12 +101,18 @@ CHAPTERS = (
     FloorDict({0: CHAPTER_NONE}),
     FloorDict({0: CHAPTER_NONE}),
     FloorDict({0: CHAPTER_NONE}),
+    FloorDict({0: CHAPTER_NONE}),
+    FloorDict({0: CHAPTER_NONE}),
+    FloorDict({0: CHAPTER_NONE}),
+    FloorDict({0: CHAPTER_NONE}),
+    FloorDict({0: CHAPTER_NONE}),
+    FloorDict({0: CHAPTER_NONE}),
 )
 CHAPTER_SYMBOLS = (
     'chapter1', 'chapter2', 'chapter3', 'chapter4', 'chapter5', 'chapter6', 'chapter7', 'chapter8',
     'chapter9', 'chapter10', 'chapter11', 'chapter12', 'chapter13', 'chapter14', 'chapter15', 'chapter16',
     'chapter17', 'chapter18', 'chapter19', 'chapter20','chapter21','chapter22', 'chapter23','chapter24',
-    'chapter25', 'chapter26','chapter27','chapter28','chapter29'
+    'chapter25', 'chapter26','chapter27','chapter28','chapter29','chapter30'
 )
 
 VH_CHAPTERS = (
@@ -113,7 +121,7 @@ VH_CHAPTERS = (
 )
 
 VH_CHAPTER_SYMBOLS = (
-    'chapter18','chapter19'
+    'chapter18','chapter19','chapter20'
 )
 
 ACTIVITY_YLY = ((168, 322), (261, 247), (334, 356), (415, 231), (488, 317),

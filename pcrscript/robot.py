@@ -111,10 +111,11 @@ class Robot:
             for funcname, *args in tasklist:
                 if funcname in taskKeyMapping:
                     self._runTask(funcname, taskKeyMapping[funcname], args)
-                try:
-                    getattr(self, "_" + funcname)(*args)
-                except Exception as e:
-                    print(e)
+                else:
+                    try:
+                        getattr(self, "_" + funcname)(*args)
+                    except Exception as e:
+                        print(e)
 
     def _runTask(self, taskname, taskclass: BaseTask, args):
         self._log(f"start task: {taskname}")
@@ -217,27 +218,6 @@ class Robot:
                         ClickAction()], timeout=3)
         )
 
-    @trace
-    def _guild_like(self, no=1):
-        '''
-        行会点赞
-        Paramters:
-        ----
-        no: 支持1/2/3
-        '''
-        x = 829
-        y = 110 * (no - 1) + 196
-        self._action_squential(
-            SleepAction(2),
-            ClickAction(template="guild"),
-            MatchAction("guild_symbol"),
-            SleepAction(1),
-            ClickAction(pos=self._pos(234, 349)),
-            SleepAction(3),
-            ClickAction(pos=self._pos(x, y)),
-            MatchAction("btn_ok_blue", matched_actions=[
-                        ClickAction()], timeout=5),
-        )
 
     @trace
     def _shop_buy(self, rule):
@@ -764,6 +744,8 @@ class Robot:
         # 确保移动到对应页面
         actions.append(SleepAction(1))
         self._action_squential(*actions)
+        if chapter_index >= len(chapters):
+            chapter_index = -1
         level_pos = chapters[chapter_index][0]
         if pos == chapter_index:
             # 修正level pos
@@ -1187,9 +1169,9 @@ class Robot:
                 actions.append(SleepAction(10))
                 actions.append(MatchAction('btn_next_step', matched_actions=[ClickAction()], unmatch_actions=[
                     ClickAction(template='btn_close'), ClickAction(pos=self._pos(200, 250))]))
-                actions.append(SleepAction(8))
+                actions.append(SleepAction(6))
                 actions.append(ClickAction(template='btn_ok'))
-                actions.append(SleepAction(5))
+                actions.append(SleepAction(3))
 
         if withdraw:
             actions.append(MatchAction('in_dungeon_symbol'))

@@ -132,6 +132,25 @@ class RoleIntensify(BaseTask):
             actions.append(SleepAction(1))
         self.action_squential(*actions)
 
+class GuildLike(BaseTask):
+
+    def run(self, no=1):
+        x = 829
+        y = 110 * (no - 1) + 196
+        self.action_squential(
+            SleepAction(2),
+            MatchAction(template="guild", matched_actions=[ClickAction()],
+            unmatch_actions=[ClickAction(template="btn_close"), SleepAction(0.5)]),
+            SleepAction(2),
+            MatchAction("guild_symbol"),
+            SleepAction(1),
+            ClickAction(pos=(234, 349)),
+            SleepAction(3),
+            ClickAction(pos=(x, y)),
+            MatchAction("btn_ok_blue", matched_actions=[
+                        ClickAction()], timeout=5),
+        )
+
 
 
 # 声明任务对应的配置任务名
@@ -139,7 +158,8 @@ taskKeyMapping = {
     "get_gift": GetGift,
     "choushilian": ChouShiLian,
     "normal_gacha": NormalGacha,
-    "role_intensify":RoleIntensify,
+    "role_intensify": RoleIntensify,
+    "guild_like": GuildLike
     }
 
 
