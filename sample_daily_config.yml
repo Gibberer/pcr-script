@@ -67,6 +67,11 @@ Task: #配置执行任务,配置任务名称，如果需要传入参数在下面
       - activity_saodang  # 清活动图的日常，由于每次活动不一样，该任务每次活动更新一次做支持
       - True # 是否刷活动困难章节和高难boss
       - False # 是否将剩余体力花费在活动普通章节上
+    # 扫荡露娜塔
+    # -
+    #   - tohomepage
+    # -
+    #   - luna_tower_saodang
     -
       - tohomepage
     - 

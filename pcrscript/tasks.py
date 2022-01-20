@@ -11,8 +11,7 @@ class BaseTask(metaclass=ABCMeta):
         self.define_width = BASE_WIDTH
         self.define_height = BASE_HEIGHT
 
-    
-    def action_squential(self, *actions:Iterable[Action]):
+    def action_squential(self, *actions: Iterable[Action]):
         for action in actions:
             action.bindTask(self)
         self.robot._action_squential(*actions)
@@ -26,7 +25,7 @@ class GetGift(BaseTask):
     '''
     获取礼物
     '''
-    
+
     def run(self):
         self.action_squential(
             SleepAction(1),
@@ -40,6 +39,7 @@ class GetGift(BaseTask):
             MatchAction('btn_cancel', matched_actions=[
                         ClickAction()], timeout=3)
         )
+
 
 class ChouShiLian(BaseTask):
     '''
@@ -80,6 +80,7 @@ class NormalGacha(BaseTask):
     '''
     普通扭蛋
     '''
+
     def run(self):
         self.action_squential(
             ClickAction(template='niudan'),
@@ -132,6 +133,7 @@ class RoleIntensify(BaseTask):
             actions.append(SleepAction(1))
         self.action_squential(*actions)
 
+
 class GuildLike(BaseTask):
 
     def run(self, no=1):
@@ -152,17 +154,37 @@ class GuildLike(BaseTask):
         )
 
 
+class LunaTowerSaodang(BaseTask):
+
+    def run(self):
+        actions = [
+            MatchAction('tab_adventure', matched_actions=[ClickAction()], unmatch_actions=[ClickAction(template='btn_close'), ClickAction(pos=(50, 300))]),
+            SleepAction(2),
+            ClickAction(pos=(320, 425)),
+            MatchAction(template="symbol_luna_tower"),
+            SleepAction(2),
+            SwipeAction(start=(890, 376), end=(890, 376), duration=2000),
+            ClickAction(pos=(815, 375)),
+            ClickAction(template='btn_ok_blue'),
+            MatchAction(template='btn_skip_ok', matched_actions=[ClickAction()], timeout=2, delay=0.1),
+            SleepAction(1),
+            MatchAction(template='btn_ok', matched_actions=[ClickAction()], timeout=2, delay=0.1),
+            SleepAction(1),
+            MatchAction(template='btn_ok', matched_actions=[ClickAction(), SleepAction(1)], timeout=1),
+            MatchAction(template='btn_ok', matched_actions=[ClickAction(), SleepAction(1)], timeout=1),
+            MatchAction(template='btn_cancel', matched_actions=[ClickAction(), SleepAction(1)], timeout=1),
+            ]
+        self.action_squential(*actions)
+
+
+
 
 # 声明任务对应的配置任务名
-taskKeyMapping = {
+taskKeyMapping={
     "get_gift": GetGift,
     "choushilian": ChouShiLian,
     "normal_gacha": NormalGacha,
     "role_intensify": RoleIntensify,
-    "guild_like": GuildLike
+    "guild_like": GuildLike,
+    "luna_tower_saodang": LunaTowerSaodang,
     }
-
-
-
-
-
