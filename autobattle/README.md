@@ -105,6 +105,7 @@ job_list:
 * 为了获取比较准确的延迟时间，可以通过listen_mouse_event设置True之后观察日志打印的点击延迟时间，之后将该数据设置到配置文件中 （该功能依赖pynput, pip install pynput）
 * 战斗界面建议不要开启二倍/四倍速和AUTO（目前按照0.1秒的时间间隔处理，大部分的轴在二倍速还是可以跑的）
 * 使用ocr时，第一次启动需要下载OCR模型（启动脚本会自动下载）下载失败可以去[easy ocr](https://www.jaided.ai/easyocr/modelhub/)下载english_g2模型，然后解压放在用户目录的.EasyOCR/model下。
+* 可以使用[轴提取工具](../plugins/battleline_extractor)简化写轴的操作
 
 ### 在其他分辨率或设备上运行
 
