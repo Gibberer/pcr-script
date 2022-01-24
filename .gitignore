@@ -5,3 +5,4 @@ daily_config.yml
 *.log
 .vscode/
 autobattle/gui
+plugins/battleline_extractor/output.yaml
