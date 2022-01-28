@@ -37,6 +37,7 @@ class MatchAction(Action):
         self.timeout = timeout
         self.starttime = 0
         self.match_text = match_text
+        self.is_timeout = False
 
     def do(self, screenshot, robot):
         if self.starttime == 0:
@@ -71,6 +72,7 @@ class MatchAction(Action):
                         break
         if self.timeout > 0:
             if time.time() - self.starttime > self.timeout:
+                self.is_timeout = True
                 self._done = True
 
 

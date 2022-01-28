@@ -2,7 +2,27 @@ from abc import ABCMeta, abstractmethod
 from .constants import *
 from pcrscript.actions import *
 from typing import Iterable
+import time
 
+
+def _get_combat_actions(check_auto=False, combat_duration=35):
+    actions = []
+    actions.append(ClickAction(template='btn_challenge'))
+    actions.append(SleepAction(1))
+    actions.append(ClickAction(template='btn_combat_start'))
+    actions.append(SleepAction(5))
+    if check_auto:
+        actions.append(MatchAction(template='btn_caidan', matched_actions=[ClickAction(template='btn_speed'),
+                                                                               ClickAction(template='btn_auto')], timeout=10))
+    actions.append(SleepAction(combat_duration))
+    actions.append(MatchAction('btn_next_step', matched_actions=[ClickAction()], unmatch_actions=[
+        ClickAction(template='btn_close'),ClickAction(template='btn_cancel'), ClickAction(pos=(200, 250))]))
+    actions.append(SleepAction(1))
+    actions.append(MatchAction('btn_next_step', matched_actions=[ClickAction()], unmatch_actions=[
+        ClickAction(template='btn_close'),ClickAction(template='btn_cancel')]))
+    return actions
+
+    
 
 class BaseTask(metaclass=ABCMeta):
 
@@ -176,6 +196,35 @@ class LunaTowerSaodang(BaseTask):
             ]
         self.action_squential(*actions)
 
+class CommonAdventure(BaseTask):
+    '''
+    通用的过图任务，执行内容为：
+    1. 寻找当前人物的位置
+    2. 点击人物
+    3. 进入战斗页面，开始战斗直到结束
+    4. -> 1 循环
+    '''
+
+    def run(self, charactor_symbol="peco", estimate_combat_duration=30):
+        '''
+        :param charactor_symbol 当前使用角色在冒险地图上的图片特征（取脸部或身体部分即可，不要截到背景）
+        :param estimate_combat_duration 预估一次战斗的时间（正确设置可以减少cpu的消耗)
+        '''
+        while True:
+            screenshot = self.robot.driver.screenshot()
+            pos = self.robot._find_match_pos(screenshot, charactor_symbol, threshold=0.7)
+            if pos :
+                # 通过图片匹配的位置信息是真实的坐标，不需要转换
+                self.robot.driver.click(pos[0], pos[1] + self.define_height * 0.1)
+                match_action = MatchAction(template='btn_challenge', timeout=5)
+                self.action_squential(match_action)
+                if not match_action.is_timeout:
+                    actions = _get_combat_actions(combat_duration=estimate_combat_duration)
+                    actions += [SleepAction(2)]
+                    self.action_squential(*actions)
+            else:
+                self.action_squential(MatchAction(template='peco', threshold=0.7, unmatch_actions=[ClickAction(template='btn_cancel'), ClickAction(template='btn_close')]))
+
 
 
 
@@ -187,4 +236,5 @@ taskKeyMapping={
     "role_intensify": RoleIntensify,
     "guild_like": GuildLike,
     "luna_tower_saodang": LunaTowerSaodang,
+    "common_adventure": CommonAdventure,
     }

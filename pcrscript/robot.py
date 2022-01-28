@@ -349,6 +349,7 @@ class Robot:
                         ClickAction(pos=self._pos(550, 440)),
                         SleepAction(0.2),
                         ClickAction(template='btn_ok_blue'),
+                        SleepAction(1)
                     ]
                     copy_tab_actions += copy.deepcopy(tab_actions)
                     actions += copy_tab_actions
@@ -749,7 +750,7 @@ class Robot:
         level_pos = chapters[chapter_index][0]
         if pos == chapter_index:
             # 修正level pos
-            ret = self._find_match_pos(self.driver.screenshot(), 'peiko')
+            ret = self._find_match_pos(self.driver.screenshot(), 'peco')
             if ret:
                 bar = ret[0] + 15
                 for i, pos in enumerate(level_pos):
