@@ -506,7 +506,7 @@ class Robot:
                 MatchAction(template='btn_ok',
                             matched_actions=[ClickAction(), SleepAction(1)], timeout=1),
                 MatchAction(template='btn_cancel', matched_actions=[
-                            ClickAction(), SleepAction(1)], timeout=1),  # 限时商店
+                            ClickAction(pos=self._pos(121,240)), SleepAction(1)], timeout=1),  # 限时商店
                 ClickAction(pos=self._pos(*next_pos)),
                 SleepAction(2),
             )
@@ -563,7 +563,7 @@ class Robot:
             self._action_squential(
                 SleepAction(2),
                 ClickAction(template='1-1', offset=self._pos(0, -20),
-                            threshold=0.6, mode='binarization'),  # 点击第一个活动困难本
+                            threshold=0.5, mode='binarization'),  # 点击第一个活动困难本
                 MatchAction('btn_challenge', threshold=0.9*THRESHOLD),
             )
             for _ in range(5):
@@ -591,7 +591,7 @@ class Robot:
                     MatchAction(template='btn_ok',
                                 matched_actions=[ClickAction(), SleepAction(1)], timeout=1),
                     MatchAction(template='btn_cancel', matched_actions=[
-                                ClickAction(), SleepAction(1)], timeout=1),  # 限时商店
+                                ClickAction(pos=self._pos(121,240)), SleepAction(1)], timeout=1),  # 限时商店
                     ClickAction(pos=self._pos(939, 251)),
                     SleepAction(2),
                 )
@@ -873,7 +873,6 @@ class Robot:
             SleepAction(3),
             ClickAction(pos=self._pos(712, 143)),
             MatchAction('btn_challenge'),
-            SwipeAction(self._pos(877, 330), self._pos(877, 330), 2000),
             ClickAction(pos=self._pos(757, 330)),
             ClickAction(template='btn_ok_blue'),
             ClickAction(template='btn_skip_ok'),
@@ -884,7 +883,6 @@ class Robot:
             SleepAction(3),
             ClickAction(pos=self._pos(712, 143)),
             MatchAction('btn_challenge'),
-            SwipeAction(self._pos(877, 330), self._pos(877, 330), 2000),
             ClickAction(pos=self._pos(757, 330)),
             ClickAction(template='btn_ok_blue'),
             ClickAction(template='btn_skip_ok'),
@@ -944,7 +942,8 @@ class Robot:
             ClickAction(pos=self._pos(665, 186)),
             SleepAction(3),
             ClickAction(pos=self._pos(849, 454)),
-            SleepAction(10),
+            SleepAction(2),
+            MatchAction(template='btn_arena_skip', matched_actions=[ClickAction()], timeout=5),
             MatchAction(['btn_next_step_small', 'btn_next_step'], matched_actions=[ClickAction()], unmatch_actions=[
                 ClickAction(template='btn_close')]),
         )
@@ -969,29 +968,30 @@ class Robot:
             ClickAction(pos=self._pos(849, 454)),
             SleepAction(1),
             ClickAction(pos=self._pos(849, 454)),
-            SleepAction(30),
+            SleepAction(2),
+            MatchAction(template='btn_arena_skip', matched_actions=[ClickAction()], timeout=10),
             MatchAction(['btn_next_step_small', 'btn_next_step'], matched_actions=[ClickAction()], unmatch_actions=[
                 ClickAction(template='btn_close')]),
         )
 
     @trace
-    def _dungeon_saodang(self, difficulty=5, monster_team=1, boss_group='1', boss_team='2,3', withdraw=False):
+    def _dungeon_saodang(self, difficulty=6, monster_team=1, boss_group='1', boss_team='2,3', withdraw=False):
         '''
         大号用来过地下城
         '''
-        level = [7, 0, 0, 5, 5][difficulty-1]
+        level = [7, 0, 0, 5, 5, 5][difficulty-1]
         actions = []
         actions.append(MatchAction('tab_adventure', matched_actions=[ClickAction()], unmatch_actions=[
             ClickAction(template='btn_close')]))
         actions.append(SleepAction(2))
         actions.append(ClickAction(template='dungeon'))
         actions.append(SleepAction(2))
-        if difficulty == 1:
+        if difficulty <= 2:
             actions.append(ClickAction(pos=self._pos(10, 248)))
             dungeon_pos = DUNGEON_LOCATION[difficulty - 1]
         else:
             actions.append(ClickAction(pos=self._pos(944, 248)))
-            dungeon_pos = DUNGEON_LOCATION[difficulty - 2]
+            dungeon_pos = DUNGEON_LOCATION[difficulty - 3]
         actions.append(SleepAction(2))
         actions.append(MatchAction('dungeon_symbol', matched_actions=[
                        ClickAction(offset=self._pos(*dungeon_pos))], timeout=5))  # 确认进入地下城

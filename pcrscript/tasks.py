@@ -215,7 +215,7 @@ class CommonAdventure(BaseTask):
             pos = self.robot._find_match_pos(screenshot, charactor_symbol, threshold=0.7)
             if pos :
                 # 通过图片匹配的位置信息是真实的坐标，不需要转换
-                self.robot.driver.click(pos[0], pos[1] + self.define_height * 0.1)
+                self.robot.driver.click(pos[0], pos[1] + self.robot.deviceheight * 0.1)
                 match_action = MatchAction(template='btn_challenge', timeout=5)
                 self.action_squential(match_action)
                 if not match_action.is_timeout:
