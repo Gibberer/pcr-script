@@ -139,9 +139,9 @@ ACTIVITIES = (
 ACTIVITY_SYMBOLS = ('activity_symbol',)
 
 TEAM_LOCATION = (
-    (790, 170),
-    (790, 290),
-    (790, 409)
+    (790, 207),
+    (790, 320),
+    (790, 428)
 )
 TEAM_GROUP_LOCATION = (
     (117,90),
