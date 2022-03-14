@@ -242,6 +242,7 @@ class Robot:
         Item = collections.namedtuple(
             "Item", ["pos", "threshold"], defaults=[0, -1])
         times = collections.defaultdict(int)
+        item_total_count = collections.defaultdict(lambda:-1)
         for key in tabs:
             value = tabs[key]
             tabs[key] = []
@@ -258,6 +259,8 @@ class Robot:
             items.sort(key=lambda item: item.pos)
             if 'time' in value:
                 times[key] = value['time']
+            if 'total_item_count' in value:
+                item_total_count[key] = value['total_item_count']
         for tab, items in tabs.items():
             actions += [
                 ClickAction(pos=self._pos(*SHOP_TAB_LOCATION[tab - 1])),
@@ -275,7 +278,7 @@ class Robot:
                     break
             last_line = 100000
             if slow_swipe:
-                last_line = int((items[-1].pos - 1) / line_count) + 1
+                last_line = item_total_count[tab]
             for item in items:
                 swipe_time = 0
                 if item.pos > line * line_count:
@@ -1405,10 +1408,10 @@ class Robot:
         if mode:
             if mode == 'binarization':
                 source = cv.cvtColor(source, cv.COLOR_BGR2GRAY)
-                _, source = cv.threshold(source, 127, 255, cv.THRESH_BINARY)
+                _, source = cv.threshold(source, 180, 255, cv.THRESH_BINARY)
                 template = cv.cvtColor(template, cv.COLOR_BGR2GRAY)
                 _, template = cv.threshold(
-                    template, 127, 255, cv.THRESH_BINARY)
+                    template, 180, 255, cv.THRESH_BINARY)
             elif mode == 'canny':
                 source = cv.Canny(source, 180, 220)
                 template = cv.Canny(template, 180, 220)
