@@ -883,8 +883,8 @@ class Robot:
             ClickAction(template='btn_skip_ok'),
             SleepAction(1),
             ClickAction(pos=self._pos(480, 480)),
-            SleepAction(3),
-            ClickAction(pos=self._pos(813, 230)),  # 玛娜关卡
+            # SleepAction(3),
+            # ClickAction(pos=self._pos(813, 230)),  # 玛娜关卡
             SleepAction(3),
             ClickAction(pos=self._pos(712, 143)),
             MatchAction('btn_challenge'),
@@ -1038,7 +1038,7 @@ class Robot:
                     elif team <= 6:
                         meet_actions += [
                             SleepAction(1),
-                            SwipeAction(self._pos(440, 415),
+                            SwipeAction(self._pos(440, 419),
                                         self._pos(440, 140),400),
                             SleepAction(1),
                             ClickAction(pos=self._pos(
@@ -1047,10 +1047,10 @@ class Robot:
                     elif team <= 9:
                         meet_actions += [
                             SleepAction(1),
-                            SwipeAction(self._pos(440, 415),
+                            SwipeAction(self._pos(440, 419),
                                         self._pos(440, 140),400),
                             SleepAction(1),
-                            SwipeAction(self._pos(440, 415),
+                            SwipeAction(self._pos(440, 419),
                                         self._pos(440, 140),400),
                             SleepAction(1),
                             ClickAction(pos=self._pos(
@@ -1059,13 +1059,13 @@ class Robot:
                     else:
                         meet_actions += [
                             SleepAction(1),
-                            SwipeAction(self._pos(440, 415),
+                            SwipeAction(self._pos(440, 419),
                                         self._pos(440, 140),400),
                             SleepAction(1),
-                            SwipeAction(self._pos(440, 415),
+                            SwipeAction(self._pos(440, 419),
                                         self._pos(440, 140),400),
                             SleepAction(1),
-                            SwipeAction(self._pos(440, 415),
+                            SwipeAction(self._pos(440, 419),
                                         self._pos(440, 140),400),
                             SleepAction(1),
                             ClickAction(pos=self._pos(796, 371))  # 暂时特殊给到
