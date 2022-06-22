@@ -184,6 +184,7 @@ class Robot:
             ClickAction(template='btn_close'),
             ClickAction(template="btn_ok_blue"),
             ClickAction(template="btn_download"),
+            ClickAction(template='btn_skip'),
             ClickAction(pos=self._pos(90, 500)),
         ), timeout=timeout))
 
@@ -413,7 +414,8 @@ class Robot:
         '''
         self._action_squential(
             ClickAction(template='tab_society_home'),
-            SleepAction(3),
+            MatchAction('guilde_home_symbol', timeout=8),
+            SleepAction(1),
             ClickAction(pos=self._pos(900, 428)),
             MatchAction('btn_close', matched_actions=[
                         ClickAction()], timeout=5),
@@ -924,11 +926,11 @@ class Robot:
             *self.__saodang_oneshot_actions(),
             SleepAction(1)
         ]
-        # 神殿1级
-        actions += [
-            ClickAction(pos=self._pos(718, 259)),
-            *self.__saodang_oneshot_actions()
-        ]
+        # # 神殿1级
+        # actions += [
+        #     ClickAction(pos=self._pos(718, 259)),
+        #     *self.__saodang_oneshot_actions()
+        # ]
         self._action_squential(*actions)
 
     @trace

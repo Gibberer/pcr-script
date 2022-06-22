@@ -225,8 +225,42 @@ class CommonAdventure(BaseTask):
             else:
                 self.action_squential(MatchAction(template='peco', threshold=0.7, unmatch_actions=[ClickAction(template='btn_cancel'), ClickAction(template='btn_close')]))
 
-
-
+class QuickSaodang(BaseTask):
+    '''
+    快速扫荡任务
+    '''
+    _pos = ((80, 100), (80, 220), (80, 340), (80, 450), (80, 570), (80, 690), (80, 810))
+    def run(self, pos=0):
+        if pos <= 0 or pos > len(QuickSaodang._pos):
+            print(f"不支持的预设选项:{pos}")
+            return
+        pref_pos = QuickSaodang._pos[pos - 1]
+        # 进入冒险图
+        self.robot._entre_advanture()
+        actions = [
+            ClickAction(pos=(920, 144)),
+            SleepAction(1),
+            ClickAction(pos=pref_pos),
+            SleepAction(0.5),
+            ClickAction(pos=(815, 480)),
+            MatchAction(template="btn_challenge",matched_actions=[ClickAction()], unmatch_actions=[
+                IfCondition("symbol_restore_power", meet_actions=[
+                    ThrowErrorAction("No Power!!!")
+                ], unmeet_actions=[
+                    MatchAction(template='btn_ok_blue',matched_actions=[ClickAction()],timeout=0.1)
+                ])
+            ]),
+            MatchAction(template='btn_skip_ok', matched_actions=[
+                            ClickAction()], timeout=2, delay=0.1),
+            SleepAction(1),
+            MatchAction(template='btn_ok', matched_actions=[
+                            ClickAction()], timeout=2, delay=0.1),
+            SleepAction(1),
+            MatchAction(template='btn_cancel', matched_actions=[
+                                ClickAction(pos=(121,240)), SleepAction(1)], timeout=1),  # 限时商店
+            ClickAction(pos=(580, 480)), # 取消按钮退出
+        ]
+        self.action_squential(*actions)
 
 # 声明任务对应的配置任务名
 taskKeyMapping={
@@ -237,4 +271,5 @@ taskKeyMapping={
     "guild_like": GuildLike,
     "luna_tower_saodang": LunaTowerSaodang,
     "common_adventure": CommonAdventure,
+    "quick_saodang": QuickSaodang,
     }
