@@ -2,6 +2,7 @@ from time import sleep
 from .driver import Driver
 from .actions import *
 from .constants import *
+from .error import NetError
 from cv2 import cv2 as cv
 import numpy as np
 import time
@@ -112,10 +113,7 @@ class Robot:
                 if funcname in taskKeyMapping:
                     self._runTask(funcname, taskKeyMapping[funcname], args)
                 else:
-                    try:
-                        getattr(self, "_" + funcname)(*args)
-                    except Exception as e:
-                        print(e)
+                    self._call_function(funcname, args)
 
     def _runTask(self, taskname, taskclass: BaseTask, args):
         self._log(f"start task: {taskname}")
@@ -127,7 +125,19 @@ class Robot:
                 task.run()
         except Exception as e:
             print(e)
+            if isinstance(e, NetError):
+                self._tohomepage(click_pos=(60, 300))
+                self._runTask(taskname, taskclass, args)
         self._log(f"end task: {taskname}")
+    
+    def _call_function(self, funcname, args):
+        try:
+            getattr(self, "_" + funcname)(*args)
+        except Exception as e:
+            print(e)
+            if isinstance(e, NetError):
+                self._tohomepage(click_pos=(60, 300))
+                self._call_function(funcname, args)
 
     def _log(self, msg: str):
         print("{}: {}".format(self._name, msg))
@@ -176,7 +186,7 @@ class Robot:
         )
 
     @trace
-    def _tohomepage(self, timeout=0):
+    def _tohomepage(self, click_pos=(90, 500), timeout=0):
         '''
         进入游戏主页面
         '''
@@ -185,8 +195,8 @@ class Robot:
             ClickAction(template="btn_ok_blue"),
             ClickAction(template="btn_download"),
             ClickAction(template='btn_skip'),
-            ClickAction(pos=self._pos(90, 500)),
-        ), timeout=timeout))
+            ClickAction(pos=self._pos(*click_pos)),
+        ), timeout=timeout), net_error_check=False)
 
     @trace
     def _close_ub_animation(self):
@@ -1386,12 +1396,22 @@ class Robot:
     def _roi(self, left, top, right, bottom) -> Tuple[int, int, int, int]:
         return (*self._pos(left, top), *self._pos(right, bottom))
 
-    def _action_squential(self, *actions: Iterable[Action], delay=0.2):
+    def _action_squential(self, *actions: Iterable[Action], delay=0.2, net_error_check=True):
         for action in actions:
+            action_start_time = time.time()
             while not action.done():
-                action.do(self.driver.screenshot(), self)
+                screenshot = self.driver.screenshot()
+                action.do(screenshot, self)
                 if delay > 0:
                     time.sleep(delay)
+                if net_error_check and time.time() - action_start_time > 10:
+                    # 如果一个任务检测超过10s，校验是否存在网络异常
+                    net_error = self._find_match_pos(screenshot, "btn_return_title_blue")
+                    if not net_error:
+                        net_error = self._find_match_pos(screenshot, "btn_return_title_white")
+                    if net_error:
+                        self.driver.click(*net_error)
+                        raise NetError()
 
     def _find_match_pos(self, screenshot, template, threshold=THRESHOLD, mode=None, base_width=BASE_WIDTH, base_height=BASE_HEIGHT) -> Tuple[int, int]:
         name = template
