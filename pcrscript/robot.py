@@ -195,6 +195,7 @@ class Robot:
             ClickAction(template="btn_ok_blue"),
             ClickAction(template="btn_download"),
             ClickAction(template='btn_skip'),
+            ClickAction(template='btn_cancel'),
             ClickAction(pos=self._pos(*click_pos)),
         ), timeout=timeout), net_error_check=False)
 
