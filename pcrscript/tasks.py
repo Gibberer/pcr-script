@@ -105,17 +105,16 @@ class NormalGacha(BaseTask):
         self.action_squential(
             ClickAction(template='niudan'),
             MatchAction('btn_setting_blue', matched_actions=[ClickAction()], unmatch_actions=[
-                        ClickAction(template='btn_close')], timeout=5),
+                        ClickAction(template='btn_close')], timeout=3),
             MatchAction('btn_role_detail', unmatch_actions=[
                         ClickAction(template='btn_close')]),
             ClickAction(pos=(877, 72)),
-            SleepAction(2),
-            ClickAction(pos=(722, 347)),
-            ClickAction(template='btn_ok_blue'),
-            MatchAction('btn_ok', matched_actions=[ClickAction()],
-                        unmatch_actions=[
-                        ClickAction(pos=(50, 300)),
-                        ]),
+            MatchAction('btn_ok_blue', 
+                        matched_actions=[ClickAction()],
+                        unmatch_actions=[ClickAction(pos=(722, 347))]),
+            MatchAction('btn_ok', 
+                        matched_actions=[ClickAction()],
+                        unmatch_actions=[ClickAction(pos=(50, 300)),]),
             MatchAction('btn_setting_blue', matched_actions=[
                         ClickAction()], timeout=5),
         )
@@ -162,7 +161,7 @@ class GuildLike(BaseTask):
         self.action_squential(
             SleepAction(2),
             MatchAction(template="guild", matched_actions=[ClickAction()],
-            unmatch_actions=[ClickAction(template="btn_close"), SleepAction(0.5)]),
+            unmatch_actions=[ClickAction(template="btn_close"),ClickAction(template="btn_ok"), SleepAction(0.5)]),
             SleepAction(2),
             MatchAction("guild_symbol"),
             SleepAction(1),
@@ -262,6 +261,82 @@ class QuickSaodang(BaseTask):
         ]
         self.action_squential(*actions)
 
+class ActivitySaodang(BaseTask):
+    '''
+    剧情活动扫荡
+    '''
+    def run(self, hard_chapter=True, exhaust_power=True):
+        if hard_chapter:
+            self.robot._entre_advanture(difficulty=Difficulty.HARD, activity=True)
+            actions = [
+                MatchAction(template='btn_close', matched_actions=[
+                            ClickAction(), SleepAction(2)], timeout=3),
+                SleepAction(2),
+                # 清困难本
+                ClickAction(template='1-1', offset=(0, -20),
+                            threshold=0.5, mode='binarization'),  # 点击第一个活动困难本
+                MatchAction('btn_challenge', threshold=0.9*THRESHOLD),
+            ]
+            for _ in range(5):
+                actions += [
+                    SwipeAction((877, 330),(877, 330), 2000),
+                    ClickAction(pos=(757, 330)),
+                    ClickAction(template='btn_ok_blue'),
+                    MatchAction(template='symbol_restore_power',
+                                matched_actions=[
+                                    ClickAction(pos=(370, 370)),
+                                    SleepAction(2),
+                                    ClickAction(pos=(680, 454)),
+                                    SleepAction(2),
+                                    ThrowErrorAction("No power!!!")],
+                                timeout=1),
+                    MatchAction(template='btn_skip_ok', matched_actions=[
+                                ClickAction()], timeout=2, delay=0.1),
+                    SleepAction(1),
+                    MatchAction(template='btn_ok', matched_actions=[
+                                ClickAction()], timeout=2, delay=0.1),
+                    SleepAction(1),
+                    MatchAction(template='btn_ok',
+                                matched_actions=[ClickAction(), SleepAction(1)], timeout=1),
+                    MatchAction(template='btn_ok',
+                                matched_actions=[ClickAction(), SleepAction(1)], timeout=1),
+                    MatchAction(template='btn_cancel', matched_actions=[
+                                ClickAction(pos=(121,240)), SleepAction(1)], timeout=1),  # 限时商店
+                    ClickAction(pos=(939, 251)),
+                    SleepAction(2)
+                ]
+            actions += [
+                ClickAction(pos=(666, 457)),
+                SleepAction(2)
+            ]
+            # 高难
+            actions += [
+                ClickAction(template='very', offset=(0, -40),
+                            threshold=0.6, mode='binarization')
+            ]
+            actions += _get_combat_actions()
+            self.action_squential(*actions)
+        if exhaust_power:
+            if hard_chapter:
+                self.robot._tohomepage()
+            self.robot._entre_advanture(difficulty=Difficulty.NORMAL, activity=True)
+            actions = []
+            if not hard_chapter:
+                actions += [
+                    MatchAction(template='btn_close', matched_actions=[
+                                ClickAction(), SleepAction(2)], timeout=3)
+                ]
+            actions += [
+                ClickAction(template="15", offset=(0, -20),
+                            threshold=0.6, mode="binarization"),
+                SleepAction(2),
+                *(getattr(self.robot, "_Robot__saodang_oneshot_actions")(duration=6000)),
+                SleepAction(2)
+            ]
+            self.action_squential(*actions)
+        self.action_squential(SleepAction(2))
+        self.robot._get_quest_reward()
+
 # 声明任务对应的配置任务名
 taskKeyMapping={
     "get_gift": GetGift,
@@ -272,4 +347,5 @@ taskKeyMapping={
     "luna_tower_saodang": LunaTowerSaodang,
     "common_adventure": CommonAdventure,
     "quick_saodang": QuickSaodang,
+    "activity_saodang": ActivitySaodang,
     }

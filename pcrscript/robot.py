@@ -196,6 +196,7 @@ class Robot:
             ClickAction(template="btn_download"),
             ClickAction(template='btn_skip'),
             ClickAction(template='btn_cancel'),
+            ClickAction(template='select_branch_first'),
             ClickAction(pos=self._pos(*click_pos)),
         ), timeout=timeout), net_error_check=False)
 
@@ -352,12 +353,11 @@ class Robot:
                         SleepAction(0.8),
                     ]
             tab_actions += [
-                ClickAction(pos=self._pos(833, 438)),
+                ClickAction(pos=self._pos(700, 438)),
                 SleepAction(0.2),
-                ClickAction(template='btn_ok_blue'),
-                SleepAction(1.5),
-                ClickAction(template='btn_ok_blue'),
-                SleepAction(1.5)
+                MatchAction(template='btn_ok_blue',matched_actions=[ClickAction()], timeout=2),
+                SleepAction(2),
+                MatchAction(template='btn_ok_blue',matched_actions=[ClickAction()], timeout=2)
             ]
             actions += tab_actions
             if times[tab]:
@@ -567,110 +567,6 @@ class Robot:
         ]
 
     @trace
-    def _activity_saodang(self, hard_chapter=True, exhaust_power=True):
-        '''
-        用于过活动的每日日常
-        '''
-        if hard_chapter:
-            self._entre_advanture(difficulty=Difficulty.HARD, activity=True)
-            self._action_squential(
-                MatchAction(template='btn_close', matched_actions=[
-                            ClickAction(), SleepAction(2)], timeout=3)
-            )
-            # 清困难本
-            self._action_squential(
-                SleepAction(2),
-                ClickAction(template='1-1', offset=self._pos(0, -20),
-                            threshold=0.5, mode='binarization'),  # 点击第一个活动困难本
-                MatchAction('btn_challenge', threshold=0.9*THRESHOLD),
-            )
-            for _ in range(5):
-                self._action_squential(
-                    SwipeAction(self._pos(877, 330),
-                                self._pos(877, 330), 2000),
-                    ClickAction(pos=self._pos(757, 330)),
-                    ClickAction(template='btn_ok_blue'),
-                    MatchAction(template='symbol_restore_power',
-                                matched_actions=[
-                                    ClickAction(pos=self._pos(370, 370)),
-                                    SleepAction(2),
-                                    ClickAction(pos=self._pos(680, 454)),
-                                    SleepAction(2),
-                                    ThrowErrorAction("No power!!!")],
-                                timeout=1),
-                    MatchAction(template='btn_skip_ok', matched_actions=[
-                                ClickAction()], timeout=2, delay=0.1),
-                    SleepAction(1),
-                    MatchAction(template='btn_ok', matched_actions=[
-                                ClickAction()], timeout=2, delay=0.1),
-                    SleepAction(1),
-                    MatchAction(template='btn_ok',
-                                matched_actions=[ClickAction(), SleepAction(1)], timeout=1),
-                    MatchAction(template='btn_ok',
-                                matched_actions=[ClickAction(), SleepAction(1)], timeout=1),
-                    MatchAction(template='btn_cancel', matched_actions=[
-                                ClickAction(pos=self._pos(121,240)), SleepAction(1)], timeout=1),  # 限时商店
-                    ClickAction(pos=self._pos(939, 251)),
-                    SleepAction(2),
-                )
-            self._action_squential(
-                SleepAction(2),
-                ClickAction(pos=self._pos(666, 457)),
-                SleepAction(2)
-            )
-            # 高难
-            self._action_squential(
-                ClickAction(template='very', offset=self._pos(0, -40),
-                            threshold=0.6, mode='binarization')
-            )
-            self._combat(None)
-        if exhaust_power:
-            if hard_chapter:
-                self._tohomepage()
-            self._entre_advanture(difficulty=Difficulty.NORMAL, activity=True)
-            if not hard_chapter:
-                self._action_squential(
-                    MatchAction(template='btn_close', matched_actions=[
-                                ClickAction(), SleepAction(2)], timeout=3)
-                )
-            self._action_squential(
-                ClickAction(template="15", offset=self._pos(0, -20),
-                            threshold=0.6, mode="binarization"),
-                SleepAction(2),
-                *self.__saodang_oneshot_actions(duration=6000)
-            )
-        self._action_squential(SleepAction(2))
-        self._get_quest_reward()
-
-    @trace
-    def _drama_activity(self, start, end):
-        # 不做了没啥收益
-        self._action_squential(
-            ClickAction(template='tab_adventure'),
-            SleepAction(1),
-            MatchAction('btn_main_plot'),
-            ClickAction(pos=self._pos(413, 423)),
-            SleepAction(3)
-        )
-        ret = self._find_match_pos(self.driver.screenshot(), 'btn_no_voice')
-        if ret:
-            # 第一次进入出现引导
-            self._action_squential(
-                ClickAction(pos=ret),
-                ClickAction(template='btn_menu'),
-                ClickAction(template='btn_skip_with_text'),
-                ClickAction(template='btn_ok_blue'),
-                MatchAction(template='btn_close', matched_actions=[
-                            ClickAction()], unmatch_actions=[ClickAction(pos=self._pos(373, 212))])
-            )
-        self._action_squential(
-            MatchAction('activity_symbol', unmatch_actions=[
-                        ClickAction(pos=self._pos(537, 177))])
-        )
-        self._guotu(1, start, end, 1, False,
-                    symbols=ACTIVITY_SYMBOLS, chapters=ACTIVITIES)
-
-    @trace
     def _adventure(self, chapter, start, end=None, totalcount=1, checkguide=False):
         '''
         刷冒险
@@ -717,7 +613,7 @@ class Robot:
             ClickAction(template='btn_close'), ClickAction(pos=self._pos(50, 300))]))
         actions.append(SleepAction(2))
         if activity:
-            actions.append(ClickAction(pos=self._pos(413, 423)))
+            actions.append(ClickAction(template='story_activity_symbol'))
         else:
             actions.append(ClickAction(
                 template='btn_main_plot', threshold=0.8*THRESHOLD))
