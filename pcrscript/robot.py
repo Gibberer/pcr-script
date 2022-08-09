@@ -356,8 +356,9 @@ class Robot:
                 ClickAction(pos=self._pos(700, 438)),
                 SleepAction(0.2),
                 MatchAction(template='btn_ok_blue',matched_actions=[ClickAction()], timeout=2),
-                SleepAction(2),
-                MatchAction(template='btn_ok_blue',matched_actions=[ClickAction()], timeout=2)
+                SleepAction(1.5),
+                MatchAction(template='btn_ok_blue',matched_actions=[ClickAction()], timeout=2),
+                SleepAction(1.5)
             ]
             actions += tab_actions
             if times[tab]:
