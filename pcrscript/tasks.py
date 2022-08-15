@@ -178,8 +178,8 @@ class LunaTowerSaodang(BaseTask):
     def run(self):
         actions = [
             MatchAction('tab_adventure', matched_actions=[ClickAction()], unmatch_actions=[ClickAction(template='btn_close'), ClickAction(pos=(50, 300))]),
-            SleepAction(2),
-            ClickAction(pos=(320, 425)),
+            SleepAction(1),
+            ClickAction(template="btn_luna_tower_entrance"),
             MatchAction(template="symbol_luna_tower"),
             SleepAction(2),
             SwipeAction(start=(890, 376), end=(890, 376), duration=2000),

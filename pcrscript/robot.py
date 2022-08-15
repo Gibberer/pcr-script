@@ -277,10 +277,7 @@ class Robot:
             if 'total_item_count' in value:
                 item_total_count[key] = value['total_item_count']
         for tab, items in tabs.items():
-            actions += [
-                ClickAction(pos=self._pos(*SHOP_TAB_LOCATION[tab - 1])),
-                SleepAction(1)
-            ]
+            tab_main_actions = []
 
             tab_actions = []
 
@@ -360,7 +357,7 @@ class Robot:
                 MatchAction(template='btn_ok_blue',matched_actions=[ClickAction()], timeout=2),
                 SleepAction(1.5)
             ]
-            actions += tab_actions
+            tab_main_actions += tab_actions
             if times[tab]:
                 for i in range(times[tab] - 1):
                     copy_tab_actions = [
@@ -370,7 +367,21 @@ class Robot:
                         SleepAction(1)
                     ]
                     copy_tab_actions += copy.deepcopy(tab_actions)
-                    actions += copy_tab_actions
+                    tab_main_actions += copy_tab_actions
+            if tab == 8:
+                # 限定tab，判断下对应tab是否为可点击状态
+                meet_actions = [ClickAction(pos=self._pos(*SHOP_TAB_LOCATION[tab - 1]))] + tab_main_actions
+                actions += [
+                    SleepAction(1),
+                    IfCondition(template="limit_tab_enable_symbol", meet_actions= meet_actions),
+                    SleepAction(1)
+                    ]
+            else:
+                actions += [
+                    ClickAction(pos=self._pos(*SHOP_TAB_LOCATION[tab - 1])),
+                    SleepAction(1)
+                    ]
+                actions += + tab_main_actions
         self._action_squential(*actions)
 
     @trace
