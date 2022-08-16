@@ -373,7 +373,7 @@ class Robot:
                 meet_actions = [ClickAction(pos=self._pos(*SHOP_TAB_LOCATION[tab - 1]))] + tab_main_actions
                 actions += [
                     SleepAction(1),
-                    IfCondition(template="limit_tab_enable_symbol", meet_actions= meet_actions),
+                    IfCondition("limit_tab_enable_symbol", meet_actions= meet_actions),
                     SleepAction(1)
                     ]
             else:
@@ -381,7 +381,7 @@ class Robot:
                     ClickAction(pos=self._pos(*SHOP_TAB_LOCATION[tab - 1])),
                     SleepAction(1)
                     ]
-                actions += + tab_main_actions
+                actions += tab_main_actions
         self._action_squential(*actions)
 
     @trace
