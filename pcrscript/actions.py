@@ -10,6 +10,7 @@ class Action:
     
     def bindTask(self, task):
         self.task = task
+        return self
 
     def do(self, screenshot, robot):
         self._done = True

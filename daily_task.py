@@ -4,6 +4,10 @@ import subprocess
 import time
 from pcrscript import DNSimulator2
 
+def restart_adb_server():
+    subprocess.run("adb kill-server")
+    subprocess.run("adb start-server")
+
 if __name__ == '__main__':
     with open('daily_config.yml', encoding='utf-8') as f:
         config = yaml.load(f, Loader=yaml.FullLoader)
@@ -18,11 +22,14 @@ if __name__ == '__main__':
     simulator = DNSimulator2(dnpath)
     retry_count = 0
     while retry_count < 10:
-        if not simulator.get_devices():
+        devices = simulator.get_devices()
+        if not devices:
             print("未检测到设备，等待20秒再次检测")
             time.sleep(20)
+            restart_adb_server()
             retry_count += 1
         else:
+            print(f"target device: {devices[0]}")
             break
     if retry_count == 10:
         print("exit can't found device")

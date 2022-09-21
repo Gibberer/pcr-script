@@ -153,7 +153,7 @@ class Robot:
                         ClickAction(pos=self._pos(53, 283))], timeout=30),
             SleepAction(1)
         )
-        if time.time() - start_time > 30:
+        if time.time() - start_time > 45:
             return
         pos = random.choice(((199, 300), (400, 300), (590, 300), (790, 300)))
         self._action_squential(
@@ -1323,6 +1323,9 @@ class Robot:
                         raise NetError()
 
     def _find_match_pos(self, screenshot, template, threshold=THRESHOLD, mode=None, base_width=BASE_WIDTH, base_height=BASE_HEIGHT) -> Tuple[int, int]:
+        return self._find_match_pos_list(screenshot, template, threshold, mode, base_width, base_height, 1)
+    
+    def _find_match_pos_list(self, screenshot, template, threshold=THRESHOLD, mode=None, base_width=BASE_WIDTH, base_height=BASE_HEIGHT, ret_count=0) -> Iterable[Tuple[int,int]]:
         name = template
         source: np.ndarray
         if isinstance(screenshot, np.ndarray):
@@ -1349,9 +1352,28 @@ class Robot:
                 source = cv.Canny(source, 180, 220)
                 template = cv.Canny(template, 180, 220)
         ret = cv.matchTemplate(source, template, cv.TM_CCOEFF_NORMED)
-        min_val, max_val, min_loc, max_loc = cv.minMaxLoc(ret)
-        # self._log("{}:{}:{}".format(name, max_val, threshold))
-        if max_val > threshold:
-            return (max_loc[0] + twidth/2, max_loc[1] + theight/2)
+        if ret_count == 1:
+            min_val, max_val, min_loc, max_loc = cv.minMaxLoc(ret)
+            # self._log("{}:{}:{}".format(name, max_val, threshold))
+            if max_val > threshold:
+                return (max_loc[0] + twidth/2, max_loc[1] + theight/2)
+            else:
+                return None
         else:
-            return None
+            index_array = np.where(ret > threshold)
+            matched_points = []
+            for x, y in zip(*index_array[::-1]):
+                duplicate = False
+                for point in matched_points:
+                    if abs(point[0] - x) < 8 and abs(point[1] - y) < 8:
+                        duplicate = True
+                    break
+                if not duplicate:
+                    matched_points.append((x + twidth/2,y + theight/2))
+            if matched_points:
+                if ret_count > 0:
+                    return matched_points[:ret_count]
+                else:
+                    return matched_points
+            else:
+                return None
