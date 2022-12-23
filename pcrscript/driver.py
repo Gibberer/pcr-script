@@ -4,9 +4,10 @@ from win32 import win32gui, win32api, win32console
 import ctypes
 from win32.lib import win32con
 from pythonwin import win32ui
+import pywintypes
 import numpy as np
 import matplotlib.pyplot as plt
-from cv2 import cv2 as cv
+import cv2 as cv
 import os
 from . import constants
 import time
@@ -91,6 +92,23 @@ class DNADBDriver(ADBDriver):
         self.dnpath = dnpath
         self.index = index
         self.click_by_mouse = click_by_mouse
+        self.binded_hwnd_id = None
+        self.binded_hwnd = None
+        self.window_title = None
+        self.scale = 1
+        self._init_window_info()
+    
+
+    def _init_window_info(self):
+        if os.path.exists(f'{self.dnpath}/ldconsole.exe'):
+            output = os.popen(f"{self.dnpath}/ldconsole.exe list2").read()
+            if output:
+                infos = list(map(lambda x : x.split(','), output.split('\n')))
+                if len(infos) > self.index:
+                    info = infos[self.index]
+                    self.window_title = info[1]
+                    self.binded_hwnd_id = int(info[3])
+        # 获取缩放信息
         shcore = ctypes.windll.shcore
         monitor = win32api.MonitorFromPoint((0,0),1)
         scale = ctypes.c_int()
@@ -104,22 +122,17 @@ class DNADBDriver(ADBDriver):
         if self.click_by_mouse:
             window_title = self._getWindowTitle()
             try:
-                hwin = win32gui.FindWindow('LDPlayerMainFrame', window_title)
-                self._subhwin = None
-                def winfun(hwnd, lparam):
-                    subtitle = win32gui.GetWindowText(hwnd)
-                    if subtitle == 'TheRender':
-                        self._subhwin = hwnd
-                win32gui.EnumChildWindows(hwin, winfun, None)
-                ret = win32gui.GetWindowRect(self._subhwin)
+                hwin = self._get_binded_hwnd()
+                ret = win32gui.GetWindowRect(hwin)
                 height = ret[3] - ret[1]
                 width = ret[2] - ret[0]
                 tx = int(x * width/constants.BASE_WIDTH)
                 ty = int(y * height/constants.BASE_HEIGHT)
                 positon = win32api.MAKELONG(tx, ty)
-                win32api.SendMessage(self._subhwin, win32con.WM_LBUTTONDOWN, win32con.MK_LBUTTON, positon)
-                win32api.SendMessage(self._subhwin, win32con.WM_LBUTTONUP, win32con.MK_LBUTTON,positon)
+                win32api.SendMessage(hwin, win32con.WM_LBUTTONDOWN, win32con.MK_LBUTTON, positon)
+                win32api.SendMessage(hwin, win32con.WM_LBUTTONUP, win32con.MK_LBUTTON,positon)
             except Exception as e:
+                self._clear_cached_hwnd()
                 print(f"fallback adb click:{e}")
                 super().click(x,y)
         else:
@@ -144,14 +157,8 @@ class DNADBDriver(ADBDriver):
         window_title = self._getWindowTitle()
         width, height = constants.BASE_WIDTH, constants.BASE_HEIGHT
         try:
-            hwin = win32gui.FindWindow('LDPlayerMainFrame', window_title)
-            self._subhwin = None
-            def winfun(hwnd, lparam):
-                subtitle = win32gui.GetWindowText(hwnd)
-                if subtitle == 'TheRender':
-                    self._subhwin = hwnd
-            win32gui.EnumChildWindows(hwin, winfun, None)
-            hwindc = win32gui.GetWindowDC(self._subhwin)
+            hwin = self._get_binded_hwnd()
+            hwindc = win32gui.GetWindowDC(hwin)
             srcdc = win32ui.CreateDCFromHandle(hwindc)
             memdc = srcdc.CreateCompatibleDC()
             bmp = win32ui.CreateBitmap()
@@ -168,6 +175,7 @@ class DNADBDriver(ADBDriver):
             win32gui.DeleteObject(bmp.GetHandle())
             return img[:, :, :3]
         except Exception as e:
+            self._clear_cached_hwnd()
             print(e)
             return super().screenshot(output=output)
     
@@ -183,35 +191,39 @@ class DNADBDriver(ADBDriver):
     def _getDnToolbarHeight(self):
         return 27
     
+    def _get_binded_hwnd(self):
+        if self.binded_hwnd:
+            return self.binded_hwnd
+        if self.binded_hwnd_id:
+            self.binded_hwnd = pywintypes.HANDLE(self.binded_hwnd_id)
+            return self.binded_hwnd
+        try:
+            window_title = self._getWindowTitle()
+            hwin = win32gui.FindWindow('LDPlayerMainFrame', window_title)
+            def winfun(hwnd, lparam):
+                subtitle = win32gui.GetWindowText(hwnd)
+                if subtitle == 'TheRender':
+                    self.binded_hwnd = hwnd
+            win32gui.EnumChildWindows(hwin, winfun, None)
+            return self.binded_hwnd
+        except Exception as e:
+            print(e)
+            return None
+
+    def _clear_cached_hwnd(self):
+        self.binded_hwnd = None
+        self.binded_hwnd_id = None
+
     def _getWindowTitle(self):
-        window_title = '雷电模拟器'
+        if self.window_title:
+            return self.window_title
+        window_title = "雷电模拟器"
         if self.index > 0:
             window_title = "{}-{}".format(window_title, self.index)
         return window_title
     
     def getScale(self):
         return self.scale
-
-# if __name__ == "__main__":
-#     _subhwin = None
-#     hwin = win32gui.FindWindow('LDPlayerMainFrame', "雷电模拟器")
-#     def winfun(hwnd, lparam):
-#         global _subhwin
-#         subtitle = win32gui.GetWindowText(hwnd)
-#         print(f'{subtitle}:{hwnd}')
-#         if subtitle == 'sub':
-#             _subhwin = hwnd
-#     win32gui.EnumChildWindows(hwin, winfun, None)
-#     print(_subhwin)
-#     ret = win32gui.GetWindowRect(_subhwin)
-#     height = ret[3] - ret[1]
-#     width = ret[2] - ret[0]
-#     tx = int(900 * width/960)
-#     ty = int(27 * height/540)
-#     positon = win32api.MAKELONG(tx, ty)
-#     win32api.SendMessage(1770076, win32con.WM_LBUTTONDOWN, win32con.MK_LBUTTON, positon)
-#     win32api.SendMessage(1770076, win32con.WM_LBUTTONUP, None,positon)
-
 
 # if __name__ == "__main__":
 #     # test win 32 grap screen

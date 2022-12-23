@@ -10,7 +10,7 @@ from pcrscript.driver import Driver
 from pcrscript.constants import *
 from pcrscript import *
 from typing import Iterable, Tuple
-from cv2 import cv2 as cv
+import cv2 as cv
 
 
 UB_ERROR_CHECK_DURATION = 3

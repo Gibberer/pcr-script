@@ -37,7 +37,7 @@ if __name__ == '__main__':
     else:
         print("try start princess connect application")
         os.system(f'adb -s {simulator.get_devices()[0]} shell monkey -p com.bilibili.priconne 1')
-        time.sleep(60)
+        time.sleep(30)
         exit(0)
 
 

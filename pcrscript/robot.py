@@ -3,7 +3,7 @@ from .driver import Driver
 from .actions import *
 from .constants import *
 from .error import NetError
-from cv2 import cv2 as cv
+import cv2 as cv
 import numpy as np
 import time
 from typing import Iterable, Tuple
