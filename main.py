@@ -10,6 +10,7 @@ def usage():
     print('''
     -h help
     -c 设置配置文件
+    -m 模式 0 默认 1 不使用adb命令
     ''')
 
 def getTaskDict(config) -> FloorDict:
@@ -34,13 +35,16 @@ def dostaff(robot: Robot, lock, account_list, total_size, task_dict):
 
 def main():
     config_file = 'config.yml'
+    mode = 0
     try:
-        opts, args = getopt.getopt(sys.argv[1:], 'hc:', ['help','config='])
+        opts, args = getopt.getopt(sys.argv[1:], 'hc:m:', ['help','config=','mode='])
         for name, value in opts:
             if name in ('-h','--help'):
                 usage()
             elif name in ('-c','--config'):
                 config_file = value
+            elif name in ('-m','--mode'):
+                mode = int(value)
     except getopt.GetoptError as error:
         print(error)
         usage()
@@ -49,7 +53,7 @@ def main():
     with open(config_file, encoding='utf-8') as f:
         config = yaml.load(f, Loader=yaml.FullLoader)
     task_dict = getTaskDict(config)
-    drivers = DNSimulator2(config['Extra']['dnpath']).get_dirvers() 
+    drivers = DNSimulator2(config['Extra']['dnpath'],useADB= mode==0).get_dirvers() 
     account_list = [(account['account'], account['password'])
                     for account in config['Accounts']]
     total_size = len(account_list)

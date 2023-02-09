@@ -95,6 +95,8 @@ class DNADBDriver(ADBDriver):
         self.binded_hwnd_id = None
         self.binded_hwnd = None
         self.window_title = None
+        self.window_width = -1
+        self.window_height = -1
         self.scale = 1
         self._init_window_info()
     
@@ -108,6 +110,8 @@ class DNADBDriver(ADBDriver):
                     info = infos[self.index]
                     self.window_title = info[1]
                     self.binded_hwnd_id = int(info[3])
+                    self.window_width = int(info[7])
+                    self.window_height = int(info[8])
         # 获取缩放信息
         shcore = ctypes.windll.shcore
         monitor = win32api.MonitorFromPoint((0,0),1)
@@ -118,9 +122,48 @@ class DNADBDriver(ADBDriver):
         )
         self.scale = float(scale.value / 100)
     
+    def getScreenSize(self) -> Tuple[int, int]:
+        if self.window_width > 0 and self.window_height > 0:
+            return (self.window_width, self.window_height)
+        return super().getScreenSize()
+
+    def swipe(self, start, end=None, duration=500):
+        if self.click_by_mouse:
+            try:
+                if not end:
+                    end = start
+                hwin = self._get_binded_hwnd()
+                ret = win32gui.GetWindowRect(hwin)
+                height = ret[3] - ret[1]
+                width = ret[2] - ret[0]
+                start_x = int(start[0] * width/constants.BASE_WIDTH)
+                start_y = int(start[1] * height/constants.BASE_HEIGHT)
+                end_x = int(end[0] * width/constants.BASE_WIDTH)
+                end_y = int(end[1] * height/constants.BASE_HEIGHT)
+                start_position = win32api.MAKELONG(start_x, start_y)
+                end_position = win32api.MAKELONG(end_x, end_y)
+                win32api.SendMessage(hwin, win32con.WM_LBUTTONDOWN, win32con.MK_LBUTTON, start_position)
+                # linear tween
+                total_duration = duration
+                while duration > 100:
+                    duration -= 100
+                    time.sleep(0.1)
+                    rate = duration/total_duration
+                    mx = int(rate*start_x + (1-rate)*end_x)
+                    my = int(rate*start_y + (1-rate)*end_y)
+                    win32api.SendMessage(hwin, win32con.WM_MOUSEMOVE, 0, win32api.MAKELONG(mx,my))
+                if duration > 0:
+                    time.sleep(0.1)
+                win32api.SendMessage(hwin, win32con.WM_LBUTTONUP, win32con.MK_LBUTTON, end_position)
+            except Exception as e:
+                self._clear_cached_hwnd()
+                print(f"fallback adb swipe:{e}")
+                super().swipe(start,end, duration)
+        else:
+            super().swipe(start,end, duration)
+    
     def click(self, x, y):
         if self.click_by_mouse:
-            window_title = self._getWindowTitle()
             try:
                 hwin = self._get_binded_hwnd()
                 ret = win32gui.GetWindowRect(hwin)
@@ -154,7 +197,6 @@ class DNADBDriver(ADBDriver):
             super().input(text)
 
     def screenshot(self, output='screen_shot.png'):
-        window_title = self._getWindowTitle()
         width, height = constants.BASE_WIDTH, constants.BASE_HEIGHT
         try:
             hwin = self._get_binded_hwnd()

@@ -10,13 +10,13 @@ class DNSimulator():
     雷电模拟器
     '''
 
-    def __init__(self, path):  # N:\dnplayer2
+    def __init__(self, path):  #example： N:\dnplayer2
         super().__init__()
         self.path = path
 
     def dninput(self, msg, index=0):
         os.system(
-            '{}\dnconsole.exe action --index {} --key call.input --value "{}"'.format(self.path, index, msg))
+            '{}\ldconsole.exe action --index {} --key call.input --value "{}"'.format(self.path, index, msg))
 
     def get_devices(self) -> List[str]:
         lines = os.popen("adb devices").readlines()
@@ -57,15 +57,29 @@ class DNSimulator():
 
 
 class DNSimulator2(DNSimulator):
-
-
-    def __init__(self, path, fastclick=False):
-        super().__init__(path)
-        self.fastclick = fastclick
-
     '''
     雷电模拟器使用win32api
     '''
+
+    def __init__(self, path, fastclick=False, useADB=True):
+        super().__init__(path)
+        self.fastclick = fastclick
+        self.useADB = useADB
+        if not useADB:
+            self.fastclick = True
+
+    def get_devices(self) -> List[str]:
+        if self.useADB:
+            return super().get_devices()
+        else:
+            try:
+                output = os.popen(f"{self.path}\ldconsole.exe list2").read()
+                if output:
+                    infos = list(map(lambda x : x.split(','), output.split('\n')))
+                    return [info[0] for info in infos if len(info) > 1 and int(info[2]) > 0]
+            except Exception as e:
+                print(e)
+                return super().get_devices()
 
     def get_dirvers(self) -> List[Driver]:
         devices = self.get_devices()
