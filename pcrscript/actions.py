@@ -109,7 +109,7 @@ class SleepAction(Action):
 
 
 class ClickAction(Action):
-    def __init__(self, template=None, pos=None, offset=(0, 0), threshold=THRESHOLD, mode=None, match_text=None):
+    def __init__(self, template=None, pos=None, offset=(0, 0), threshold=THRESHOLD, mode=None, match_text=None, timeout=0):
         super().__init__()
         self.template = template
         self.pos = pos
@@ -117,8 +117,12 @@ class ClickAction(Action):
         self.threshold = threshold
         self.mode = mode
         self.match_text = match_text
+        self.timeout = timeout
+        self.starttime = 0
 
     def do(self, screenshot, robot):
+        if self.starttime == 0:
+            self.starttime = time.time()
         if self.template or self.match_text:
             if self.match_text and robot.ocr:
                 ret = robot.ocr.find_match_text_pos(screenshot, self.match_text)
@@ -137,6 +141,9 @@ class ClickAction(Action):
                 robot.driver.click(pos[0] + offset[0],
                                    pos[1] + offset[1])
             self._done = True
+        if self.timeout > 0:
+            if time.time() - self.starttime > self.timeout:
+                self._done = True
 
 
 class InputAction(Action):
@@ -150,7 +157,7 @@ class InputAction(Action):
 
 
 class SwipeAction(Action):
-    def __init__(self, start, end, duration = ''):
+    def __init__(self, start, end, duration = 200):
         super().__init__()
         self.start = start
         self.end = end
@@ -162,7 +169,7 @@ class SwipeAction(Action):
 
 
 class IfCondition(CanSkipMatchAction):
-    def __init__(self, condition_template, meet_actions: [Action] = None, unmeet_actions: [Action] = None, threshold=THRESHOLD):
+    def __init__(self, condition_template, meet_actions: list[Action] = None, unmeet_actions: list[Action] = None, threshold=THRESHOLD):
         super().__init__()
         self._condition_template = condition_template
         self._threshold = threshold

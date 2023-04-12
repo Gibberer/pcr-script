@@ -185,16 +185,24 @@ class DNADBDriver(ADBDriver):
         '''
         adb 不支持中文使用dnconsole接口
         '''
-        contain_hanzi = False
-        for char in text:
-            if '\u4e00' <= char <= '\u9fa5':
-                contain_hanzi = True
-                break
-        if contain_hanzi:
-            os.system(
-                '{}\ldconsole.exe action --index {} --key call.input --value "{}"'.format(self.dnpath, self.index, text))
+        if self.click_by_mouse:
+            try:
+                os.system(
+                    '{}\ldconsole.exe action --index {} --key call.input --value "{}"'.format(self.dnpath, self.index, text))
+            except Exception as e:
+                print(f"fallback adb input:{e}")
+                super().input(text)
         else:
-            super().input(text)
+            contain_hanzi = False
+            for char in text:
+                if '\u4e00' <= char <= '\u9fa5':
+                    contain_hanzi = True
+                    break
+            if contain_hanzi:
+                os.system(
+                    '{}\ldconsole.exe action --index {} --key call.input --value "{}"'.format(self.dnpath, self.index, text))
+            else:
+                super().input(text)
 
     def screenshot(self, output='screen_shot.png'):
         width, height = constants.BASE_WIDTH, constants.BASE_HEIGHT

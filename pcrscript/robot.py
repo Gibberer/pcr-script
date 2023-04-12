@@ -52,6 +52,9 @@ class Robot:
                 actions = (
                     MatchAction('btn_change_account', matched_actions=[
                                 ClickAction()], unmatch_actions=[ClickAction(pos=self._pos(850, 30))], delay=0),
+                    SleepAction(0.5),
+                    ClickAction(pos=self._pos(354,374)),
+                    SleepAction(0.5),
                     ClickAction(template='symbol_bilibili_logo'),
                     ClickAction(template='edit_account'),
                     InputAction(account),
@@ -447,7 +450,7 @@ class Robot:
 
     @trace
     def _saodang(self, chapter=1, level=1, count=1):
-        self._entre_advanture()
+        self._enter_advanture()
         level_pos = self._move_to_chapter(chapter - 1)
         pos = level_pos[level - 1]
         actions = []
@@ -490,7 +493,7 @@ class Robot:
         '''
         if isinstance(difficulty, int):
             difficulty = Difficulty(difficulty)
-        self._entre_advanture(difficulty)
+        self._enter_advanture(difficulty)
         if explicits:
             self.__saodang_hard_explicit_mode(difficulty, explicits)
             return
@@ -561,7 +564,9 @@ class Robot:
             MatchAction('btn_challenge', threshold=0.75),
             SwipeAction(self._pos(877, 330), self._pos(877, 330), duration),
             ClickAction(pos=self._pos(757, 330)),
+            SleepAction(0.5),
             ClickAction(template='btn_ok_blue'),
+            SleepAction(0.5),
             ClickAction(template='btn_skip_ok'),
             SleepAction(1),
             ClickAction(template='btn_ok'),
@@ -590,7 +595,7 @@ class Robot:
         checkguide: 是否做跳过教程检测
         '''
         # 从主页进入冒险页面
-        self._entre_advanture()
+        self._enter_advanture()
         self._guotu(chapter, start, end, totalcount, checkguide)
 
     def _guotu(self, chapter, start, end, totalcount, checkguide, symbols=CHAPTER_SYMBOLS, chapters=CHAPTERS):
@@ -619,10 +624,10 @@ class Robot:
                 level_pos = chapters[chapter][i]
             count += (end - start) + 1
 
-    def _entre_advanture(self, difficulty=Difficulty.NORMAL, activity=False):
+    def _enter_advanture(self, difficulty=Difficulty.NORMAL, activity=False):
         actions = []
         actions.append(MatchAction('tab_adventure', matched_actions=[ClickAction()], unmatch_actions=[
-            ClickAction(template='btn_close'), ClickAction(pos=self._pos(50, 300))]))
+            ClickAction(template='btn_close'), ClickAction(pos=self._pos(15, 300))]))
         actions.append(SleepAction(2))
         if activity:
             actions.append(ClickAction(template='story_activity_symbol'))
@@ -634,9 +639,10 @@ class Robot:
         if activity:
             unmatch_actions += [
                 IfCondition('btn_activity_plot',
+                            threshold=0.8*THRESHOLD,
                             meet_actions=[ClickAction(
                                 template='btn_activity_plot')],
-                            unmeet_actions=[ClickAction(pos=self._pos(53, 283)), MatchAction('btn_close', matched_actions=[ClickAction()], timeout=1)])]
+                            unmeet_actions=[ClickAction(pos=self._pos(15, 283)), MatchAction('btn_close', matched_actions=[ClickAction()], timeout=1)])]
         if difficulty == Difficulty.NORMAL:
             unmatch_actions = [ClickAction(
                 template='btn_normal', threshold=0.9)] + unmatch_actions
@@ -800,6 +806,7 @@ class Robot:
             ClickAction(pos=self._pos(712, 143)),
             MatchAction('btn_challenge'),
             ClickAction(pos=self._pos(757, 330)),
+            SleepAction(0.5),
             ClickAction(template='btn_ok_blue'),
             ClickAction(template='btn_skip_ok'),
             SleepAction(1),
@@ -810,6 +817,7 @@ class Robot:
             ClickAction(pos=self._pos(712, 143)),
             MatchAction('btn_challenge'),
             ClickAction(pos=self._pos(757, 330)),
+            SleepAction(0.5),
             ClickAction(template='btn_ok_blue'),
             ClickAction(template='btn_skip_ok'),
             SleepAction(1),
@@ -905,19 +913,19 @@ class Robot:
         '''
         大号用来过地下城
         '''
-        level = [7, 0, 0, 5, 5, 5][difficulty-1]
+        level = [7, 0, 0, 5, 5, 5, 5][difficulty-1]
         actions = []
         actions.append(MatchAction('tab_adventure', matched_actions=[ClickAction()], unmatch_actions=[
             ClickAction(template='btn_close')]))
         actions.append(SleepAction(2))
         actions.append(ClickAction(template='dungeon'))
         actions.append(SleepAction(2))
-        if difficulty <= 2:
+        if difficulty <= 3:
             actions.append(ClickAction(pos=self._pos(10, 248)))
             dungeon_pos = DUNGEON_LOCATION[difficulty - 1]
         else:
             actions.append(ClickAction(pos=self._pos(944, 248)))
-            dungeon_pos = DUNGEON_LOCATION[difficulty - 3]
+            dungeon_pos = DUNGEON_LOCATION[difficulty - 4]
         actions.append(SleepAction(2))
         actions.append(MatchAction('dungeon_symbol', matched_actions=[
                        ClickAction(offset=self._pos(*dungeon_pos))], timeout=5))  # 确认进入地下城
@@ -1216,7 +1224,7 @@ class Robot:
         # 回首页，这里稍微绕下远
         self._tohomepage()
         # 再回到冒险页面
-        self._entre_advanture()
+        self._enter_advanture()
 
     @ trace
     def _skip_guide_2_2(self):
@@ -1226,7 +1234,7 @@ class Robot:
                         ClickAction(pos=self._pos(310, 50))], timeout=10)  # 为了点几下屏幕没有好的标志位
         )
         # 再回到冒险页面
-        self._entre_advanture()
+        self._enter_advanture()
 
     @ trace
     def _skip_guide_2_5(self):
@@ -1239,7 +1247,7 @@ class Robot:
         # 回首页，这里稍微绕下远
         self._tohomepage()
         # 再去冒险
-        self._entre_advanture()
+        self._enter_advanture()
 
     @ trace
     def _skip_guide_2_8(self):
@@ -1250,7 +1258,7 @@ class Robot:
         # 回首页，这里稍微绕下远
         self._tohomepage()
         # 再去冒险
-        self._entre_advanture()
+        self._enter_advanture()
 
     @ trace
     def _skip_guide_2_12(self):
@@ -1278,7 +1286,7 @@ class Robot:
             ClickAction(pos=self._pos(362, 374))
         )
         # 再去冒险
-        self._entre_advanture()
+        self._enter_advanture()
         self._action_squential(
             MatchAction('btn_close', matched_actions=[
                         ClickAction()], timeout=5)
@@ -1293,7 +1301,7 @@ class Robot:
                         ClickAction(pos=self._pos(310, 50))], timeout=5)  # 为了点几下屏幕没有好的标志位
         )
         # 再去冒险
-        self._entre_advanture()
+        self._enter_advanture()
 
     def _create_skip_guide_action(self, template='arrow_down', offset=(0, 100), threshold=(7/8)*THRESHOLD) -> Action:
         return MatchAction(template, matched_actions=[ClickAction(offset=(
@@ -1325,7 +1333,7 @@ class Robot:
     def _find_match_pos(self, screenshot, template, threshold=THRESHOLD, mode=None, base_width=BASE_WIDTH, base_height=BASE_HEIGHT) -> Tuple[int, int]:
         return self._find_match_pos_list(screenshot, template, threshold, mode, base_width, base_height, 1)
     
-    def _find_match_pos_list(self, screenshot, template, threshold=THRESHOLD, mode=None, base_width=BASE_WIDTH, base_height=BASE_HEIGHT, ret_count=0) -> Iterable[Tuple[int,int]]:
+    def _find_match_pos_list(self, screenshot, template, threshold=THRESHOLD, mode=None, base_width=BASE_WIDTH, base_height=BASE_HEIGHT, ret_count=0, for_test=False) -> Iterable[Tuple[int,int]]:
         name = template
         source: np.ndarray
         if isinstance(screenshot, np.ndarray):
@@ -1344,10 +1352,9 @@ class Robot:
         if mode:
             if mode == 'binarization':
                 source = cv.cvtColor(source, cv.COLOR_BGR2GRAY)
-                _, source = cv.threshold(source, 180, 255, cv.THRESH_BINARY)
+                _, source = cv.threshold(source, 220, 255, cv.THRESH_BINARY)
                 template = cv.cvtColor(template, cv.COLOR_BGR2GRAY)
-                _, template = cv.threshold(
-                    template, 180, 255, cv.THRESH_BINARY)
+                _, template = cv.threshold(template, 220, 255, cv.THRESH_BINARY)
             elif mode == 'canny':
                 source = cv.Canny(source, 180, 220)
                 template = cv.Canny(template, 180, 220)
@@ -1369,8 +1376,12 @@ class Robot:
                         duplicate = True
                     break
                 if not duplicate:
-                    matched_points.append((x + twidth/2,y + theight/2))
+                    matched_points.append((x,y))
             if matched_points:
+                if for_test:
+                    matched_points = list(map(lambda point: ((point[0] + twidth/2, point[1] + theight/2),ret[point[1],point[0]]), matched_points))
+                else:
+                    matched_points = list(map(lambda point: (point[0] + twidth/2, point[1] + theight/2), matched_points))
                 if ret_count > 0:
                     return matched_points[:ret_count]
                 else:

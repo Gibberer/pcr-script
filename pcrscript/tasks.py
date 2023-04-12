@@ -74,6 +74,7 @@ class ChouShiLian(BaseTask):
 
     def run(self, multi=False):
         draw_actions = [
+            SleepAction(0.5),
             ClickAction(template='btn_ok_blue'),
             MatchAction('btn_skip', matched_actions=[ClickAction()], unmatch_actions=[
                         ClickAction(pos=(50, 300))])
@@ -167,9 +168,10 @@ class GuildLike(BaseTask):
         self.action_squential(
             SleepAction(2),
             MatchAction(template="guild", matched_actions=[ClickAction()],
-            unmatch_actions=[ClickAction(template="btn_close"),ClickAction(template="btn_ok"), SleepAction(0.5)]),
+                        unmatch_actions=[ClickAction(template="btn_close"),ClickAction(template="btn_ok"), SleepAction(0.5)]),
             SleepAction(2),
-            MatchAction("guild_symbol"),
+            MatchAction(template="guild_symbol",matched_actions=[ClickAction()],
+                        unmatch_actions=[ClickAction(template="btn_close"),ClickAction(template="btn_ok"), SleepAction(0.5)]),
             SleepAction(1),
             ClickAction(pos=(234, 349)),
             SleepAction(3),
@@ -241,7 +243,7 @@ class QuickSaodang(BaseTask):
             return
         pref_pos = QuickSaodang._pos[pos - 1]
         # 进入冒险图
-        self.robot._entre_advanture()
+        self.robot._enter_advanture()
         actions = [
             ClickAction(pos=(920, 144)),
             SleepAction(1),
@@ -273,20 +275,21 @@ class ActivitySaodang(BaseTask):
     '''
     def run(self, hard_chapter=True, exhaust_power=True):
         if hard_chapter:
-            self.robot._entre_advanture(difficulty=Difficulty.HARD, activity=True)
+            self.robot._enter_advanture(difficulty=Difficulty.HARD, activity=True)
             actions = [
                 MatchAction(template='btn_close', matched_actions=[
                             ClickAction(), SleepAction(2)], timeout=3),
                 SleepAction(2),
                 # 清困难本
                 ClickAction(template='1-1', offset=(0, -20),
-                            threshold=0.5, mode='binarization'),  # 点击第一个活动困难本
+                            threshold=0.6, mode='binarization'),  # 点击第一个活动困难本
                 MatchAction('btn_challenge', threshold=0.9*THRESHOLD),
             ]
             for _ in range(5):
                 actions += [
                     SwipeAction((877, 330),(877, 330), 2000),
                     ClickAction(pos=(757, 330)),
+                    SleepAction(0.5),
                     ClickAction(template='btn_ok_blue'),
                     MatchAction(template='symbol_restore_power',
                                 matched_actions=[
@@ -306,8 +309,7 @@ class ActivitySaodang(BaseTask):
                                 matched_actions=[ClickAction(), SleepAction(1)], timeout=1),
                     MatchAction(template='btn_ok',
                                 matched_actions=[ClickAction(), SleepAction(1)], timeout=1),
-                    MatchAction(template='btn_cancel', matched_actions=[
-                                ClickAction(pos=(121,240)), SleepAction(1)], timeout=1),  # 限时商店
+                    MatchAction(template='btn_cancel', matched_actions=[ClickAction(), SleepAction(1)], timeout=1),  # 限时商店
                     ClickAction(pos=(939, 251)),
                     SleepAction(2)
                 ]
@@ -318,14 +320,16 @@ class ActivitySaodang(BaseTask):
             # 高难
             actions += [
                 ClickAction(template='very', offset=(0, -40),
-                            threshold=0.6, mode='binarization')
+                            threshold=0.6, mode='binarization',timeout=5),
+                ClickAction(pos=(860,270)), # 如果timeout尝试点击该位置   
+                SleepAction(1),         
             ]
             actions += _get_combat_actions()
             self.action_squential(*actions)
         if exhaust_power:
             if hard_chapter:
                 self.robot._tohomepage()
-            self.robot._entre_advanture(difficulty=Difficulty.NORMAL, activity=True)
+            self.robot._enter_advanture(difficulty=Difficulty.NORMAL, activity=True)
             actions = []
             if not hard_chapter:
                 actions += [
@@ -348,6 +352,7 @@ class ClearStory(BaseTask):
     清new剧情
     '''
     def run(self):
+        mismatch_cnt = 0
         while True:
             screenshot = self.robot.driver.screenshot()
             if self.have_dialog(screenshot):
@@ -359,8 +364,11 @@ class ClearStory(BaseTask):
                     self.resolve_main_list()
                 elif self.in_sub_story_list(screenshot):
                     self.resolve_sub_list()
-                else:
+                elif mismatch_cnt > 2:
+                    mismatch_cnt = 0
                     self.resolve_other_list()
+                else:
+                    mismatch_cnt += 1
             else:
                 # try move to story tab
                 self.action_once(ClickAction(template='tab_story'))
@@ -401,7 +409,7 @@ class ClearStory(BaseTask):
 
     def skip_reading_page(self):
         self.action_squential(MatchAction(template='btn_skip_in_story', 
-                                unmatch_actions=[ClickAction(template='symbol_menu_in_story')], 
+                                unmatch_actions=[ClickAction(template='symbol_menu_in_story'), ClickAction(template='select_branch_first'),], 
                                 matched_actions=[ClickAction()],
                                 timeout=5))
     
