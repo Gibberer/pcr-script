@@ -909,7 +909,7 @@ class Robot:
         )
 
     @trace
-    def _dungeon_saodang(self, difficulty=6, monster_team=1, boss_group='1', boss_team='2,3', withdraw=False):
+    def _dungeon_saodang(self, difficulty=6, monster_team=1, boss_group='1', boss_team='2,3', withdraw=False, skipable=True):
         '''
         大号用来过地下城
         '''
@@ -929,6 +929,17 @@ class Robot:
         actions.append(SleepAction(2))
         actions.append(MatchAction('dungeon_symbol', matched_actions=[
                        ClickAction(offset=self._pos(*dungeon_pos))], timeout=5))  # 确认进入地下城
+        if skipable:
+            actions.append(IfCondition("btn_dungeon_skip", meet_actions=[
+                ClickAction("btn_dungeon_skip"),
+                SleepAction(0.5),
+                MatchAction(template='btn_skip_ok', matched_actions=[
+                            ClickAction()], timeout=2, delay=0.1),
+                SleepAction(0.5),
+                MatchAction(template='btn_ok', matched_actions=[
+                            ClickAction()], timeout=2, delay=0.1),
+                ThrowErrorAction("Skip dungeon done!!"), # 跳过后续流程
+            ]))
         actions.append(MatchAction(
             'btn_ok_blue', matched_actions=[ClickAction()], timeout=5))
         actions.append(SleepAction(3))

@@ -1,34 +1,34 @@
 # 这个是用于清日常的配置文件
 Accounts: #存账号信息
   -
-    account: 'YourAccount'
-    password: 'YourPassword'
+    account: '账号1'
+    password: '密码1'
+  # - 
+  #   account: '账号2'
+  #   password: '密码2'
 Extra:
-  dnpath: 'N:\dnplayer2' # 雷电模拟器的安装目录
-  ocr: False
+  dnpath: 'G:\leidian\LDPlayer9' # 雷电模拟器路径，如果不使用ADB命令则必须配置这个路径
+  ocr: True # 只有根据数量购买装备时需要，不需要这个功能可以设置为False
 Task: #配置执行任务,配置任务名称，如果需要传入参数在下面增加参数，可以根据不同的账号序号配置任务。
-      #账号会执行小于等于并且离它最近的序号的任务列表
-  1: #配置账号大于等于1的进行以下操作
-     #最好每个任务结束后设置tohomepage，因为每个任务都是按照当前在首页的情况执行的
+      #账号序号就是Accounts中第几个账号，下述例子就是配置大于等于1的账号都执行下面的任务列表，如果在下面加入一个5：那么就是1-4执行1：后面的任务列表5以后执行5：后面的任务列表
+  1: #最好每个任务结束后或前设置tohomepage，因为每个任务都是按照当前在首页的情况执行的，下面部分注释的任务是只有某些活动时可用，可以根据需要取消注释
     # -
     #   - landsol_cup # 兰德索尔杯 随机选一个角色
     -
       - guild_like # 点赞行会成员
-    # 这里没判断是否是免费的十连，所以第二个参数最好不要传True
-    # 如果当前没有免费的十连的话就直接把钻石花光了
     # - 
     #   - tohomepage
     # -
     #   - choushilian #抽取免费十连
-    #   - False #是否抽取所有免费十连
+    #   - False #是否抽取所有免费十连，这里没判断是否是免费的十连，所以第二个参数最好不要传True，如果当前没有免费的十连的话就直接把钻石花光了
     -
-      - tohomepage
+      - tohomepage #回到首页
     -
       - normal_gacha #普通扭蛋10连
     -
       - tohomepage
     -
-      - get_quest_reward
+      - get_quest_reward #领取任务奖励
     -
       - get_power #去公会之家领体力
     -
@@ -49,27 +49,28 @@ Task: #配置执行任务,配置任务名称，如果需要传入参数在下面
       - tohomepage
     -
       - dungeon_saodang  #扫荡地下城
-      - 6 # 绿龙
+      - 7 # 极难4地下城, 极难3为6依次类推
       - 1  #使用编号1队过小怪
       - '4' # 选择编组4过boss
-      - '1,2,3,4,5,6,7,8,9,10' #使用上面选择的编组中编号1到10队过boss，小队之间用','分割使用''空串代表不打boss
+      - '1,2,3,4,5,6,7,8,9,10' #使用上面选择的编组中编号1到10队过boss，小队之间用','分割
+                               #传入空串''则表示不打boss配合下方结束是否退出地下城使用
       - False # 结束后是否退出地下城，在无法完成地下城时使用
+      - True # 如果能跳过是否执行跳过，默认True
     -
       - tohomepage
     -
-      - quick_saodang # 使用快捷扫荡功能（游戏内置功能）
-      - 2 # 使用预设2
+      - quick_saodang
+      - 2
     # -
     #   - tohomepage
     # -
-    #   - activity_saodang  # 清活动图的日常(每次活动有区别，任务大概率无法执行)
+    #   - activity_saodang  # 清活动图的日常
     #   - True # 是否刷活动困难章节和高难boss
-    #   - False # 是否将剩余体力花费在活动普通章节上
-    # 扫荡露娜塔
+    #   - True # 是否将剩余体力花费在活动普通章节上
     # -
     #   - tohomepage
     # -
-    #   - luna_tower_saodang
+    #   - luna_tower_saodang # 进行露娜塔的回廊扫荡，通过露娜塔后开放
     -
       - tohomepage
     -
@@ -80,29 +81,31 @@ Task: #配置执行任务,配置任务名称，如果需要传入参数在下面
           - 2
           - 3
           - 4
-        2: # 地下城
-          - 1
         2_config: # 第二个栏的额外配置
-          time: 3 # 执行3次，相当于重置2次
           buy_equip: True # 购买装备
-          first_equip: 12 # 第一个装备位置
-          end_equip: 19 # 最有一个装备的位置
+          first_equip: 1 # 第一个装备位置
+          end_equip: 4 # 最后一个装备的位置
           buy_threshold: 300 # 购买所有小于300的装备
-          total_item_count: 20 # 当前tab下购买物品数量上限，用来计算是否是最后一行
-        5: # 行会
-          - 5
-        8: # 限时，放到扫荡之后确保之前已经触发出来限时了
-          - 1
-          - 2
+        3_config: 
+          buy_equip: True 
+          first_equip: 1 
+          end_equip: 4 
+          buy_threshold: 300 
+        4_config: 
+          buy_equip: True 
+          first_equip: 1 
+          end_equip: 4 
+          buy_threshold: 300 
+        8: #限定商店
+         - 1
+         - 2
+         - 3
+         - 4
     -
       - tohomepage
     -
-      - get_quest_reward  # 最后领下任务
+      - get_quest_reward  # 领取任务奖励
     -
       - tohomepage
     -
-      - get_gift # 领下礼物
-    
-    
-
-    
+      - get_gift # 领取礼物

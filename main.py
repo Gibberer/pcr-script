@@ -10,7 +10,7 @@ def usage():
     print('''
     -h help
     -c 设置配置文件
-    -m 模式 0 默认 1 不使用adb命令
+    -m 模式 0 默认使用ADB命令 1 不使用ADB命令
     ''')
 
 def getTaskDict(config) -> FloorDict:
