@@ -52,19 +52,35 @@ class GetGift(BaseTask):
     获取礼物
     '''
 
-    def run(self):
-        self.action_squential(
-            SleepAction(1),
-            ClickAction(template='gift'),
-            SleepAction(3),
-            MatchAction('btn_all_rec', matched_actions=[
+    def run(self, exclude_stamina=True):
+        actions = []
+        if not exclude_stamina:
+            actions = [
+                SleepAction(1),
+                ClickAction(template='gift'),
+                SleepAction(3),
+                MatchAction('btn_all_rec', matched_actions=[
+                        ClickAction(pos=(360,480)),SleepAction(0.5),ClickAction()], timeout=3),
+                MatchAction('btn_ok_blue', matched_actions=[
                         ClickAction()], timeout=3),
-            MatchAction('btn_ok_blue', matched_actions=[
-                        ClickAction()], timeout=3),
-            MatchAction('btn_ok', matched_actions=[ClickAction()], timeout=3),
-            MatchAction('btn_cancel', matched_actions=[
+                MatchAction('btn_ok', matched_actions=[ClickAction()], timeout=3),
+                MatchAction('btn_cancel', matched_actions=[
                         ClickAction()], timeout=3)
-        )
+            ]
+        else:
+            actions = [
+                SleepAction(1),
+                ClickAction(template='gift'),
+                SleepAction(3),
+                MatchAction('btn_all_rec', matched_actions=[
+                        ClickAction()], timeout=3),
+                MatchAction('btn_ok_blue', matched_actions=[
+                        ClickAction()], timeout=3),
+                MatchAction('btn_ok', matched_actions=[ClickAction()], timeout=3),
+                MatchAction('btn_cancel', matched_actions=[
+                        ClickAction()], timeout=3)
+            ]
+        self.action_squential(*actions)
 
 
 class ChouShiLian(BaseTask):
@@ -192,6 +208,7 @@ class LunaTowerSaodang(BaseTask):
             SleepAction(2),
             SwipeAction(start=(890, 376), end=(890, 376), duration=2000),
             ClickAction(pos=(815, 375)),
+            SleepAction(0.5),
             ClickAction(template='btn_ok_blue'),
             MatchAction(template='btn_skip_ok', matched_actions=[ClickAction()], timeout=2, delay=0.1),
             SleepAction(1),

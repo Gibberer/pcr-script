@@ -929,6 +929,8 @@ class Robot:
         actions.append(SleepAction(2))
         actions.append(MatchAction('dungeon_symbol', matched_actions=[
                        ClickAction(offset=self._pos(*dungeon_pos))], timeout=5))  # 确认进入地下城
+        actions.append(MatchAction(
+            'btn_ok_blue', matched_actions=[ClickAction()], timeout=5))
         if skipable:
             actions.append(IfCondition("btn_dungeon_skip", meet_actions=[
                 ClickAction("btn_dungeon_skip"),
@@ -940,8 +942,6 @@ class Robot:
                             ClickAction()], timeout=2, delay=0.1),
                 ThrowErrorAction("Skip dungeon done!!"), # 跳过后续流程
             ]))
-        actions.append(MatchAction(
-            'btn_ok_blue', matched_actions=[ClickAction()], timeout=5))
         actions.append(SleepAction(3))
         actions.append(MatchAction('in_dungeon_symbol'))
         actions.append(SleepAction(3))
