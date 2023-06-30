@@ -6,6 +6,7 @@ sys.path.insert(0,".")
 
 from pcrscript.robot import Robot
 from pcrscript.simulator import DNSimulator2
+from pcrscript.ocr import Ocr
 
 def _imgshow(template_name, screenshot, point_list):
     screenshot = screenshot.copy()
@@ -25,7 +26,13 @@ def _test_and_show_image(robot:Robot, template_name, threshold=0.6, mode=None):
     screenshot = robot.driver.screenshot()
     result = robot._find_match_pos_list(screenshot, template_name,threshold=threshold, mode=mode,for_test=True)
     if result:
+        if mode == 'binarization':
+            binary_screen = cv.cvtColor(screenshot, cv.COLOR_BGR2GRAY)
+            _, binary_screen = cv.threshold(binary_screen, 220, 255, cv.THRESH_BINARY_INV)
+            # print(Ocr(languagelist=["en"]).recognize(binary_screen))
+            cv.imshow("Binary mode",binary_screen)
         _imgshow(template_name, screenshot, result)
+            
 
 def test_btn_activity_match(robot:Robot):
     _test_and_show_image(robot, "btn_activity_plot")
@@ -41,4 +48,4 @@ if __name__ == "__main__":
         config = yaml.load(f, Loader=yaml.FullLoader)
     drivers = DNSimulator2(config['Extra']['dnpath'],useADB=False).get_dirvers()
     robot = Robot(drivers[0])
-    test_btn_activity_match(robot)
+    test_1_1_image_match(robot)

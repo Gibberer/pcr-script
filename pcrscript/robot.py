@@ -312,7 +312,9 @@ class Robot:
                             ]
                         line += 1
                         swipe_time += 1
-                if line == last_line:
+                if tab in (1, 8) and item.pos < 0:
+                    click_pos = (860,126) # 全选按钮
+                elif line == last_line:
                     click_pos = SHOP_ITEM_LOCATION_FOR_LAST_LINE[(
                         item.pos - 1) % line_count]
                 else:
@@ -1363,9 +1365,9 @@ class Robot:
         if mode:
             if mode == 'binarization':
                 source = cv.cvtColor(source, cv.COLOR_BGR2GRAY)
-                _, source = cv.threshold(source, 220, 255, cv.THRESH_BINARY)
+                _, source = cv.threshold(source, 220, 255, cv.THRESH_BINARY_INV)
                 template = cv.cvtColor(template, cv.COLOR_BGR2GRAY)
-                _, template = cv.threshold(template, 220, 255, cv.THRESH_BINARY)
+                _, template = cv.threshold(template, 220, 255, cv.THRESH_BINARY_INV)
             elif mode == 'canny':
                 source = cv.Canny(source, 180, 220)
                 template = cv.Canny(template, 180, 220)

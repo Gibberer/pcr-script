@@ -307,7 +307,7 @@ class ActivitySaodang(BaseTask):
                     SwipeAction((877, 330),(877, 330), 2000),
                     ClickAction(pos=(757, 330)),
                     SleepAction(0.5),
-                    ClickAction(template='btn_ok_blue'),
+                    ClickAction(template='btn_ok_blue', timeout=10), # 加入超时防止卡住（应为不能稳定点击到1-1）
                     MatchAction(template='symbol_restore_power',
                                 matched_actions=[
                                     ClickAction(pos=(370, 370)),
@@ -326,7 +326,8 @@ class ActivitySaodang(BaseTask):
                                 matched_actions=[ClickAction(), SleepAction(1)], timeout=1),
                     MatchAction(template='btn_ok',
                                 matched_actions=[ClickAction(), SleepAction(1)], timeout=1),
-                    MatchAction(template='btn_cancel', matched_actions=[ClickAction(), SleepAction(1)], timeout=1),  # 限时商店
+                    IfCondition("btn_challenge", meet_actions=[], 
+                                unmeet_actions=[MatchAction(template='btn_cancel', matched_actions=[ClickAction(), SleepAction(1)], timeout=1)]), # 限时商店
                     ClickAction(pos=(939, 251)),
                     SleepAction(2)
                 ]
