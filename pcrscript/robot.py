@@ -41,38 +41,42 @@ class Robot:
         self._name = name
 
     @trace
-    def changeaccount(self, account, password, logpath=None):
+    def changeaccount(self, account=None, password=None, logpath=None):
         if logpath:
             with open(logpath, 'a') as f:
                 f.write("{}:{}\n".format(self._name, account))
         while True:
             screenshot = self.driver.screenshot()
             if self._find_match_pos(screenshot, 'welcome_main_menu'):
-                # 当前是欢迎页，执行登录操作
-                actions = (
-                    MatchAction('btn_change_account', matched_actions=[
-                                ClickAction()], unmatch_actions=[ClickAction(pos=self._pos(850, 30))], delay=0),
-                    SleepAction(0.5),
-                    ClickAction(pos=self._pos(354,374)),
-                    SleepAction(0.5),
-                    ClickAction(template='symbol_bilibili_logo'),
-                    ClickAction(template='edit_account'),
-                    InputAction(account),
-                    ClickAction(template='edit_password'),
-                    InputAction(password),
-                    ClickAction(template='btn_login'),
-                    SleepAction(5)  # 延迟下，后续需要判断是否出现用户协议弹窗
-                )
-                self._action_squential(*actions)
-                # 执行登录操作之后判断是否出现用户协议
-                while self._find_match_pos(self.driver.screenshot(), 'user_agreement_symbol'):
-                    self._action_squential(
-                        ClickAction(pos=self._pos(704, 334)),  # 滑动到底部
-                        SleepAction(2),
-                        ClickAction(pos=self._pos(536, 388)),  # 点击同意
-                        SleepAction(2)
+                if account:
+                    # 当前是欢迎页，执行登录操作
+                    actions = (
+                        MatchAction('btn_change_account', matched_actions=[
+                                    ClickAction()], unmatch_actions=[ClickAction(pos=self._pos(850, 30))], delay=0),
+                        SleepAction(0.5),
+                        ClickAction(pos=self._pos(354,374)),
+                        SleepAction(0.5),
+                        ClickAction(template='symbol_bilibili_logo'),
+                        ClickAction(template='edit_account'),
+                        InputAction(account),
+                        ClickAction(template='edit_password'),
+                        InputAction(password),
+                        ClickAction(template='btn_login'),
+                        SleepAction(5)  # 延迟下，后续需要判断是否出现用户协议弹窗
                     )
-                break
+                    self._action_squential(*actions)
+                    # 执行登录操作之后判断是否出现用户协议
+                    while self._find_match_pos(self.driver.screenshot(), 'user_agreement_symbol'):
+                        self._action_squential(
+                            ClickAction(pos=self._pos(704, 334)),  # 滑动到底部
+                            SleepAction(2),
+                            ClickAction(pos=self._pos(536, 388)),  # 点击同意
+                            SleepAction(2)
+                        )
+                    break
+                else:
+                    self._action_squential(ClickAction(pos=self._pos(30,200)))
+                    break
             else:
                 # 在游戏里退出账号
                 ret = self._find_match_pos(screenshot, 'btn_close')
@@ -95,6 +99,26 @@ class Robot:
                 ClickAction(pos=self._pos(50, 300)).do(screenshot, self)
             time.sleep(3)
 
+    def _first_enter_check(self):
+        pos = random.choice(((199, 300), (400, 300), (590, 300), (790, 300)))
+        self._action_squential(MatchAction('shop', unmatch_actions=(
+            ClickAction(template='btn_close'),
+            ClickAction(template="btn_ok_blue"),
+            ClickAction(template="btn_download"),
+            ClickAction(template='btn_skip'),
+            ClickAction(template='btn_cancel'),
+            ClickAction(template='select_branch_first'),
+            ClickAction(pos=self._pos(90, 500)),
+            # 处理兰德索尔杯的情况
+            IfCondition(condition_template="landsol_cup_symbol", meet_actions=[
+                ClickAction(pos=self._pos(*pos)),
+                SleepAction(2),
+                ClickAction(pos=self._pos(838, 494))
+            ])
+        ), timeout=0), net_error_check=False)
+        time.sleep(3)
+        ClickAction(template='btn_close').do(self.driver.screenshot(), self)
+
     @trace
     def work(self, tasklist=None):
         tasklist = tasklist[:]
@@ -102,15 +126,13 @@ class Robot:
         taskcount = len(tasklist)
         for i in range(taskcount - 1, -1, -1):
             if tasklist[i][0] in ('real_name_auth', 'landsol_cup'):
-                pretasks.insert(0, tasklist[i])
+                if tasklist[i][0] != 'landsol_cup':
+                    pretasks.insert(0, tasklist[i])
                 tasklist.pop(i)
         if pretasks:
             for funcname, *args in pretasks:
                 getattr(self, "_" + funcname)(*args)
-        self._tohomepage()
-        # 第一次进入的时候等下公告
-        time.sleep(3)
-        ClickAction(template='btn_close').do(self.driver.screenshot(), self)
+        self._first_enter_check()
         if tasklist:
             for funcname, *args in tasklist:
                 if funcname in taskKeyMapping:
@@ -145,25 +167,6 @@ class Robot:
     def _log(self, msg: str):
         print("{}: {}".format(self._name, msg))
 
-    @trace
-    def _landsol_cup(self):
-        '''
-        兰德索尔杯
-        '''
-        start_time = time.time()
-        self._action_squential(
-            MatchAction('landsol_cup_symbol', unmatch_actions=[
-                        ClickAction(pos=self._pos(53, 283))], timeout=30),
-            SleepAction(1)
-        )
-        if time.time() - start_time > 45:
-            return
-        pos = random.choice(((199, 300), (400, 300), (590, 300), (790, 300)))
-        self._action_squential(
-            ClickAction(pos=self._pos(*pos)),
-            SleepAction(2),
-            ClickAction(pos=self._pos(838, 494))
-        )
 
     @trace
     def _real_name_auth(self, ids):

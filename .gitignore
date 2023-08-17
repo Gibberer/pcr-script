@@ -6,3 +6,4 @@ daily_config.yml
 .vscode/
 autobattle/gui
 plugins/battleline_extractor/output.yaml
+cache/

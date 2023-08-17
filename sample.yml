@@ -34,8 +34,6 @@ Task: #配置执行任务,配置任务名称，如果需要传入参数在下面
       - get_quest_reward
   5: #配置大于等于5的账号执行以下操作，这里只是罗列功能
     -
-      - landsol_cup # 兰德索尔杯 随机选一个角色
-    -
       - get_quest_reward #领取任务奖励
     -
       - tohomepage #回到首页

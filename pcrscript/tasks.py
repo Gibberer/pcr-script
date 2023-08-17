@@ -101,21 +101,23 @@ class ChouShiLian(BaseTask):
                         ClickAction(template='btn_close')], timeout=5),
             MatchAction('btn_role_detail', unmatch_actions=[
                         ClickAction(template='btn_close')]),
-            ClickAction(pos=(871, 355)),
-            *draw_actions,
-            MatchAction('btn_ok', matched_actions=[ClickAction()],
-                        unmatch_actions=[
-                        ClickAction(pos=(50, 300)),
-                        IfCondition('btn_draw_again', meet_actions=[
-                            ClickAction(template='btn_draw_again'),
-                            *draw_actions
-                        ]) if multi else IfCondition('btn_cancel', meet_actions=[
-                            ClickAction(template='btn_cancel'),
-                            SkipAction()
-                        ])
-                        ]),
-            MatchAction('btn_setting_blue', matched_actions=[
-                        ClickAction()], timeout=5),
+            IfCondition(condition_template="symbol_gacha_free", meet_actions=[
+                ClickAction(pos=(871, 355)),
+                *draw_actions,
+                MatchAction('btn_ok', matched_actions=[ClickAction()],
+                            unmatch_actions=[
+                            ClickAction(pos=(50, 300)),
+                            IfCondition('btn_draw_again', meet_actions=[
+                                ClickAction(template='btn_draw_again'),
+                                *draw_actions
+                            ]) if multi else IfCondition('btn_cancel', meet_actions=[
+                                ClickAction(template='btn_cancel'),
+                                SkipAction()
+                            ])
+                            ]),
+                MatchAction('btn_setting_blue', matched_actions=[
+                            ClickAction()], timeout=5),
+            ]),
         )
 
 

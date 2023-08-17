@@ -57,7 +57,7 @@ def main():
     account_list = [(account['account'], account['password'])
                     for account in config['Accounts']]
     total_size = len(account_list)
-    thread_list = []
+    thread_list:list[threading.Thread] = []
     lock = threading.Lock()
 
     if not drivers:
@@ -77,7 +77,7 @@ def main():
     print("wait thread finish")
     for thread in thread_list:
         thread.join()
-    print("consume time: {}".format(time.time() - start_time))
+    print("consumed time: {}".format(time.time() - start_time))
 
 if __name__ =='__main__':
     main()
