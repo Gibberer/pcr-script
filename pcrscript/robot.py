@@ -455,7 +455,7 @@ class Robot:
 
     @trace
     def _saodang(self, chapter=1, level=1, count=1):
-        self._enter_advanture()
+        self._enter_adventure()
         level_pos = self._move_to_chapter(chapter - 1)
         pos = level_pos[level - 1]
         actions = []
@@ -498,7 +498,7 @@ class Robot:
         '''
         if isinstance(difficulty, int):
             difficulty = Difficulty(difficulty)
-        self._enter_advanture(difficulty)
+        self._enter_adventure(difficulty)
         if explicits:
             self.__saodang_hard_explicit_mode(difficulty, explicits)
             return
@@ -600,7 +600,7 @@ class Robot:
         checkguide: 是否做跳过教程检测
         '''
         # 从主页进入冒险页面
-        self._enter_advanture()
+        self._enter_adventure()
         self._guotu(chapter, start, end, totalcount, checkguide)
 
     def _guotu(self, chapter, start, end, totalcount, checkguide, symbols=CHAPTER_SYMBOLS, chapters=CHAPTERS):
@@ -629,18 +629,21 @@ class Robot:
                 level_pos = chapters[chapter][i]
             count += (end - start) + 1
 
-    def _enter_advanture(self, difficulty=Difficulty.NORMAL, activity=False):
+    def _enter_adventure(self, difficulty=Difficulty.NORMAL, activity=False):
         actions = []
         actions.append(MatchAction('tab_adventure', matched_actions=[ClickAction()], unmatch_actions=[
             ClickAction(template='btn_close'), ClickAction(pos=self._pos(15, 300))]))
         actions.append(SleepAction(2))
         if activity:
-            actions.append(ClickAction(template='story_activity_symbol'))
+            actions.append(MatchAction(template=['story_activity_symbol', 'story_activity_reprint_symbol'], matched_actions=[ClickAction()]))
         else:
             actions.append(ClickAction(
                 template='btn_main_plot', threshold=0.8*THRESHOLD))
         actions.append(SleepAction(2))
-        unmatch_actions = []
+        unmatch_actions = [ClickAction('btn_close'),
+                           ClickAction('btn_skip_blue'),
+                           ClickAction('btn_novocal_blue'),
+                           ClickAction('symbol_menu_in_story')]
         if activity:
             unmatch_actions += [
                 IfCondition('btn_activity_plot',
@@ -793,42 +796,6 @@ class Robot:
         actions.append(ClickAction(template='btn_ok_blue'))
         actions.append(SleepAction(5))
         self._action_squential(*actions)
-
-    @trace
-    def _explore(self):
-        '''
-        处理探索的每日信息
-        '''
-        self._action_squential(
-            MatchAction('tab_adventure', matched_actions=[ClickAction()], unmatch_actions=[
-                ClickAction(template='btn_close')]),
-            SleepAction(2),
-            ClickAction(template='explore'),
-            MatchAction('explore_symbol', matched_actions=[
-                ClickAction(offset=self._pos(100, 200))], timeout=5),
-            ClickAction(pos=self._pos(594, 242)),  # 经验关卡
-            SleepAction(3),
-            ClickAction(pos=self._pos(712, 143)),
-            MatchAction('btn_challenge'),
-            ClickAction(pos=self._pos(757, 330)),
-            SleepAction(0.5),
-            ClickAction(template='btn_ok_blue'),
-            ClickAction(template='btn_skip_ok'),
-            SleepAction(1),
-            ClickAction(pos=self._pos(480, 480)),
-            # SleepAction(3),
-            # ClickAction(pos=self._pos(813, 230)),  # 玛娜关卡
-            SleepAction(3),
-            ClickAction(pos=self._pos(712, 143)),
-            MatchAction('btn_challenge'),
-            ClickAction(pos=self._pos(757, 330)),
-            SleepAction(0.5),
-            ClickAction(template='btn_ok_blue'),
-            ClickAction(template='btn_skip_ok'),
-            SleepAction(1),
-            ClickAction(pos=self._pos(480, 480)),
-            SleepAction(3)
-        )
 
     @trace
     def _research(self):
@@ -1240,7 +1207,7 @@ class Robot:
         # 回首页，这里稍微绕下远
         self._tohomepage()
         # 再回到冒险页面
-        self._enter_advanture()
+        self._enter_adventure()
 
     @ trace
     def _skip_guide_2_2(self):
@@ -1250,7 +1217,7 @@ class Robot:
                         ClickAction(pos=self._pos(310, 50))], timeout=10)  # 为了点几下屏幕没有好的标志位
         )
         # 再回到冒险页面
-        self._enter_advanture()
+        self._enter_adventure()
 
     @ trace
     def _skip_guide_2_5(self):
@@ -1263,7 +1230,7 @@ class Robot:
         # 回首页，这里稍微绕下远
         self._tohomepage()
         # 再去冒险
-        self._enter_advanture()
+        self._enter_adventure()
 
     @ trace
     def _skip_guide_2_8(self):
@@ -1274,7 +1241,7 @@ class Robot:
         # 回首页，这里稍微绕下远
         self._tohomepage()
         # 再去冒险
-        self._enter_advanture()
+        self._enter_adventure()
 
     @ trace
     def _skip_guide_2_12(self):
@@ -1302,7 +1269,7 @@ class Robot:
             ClickAction(pos=self._pos(362, 374))
         )
         # 再去冒险
-        self._enter_advanture()
+        self._enter_adventure()
         self._action_squential(
             MatchAction('btn_close', matched_actions=[
                         ClickAction()], timeout=5)
@@ -1317,7 +1284,7 @@ class Robot:
                         ClickAction(pos=self._pos(310, 50))], timeout=5)  # 为了点几下屏幕没有好的标志位
         )
         # 再去冒险
-        self._enter_advanture()
+        self._enter_adventure()
 
     def _create_skip_guide_action(self, template='arrow_down', offset=(0, 100), threshold=(7/8)*THRESHOLD) -> Action:
         return MatchAction(template, matched_actions=[ClickAction(offset=(

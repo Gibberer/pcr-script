@@ -1,23 +1,32 @@
 from abc import ABCMeta, abstractmethod
 from .constants import *
 from pcrscript.actions import *
-from typing import Iterable
+from typing import Iterable, TYPE_CHECKING
 import numpy as np
 import time
 
+if TYPE_CHECKING:
+    from pcrscript import Robot
 
-def _get_combat_actions(check_auto=False, combat_duration=35):
+def _get_combat_actions(check_auto=False, combat_duration=35, interval=1):
     actions = []
     actions.append(ClickAction(template='btn_challenge'))
     actions.append(SleepAction(1))
     actions.append(ClickAction(template='btn_combat_start'))
-    actions.append(SleepAction(5))
+    actions.append(MatchAction(template='btn_blue_settle',matched_actions=[ClickAction(),SleepAction(1),ClickAction(template='btn_combat_start')], timeout=5))
+    actions.append(IfCondition('symbol_restore_power', 
+                               meet_actions=[
+                                ClickAction(pos=(370, 370)),
+                                SleepAction(2),
+                                ClickAction(pos=(680, 454)),
+                                SleepAction(2),
+                                ThrowErrorAction("No power!!!")]))
     if check_auto:
         actions.append(MatchAction(template='btn_caidan', matched_actions=[ClickAction(template='btn_speed'),
                                                                                ClickAction(template='btn_auto')], timeout=10))
     actions.append(SleepAction(combat_duration))
     actions.append(MatchAction('btn_next_step', matched_actions=[ClickAction()], unmatch_actions=[
-        ClickAction(template='btn_close'),ClickAction(template='btn_cancel'), ClickAction(pos=(200, 250))]))
+        ClickAction(template='btn_close'),ClickAction(template='btn_cancel'), ClickAction(pos=(200, 250))], delay=interval))
     actions.append(SleepAction(1))
     actions.append(MatchAction('btn_next_step', matched_actions=[ClickAction()], unmatch_actions=[
         ClickAction(template='btn_close'),ClickAction(template='btn_cancel')]))
@@ -27,7 +36,7 @@ def _get_combat_actions(check_auto=False, combat_duration=35):
 
 class BaseTask(metaclass=ABCMeta):
 
-    def __init__(self, robot):
+    def __init__(self, robot:'Robot'):
         self.robot = robot
         self.define_width = BASE_WIDTH
         self.define_height = BASE_HEIGHT
@@ -262,7 +271,7 @@ class QuickSaodang(BaseTask):
             return
         pref_pos = QuickSaodang._pos[pos - 1]
         # 进入冒险图
-        self.robot._enter_advanture()
+        self.robot._enter_adventure()
         actions = [
             ClickAction(pos=(920, 144)),
             SleepAction(1),
@@ -288,13 +297,91 @@ class QuickSaodang(BaseTask):
         ]
         self.action_squential(*actions)
 
+class ClearActivityFirstTime(BaseTask):
+    '''
+    剧情活动首次过图
+    '''
+    def run(self, exhaust_power=False):
+        self.robot._enter_adventure(difficulty=Difficulty.NORMAL, activity=True)
+        pre_pos = (-100,-100)
+        step = 0
+        while True:
+            time.sleep(0.5)
+            screenshot = self.robot.driver.screenshot()
+            self._ignore_niggled_scene(screenshot)
+            peco_pos = self.robot._find_match_pos(screenshot, template='peco', threshold=0.7)
+            if not peco_pos:
+                # 点击屏幕重新判断
+                self.action_once(ClickAction(pos=(20, 100)))
+                continue
+            else:
+                if self._is_same_pos(pre_pos, peco_pos):
+                    # 位置相同，说明下一关需要挑战boss关卡
+                    if step == 0:
+                        # 普通关卡
+                        self.action_squential(ClickAction(template='normal', threshold=0.6, mode='binarization'))
+                    else:
+                        self.action_squential(ClickAction(template='hard', threshold=0.6, mode='binarization'))
+                    match_action = MatchAction(template='btn_challenge', timeout=5)
+                    self.action_squential(match_action)
+                    if not match_action.is_timeout:
+                        actions = _get_combat_actions(combat_duration=3, interval=0.2)
+                        actions += [SleepAction(2)]
+                        self.action_squential(*actions)
+                        if step == 0:
+                            # 移动到困难章节
+                            time.sleep(5)
+                            self.action_squential(MatchAction('btn_hard_selected',
+                                                unmatch_actions=[ClickAction(
+                                                    template="btn_hard", threshold=0.9)]))
+                            time.sleep(3)
+                            step = 1
+                else:
+                    lock_ret = self.robot._find_match_pos_list(screenshot, template='symbol_lock')
+                    if not lock_ret:
+                        print('未发现解锁符号，执行正常活动清理步骤')
+                        break
+                    self.robot.driver.click(peco_pos[0], peco_pos[1] + self.robot.deviceheight * 0.1)
+                    match_action = MatchAction(template='btn_challenge', timeout=5)
+                    self.action_squential(match_action)
+                    if not match_action.is_timeout:
+                        actions = _get_combat_actions(combat_duration=15)
+                        actions += [SleepAction(2)]
+                        self.action_squential(*actions)
+                pre_pos = peco_pos
+        # 首次过图处理完毕，执行正常活动清体力任务步骤
+        self.robot._tohomepage()
+        ActivitySaodang().run(hard_chapter=True, exhaust_power=exhaust_power)
+        
+
+    def _is_same_pos(self, pre_pos, pos):
+        px,py = pre_pos
+        x,y = pos
+        return  (x - 40 <= px <= x + 40) and (y - 40 <= py <= y + 40)
+    
+    def _ignore_niggled_scene(self, screenshot):
+        print("check ignore")
+        templates = [
+            'btn_close',
+            'btn_skip_blue',
+            'btn_novocal_blue',
+            'symbol_menu_in_story',
+            'btn_skip_in_story',
+            'btn_blue_settle',
+            'btn_cancel',
+        ]
+        for template in templates:
+            pos = self.robot._find_match_pos(screenshot, template=template)
+            if pos:
+                self.robot.driver.click(*pos)
+
 class ActivitySaodang(BaseTask):
     '''
     剧情活动扫荡
     '''
     def run(self, hard_chapter=True, exhaust_power=True):
         if hard_chapter:
-            self.robot._enter_advanture(difficulty=Difficulty.HARD, activity=True)
+            self.robot._enter_adventure(difficulty=Difficulty.HARD, activity=True)
             actions = [
                 MatchAction(template='btn_close', matched_actions=[
                             ClickAction(), SleepAction(2)], timeout=3),
@@ -344,12 +431,12 @@ class ActivitySaodang(BaseTask):
                 ClickAction(pos=(860,270)), # 如果timeout尝试点击该位置   
                 SleepAction(1),         
             ]
-            actions += _get_combat_actions()
+            actions += _get_combat_actions(combat_duration=3, interval=0.5)
             self.action_squential(*actions)
         if exhaust_power:
             if hard_chapter:
                 self.robot._tohomepage()
-            self.robot._enter_advanture(difficulty=Difficulty.NORMAL, activity=True)
+            self.robot._enter_adventure(difficulty=Difficulty.NORMAL, activity=True)
             actions = []
             if not hard_chapter:
                 actions += [
@@ -479,6 +566,65 @@ class ClearStory(BaseTask):
             times += 1
             time.sleep(retry_interval)
 
+class Explore(BaseTask):
+    '''
+    每日探索
+    '''
+    def run(self, *args):
+        self.action_squential(
+            MatchAction('tab_adventure', matched_actions=[ClickAction()], unmatch_actions=[
+            ClickAction(template='btn_close')]),
+            SleepAction(2),
+            ClickAction(template='explore'),
+            MatchAction('explore_symbol', matched_actions=[
+                ClickAction(offset=(100, 200))], timeout=5),)
+        self.action_squential(
+            ClickAction(pos=(594, 242)),  # 经验关卡
+            SleepAction(3),)
+        # 处理经验关卡
+        self._execute_process()
+        # 处理玛娜关卡
+        self._execute_process()
+
+    def _execute_process(self):
+        target_pos = (712, 143)
+        times = 0
+        while True:
+            screenshot = self.robot.driver.screenshot()
+            lock_symbol = self.robot._find_match_pos(screenshot, 'symbol_lock')
+            if lock_symbol:
+                ret = self.robot._find_match_pos_list(screenshot, 'symbol_explore_unlock_level')
+                if ret:
+                    ret.sort(key=lambda pos: pos[1])
+                    target_pos = ret[0]
+                break
+            else:
+                level_lock_symbol = self.robot._find_match_pos(screenshot, 'symbol_explore_lock_level')
+                if level_lock_symbol and times == 0:
+                    # 未解锁关卡执行解锁操作,只处理一次
+                    times += 1
+                    self.action_squential(ClickAction(pos=target_pos), *_get_combat_actions(combat_duration=15))
+                else:
+                    if times > 0:
+                        ret = self.robot._find_match_pos_list(screenshot, 'symbol_explore_unlock_level')
+                        if ret:
+                            ret.sort(key=lambda pos: pos[1])
+                            target_pos = ret[0]
+                    break
+                    
+        # 扫荡流程
+        self.action_squential(
+            ClickAction(pos=target_pos),
+            MatchAction('btn_challenge'),
+            ClickAction(pos=(757, 330)),
+            SleepAction(0.5),
+            ClickAction(template='btn_ok_blue'),
+            ClickAction(template='btn_skip_ok'),
+            SleepAction(1),
+            ClickAction(pos=(480, 480)), # 这是一个引导弹窗，如果经验关卡没票了会自动移动到玛娜关卡
+            SleepAction(3)
+        )
+
 # 声明任务对应的配置任务名
 taskKeyMapping={
     "get_gift": GetGift,
@@ -491,4 +637,6 @@ taskKeyMapping={
     "quick_saodang": QuickSaodang,
     "activity_saodang": ActivitySaodang,
     "clear_story":ClearStory,
+    "clear_activity_first_time": ClearActivityFirstTime,
+    "explore":Explore,
     }
