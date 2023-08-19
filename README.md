@@ -63,9 +63,9 @@
 
 ## 配置信息参考
 
-配置默认的账号及需要做哪些任务等信息，需要在工程目录下创建`config.yml`的文件，具体可参考根目录下[sample.yml](sample.yml)文件。如果是清日常的话，参考[sample_daily_config.yml](sample_daily_config.yml)文件，如果通过daily_task执行的话，则需要创建`daily_config.yml`文件。
+配置默认的账号及需要做哪些任务等信息，需要在工程目录下创建`config.yml`的文件，具体可参考根目录下[sample.yml](sample.yml)文件。如果是清日常的话，参考[sample_daily_config.yml](sample_daily_config.yml)文件，如果通过[daily_task.py](daily_task.py)执行的话，则需要创建`daily_config.yml`文件。
 
-另外如果使用[daily_task.py]（daily_task.py）执行每日任务的话，可以将活动限制的任务全部启用（示例文件中是默认注释掉的），该脚本会拉取当前正在进行的活动，只有对应活动时间段内才会执行活动限定任务。
+另外如果使用[daily_task.py](daily_task.py)执行每日任务的话，可以将活动限制的任务全部启用（示例文件中是默认注释掉的），该脚本会拉取当前正在进行的活动，只有对应活动时间段内才会执行活动限定任务。
 
 ```yaml
 # 这个是用于清日常的配置文件
@@ -144,11 +144,8 @@ Task: #配置执行任务,配置任务名称，如果需要传入参数在下面
     -
       - shop_buy #商店购买
       -
-        1: # 第一个tab（通常）购买前四个
-          - 1
-          - 2
-          - 3
-          - 4
+        1: # 第一个tab（通常）
+          - -1 # 表示点击全选按钮即全部经验药水
         2_config: # 第二个栏的额外配置
           buy_equip: True # 购买装备
           first_equip: 1 # 第一个装备位置

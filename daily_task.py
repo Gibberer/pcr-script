@@ -35,9 +35,9 @@ class EventNews:
     clanBattle: Optional[Event] = None  # 公会战
 
 
-def is_emulator_online(dnpath):
+def is_emulator_online(dnpath)->bool:
     if not dnpath:
-        return False
+        return DNSimulator2("", useADB=True).get_devices()
     command_result = os.popen(f"{dnpath}\ldconsole.exe list2").read()
     if command_result:
         infos = list(map(lambda x: x.split(","), command_result.split("\n")))
@@ -135,7 +135,7 @@ def _query_hatsune_event(conn: sqlite3.Connection):
     cursor = conn.cursor()
     current_time = datetime.now().strftime(_time_format)
     cursor.execute(
-        f'SELECT start_time,end_time, original_event_id FROM hatsune_schedule WHERE end_time > "{current_time}" and start_time <= "{current_time}"'
+        f'SELECT start_time,end_time,original_event_id FROM hatsune_schedule WHERE end_time > "{current_time}" and start_time <= "{current_time}"'
     )
     result = cursor.fetchall()
     cursor.close()

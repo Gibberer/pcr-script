@@ -222,25 +222,6 @@ class Robot:
         )
 
     @trace
-    def _get_quest_reward(self):
-        '''
-        获取任务奖励
-        '''
-        self._action_squential(
-            SleepAction(1),
-            ClickAction(template='quest'),
-            SleepAction(3),
-            MatchAction('btn_all_rec', matched_actions=[
-                        ClickAction()], timeout=5),
-            MatchAction('btn_close', matched_actions=[
-                        ClickAction()], timeout=5),
-            MatchAction('btn_ok', matched_actions=[ClickAction()], timeout=3),
-            MatchAction('btn_cancel', matched_actions=[
-                        ClickAction()], timeout=3)
-        )
-
-
-    @trace
     def _shop_buy(self, rule):
         '''
         商店购买
@@ -439,21 +420,6 @@ class Robot:
         self._action_squential(*actions)
 
     @trace
-    def _get_power(self):
-        '''
-        公会之家领体力
-        '''
-        self._action_squential(
-            ClickAction(template='tab_society_home'),
-            MatchAction('guilde_home_symbol', timeout=8),
-            SleepAction(1),
-            ClickAction(pos=self._pos(900, 428)),
-            MatchAction('btn_close', matched_actions=[
-                        ClickAction()], timeout=5),
-            SleepAction(3)
-        )
-
-    @trace
     def _saodang(self, chapter=1, level=1, count=1):
         self._enter_adventure()
         level_pos = self._move_to_chapter(chapter - 1)
@@ -643,7 +609,8 @@ class Robot:
         unmatch_actions = [ClickAction('btn_close'),
                            ClickAction('btn_skip_blue'),
                            ClickAction('btn_novocal_blue'),
-                           ClickAction('symbol_menu_in_story')]
+                           ClickAction('symbol_menu_in_story'),
+                           ClickAction('btn_skip_in_story')]
         if activity:
             unmatch_actions += [
                 IfCondition('btn_activity_plot',
@@ -796,89 +763,6 @@ class Robot:
         actions.append(ClickAction(template='btn_ok_blue'))
         actions.append(SleepAction(5))
         self._action_squential(*actions)
-
-    @trace
-    def _research(self):
-        actions = [
-            MatchAction('tab_adventure', matched_actions=[ClickAction()], unmatch_actions=[
-                ClickAction(template='btn_close')]),
-            SleepAction(2),
-            ClickAction(template='research'),
-            MatchAction('research_symbol', matched_actions=[
-                ClickAction(offset=self._pos(100, 200))], timeout=5),
-        ]
-        # 圣迹2级
-        actions += [
-            ClickAction(pos=self._pos(587, 231)),
-            SleepAction(1),
-            ClickAction(pos=self._pos(718, 146)),
-            *self.__saodang_oneshot_actions(),
-            SleepAction(1),
-            ClickAction(pos=self._pos(37, 33)),
-            SleepAction(1)
-        ]
-        # 神殿2级
-        actions += [
-            ClickAction(pos=self._pos(800, 240)),
-            SleepAction(1),
-            ClickAction(pos=self._pos(718, 146)),
-            *self.__saodang_oneshot_actions(),
-            SleepAction(1)
-        ]
-        # # 神殿1级
-        # actions += [
-        #     ClickAction(pos=self._pos(718, 259)),
-        #     *self.__saodang_oneshot_actions()
-        # ]
-        self._action_squential(*actions)
-
-    @trace
-    def _arena(self):
-        self._action_squential(
-            MatchAction('tab_adventure', matched_actions=[ClickAction()], unmatch_actions=[
-                ClickAction(template='btn_close')]),
-            SleepAction(2),
-            ClickAction(pos=self._pos(587, 411)),
-            SleepAction(3),
-            MatchAction(template='btn_cancel', matched_actions=[
-                ClickAction(), SleepAction(1)], timeout=1),
-            ClickAction(pos=self._pos(295, 336)),
-            MatchAction(template='btn_ok', matched_actions=[
-                ClickAction(), SleepAction(1)], timeout=2),
-            ClickAction(pos=self._pos(665, 186)),
-            SleepAction(3),
-            ClickAction(pos=self._pos(849, 454)),
-            SleepAction(2),
-            MatchAction(template='btn_arena_skip', matched_actions=[ClickAction()], timeout=5),
-            MatchAction(['btn_next_step_small', 'btn_next_step'], matched_actions=[ClickAction()], unmatch_actions=[
-                ClickAction(template='btn_close')]),
-        )
-
-    @trace
-    def _princess_arena(self):
-        self._action_squential(
-            MatchAction('tab_adventure', matched_actions=[ClickAction()], unmatch_actions=[
-                ClickAction(template='btn_close')]),
-            SleepAction(2),
-            ClickAction(pos=self._pos(836, 409)),
-            SleepAction(3),
-            MatchAction(template='btn_cancel', matched_actions=[
-                ClickAction(), SleepAction(1)], timeout=1),
-            ClickAction(pos=self._pos(295, 336)),
-            MatchAction(template='btn_ok', matched_actions=[
-                ClickAction(), SleepAction(1)], timeout=2),
-            ClickAction(pos=self._pos(665, 186)),
-            SleepAction(3),
-            ClickAction(pos=self._pos(849, 454)),
-            SleepAction(1),
-            ClickAction(pos=self._pos(849, 454)),
-            SleepAction(1),
-            ClickAction(pos=self._pos(849, 454)),
-            SleepAction(2),
-            MatchAction(template='btn_arena_skip', matched_actions=[ClickAction()], timeout=10),
-            MatchAction(['btn_next_step_small', 'btn_next_step'], matched_actions=[ClickAction()], unmatch_actions=[
-                ClickAction(template='btn_close')]),
-        )
 
     @trace
     def _dungeon_saodang(self, difficulty=6, monster_team=1, boss_group='1', boss_team='2,3', withdraw=False, skipable=True):
