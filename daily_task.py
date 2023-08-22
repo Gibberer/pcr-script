@@ -114,6 +114,7 @@ def _upgrade_db_file(config, db_dir, db_file):
 
 
 _time_format = "%Y/%m/%d %H:%M:%S"
+_time_format_for_hatsune = "%Y/%#m/%d %H:%M:%S"
 
 
 def _query_free_gacha_event(conn: sqlite3.Connection):
@@ -133,7 +134,9 @@ def _query_free_gacha_event(conn: sqlite3.Connection):
 
 def _query_hatsune_event(conn: sqlite3.Connection):
     cursor = conn.cursor()
-    current_time = datetime.now().strftime(_time_format)
+    # 剧情活动的月份部分从2023年开始是不补零的
+    # 查了下%Y/%m/%d %H:%M:%S格式不是标准格式，所以实质下面的SQL是走了个字符串比较？应该有效率问题，不过不影响结果罢了。
+    current_time = datetime.now().strftime(_time_format_for_hatsune)
     cursor.execute(
         f'SELECT start_time,end_time,original_event_id FROM hatsune_schedule WHERE end_time > "{current_time}" and start_time <= "{current_time}"'
     )
@@ -143,7 +146,11 @@ def _query_hatsune_event(conn: sqlite3.Connection):
         start_time, end_time, original_event_id = result[0]
         start_time = datetime.timestamp(datetime.strptime(start_time, _time_format))
         end_time = datetime.timestamp(datetime.strptime(end_time, _time_format))
-        return Event(start_time, end_time, "剧情活动", {"original_event_id":original_event_id})
+        if original_event_id > 0:
+            name = "剧情活动（复刻）"
+        else:
+            name = "剧情活动"
+        return Event(start_time, end_time, name, {"original_event_id":original_event_id})
 
 
 def _query_tower_event(conn: sqlite3.Connection):
