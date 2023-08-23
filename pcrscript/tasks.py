@@ -137,6 +137,14 @@ class ChouShiLian(BaseTask):
             # 校验下是否有“免费”标签，没有的话就跳过
             IfCondition(condition_template="symbol_gacha_free", meet_actions=[
                 ClickAction(pos=(871, 355)),
+                SleepAction(0.5),
+                IfCondition("symbol_reward_select", meet_actions=[
+                    ClickAction(pos=(600, 265)),
+                    ClickAction(template="btn_ok_blue", timeout=5),
+                    ClickAction(template="btn_close"),
+                    SleepAction(0.5),
+                    ClickAction(pos=(871, 355)),
+                ]), # 处理附奖扭蛋必须选择的情况
                 *draw_actions,
                 MatchAction('btn_ok', matched_actions=[ClickAction()],
                             unmatch_actions=[
@@ -476,8 +484,9 @@ class ActivitySaodang(BaseTask):
                 ]
             actions += [
                 ClickAction(template="15", offset=(0, -20),
-                            threshold=0.6, mode="binarization"),
-                SleepAction(2),
+                            threshold=0.6, mode="binarization", timeout=10),
+                SleepAction(1),
+                IfCondition("peco", meet_actions=[ClickAction("peco"), SleepAction(1)]), # 找不到对应关卡符号时，使用人物标记查找
                 *_get_saodang_oneshot(duration=6000),
                 SleepAction(2)
             ]
