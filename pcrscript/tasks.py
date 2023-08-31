@@ -29,7 +29,7 @@ def _get_combat_actions(check_auto=False, combat_duration=35, interval=1):
         ClickAction(template='btn_close'),ClickAction(template='btn_cancel'), ClickAction(pos=(200, 250))], delay=interval))
     actions.append(SleepAction(1))
     actions.append(MatchAction('btn_next_step', matched_actions=[ClickAction()], unmatch_actions=[
-        ClickAction(template='btn_close'),ClickAction(template='btn_cancel')]))
+        ClickAction(template='btn_close'),ClickAction(template='btn_cancel'),ClickAction(template='btn_ok_blue')]))
     return actions
 
 def _get_saodang_oneshot(duration=2000):
@@ -65,7 +65,7 @@ class BaseTask(metaclass=ABCMeta):
         self.define_width = BASE_WIDTH
         self.define_height = BASE_HEIGHT
 
-    def action_squential(self, *actions: Iterable[Action]):
+    def action_squential(self, *actions: Action):
         for action in actions:
             action.bindTask(self)
         self.robot._action_squential(*actions)
@@ -352,15 +352,22 @@ class ClearActivityFirstTime(BaseTask):
             if not peco_pos:
                 # 点击屏幕重新判断
                 self.action_once(ClickAction(pos=(20, 100)))
+                pos = self.robot._find_match_pos(screenshot, template="btn_activity_plot", threshold=0.8*THRESHOLD)
+                if pos:
+                    self.robot.driver.click(*pos)
                 continue
             else:
+                lock_ret = self.robot._find_match_pos_list(screenshot, template='symbol_lock')
+                if not lock_ret:
+                    print('未发现解锁符号，执行正常活动清理步骤')
+                    break
                 if self._is_same_pos(pre_pos, peco_pos):
                     # 位置相同，说明下一关需要挑战boss关卡
                     if step == 0:
                         # 普通关卡
-                        self.action_squential(ClickAction(template='normal', threshold=0.6, mode='binarization'))
+                        self.action_squential(ClickAction(template='normal'))
                     else:
-                        self.action_squential(ClickAction(template='hard', threshold=0.6, mode='binarization'))
+                        self.action_squential(ClickAction(template='hard'))
                     match_action = MatchAction(template='btn_challenge', timeout=5)
                     self.action_squential(match_action)
                     if not match_action.is_timeout:
@@ -371,15 +378,12 @@ class ClearActivityFirstTime(BaseTask):
                             # 移动到困难章节
                             time.sleep(5)
                             self.action_squential(MatchAction('btn_hard_selected',
-                                                unmatch_actions=[ClickAction(
-                                                    template="btn_hard", threshold=0.9)]))
+                                                unmatch_actions=[ClickAction(template="btn_hard", threshold=0.9),
+                                                    ClickAction(pos=(20, 100))]))
                             time.sleep(3)
                             step = 1
+                        pre_pos = peco_pos
                 else:
-                    lock_ret = self.robot._find_match_pos_list(screenshot, template='symbol_lock')
-                    if not lock_ret:
-                        print('未发现解锁符号，执行正常活动清理步骤')
-                        break
                     self.robot.driver.click(peco_pos[0], peco_pos[1] + self.robot.deviceheight * 0.1)
                     match_action = MatchAction(template='btn_challenge', timeout=5)
                     self.action_squential(match_action)
@@ -387,19 +391,18 @@ class ClearActivityFirstTime(BaseTask):
                         actions = _get_combat_actions(combat_duration=15)
                         actions += [SleepAction(2)]
                         self.action_squential(*actions)
-                pre_pos = peco_pos
+                        pre_pos = peco_pos
         # 首次过图处理完毕，执行正常活动清体力任务步骤
         self.robot._tohomepage()
-        ActivitySaodang().run(hard_chapter=True, exhaust_power=exhaust_power)
+        ActivitySaodang(self.robot).run(hard_chapter=True, exhaust_power=exhaust_power)
         
 
     def _is_same_pos(self, pre_pos, pos):
         px,py = pre_pos
         x,y = pos
-        return  (x - 40 <= px <= x + 40) and (y - 40 <= py <= y + 40)
+        return  (x - 10 <= px <= x + 10) and (y - 10 <= py <= y + 10)
     
     def _ignore_niggled_scene(self, screenshot):
-        print("check ignore")
         templates = [
             'btn_close',
             'btn_skip_blue',
@@ -492,7 +495,22 @@ class ActivitySaodang(BaseTask):
             ]
             self.action_squential(*actions)
         self.action_squential(SleepAction(2))
-        self.robot._get_quest_reward()
+        # 领取任务
+        self.action_squential(
+            SleepAction(1),
+            MatchAction(template='quest', matched_actions=[ClickAction()], 
+                        unmatch_actions=[ClickAction(pos=(15, 200)), 
+                                         ClickAction(template="btn_cancel"),
+                                         ClickAction(template="symbol_guild_down_arrow", offset=(0, 70))]),
+            SleepAction(3),
+            MatchAction('btn_all_rec', matched_actions=[
+                        ClickAction()], timeout=5),
+            MatchAction('btn_close', matched_actions=[
+                        ClickAction()], timeout=5),
+            MatchAction('btn_ok', matched_actions=[ClickAction()], timeout=3),
+            MatchAction('btn_cancel', matched_actions=[
+                        ClickAction()], timeout=3)
+        )
     
 class ClearStory(BaseTask):
     '''
@@ -675,7 +693,7 @@ class GetQuestReward(BaseTask):
     def run(self):
         self.action_squential(
             SleepAction(1),
-            ClickAction(template='quest'),
+            MatchAction(template='quest', matched_actions=[ClickAction()], unmatch_actions=[ClickAction(pos=(15, 200))]),
             SleepAction(3),
             MatchAction('btn_all_rec', matched_actions=[
                         ClickAction()], timeout=5),

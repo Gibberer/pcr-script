@@ -322,7 +322,7 @@ class Robot:
                             else:
                                 ret = ret[0]
                                 ret = re.sub(
-                                    r'[;:孑持自有数敫敖致方敛寺故敌氮故女效^]', "", ret)
+                                    r'[;:孑持自有数敫敖致方敛寺故敌氮故女效/^]', "", ret)
                             ret = ret.replace("|", "1").replace("&", "8")
                             ret = ret.strip()
                             if not ret.isdigit():
@@ -598,7 +598,7 @@ class Robot:
     def _enter_adventure(self, difficulty=Difficulty.NORMAL, activity=False):
         actions = []
         actions.append(MatchAction('tab_adventure', matched_actions=[ClickAction()], unmatch_actions=[
-            ClickAction(template='btn_close'), ClickAction(pos=self._pos(15, 300))]))
+            ClickAction(template='btn_close'), ClickAction(pos=self._pos(15, 200))]))
         actions.append(SleepAction(2))
         if activity:
             actions.append(MatchAction(template=['story_activity_symbol', 'story_activity_reprint_symbol'], matched_actions=[ClickAction()]))
@@ -616,8 +616,8 @@ class Robot:
                 IfCondition('btn_activity_plot',
                             threshold=0.8*THRESHOLD,
                             meet_actions=[ClickAction(
-                                template='btn_activity_plot')],
-                            unmeet_actions=[ClickAction(pos=self._pos(15, 283)), MatchAction('btn_close', matched_actions=[ClickAction()], timeout=1)])]
+                                template='btn_activity_plot', offset=(0, -60))],
+                            unmeet_actions=[ClickAction(pos=self._pos(15, 200))])]
         if difficulty == Difficulty.NORMAL:
             unmatch_actions = [ClickAction(
                 template='btn_normal', threshold=0.9)] + unmatch_actions
