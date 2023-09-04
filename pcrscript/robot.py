@@ -6,13 +6,16 @@ from .error import NetError
 import cv2 as cv
 import numpy as np
 import time
-from typing import Iterable, Tuple
+from typing import Iterable, Tuple, TYPE_CHECKING
 from .tasks import taskKeyMapping, BaseTask
 import functools
 import random
 import collections
 import copy
 import re
+
+if TYPE_CHECKING:
+    from ocr import Ocr
 
 
 def trace(func):
@@ -31,7 +34,7 @@ num = 0
 class Robot:
     def __init__(self, driver: Driver, name=None):
         super().__init__()
-        self.ocr = None
+        self.ocr:'Ocr' = None
         self.driver = driver
         self.devicewidth, self.deviceheight = driver.getScreenSize()
         global num

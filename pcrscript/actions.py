@@ -1,7 +1,9 @@
 from .constants import *
-from typing import Tuple
+from typing import Tuple,TYPE_CHECKING
 import time
 
+if TYPE_CHECKING:
+    from pcrscript import Robot
 class Action:
     def __init__(self):
         super().__init__()
@@ -12,7 +14,7 @@ class Action:
         self.task = task
         return self
 
-    def do(self, screenshot, robot):
+    def do(self, screenshot, robot:'Robot'):
         self._done = True
 
     def done(self) -> bool:
@@ -28,7 +30,7 @@ class Action:
         return (x, y)
 
 class MatchAction(Action):
-    def __init__(self, template, matched_actions=None, unmatch_actions=None, delay=1, timeout=0, threshold=THRESHOLD, match_text=None):
+    def __init__(self, template, matched_actions:list['Action']=None, unmatch_actions:list['Action']=None, delay=1, timeout=0, threshold=THRESHOLD, match_text=None):
         super().__init__()
         self.template = template
         self.matched_actions = matched_actions
