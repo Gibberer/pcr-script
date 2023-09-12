@@ -609,7 +609,7 @@ class Robot:
             actions.append(ClickAction(
                 template='btn_main_plot', threshold=0.8*THRESHOLD))
         actions.append(SleepAction(2))
-        unmatch_actions = [ClickAction('btn_close'),
+        unmatch_actions = [ClickAction('btn_close', threshold=0.6),
                            ClickAction('btn_skip_blue'),
                            ClickAction('btn_novocal_blue'),
                            ClickAction('symbol_menu_in_story'),
@@ -619,7 +619,7 @@ class Robot:
                 IfCondition('btn_activity_plot',
                             threshold=0.8*THRESHOLD,
                             meet_actions=[ClickAction(
-                                template='btn_activity_plot', offset=(0, -60))],
+                                template='btn_activity_plot', offset=(0, -60), timeout=1)],
                             unmeet_actions=[ClickAction(pos=self._pos(15, 200))])]
         if difficulty == Difficulty.NORMAL:
             unmatch_actions = [ClickAction(
