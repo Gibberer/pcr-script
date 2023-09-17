@@ -344,6 +344,7 @@ class ClearActivityFirstTime(BaseTask):
         self.robot._enter_adventure(difficulty=Difficulty.NORMAL, activity=True)
         pre_pos = (-100,-100)
         step = 0
+        retry_count = 3
         while True:
             time.sleep(0.5)
             screenshot = self.robot.driver.screenshot()
@@ -363,11 +364,12 @@ class ClearActivityFirstTime(BaseTask):
                     break
                 if self._is_same_pos(pre_pos, peco_pos):
                     # 位置相同，说明下一关需要挑战boss关卡
+                    print(f"位置未发生变化可能下一步是{'普通'if step == 0 else '困难'}boss关卡{f'(重试{retry_count}次)' if retry_count > 0 else ''}")
                     if step == 0:
                         # 普通关卡
-                        self.action_squential(ClickAction(template='normal'))
+                        self.action_squential(ClickAction(template='normal', threshold=0.7, timeout=5))
                     else:
-                        self.action_squential(ClickAction(template='hard'))
+                        self.action_squential(ClickAction(template='hard', threshold=0.7, timeout=5))
                     match_action = MatchAction(template='btn_challenge', timeout=5)
                     self.action_squential(match_action)
                     if not match_action.is_timeout:
@@ -383,6 +385,13 @@ class ClearActivityFirstTime(BaseTask):
                             time.sleep(3)
                             step = 1
                         pre_pos = peco_pos
+                        retry_count = 0
+                    else:
+                        if retry_count >= 2:
+                            pre_pos = (-1, -1)
+                            retry_count = 0
+                        else:
+                            retry_count += 1
                 else:
                     self.robot.driver.click(peco_pos[0], peco_pos[1] + self.robot.deviceheight * 0.1)
                     match_action = MatchAction(template='btn_challenge', timeout=5)
@@ -400,7 +409,7 @@ class ClearActivityFirstTime(BaseTask):
     def _is_same_pos(self, pre_pos, pos):
         px,py = pre_pos
         x,y = pos
-        return  (x - 10 <= px <= x + 10) and (y - 10 <= py <= y + 10)
+        return  (x - 5 <= px <= x + 5) and (y - 5 <= py <= y + 5)
     
     def _ignore_niggled_scene(self, screenshot):
         templates = [
@@ -498,8 +507,9 @@ class ActivitySaodang(BaseTask):
         # 领取任务
         self.action_squential(
             SleepAction(1),
-            MatchAction(template='quest', matched_actions=[ClickAction()], 
+            MatchAction(template='symbol_activity_quest',
                         unmatch_actions=[ClickAction(pos=(15, 200)), 
+                                         ClickAction(template='quest'),
                                          ClickAction(template="btn_cancel"),
                                          ClickAction(template="symbol_guild_down_arrow", offset=(0, 70))]),
             SleepAction(3),
