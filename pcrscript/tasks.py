@@ -344,7 +344,7 @@ class ClearActivityFirstTime(BaseTask):
         self.robot._enter_adventure(difficulty=Difficulty.NORMAL, activity=True)
         pre_pos = (-100,-100)
         step = 0
-        retry_count = 3
+        retry_count = 0
         while True:
             time.sleep(0.5)
             screenshot = self.robot.driver.screenshot()
