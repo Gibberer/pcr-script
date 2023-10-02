@@ -114,7 +114,6 @@ def _upgrade_db_file(config, db_dir, db_file):
 
 
 _time_format = "%Y/%m/%d %H:%M:%S"
-_time_format_for_hatsune = "%Y/%#m/%d %H:%M:%S"
 
 
 def _query_free_gacha_event(conn: sqlite3.Connection):
@@ -134,11 +133,10 @@ def _query_free_gacha_event(conn: sqlite3.Connection):
 
 def _query_hatsune_event(conn: sqlite3.Connection):
     cursor = conn.cursor()
-    # 剧情活动的月份部分从2023年开始是不补零的
-    # 查了下%Y/%m/%d %H:%M:%S格式不是标准格式，所以实质下面的SQL是走了个字符串比较？应该有效率问题，不过不影响结果罢了。
-    current_time = datetime.now().strftime(_time_format_for_hatsune)
+    # 剧情活动的月份部分从2023年开始是不补零的, 直接使用字符串匹配不符合预期转换为标准时间比较
+    current_iso_time = datetime.now().isoformat(' ', 'seconds')
     cursor.execute(
-        f'SELECT start_time,end_time,original_event_id FROM hatsune_schedule WHERE end_time > "{current_time}" and start_time <= "{current_time}"'
+        f'SELECT start_time,end_time,original_event_id FROM hatsune_schedule WHERE ISO(end_time) > "{current_iso_time}" and ISO(start_time) <= "{current_iso_time}"'
     )
     result = cursor.fetchall()
     cursor.close()
@@ -181,6 +179,8 @@ def _query_drop_normal_event(conn: sqlite3.Connection):
         end_time = datetime.timestamp(datetime.strptime(end_time, _time_format))
         return Event(start_time, end_time, f"普通关卡{int(value/1000)}倍掉落", {"value":value})
 
+def _iso_datetime(date):
+    return str(datetime.strptime(date, _time_format))
 
 def fetch_event_news() -> EventNews:
     # 从redive.estertion.win抓国服信息
@@ -203,13 +203,14 @@ def fetch_event_news() -> EventNews:
         print("fetch event news failed")
     try:
         with sqlite3.connect(os.path.join(cache_path, db_file)) as conn:
+            conn.create_function('ISO', 1, _iso_datetime)
             free_gacha = _query_free_gacha_event(conn)
             hatsune = _query_hatsune_event(conn)
             tower = _query_tower_event(conn)
             drop_normal = _query_drop_normal_event(conn)
         return EventNews(freeGacha=free_gacha, hatsune=hatsune, tower=tower, dropItemNormal=drop_normal)
-    except Exception:
-        print("parse db file failed, filter all event special task")
+    except Exception as e:
+        print(f"parse db file failed, filter all event special task. Case: {e}")
         return EventNews()
 
 
@@ -244,7 +245,7 @@ def modify_task_list(news: EventNews, task_list: list):
                 if event_first_day(current, news.hatsune):
                     # 剧情活动第一天，需要清图,替换任务
                     task_list.pop(i)
-                    task_list.insert(i, ["clear_activity_first_time"]) # 该任务未测试，等待下次剧情活动开始进行验证
+                    task_list.insert(i, ["clear_activity_first_time"]) 
                 elif news.hatsune.extras["original_event_id"] != 0 and news.dropItemNormal:
                     # 如果是复刻活动，并且有掉落双倍则不在剧情活动清空体力
                     task_list.pop(i)
@@ -281,7 +282,6 @@ def run_script(config, use_adb):
     # 对于日常脚本不需要切换账号（提供账号），只是返回游戏欢迎页面
     robot.changeaccount()
     robot.work(task_list)
-
 
 if __name__ == "__main__":
     with open("daily_config.yml", encoding="utf-8") as f:

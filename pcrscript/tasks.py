@@ -508,7 +508,7 @@ class ActivitySaodang(BaseTask):
         self.action_squential(
             SleepAction(1),
             MatchAction(template='symbol_activity_quest',
-                        unmatch_actions=[ClickAction(pos=(15, 200)), 
+                        unmatch_actions=[ClickAction(pos=(15, 150)), 
                                          ClickAction(template='quest'),
                                          ClickAction(template="btn_cancel"),
                                          ClickAction(template="symbol_guild_down_arrow", offset=(0, 70))]),
