@@ -353,9 +353,9 @@ class ClearActivityFirstTime(BaseTask):
             if not peco_pos:
                 # 点击屏幕重新判断
                 self.action_once(ClickAction(pos=(20, 100)))
-                pos = self.robot._find_match_pos(screenshot, template="btn_activity_plot", threshold=0.8*THRESHOLD)
+                pos = self.robot._find_match_pos(screenshot, template="symbol_activity_home", threshold=0.8*THRESHOLD)
                 if pos:
-                    self.robot.driver.click(*pos)
+                    self.robot.driver.click(560, 170)
                 continue
             else:
                 lock_ret = self.robot._find_match_pos_list(screenshot, template='symbol_lock')
@@ -508,7 +508,7 @@ class ActivitySaodang(BaseTask):
         self.action_squential(
             SleepAction(1),
             MatchAction(template='symbol_activity_quest',
-                        unmatch_actions=[ClickAction(pos=(15, 150)), 
+                        unmatch_actions=[ClickAction(pos=(5, 150)), 
                                          ClickAction(template='quest'),
                                          ClickAction(template="btn_cancel"),
                                          ClickAction(template="symbol_guild_down_arrow", offset=(0, 70))]),

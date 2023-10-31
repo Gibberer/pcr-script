@@ -97,6 +97,7 @@ class Robot:
                 if ret:
                     self._action_squential(
                         ClickAction(template='btn_back_welcome'),
+                        SleepAction(1),
                         ClickAction(template='btn_ok_blue')
                     )
                 ClickAction(pos=self._pos(50, 300)).do(screenshot, self)
@@ -616,10 +617,9 @@ class Robot:
                            ClickAction('btn_skip_in_story')]
         if activity:
             unmatch_actions += [
-                IfCondition('btn_activity_plot',
+                IfCondition('symbol_activity_home',
                             threshold=0.8*THRESHOLD,
-                            meet_actions=[ClickAction(
-                                template='btn_activity_plot', offset=(0, -60), timeout=1)],
+                            meet_actions=[ClickAction(pos=self._pos(560, 170))],
                             unmeet_actions=[ClickAction(pos=self._pos(15, 200))])]
         if difficulty == Difficulty.NORMAL:
             unmatch_actions = [ClickAction(
