@@ -4,7 +4,7 @@ import subprocess
 import time
 from typing import Optional
 from dataclasses import dataclass, field
-from pcrscript import DNSimulator2, Robot, ocr
+from pcrscript import DNSimulator2, Robot
 import requests
 import brotli
 import sqlite3
@@ -31,6 +31,7 @@ class EventNews:
     freeGacha: Optional[Event] = None  # 免费扭蛋
     tower: Optional[Event] = None  # 露娜塔
     dropItemNormal: Optional[Event] = None  # 普通关卡掉落活动
+    dropItemHard: Optional[Event] = None # 困难关卡掉落活动
     hatsune: Optional[Event] = None  # 剧情活动
     clanBattle: Optional[Event] = None  # 公会战
 
@@ -167,9 +168,9 @@ def _query_tower_event(conn: sqlite3.Connection):
 
 def _query_drop_normal_event(conn: sqlite3.Connection):
     cursor = conn.cursor()
-    current_time = datetime.now().strftime(_time_format)
+    current_iso_time = datetime.now().isoformat(' ', 'seconds')
     cursor.execute(
-        f'SELECT start_time,end_time,value  FROM campaign_schedule WHERE end_time > "{current_time}" and start_time <= "{current_time}" and campaign_category=31'
+        f'SELECT start_time,end_time,value  FROM campaign_schedule WHERE ISO(end_time) > "{current_iso_time}" and ISO(start_time) <= "{current_iso_time}" and campaign_category=31'
     )
     result = cursor.fetchall()
     cursor.close()
@@ -178,6 +179,20 @@ def _query_drop_normal_event(conn: sqlite3.Connection):
         start_time = datetime.timestamp(datetime.strptime(start_time, _time_format))
         end_time = datetime.timestamp(datetime.strptime(end_time, _time_format))
         return Event(start_time, end_time, f"普通关卡{int(value/1000)}倍掉落", {"value":value})
+
+def _query_drop_hard_event(conn: sqlite3.Connection):
+    cursor = conn.cursor()
+    current_iso_time = datetime.now().isoformat(' ', 'seconds')
+    cursor.execute(
+        f'SELECT start_time,end_time,value  FROM campaign_schedule WHERE ISO(end_time) > "{current_iso_time}" and ISO(start_time) <= "{current_iso_time}" and campaign_category=32'
+    )
+    result = cursor.fetchall()
+    cursor.close()
+    if result:
+        start_time, end_time, value = result[0]
+        start_time = datetime.timestamp(datetime.strptime(start_time, _time_format))
+        end_time = datetime.timestamp(datetime.strptime(end_time, _time_format))
+        return Event(start_time, end_time, f"困难关卡{int(value/1000)}倍掉落", {"value":value})
 
 def _iso_datetime(date):
     return str(datetime.strptime(date, _time_format))
@@ -208,7 +223,8 @@ def fetch_event_news() -> EventNews:
             hatsune = _query_hatsune_event(conn)
             tower = _query_tower_event(conn)
             drop_normal = _query_drop_normal_event(conn)
-        return EventNews(freeGacha=free_gacha, hatsune=hatsune, tower=tower, dropItemNormal=drop_normal)
+            drop_hard = _query_drop_hard_event(conn)
+        return EventNews(freeGacha=free_gacha, hatsune=hatsune, tower=tower, dropItemNormal=drop_normal, dropItemHard=drop_hard)
     except Exception as e:
         print(f"parse db file failed, filter all event special task. Case: {e}")
         return EventNews()
@@ -232,12 +248,13 @@ def event_first_day(current_time, event: Event):
 def modify_task_list(news: EventNews, task_list: list):
     current = time.time()
     for i in range(len(task_list) - 1, -1, -1):
-        name = task_list[i][0]
-        if name == "choushilian":
+        target_task = task_list[i]
+        name = target_task[0]
+        if name == "free_gacha":
             if not event_valid(current, news.freeGacha):
                 # 无免费十连活动，移除任务
                 task_list.pop(i)
-        elif name == "activity_saodang":
+        elif name == "campaign_clean":
             if not event_valid(current, news.hatsune):
                 # 无剧情活动，移除任务
                 task_list.pop(i)
@@ -245,14 +262,14 @@ def modify_task_list(news: EventNews, task_list: list):
                 if event_first_day(current, news.hatsune):
                     # 剧情活动第一天，需要清图,替换任务
                     task_list.pop(i)
-                    task_list.insert(i, ["clear_activity_first_time"]) 
+                    task_list.insert(i, ["clear_campaign_first_time"]) 
                 elif news.hatsune.extras["original_event_id"] != 0 and news.dropItemNormal:
                     # 如果是复刻活动，并且有掉落双倍则不在剧情活动清空体力
                     task_list.pop(i)
                 else:
                     # 正常在剧情活动清空体力
                     pass
-        elif name == "luna_tower_saodang":
+        elif name == "luna_tower_clean":
             if not event_valid(current, news.tower):
                 # 无露娜塔，移除任务
                 task_list.pop(i)
@@ -260,6 +277,10 @@ def modify_task_list(news: EventNews, task_list: list):
                 if event_first_day(current, news.tower):
                     # 露娜塔第一天，需要开启回廊
                     task_list.pop(i)
+        elif name == "quick_clean":
+            if not news.dropItemNormal and news.dropItemHard:
+                # 只有困难双倍掉落是修改快速扫荡使用预设为3
+                target_task[1] = 3
 
 
 def run_script(config, use_adb):
@@ -269,8 +290,6 @@ def run_script(config, use_adb):
         return
     # 使用第一个设备
     robot = Robot(drivers[0])
-    if config["Extra"]["ocr"]:
-        robot.ocr = ocr.Ocr()
     news = fetch_event_news()
     print("当前进行的活动:")
     for value in news.__dict__.values():
@@ -287,12 +306,18 @@ if __name__ == "__main__":
     with open("daily_config.yml", encoding="utf-8") as f:
         config = yaml.load(f, Loader=yaml.FullLoader)
     dnpath = config["Extra"]["dnpath"]
-    return_code = open_leidian_emulator(dnpath)
-    if return_code < 0:
-        print("open leidian emulator failed")
-    else:
-        if return_code == 0:
-            print("leidian emulator install path is configured, use leidian console.")
+    if dnpath:
+        return_code = open_leidian_emulator(dnpath)
+        if return_code < 0:
+            print("open leidian emulator failed")
         else:
-            print("leidian emulator install path not found, use ADB command.")
-        run_script(config, return_code != 0)
+            print("leidian emulator install path is configured, use leidian console.")
+            run_script(config, False)
+    else:
+        print("leidian emulator install path not found, use ADB command.")
+        os.system(
+                f'adb -s {DNSimulator2("").get_devices()[0]} shell monkey -p com.bilibili.priconne 1'
+            )
+        time.sleep(30)
+        run_script(config, True)
+        

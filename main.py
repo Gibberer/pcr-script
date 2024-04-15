@@ -1,5 +1,4 @@
 from pcrscript import *
-from pcrscript import ocr
 import threading
 import time
 import yaml
@@ -63,12 +62,8 @@ def main():
     if not drivers:
         print("Device not found")
         return
-    ocr_impl = None 
-    if config['Extra']['ocr']:
-        ocr_impl = ocr.Ocr()
     for driver in drivers:
         robot = Robot(driver)
-        robot.ocr = ocr_impl
         thread_list.append(threading.Thread(target=dostaff, args=(robot, lock, account_list,total_size, task_dict)))
     start_time = time.time()
     print("start {} thread".format(len(thread_list)))

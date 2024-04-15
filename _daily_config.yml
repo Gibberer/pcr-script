@@ -1,0 +1,62 @@
+# 用于清日常的配置文件
+Accounts: #多账号相关：存账号信息
+  -
+    account: '账号1'
+    password: '密码'
+  # -
+  #   account: '账号2'
+  #   password: '密码'
+Extra:
+  dnpath: '' #雷电模拟器路径，例如：F:\leidian\LDPlayer9
+Task: #配置执行任务,配置任务名称，如果需要传入参数在下面增加参数，可以根据不同的账号序号配置任务。
+  1: # 多账号相关，可以针对账号配置不同的任务，如果是单账号日常不需要关注。
+    -
+      - free_gacha #抽取免费十连（只在免费10连期间有效）
+      - False #是否抽取所有免费十连，如果有多天未进行登录会有多次免费十连
+    -
+      - tohomepage #回到首页，每个任务都是按照当前处于首页状态开始执行的，回到首页已保证任务能够顺利执行
+    -
+      - schedule #完成日程表的内容
+    -
+      - get_quest_reward #领取任务奖励（获取赠送的体力）
+    -
+      - tohomepage
+    -
+      - arena #打一把竞技场
+    -
+      - tohomepage
+    -
+      - princess_arena #打一把公主竞技场
+    -
+      - tohomepage
+    -
+      - campaign_clean  # 清活动图的日常（只在活动期间有效）
+      - True # 是否刷活动困难章节和高难boss
+      - False # 是否将剩余体力花费在活动普通章节上
+    -
+      - tohomepage
+    -
+      - quick_clean #快捷扫荡
+      - 2 #使用预设2，这里需要注意当只有困难关卡双倍掉落时会强行切换为使用预设3。所以建议把该预设设置为通常关卡，预设3设置为困难关卡。
+    -
+      - tohomepage
+    -
+      - luna_tower_clean # 进行露娜塔的回廊扫荡，通过露娜塔后开放（只在露娜塔开放期间执行）
+    -
+      - tohomepage
+    -
+      - shop_buy #商店购买
+      -
+        1: # 第一个tab（通常）
+          - -1 # 表示点击全选按钮即全部经验药水
+        8: #限定商店
+          - -1 # 表示点击全选按钮即全部经验药水
+    -
+      - tohomepage
+    -
+      - get_quest_reward  # 领取任务奖励（全部奖励）
+    -
+      - tohomepage
+    -
+      - get_gift # 领取礼物
+      - True # 忽略体力收取

@@ -1,4 +1,3 @@
-from typing import Tuple
 from typing import List
 from .driver import ADBDriver, Driver, DNADBDriver
 import os

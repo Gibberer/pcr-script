@@ -1,12 +1,23 @@
 from abc import ABCMeta, abstractmethod
 from .constants import *
 from pcrscript.actions import *
-from typing import Iterable, TYPE_CHECKING
+from typing import TYPE_CHECKING
 import numpy as np
 import time
 
 if TYPE_CHECKING:
     from pcrscript import Robot
+
+# 可使用的任务列表
+registedTasks = {}
+
+def register(name):
+    def wrap(cls):
+        if name in registedTasks:
+            raise Exception(f"Task:{name} already registed.")
+        registedTasks[name] = cls
+        return cls
+    return wrap
 
 def _get_combat_actions(check_auto=False, combat_duration=35, interval=1):
     actions = []
@@ -22,7 +33,7 @@ def _get_combat_actions(check_auto=False, combat_duration=35, interval=1):
                                 SleepAction(2),
                                 ThrowErrorAction("No power!!!")]))
     if check_auto:
-        actions.append(MatchAction(template='btn_caidan', matched_actions=[ClickAction(template='btn_speed'),
+        actions.append(MatchAction(template='btn_menu_text', matched_actions=[ClickAction(template='btn_speed'),
                                                                                ClickAction(template='btn_auto')], timeout=10))
     actions.append(SleepAction(combat_duration))
     actions.append(MatchAction('btn_next_step', matched_actions=[ClickAction()], unmatch_actions=[
@@ -32,7 +43,7 @@ def _get_combat_actions(check_auto=False, combat_duration=35, interval=1):
         ClickAction(template='btn_close'),ClickAction(template='btn_cancel'),ClickAction(template='btn_ok_blue')]))
     return actions
 
-def _get_saodang_oneshot(duration=2000):
+def _get_clean_oneshot(duration=2000):
     return [
             MatchAction('btn_challenge', threshold=0.75),
             SwipeAction((877, 330), (877, 330), duration),
@@ -55,7 +66,6 @@ def _get_saodang_oneshot(duration=2000):
             SleepAction(2),
             ClickAction(pos=(666, 457))
         ]
- 
 
 
 class BaseTask(metaclass=ABCMeta):
@@ -79,7 +89,7 @@ class BaseTask(metaclass=ABCMeta):
     def run(self, *args):
         pass
 
-
+@register("get_gift")
 class GetGift(BaseTask):
     '''
     获取礼物
@@ -115,8 +125,8 @@ class GetGift(BaseTask):
             ]
         self.action_squential(*actions)
 
-
-class ChouShiLian(BaseTask):
+@register("free_gacha")
+class FreeGacha(BaseTask):
     '''
     抽取免费十连
     '''
@@ -129,7 +139,7 @@ class ChouShiLian(BaseTask):
                         ClickAction(pos=(50, 300))])
         ]
         self.action_squential(
-            ClickAction(template='niudan'),
+            ClickAction(template='gacha'),
             MatchAction('btn_setting_blue', matched_actions=[ClickAction()], unmatch_actions=[
                         ClickAction(template='btn_close')], timeout=5),
             MatchAction('btn_role_detail', unmatch_actions=[
@@ -162,7 +172,7 @@ class ChouShiLian(BaseTask):
             ]),
         )
 
-
+@register("normal_gacha")
 class NormalGacha(BaseTask):
     '''
     普通扭蛋
@@ -170,7 +180,7 @@ class NormalGacha(BaseTask):
 
     def run(self):
         self.action_squential(
-            ClickAction(template='niudan'),
+            ClickAction(template='gacha'),
             MatchAction('btn_setting_blue', matched_actions=[ClickAction()], unmatch_actions=[
                         ClickAction(template='btn_close')], timeout=3),
             MatchAction('btn_role_detail', unmatch_actions=[
@@ -186,65 +196,8 @@ class NormalGacha(BaseTask):
                         ClickAction()], timeout=5),
         )
 
-
-class RoleIntensify(BaseTask):
-    '''
-    角色强化默认前五个
-    '''
-
-    def run(self):
-        self.action_squential(
-            ClickAction(template='tab_role'),
-            SleepAction(1),
-            MatchAction('role_symbol'),
-            SleepAction(1),
-            ClickAction(pos=(177, 142)),
-            SleepAction(1),
-            MatchAction('role_intensify_symbol'),
-            SleepAction(1)
-        )
-        # 已经进入强化页面
-        actions = []
-        for _ in range(5):
-            actions.append(ClickAction(pos=(247, 337)))
-            actions.append(MatchAction('btn_cancel', matched_actions=[
-                           ClickAction(offset=(230, 0)), SleepAction(6)], timeout=3))
-            actions.append(MatchAction('btn_ok', matched_actions=[
-                           ClickAction(), SleepAction(3)], timeout=3))
-            actions.append(ClickAction(pos=(374, 438)))
-            actions.append(MatchAction(template='btn_ok_blue', matched_actions=[ClickAction(
-            )], unmatch_actions=[ClickAction(template='btn_ok')], timeout=5, threshold=1.2*THRESHOLD))
-            actions.append(SleepAction(1))
-            actions.append(ClickAction(pos=(938, 268)))
-            actions.append(SleepAction(1))
-        self.action_squential(*actions)
-
-
-class GuildLike(BaseTask):
-    '''
-    公会成员点赞
-    '''
-
-    def run(self, no=1):
-        x = 829
-        y = 110 * (no - 1) + 196
-        self.action_squential(
-            SleepAction(2),
-            MatchAction(template="guild", matched_actions=[ClickAction()],
-                        unmatch_actions=[ClickAction(template="btn_close"),ClickAction(template="btn_ok"), SleepAction(0.5)]),
-            SleepAction(2),
-            MatchAction(template="guild_symbol",matched_actions=[ClickAction()],
-                        unmatch_actions=[ClickAction(template="btn_close"),ClickAction(template="btn_ok"), SleepAction(0.5)]),
-            SleepAction(1),
-            ClickAction(pos=(234, 349)),
-            SleepAction(3),
-            ClickAction(pos=(x, y)),
-            MatchAction("btn_ok_blue", matched_actions=[
-                        ClickAction()], timeout=5),
-        )
-
-
-class LunaTowerSaodang(BaseTask):
+@register("luna_tower_clean")
+class LunaTowerClean(BaseTask):
     '''
     露娜塔 回廊扫荡
     '''
@@ -269,7 +222,7 @@ class LunaTowerSaodang(BaseTask):
             MatchAction(template='btn_cancel', matched_actions=[ClickAction(), SleepAction(1)], timeout=1),
             ]
         self.action_squential(*actions)
-
+@register("common_adventure")
 class CommonAdventure(BaseTask):
     '''
     通用的过图任务，执行内容为：
@@ -279,14 +232,14 @@ class CommonAdventure(BaseTask):
     4. -> 1 循环
     '''
 
-    def run(self, charactor_symbol="peco", estimate_combat_duration=30):
+    def run(self, character_symbol="character", estimate_combat_duration=30):
         '''
         :param charactor_symbol 当前使用角色在冒险地图上的图片特征（取脸部或身体部分即可，不要截到背景）
         :param estimate_combat_duration 预估一次战斗的时间
         '''
         while True:
             screenshot = self.robot.driver.screenshot()
-            pos = self.robot._find_match_pos(screenshot, charactor_symbol, threshold=0.7)
+            pos = self.robot._find_match_pos(screenshot, character_symbol, threshold=0.7)
             if pos :
                 # 通过图片匹配的位置信息是真实的坐标，不需要转换
                 self.robot.driver.click(pos[0], pos[1] + self.robot.deviceheight * 0.1)
@@ -297,25 +250,25 @@ class CommonAdventure(BaseTask):
                     actions += [SleepAction(2)]
                     self.action_squential(*actions)
             else:
-                self.action_squential(MatchAction(template='peco', threshold=0.7, unmatch_actions=[ClickAction(template='btn_cancel'), ClickAction(template='btn_close')]))
-
-class QuickSaodang(BaseTask):
+                self.action_squential(MatchAction(template=character_symbol, threshold=0.7, unmatch_actions=[ClickAction(template='btn_cancel'), ClickAction(template='btn_close')]))
+@register("quick_clean")
+class QuickClean(BaseTask):
     '''
     快速扫荡任务
     '''
     _pos = ((100, 80), (220, 80), (340, 80), (450, 80), (570, 80), (690, 80), (810, 80))
     def run(self, pos=0):
-        if pos <= 0 or pos > len(QuickSaodang._pos):
+        if pos <= 0 or pos > len(QuickClean._pos):
             print(f"不支持的预设选项:{pos}")
             return
-        pref_pos = QuickSaodang._pos[pos - 1]
+        pref_pos = QuickClean._pos[pos - 1]
         # 进入冒险图
         self.robot._enter_adventure()
         actions = [
             ClickAction(pos=(920, 144)),
-            SleepAction(1),
+            SleepAction(2),
             ClickAction(pos=pref_pos),
-            SleepAction(0.5),
+            SleepAction(1),
             ClickAction(pos=(815, 480)),
             MatchAction(template="btn_challenge",matched_actions=[ClickAction()], unmatch_actions=[
                 IfCondition("symbol_restore_power", meet_actions=[
@@ -335,8 +288,8 @@ class QuickSaodang(BaseTask):
             ClickAction(pos=(580, 480)), # 取消按钮退出
         ]
         self.action_squential(*actions)
-
-class ClearActivityFirstTime(BaseTask):
+@register("clear_campaign_first_time")
+class ClearCampaignFirstTime(BaseTask):
     '''
     剧情活动首次过图
     '''
@@ -403,7 +356,7 @@ class ClearActivityFirstTime(BaseTask):
                         pre_pos = peco_pos
         # 首次过图处理完毕，执行正常活动清体力任务步骤
         self.robot._tohomepage()
-        ActivitySaodang(self.robot).run(hard_chapter=True, exhaust_power=exhaust_power)
+        CampaignClean(self.robot).run(hard_chapter=True, exhaust_power=exhaust_power)
         
 
     def _is_same_pos(self, pre_pos, pos):
@@ -425,8 +378,8 @@ class ClearActivityFirstTime(BaseTask):
             pos = self.robot._find_match_pos(screenshot, template=template)
             if pos:
                 self.robot.driver.click(*pos)
-
-class ActivitySaodang(BaseTask):
+@register("campaign_clean")
+class CampaignClean(BaseTask):
     '''
     剧情活动扫荡
     '''
@@ -499,7 +452,7 @@ class ActivitySaodang(BaseTask):
                             threshold=0.6, mode="binarization", timeout=10),
                 SleepAction(1),
                 IfCondition("peco", meet_actions=[ClickAction("peco"), SleepAction(1)]), # 找不到对应关卡符号时，使用人物标记查找
-                *_get_saodang_oneshot(duration=6000),
+                *_get_clean_oneshot(duration=6000),
                 SleepAction(2)
             ]
             self.action_squential(*actions)
@@ -507,11 +460,11 @@ class ActivitySaodang(BaseTask):
         # 领取任务
         self.action_squential(
             SleepAction(1),
-            MatchAction(template='symbol_activity_quest',
+            MatchAction(template='symbol_campaign_quest',
                         unmatch_actions=[ClickAction(pos=(5, 150)), 
                                          ClickAction(template='quest'),
                                          ClickAction(template="btn_cancel"),
-                                         ClickAction(template="symbol_guild_down_arrow", offset=(0, 70))]),
+                                         ClickAction(template="symbol_guild_down_arrow", offset=(0, 70))], timeout=10),
             SleepAction(3),
             MatchAction('btn_all_rec', matched_actions=[
                         ClickAction()], timeout=5),
@@ -521,7 +474,7 @@ class ActivitySaodang(BaseTask):
             MatchAction('btn_cancel', matched_actions=[
                         ClickAction()], timeout=3)
         )
-    
+@register("clear_story")    
 class ClearStory(BaseTask):
     '''
     清new剧情
@@ -636,65 +589,7 @@ class ClearStory(BaseTask):
             times += 1
             time.sleep(retry_interval)
 
-class Explore(BaseTask):
-    '''
-    每日探索
-    '''
-    def run(self):
-        self.action_squential(
-            MatchAction('tab_adventure', matched_actions=[ClickAction()], unmatch_actions=[
-            ClickAction(template='btn_close')]),
-            SleepAction(2),
-            ClickAction(template='explore'),
-            MatchAction('explore_symbol', matched_actions=[
-                ClickAction(offset=(100, 200))], timeout=5),)
-        self.action_squential(
-            ClickAction(pos=(594, 242)),  # 经验关卡
-            SleepAction(3),)
-        # 处理经验关卡
-        self._execute_process()
-        # 处理玛娜关卡
-        self._execute_process()
-
-    def _execute_process(self):
-        target_pos = (712, 143)
-        times = 0
-        while True:
-            screenshot = self.robot.driver.screenshot()
-            lock_symbol = self.robot._find_match_pos(screenshot, 'symbol_lock')
-            if lock_symbol:
-                ret = self.robot._find_match_pos_list(screenshot, 'symbol_explore_unlock_level')
-                if ret:
-                    ret.sort(key=lambda pos: pos[1])
-                    target_pos = ret[0]
-                break
-            else:
-                level_lock_symbol = self.robot._find_match_pos(screenshot, 'symbol_explore_lock_level')
-                if level_lock_symbol and times == 0:
-                    # 未解锁关卡执行解锁操作,只处理一次
-                    times += 1
-                    self.action_squential(ClickAction(pos=target_pos), *_get_combat_actions(combat_duration=15))
-                else:
-                    if times > 0:
-                        ret = self.robot._find_match_pos_list(screenshot, 'symbol_explore_unlock_level')
-                        if ret:
-                            ret.sort(key=lambda pos: pos[1])
-                            target_pos = ret[0]
-                    break
-                    
-        # 扫荡流程
-        self.action_squential(
-            ClickAction(pos=target_pos),
-            MatchAction('btn_challenge'),
-            ClickAction(pos=(757, 330)),
-            SleepAction(0.5),
-            ClickAction(template='btn_ok_blue'),
-            ClickAction(template='btn_skip_ok'),
-            SleepAction(1),
-            ClickAction(pos=(480, 480)), # 这是一个引导弹窗，点击后如果经验关卡没票了会自动移动到玛娜关卡
-            SleepAction(3)
-        )
-
+@register("get_quest_reward")
 class GetQuestReward(BaseTask):
     '''
     领取任务奖励
@@ -714,56 +609,7 @@ class GetQuestReward(BaseTask):
                         ClickAction()], timeout=3)
         )
 
-class GetPower(BaseTask):
-    '''
-    公会小屋领取体力
-    '''
-
-    def run(self):
-        self.action_squential(
-            ClickAction(template='tab_society_home'),
-            MatchAction('guilde_home_symbol', timeout=8),
-            SleepAction(1),
-            ClickAction(pos=(900, 428)),
-            MatchAction('btn_close', matched_actions=[
-                        ClickAction()], timeout=5),
-            SleepAction(3)
-        )
-
-class Research(BaseTask):
-    '''
-    圣迹调查
-    '''
-
-    def run(self):
-        actions = [
-            MatchAction('tab_adventure', matched_actions=[ClickAction()], unmatch_actions=[
-                ClickAction(template='btn_close')]),
-            SleepAction(2),
-            ClickAction(template='research'),
-            MatchAction('research_symbol', matched_actions=[
-                ClickAction(offset=(100, 200))], timeout=5),
-        ]
-        # 圣迹2级
-        actions += [
-            ClickAction(pos=(587, 231)),
-            SleepAction(1),
-            ClickAction(pos=(718, 146)),
-            *_get_saodang_oneshot(),
-            SleepAction(1),
-            ClickAction(pos=(37, 33)),
-            SleepAction(1)
-        ]
-        # 神殿2级
-        actions += [
-            ClickAction(pos=(800, 240)),
-            SleepAction(1),
-            ClickAction(pos=(718, 146)),
-            *_get_saodang_oneshot(),
-            SleepAction(1)
-        ]
-        self.action_squential(*actions)
-
+@register("arena")
 class Arena(BaseTask):
     '''
     竞技场
@@ -778,6 +624,8 @@ class Arena(BaseTask):
             SleepAction(3),
             MatchAction(template='btn_cancel', matched_actions=[
                 ClickAction(), SleepAction(1)], timeout=1),
+            ClickAction(pos=(590, 240)),
+            SleepAction(2),
             ClickAction(pos=(295, 336)),
             MatchAction(template='btn_ok', matched_actions=[
                 ClickAction(), SleepAction(1)], timeout=2),
@@ -790,6 +638,7 @@ class Arena(BaseTask):
                 ClickAction(template='btn_close')]),
         )
 
+@register("princess_arena")
 class PrincessArena(BaseTask):
     '''
     公主竞技场
@@ -800,10 +649,12 @@ class PrincessArena(BaseTask):
             MatchAction('tab_adventure', matched_actions=[ClickAction()], unmatch_actions=[
                 ClickAction(template='btn_close')]),
             SleepAction(2),
-            ClickAction(pos=(836, 409)),
+            ClickAction(pos=(587, 411)),
             SleepAction(3),
             MatchAction(template='btn_cancel', matched_actions=[
                 ClickAction(), SleepAction(1)], timeout=1),
+            ClickAction(pos=(810, 240)),
+            SleepAction(2),
             ClickAction(pos=(295, 336)),
             MatchAction(template='btn_ok', matched_actions=[
                 ClickAction(), SleepAction(1)], timeout=2),
@@ -819,25 +670,28 @@ class PrincessArena(BaseTask):
             MatchAction(['btn_next_step_small', 'btn_next_step'], matched_actions=[ClickAction()], unmatch_actions=[
                 ClickAction(template='btn_close')]),
         )
-    
 
-# 声明任务对应的配置任务名
-taskKeyMapping={
-    "get_gift": GetGift,
-    "choushilian": ChouShiLian,
-    "normal_gacha": NormalGacha,
-    "role_intensify": RoleIntensify,
-    "guild_like": GuildLike,
-    "luna_tower_saodang": LunaTowerSaodang,
-    "common_adventure": CommonAdventure,
-    "quick_saodang": QuickSaodang,
-    "activity_saodang": ActivitySaodang,
-    "clear_story":ClearStory,
-    "clear_activity_first_time": ClearActivityFirstTime,
-    "explore":Explore,
-    "get_quest_reward":GetQuestReward,
-    "get_power":GetPower,
-    "research":Research,
-    "arena":Arena,
-    "princess_arena":PrincessArena,
-    }
+@register("schedule")
+class Schedule(BaseTask):
+    '''
+    日程表
+    '''
+    
+    def run(self):
+        self.action_squential(
+            MatchAction(template="symbol_schedule", unmatch_actions=[
+                ClickAction("icon_schedule"),
+                ClickAction("btn_cancel")
+            ]), #确认进入日程表页面
+            SleepAction(1),
+            ClickAction(pos=(650, 480)), # 一键自动
+            SleepAction(5),
+            MatchAction(template=["symbol_schedule_dialog","symbol_schedule_completed_mark"], 
+                        unmatch_actions=[
+                            ClickAction("btn_ok_blue"),
+                            ClickAction("btn_ok"),
+                            ClickAction("btn_skip_ok"),
+                        ]),
+            SleepAction(1),
+            ClickAction(pos=(270, 480)), # 关闭
+        )

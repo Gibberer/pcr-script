@@ -1,5 +1,4 @@
 pywin32>=300
-matplotlib>=3.3.4
 opencv_python>=4.6.0.66
 numpy>=1.23.3
 PyYAML>=6.0
