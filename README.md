@@ -14,12 +14,12 @@
   ```cmd
   pip install opencv_python numpy pywin32 PyYAML
   ```
-* 设置配置文件：修改[_dialy_config.yml](_dialy_config.yml)中的雷电模拟器路径，之后将该文件重命名为**dialy_config.yml**。
+* 设置配置文件：修改[_daily_config.yml](_daily_config.yml)中的雷电模拟器路径，之后将该文件重命名为**daily_config.yml**。
   * 如果是其他模拟器可以不设置路径，不过需要保证本机ADB命令可用，脚本会尝试使用ADB命令与设备交互，当然还请注意保持模拟器分辨率为960x540。
-* 执行[dialy_task.bat](dialy_task.bat)或[dialy_task.py](dialy_task.py)来启动脚本程序。
+* 执行[daily_task.bat](daily_task.bat)或[daily_task.py](daily_task.py)来启动脚本程序。
   * 运行后会按如下方式进行:启动模拟器->启动游戏->执行脚本任务
 ---
-* dialy_task仅支持单账号并且处于已登录状态，如果需要多账号可以参考[main.py](main.py)，这里会缺少对时限任务的判断，请自行判断处理。
+* dialy_task仅支持单设备单账号并且处于已登录状态，如果需要多账号多设备可以使用[main.py](main.py)。不过在该文件中缺少对时限任务的判断，需要注意配置文件中的任务组合方式。
 
 ## 关于任务内容
 
@@ -27,5 +27,5 @@
 
 ### 关于时限任务
 
-时限任务会在[dialy_task.py](daily_task.py)中进行判断，如果对应任务的活动当前未开放，则会将配置的任务条目废弃掉不允执行。
+时限任务会在[daily_task.py](daily_task.py)中进行判断，如果对应任务的活动当前未开放，则会将配置的任务条目废弃掉不允执行。
 
