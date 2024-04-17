@@ -119,9 +119,9 @@ _time_format = "%Y/%m/%d %H:%M:%S"
 
 def _query_free_gacha_event(conn: sqlite3.Connection):
     cursor = conn.cursor()
-    current_time = datetime.now().strftime(_time_format)
+    current_time = datetime.now().isoformat(' ', 'seconds')
     cursor.execute(
-        f'SELECT start_time,end_time FROM campaign_freegacha WHERE end_time > "{current_time}" and freegacha_10 = 1 and start_time <= "{current_time}"'
+        f'SELECT start_time,end_time FROM campaign_freegacha WHERE ISO(end_time) > "{current_time}" and freegacha_10 = 1 and ISO(start_time) <= "{current_time}"'
     )
     result = cursor.fetchall()
     cursor.close()
@@ -154,9 +154,9 @@ def _query_hatsune_event(conn: sqlite3.Connection):
 
 def _query_tower_event(conn: sqlite3.Connection):
     cursor = conn.cursor()
-    current_time = datetime.now().strftime(_time_format)
+    current_time = datetime.now().isoformat(' ', 'seconds')
     cursor.execute(
-        f'SELECT start_time,end_time FROM tower_schedule WHERE end_time > "{current_time}" and start_time <= "{current_time}"'
+        f'SELECT start_time,end_time FROM tower_schedule WHERE ISO(end_time) > "{current_time}" and ISO(start_time) <= "{current_time}"'
     )
     result = cursor.fetchall()
     cursor.close()

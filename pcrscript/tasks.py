@@ -208,7 +208,7 @@ class LunaTowerClean(BaseTask):
             SleepAction(1),
             ClickAction(template="btn_luna_tower_entrance"),
             MatchAction(template="symbol_luna_tower"),
-            SleepAction(2),
+            MatchAction(template='symbol_luna_tower_lock',matched_actions=[ThrowErrorAction("回廊未解锁")],timeout=2),
             SwipeAction(start=(890, 376), end=(890, 376), duration=2000),
             ClickAction(pos=(815, 375)),
             SleepAction(0.5),
@@ -691,7 +691,7 @@ class Schedule(BaseTask):
                             ClickAction("btn_ok_blue"),
                             ClickAction("btn_ok"),
                             ClickAction("btn_skip_ok"),
-                        ]),
+                        ],delay=2,threshold=0.9),
             SleepAction(1),
             ClickAction(pos=(270, 480)), # 关闭
         )

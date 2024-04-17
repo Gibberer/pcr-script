@@ -110,7 +110,7 @@ class Robot:
             ClickAction(template='select_branch_first'),
             ClickAction(pos=self._pos(90, 500)),
             # 处理兰德索尔杯的情况
-            IfCondition(condition_template="landsol_cup_symbol", meet_actions=[
+            IfCondition(condition_template="symbol_landsol_cup", meet_actions=[
                 ClickAction(pos=self._pos(*pos)),
                 SleepAction(2),
                 ClickAction(pos=self._pos(838, 494))
@@ -133,6 +133,7 @@ class Robot:
             for funcname, *args in pretasks:
                 getattr(self, "_" + funcname)(*args)
         self._first_enter_check()
+        self._log("进入游戏首页")
         if tasklist:
             for funcname, *args in tasklist:
                 if funcname in registedTasks:
