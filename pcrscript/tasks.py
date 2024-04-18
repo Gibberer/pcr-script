@@ -2,7 +2,7 @@ from abc import ABCMeta, abstractmethod
 from .constants import *
 from pcrscript.actions import *
 from typing import TYPE_CHECKING
-import numpy as np
+from .templates import Template,ImageTemplate
 import time
 
 if TYPE_CHECKING:
@@ -45,7 +45,7 @@ def _get_combat_actions(check_auto=False, combat_duration=35, interval=1):
 
 def _get_clean_oneshot(duration=2000):
     return [
-            MatchAction('btn_challenge', threshold=0.75),
+            MatchAction('btn_challenge'),
             SwipeAction((877, 330), (877, 330), duration),
             ClickAction(pos=(757, 330)),
             SleepAction(0.5),
@@ -84,6 +84,10 @@ class BaseTask(metaclass=ABCMeta):
         action.bindTask(self)
         action.do(self.robot.driver.screenshot(), self.robot)
         return action.done()
+
+    def template_match(self, screenshot, template:Template):
+        template.set_define_size(self.define_width, self.define_height)
+        return template.match(screenshot)
 
     @abstractmethod
     def run(self, *args):
@@ -139,7 +143,7 @@ class FreeGacha(BaseTask):
                         ClickAction(pos=(50, 300))])
         ]
         self.action_squential(
-            ClickAction(template='gacha'),
+            ClickAction(template='icon_gacha'),
             MatchAction('btn_setting_blue', matched_actions=[ClickAction()], unmatch_actions=[
                         ClickAction(template='btn_close')], timeout=5),
             MatchAction('btn_role_detail', unmatch_actions=[
@@ -180,7 +184,7 @@ class NormalGacha(BaseTask):
 
     def run(self):
         self.action_squential(
-            ClickAction(template='gacha'),
+            ClickAction(template='icon_gacha'),
             MatchAction('btn_setting_blue', matched_actions=[ClickAction()], unmatch_actions=[
                         ClickAction(template='btn_close')], timeout=3),
             MatchAction('btn_role_detail', unmatch_actions=[
@@ -239,7 +243,7 @@ class CommonAdventure(BaseTask):
         '''
         while True:
             screenshot = self.robot.driver.screenshot()
-            pos = self.robot._find_match_pos(screenshot, character_symbol, threshold=0.7)
+            pos = self.template_match(screenshot, ImageTemplate(character_symbol, threshold=0.7))
             if pos :
                 # 通过图片匹配的位置信息是真实的坐标，不需要转换
                 self.robot.driver.click(pos[0], pos[1] + self.robot.deviceheight * 0.1)
@@ -250,7 +254,7 @@ class CommonAdventure(BaseTask):
                     actions += [SleepAction(2)]
                     self.action_squential(*actions)
             else:
-                self.action_squential(MatchAction(template=character_symbol, threshold=0.7, unmatch_actions=[ClickAction(template='btn_cancel'), ClickAction(template='btn_close')]))
+                self.action_squential(MatchAction(template=ImageTemplate(character_symbol, threshold=0.7), unmatch_actions=[ClickAction(template='btn_cancel'), ClickAction(template='btn_close')]))
 @register("quick_clean")
 class QuickClean(BaseTask):
     '''
@@ -302,27 +306,27 @@ class ClearCampaignFirstTime(BaseTask):
             time.sleep(0.5)
             screenshot = self.robot.driver.screenshot()
             self._ignore_niggled_scene(screenshot)
-            peco_pos = self.robot._find_match_pos(screenshot, template='peco', threshold=0.7)
-            if not peco_pos:
+            character_pos = self.template_match(screenshot, ImageTemplate('character', threshold=0.7))
+            if not character_pos:
                 # 点击屏幕重新判断
                 self.action_once(ClickAction(pos=(20, 100)))
-                pos = self.robot._find_match_pos(screenshot, template="symbol_activity_home", threshold=0.8*THRESHOLD)
+                pos = self.template_match(screenshot, ImageTemplate("symbol_activity_home", threshold=0.8*THRESHOLD))
                 if pos:
-                    self.robot.driver.click(560, 170)
+                    self.action_once(ClickAction(pos=(560, 170)))
                 continue
             else:
-                lock_ret = self.robot._find_match_pos_list(screenshot, template='symbol_lock')
+                lock_ret = self.template_match(screenshot, ImageTemplate('symbol_lock'))
                 if not lock_ret:
                     print('未发现解锁符号，执行正常活动清理步骤')
                     break
-                if self._is_same_pos(pre_pos, peco_pos):
+                if self._is_same_pos(pre_pos, character_pos):
                     # 位置相同，说明下一关需要挑战boss关卡
                     print(f"位置未发生变化可能下一步是{'普通'if step == 0 else '困难'}boss关卡{f'(重试{retry_count}次)' if retry_count > 0 else ''}")
                     if step == 0:
                         # 普通关卡
-                        self.action_squential(ClickAction(template='normal', threshold=0.7, timeout=5))
+                        self.action_squential(ClickAction(template=ImageTemplate('normal', threshold=0.7), timeout=5))
                     else:
-                        self.action_squential(ClickAction(template='hard', threshold=0.7, timeout=5))
+                        self.action_squential(ClickAction(template=ImageTemplate('hard', threshold=0.7), timeout=5))
                     match_action = MatchAction(template='btn_challenge', timeout=5)
                     self.action_squential(match_action)
                     if not match_action.is_timeout:
@@ -333,11 +337,11 @@ class ClearCampaignFirstTime(BaseTask):
                             # 移动到困难章节
                             time.sleep(5)
                             self.action_squential(MatchAction('btn_hard_selected',
-                                                unmatch_actions=[ClickAction(template="btn_hard", threshold=0.9),
+                                                unmatch_actions=[ClickAction(template="btn_hard"),
                                                     ClickAction(pos=(20, 100))]))
                             time.sleep(3)
                             step = 1
-                        pre_pos = peco_pos
+                        pre_pos = character_pos
                         retry_count = 0
                     else:
                         if retry_count >= 2:
@@ -346,14 +350,14 @@ class ClearCampaignFirstTime(BaseTask):
                         else:
                             retry_count += 1
                 else:
-                    self.robot.driver.click(peco_pos[0], peco_pos[1] + self.robot.deviceheight * 0.1)
+                    self.robot.driver.click(character_pos[0], character_pos[1] + self.robot.deviceheight * 0.1)
                     match_action = MatchAction(template='btn_challenge', timeout=5)
                     self.action_squential(match_action)
                     if not match_action.is_timeout:
                         actions = _get_combat_actions(combat_duration=15)
                         actions += [SleepAction(2)]
                         self.action_squential(*actions)
-                        pre_pos = peco_pos
+                        pre_pos = character_pos
         # 首次过图处理完毕，执行正常活动清体力任务步骤
         self.robot._tohomepage()
         CampaignClean(self.robot).run(hard_chapter=True, exhaust_power=exhaust_power)
@@ -375,7 +379,7 @@ class ClearCampaignFirstTime(BaseTask):
             'btn_cancel',
         ]
         for template in templates:
-            pos = self.robot._find_match_pos(screenshot, template=template)
+            pos = self.template_match(screenshot, ImageTemplate(template))
             if pos:
                 self.robot.driver.click(*pos)
 @register("campaign_clean")
@@ -391,9 +395,8 @@ class CampaignClean(BaseTask):
                             ClickAction(), SleepAction(2)], timeout=3),
                 SleepAction(2),
                 # 清困难本
-                ClickAction(template='1-1', offset=(0, -20),
-                            threshold=0.6, mode='binarization'),  # 点击第一个活动困难本
-                MatchAction('btn_challenge', threshold=0.9*THRESHOLD),
+                ClickAction(template=ImageTemplate('1-1', threshold=0.6, mode='binarization'), offset=(0, -20)),  # 点击第一个活动困难本
+                MatchAction(ImageTemplate('btn_challenge', threshold=0.9*THRESHOLD)),
             ]
             for _ in range(5):
                 actions += [
@@ -430,8 +433,8 @@ class CampaignClean(BaseTask):
             ]
             # 高难
             actions += [
-                ClickAction(template='very', offset=(0, -40),
-                            threshold=0.6, mode='binarization',timeout=5),
+                ClickAction(template=ImageTemplate('very', threshold=0.6, mode='binarization'), 
+                            offset=(0, -40), timeout=5),
                 ClickAction(pos=(860,270)), # 如果timeout尝试点击该位置   
                 SleepAction(1),         
             ]
@@ -448,10 +451,10 @@ class CampaignClean(BaseTask):
                                 ClickAction(), SleepAction(2)], timeout=3)
                 ]
             actions += [
-                ClickAction(template="15", offset=(0, -20),
-                            threshold=0.6, mode="binarization", timeout=10),
+                ClickAction(template=ImageTemplate('15', threshold=0.6, mode='binarization'),
+                            offset=(0, -20),timeout=10),
                 SleepAction(1),
-                IfCondition("peco", meet_actions=[ClickAction("peco"), SleepAction(1)]), # 找不到对应关卡符号时，使用人物标记查找
+                IfCondition("character", meet_actions=[ClickAction("character"), SleepAction(1)]), # 找不到对应关卡符号时，使用人物标记查找
                 *_get_clean_oneshot(duration=6000),
                 SleepAction(2)
             ]
@@ -528,7 +531,7 @@ class ClearStory(BaseTask):
                 return
             if self._can_scroll(screenshot):
                 self.action_once(SwipeAction((700, 350), (700, 150)))
-                time.sleep(0.5)
+                time.sleep(2)
                 self.resolve_sub_list()
             else:
                 # 返回上一级页面
@@ -554,19 +557,19 @@ class ClearStory(BaseTask):
             self.action_once(ClickAction(pos=(150, 250)))
     
     def in_main_story_list(self, screenshot):
-        return self.robot._find_match_pos(screenshot, 'symbol_main_story')
+        return self.template_match(screenshot, ImageTemplate('symbol_main_story'))
 
     def in_sub_story_list(self, screenshot):
-        return self.robot._find_match_pos(screenshot, 'symbol_sub_story')
+        return self.template_match(screenshot, ImageTemplate('symbol_sub_story'))
     
     def in_story_tab(self, screenshot):
-        return not self.robot._find_match_pos(screenshot, 'tab_story')
+        return self.template_match(screenshot, ImageTemplate('symbol_story'))
     
     def have_dialog(self, screenshot):
-        return self.robot._find_match_pos(screenshot, 'symbol_dialog')
+        return self.template_match(screenshot, ImageTemplate('symbol_dialog'))
 
     def in_story_read_page(self, screenshot):
-        return self.robot._find_match_pos(screenshot, 'symbol_menu_in_story')
+        return self.template_match(screenshot, ImageTemplate('symbol_menu_in_story'))
     
     def _can_scroll(self, screenshot):
         sample_pos = self._to_canonical_pos((916, 427))
@@ -581,7 +584,8 @@ class ClearStory(BaseTask):
     def _read_template_pos_list(self, template, retry_limit=3, retry_interval=1.5):
         times = 0
         while times < retry_limit:
-            ret = self.robot._find_match_pos_list(self.robot.driver.screenshot(),template)
+            screenshot = self.robot.driver.screenshot()
+            ret = self.template_match(screenshot, ImageTemplate(template, ret_count=-1))
             if ret:
                 # 根据y轴排序
                 ret.sort(key=lambda pos: pos[1])
@@ -619,13 +623,13 @@ class Arena(BaseTask):
         self.action_squential(
             MatchAction('tab_adventure', matched_actions=[ClickAction()], unmatch_actions=[
                 ClickAction(template='btn_close')]),
-            SleepAction(2),
+            SleepAction(1.5),
             ClickAction(pos=(587, 411)),
-            SleepAction(3),
-            MatchAction(template='btn_cancel', matched_actions=[
-                ClickAction(), SleepAction(1)], timeout=1),
+            SleepAction(1.5),
             ClickAction(pos=(590, 240)),
-            SleepAction(2),
+            SleepAction(1),
+            MatchAction(template='btn_cancel', matched_actions=[
+                ClickAction(), SleepAction(1)], timeout=2),
             ClickAction(pos=(295, 336)),
             MatchAction(template='btn_ok', matched_actions=[
                 ClickAction(), SleepAction(1)], timeout=2),
@@ -648,13 +652,13 @@ class PrincessArena(BaseTask):
         self.action_squential(
             MatchAction('tab_adventure', matched_actions=[ClickAction()], unmatch_actions=[
                 ClickAction(template='btn_close')]),
-            SleepAction(2),
+            SleepAction(1.5),
             ClickAction(pos=(587, 411)),
-            SleepAction(3),
-            MatchAction(template='btn_cancel', matched_actions=[
-                ClickAction(), SleepAction(1)], timeout=1),
+            SleepAction(1.5),
             ClickAction(pos=(810, 240)),
-            SleepAction(2),
+            SleepAction(1),
+            MatchAction(template='btn_cancel', matched_actions=[
+                ClickAction(), SleepAction(1)], timeout=2),
             ClickAction(pos=(295, 336)),
             MatchAction(template='btn_ok', matched_actions=[
                 ClickAction(), SleepAction(1)], timeout=2),
@@ -686,12 +690,13 @@ class Schedule(BaseTask):
             SleepAction(1),
             ClickAction(pos=(650, 480)), # 一键自动
             SleepAction(5),
-            MatchAction(template=["symbol_schedule_dialog","symbol_schedule_completed_mark"], 
+            MatchAction(template="symbol_schedule_completed_mark", 
                         unmatch_actions=[
                             ClickAction("btn_ok_blue"),
                             ClickAction("btn_ok"),
                             ClickAction("btn_skip_ok"),
-                        ],delay=2,threshold=0.9),
+                            ClickAction("btn_close", roi=(350,0,960,540))
+                        ]),
             SleepAction(1),
             ClickAction(pos=(270, 480)), # 关闭
         )

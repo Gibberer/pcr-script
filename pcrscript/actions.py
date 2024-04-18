@@ -1,14 +1,16 @@
 from .constants import *
 from typing import Tuple,TYPE_CHECKING
+from .templates import Template,ImageTemplate
 import time
 
 if TYPE_CHECKING:
     from pcrscript import Robot
+    from tasks import BaseTask
 class Action:
     def __init__(self):
         super().__init__()
         self._done = False
-        self.task = None
+        self.task:'BaseTask' = None
     
     def bindTask(self, task):
         self.task = task
@@ -20,7 +22,7 @@ class Action:
     def done(self) -> bool:
         return self._done
     
-    def _pos(self, robot, x, y) -> Tuple[int, int]:
+    def _pos(self, robot:'Robot', x, y) -> Tuple[int, int]:
         if self.task:
             device_width = robot.devicewidth
             device_height = robot.deviceheight
@@ -29,17 +31,20 @@ class Action:
             return(int((x/base_width)*device_width), int((y/base_height)*device_height))
         return (x, y)
 
+    def _match(self, screenshot, template:Template)->Template:
+        if self.task:
+            template.set_define_size(self.task.define_width, self.task.define_height)
+        return template.match(screenshot)
+
 class MatchAction(Action):
-    def __init__(self, template, matched_actions:list['Action']=None, unmatch_actions:list['Action']=None, delay=1, timeout=0, threshold=THRESHOLD, match_text=None):
+    def __init__(self, template, matched_actions:list['Action']=None, unmatch_actions:list['Action']=None, delay=1, timeout=0):
         super().__init__()
         self.template = template
         self.matched_actions = matched_actions
         self.unmatch_action = unmatch_actions
         self.delay = delay
-        self.threshold = threshold
         self.timeout = timeout
         self.starttime = 0
-        self.match_text = match_text
         self.is_timeout = False
 
     def do(self, screenshot, robot):
@@ -48,17 +53,14 @@ class MatchAction(Action):
         if self.delay > 0:
             time.sleep(self.delay)
         ret = None
-        if self.match_text and robot.ocr:
-            ret = robot.ocr.find_match_text_pos(screenshot, self.match_text)
-        elif isinstance(self.template, list):
-            for temp in self.template:
-                ret = robot._find_match_pos(
-                    screenshot, temp, threshold=self.threshold)
-                if ret:
-                    break
-        else:
-            ret = robot._find_match_pos(
-                screenshot, self.template, threshold=self.threshold)
+        if not isinstance(self.template, list):
+            self.template = [self.template]
+        for template in self.template:
+            if not isinstance(template, Template):
+                template = ImageTemplate(template)
+            ret = self._match(screenshot, template)
+            if ret:
+                break
         if ret:
             if self.matched_actions:
                 for action in self.matched_actions:
@@ -111,30 +113,32 @@ class SleepAction(Action):
 
 
 class ClickAction(Action):
-    def __init__(self, template=None, pos=None, offset=(0, 0), threshold=THRESHOLD, mode=None, match_text=None, timeout=0):
+    def __init__(self, template=None, pos=None, offset=(0, 0), roi=None, timeout=0):
         super().__init__()
         self.template = template
         self.pos = pos
         self.offset = offset
-        self.threshold = threshold
-        self.mode = mode
-        self.match_text = match_text
         self.timeout = timeout
         self.starttime = 0
+        self.roi = roi
 
     def do(self, screenshot, robot):
         if self.starttime == 0:
             self.starttime = time.time()
-        if self.template or self.match_text:
-            if self.match_text and robot.ocr:
-                ret = robot.ocr.find_match_text_pos(screenshot, self.match_text)
-            else:
-                ret = robot._find_match_pos(
-                    screenshot, self.template, threshold=self.threshold, mode=self.mode)
+        if self.template:
+            if not isinstance(self.template, Template):
+                self.template = ImageTemplate(self.template)
+            ret = self._match(screenshot, self.template)
             if ret:
-                offset = self._pos(robot, *self.offset)
-                robot.driver.click(ret[0] + offset[0],
-                                   ret[1] + offset[1])
+                ignore = False
+                if self.roi:
+                    lt = self._pos(robot, self.roi[0], self.roi[1])
+                    rb = self._pos(robot, self.roi[2], self.roi[3])
+                    if ret[0] < lt[0] or ret[0] > rb[0] or ret[1] < lt[1] or ret[1] > rb[1]:
+                        ignore = True
+                if not ignore:
+                    offset = self._pos(robot, *self.offset)
+                    robot.driver.click(ret[0] + offset[0], ret[1] + offset[1])
                 self._done = True
         else:
             if self.pos:
@@ -171,16 +175,16 @@ class SwipeAction(Action):
 
 
 class IfCondition(CanSkipMatchAction):
-    def __init__(self, condition_template, meet_actions: list[Action] = None, unmeet_actions: list[Action] = None, threshold=THRESHOLD):
+    def __init__(self, condition_template, meet_actions: list[Action] = None, unmeet_actions: list[Action] = None):
         super().__init__()
         self._condition_template = condition_template
-        self._threshold = threshold
         self._meet_actions = meet_actions
         self._unmeet_actions = unmeet_actions
 
     def do(self, screenshot, robot):
-        ret = robot._find_match_pos(
-            screenshot, self._condition_template, threshold=self._threshold)
+        if not isinstance(self._condition_template, Template):
+            self._condition_template = ImageTemplate(self._condition_template)
+        ret = self._match(screenshot, self._condition_template)
         if ret:
             if self._meet_actions:
                 for action in self._meet_actions:
