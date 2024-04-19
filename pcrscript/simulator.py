@@ -1,21 +1,15 @@
 from typing import List
 from .driver import ADBDriver, Driver, DNADBDriver
 import os
-import types
 
 
-class DNSimulator():
+class GeneralSimulator():
     '''
-    雷电模拟器
+    通用模拟器
     '''
 
-    def __init__(self, path):  #example： N:\dnplayer2
+    def __init__(self): 
         super().__init__()
-        self.path = path
-
-    def dninput(self, msg, index=0):
-        os.system(
-            '{}\ldconsole.exe action --index {} --key call.input --value "{}"'.format(self.path, index, msg))
 
     def get_devices(self) -> List[str]:
         lines = os.popen("adb devices").readlines()
@@ -33,35 +27,17 @@ class DNSimulator():
     def get_dirvers(self) -> List[Driver]:
         devices = self.get_devices()
         if devices:
-            drivers = []
-            for deivce in devices:
-                driver = ADBDriver(deivce)
-                input_func = driver.input
-                input_code = compile('''def input(it, msg):
-                        zhongwen = False
-                        for char in msg:
-                            if '\u4e00' <= char <= '\u9fa5':
-                                zhongwen = True
-                                break
-                        if zhongwen:
-                            self.dninput(msg,index)
-                        else:
-                            input_func(msg)
-                ''', "<string>", "exec")
-                input = types.FunctionType(input_code.co_consts[0], {
-                                           'self': self, 'input_func': input_func, 'index': len(devices)}, 'input')
-                driver.input = types.MethodType(input, driver)
-                drivers.append(driver)
-            return drivers
+            return [ADBDriver(device) for device in devices]
 
 
-class DNSimulator2(DNSimulator):
+class DNSimulator(GeneralSimulator):
     '''
     雷电模拟器使用win32api
     '''
 
     def __init__(self, path, fastclick=False, useADB=True):
-        super().__init__(path)
+        super().__init__()
+        self.path = path
         self.fastclick = fastclick
         self.useADB = useADB
         if not useADB:

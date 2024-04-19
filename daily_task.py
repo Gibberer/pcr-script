@@ -4,7 +4,7 @@ import subprocess
 import time
 from typing import Optional
 from dataclasses import dataclass, field
-from pcrscript import DNSimulator2, Robot
+from pcrscript import DNSimulator, Robot
 import requests
 import brotli
 import sqlite3
@@ -38,7 +38,7 @@ class EventNews:
 
 def is_emulator_online(dnpath)->bool:
     if not dnpath:
-        return DNSimulator2("", useADB=True).get_devices()
+        return DNSimulator("", useADB=True).get_devices()
     command_result = os.popen(f"{dnpath}\ldconsole.exe list2").read()
     if command_result:
         infos = list(map(lambda x: x.split(","), command_result.split("\n")))
@@ -78,7 +78,7 @@ def open_leidian_emulator(dnpath):
             exit_code = 0
         else:
             os.system(
-                f'adb -s {DNSimulator2("").get_devices()[0]} shell monkey -p com.bilibili.priconne 1'
+                f'adb -s {DNSimulator("").get_devices()[0]} shell monkey -p com.bilibili.priconne 1'
             )
             exit_code = 1
         time.sleep(30)
@@ -284,7 +284,7 @@ def modify_task_list(news: EventNews, task_list: list):
 
 
 def run_script(config, use_adb):
-    drivers = DNSimulator2(config["Extra"]["dnpath"], useADB=use_adb).get_dirvers()
+    drivers = DNSimulator(config["Extra"]["dnpath"], useADB=use_adb).get_dirvers()
     if not drivers:
         print("Device not found.")
         return
@@ -316,7 +316,7 @@ if __name__ == "__main__":
     else:
         print("leidian emulator install path not found, use ADB command.")
         os.system(
-                f'adb -s {DNSimulator2("").get_devices()[0]} shell monkey -p com.bilibili.priconne 1'
+                f'adb -s {DNSimulator("").get_devices()[0]} shell monkey -p com.bilibili.priconne 1'
             )
         time.sleep(30)
         run_script(config, True)

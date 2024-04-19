@@ -1,4 +1,3 @@
-from .floordict import FloorDict
 from enum import Enum
 
 class Difficulty(Enum):

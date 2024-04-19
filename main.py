@@ -52,7 +52,7 @@ def main():
     with open(config_file, encoding='utf-8') as f:
         config = yaml.load(f, Loader=yaml.FullLoader)
     task_dict = getTaskDict(config)
-    drivers = DNSimulator2(config['Extra']['dnpath'],useADB= mode==0).get_dirvers() 
+    drivers = DNSimulator(config['Extra']['dnpath'],useADB= mode==0).get_dirvers() 
     account_list = [(account['account'], account['password'])
                     for account in config['Accounts']]
     total_size = len(account_list)

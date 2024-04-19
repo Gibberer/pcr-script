@@ -2,9 +2,8 @@ from .driver import Driver
 from .actions import *
 from .constants import *
 import time
-from typing import Iterable
 from .tasks import registedTasks, BaseTask
-from .templates import Template,ImageTemplate
+from .templates import ImageTemplate
 import functools
 import random
 import collections
