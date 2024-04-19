@@ -18,8 +18,6 @@ Task: #配置执行任务,配置任务名称，如果需要传入参数在下面
     -
       - schedule #完成日程表的内容
     -
-      - get_quest_reward #领取任务奖励（获取赠送的体力）
-    -
       - tohomepage
     -
       - arena #打一把竞技场
@@ -27,6 +25,14 @@ Task: #配置执行任务,配置任务名称，如果需要传入参数在下面
       - tohomepage
     -
       - princess_arena #打一把公主竞技场
+    -
+      - tohomepage
+    -
+      - research #圣迹和神殿调查
+    -
+      - tohomepage
+    -
+      - get_quest_reward #领取任务奖励（获取赠送的体力）
     -
       - tohomepage
     -

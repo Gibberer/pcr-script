@@ -147,7 +147,7 @@ class FreeGacha(BaseTask):
             MatchAction('btn_setting_blue', matched_actions=[ClickAction()], unmatch_actions=[
                         ClickAction(template='btn_close')], timeout=5),
             MatchAction('btn_role_detail', unmatch_actions=[
-                        ClickAction(template='btn_close')]),
+                        ClickAction(template='btn_close'),ClickAction(template='icon_gacha')]),
             # 校验下是否有“免费”标签，没有的话就跳过
             IfCondition(condition_template="symbol_gacha_free", meet_actions=[
                 ClickAction(pos=(871, 355)),
@@ -298,7 +298,7 @@ class ClearCampaignFirstTime(BaseTask):
     剧情活动首次过图
     '''
     def run(self, exhaust_power=False):
-        self.robot._enter_adventure(difficulty=Difficulty.NORMAL, activity=True)
+        self.robot._enter_adventure(difficulty=Difficulty.NORMAL, campaign=True)
         pre_pos = (-100,-100)
         step = 0
         retry_count = 0
@@ -310,7 +310,7 @@ class ClearCampaignFirstTime(BaseTask):
             if not character_pos:
                 # 点击屏幕重新判断
                 self.action_once(ClickAction(pos=(20, 100)))
-                pos = self.template_match(screenshot, ImageTemplate("symbol_activity_home", threshold=0.8*THRESHOLD))
+                pos = self.template_match(screenshot, ImageTemplate("symbol_campaign_home", threshold=0.8*THRESHOLD))
                 if pos:
                     self.action_once(ClickAction(pos=(560, 170)))
                 continue
@@ -389,7 +389,7 @@ class CampaignClean(BaseTask):
     '''
     def run(self, hard_chapter=True, exhaust_power=True):
         if hard_chapter:
-            self.robot._enter_adventure(difficulty=Difficulty.HARD, activity=True)
+            self.robot._enter_adventure(difficulty=Difficulty.HARD, campaign=True)
             actions = [
                 MatchAction(template='btn_close', matched_actions=[
                             ClickAction(), SleepAction(2)], timeout=3),
@@ -443,7 +443,7 @@ class CampaignClean(BaseTask):
         if exhaust_power:
             if hard_chapter:
                 self.robot._tohomepage()
-            self.robot._enter_adventure(difficulty=Difficulty.NORMAL, activity=True)
+            self.robot._enter_adventure(difficulty=Difficulty.NORMAL, campaign=True)
             actions = []
             if not hard_chapter:
                 actions += [
@@ -467,7 +467,7 @@ class CampaignClean(BaseTask):
                         unmatch_actions=[ClickAction(pos=(5, 150)), 
                                          ClickAction(template='quest'),
                                          ClickAction(template="btn_cancel"),
-                                         ClickAction(template="symbol_guild_down_arrow", offset=(0, 70))], timeout=10),
+                                         ClickAction(template="symbol_guild_down_arrow", offset=(0, 70))]),
             SleepAction(3),
             MatchAction('btn_all_rec', matched_actions=[
                         ClickAction()], timeout=5),
@@ -674,6 +674,40 @@ class PrincessArena(BaseTask):
             MatchAction(['btn_next_step_small', 'btn_next_step'], matched_actions=[ClickAction()], unmatch_actions=[
                 ClickAction(template='btn_close')]),
         )
+@register("research")
+class Research(BaseTask):
+    '''
+    圣迹调查
+    '''
+
+    def run(self):
+        actions = [
+            MatchAction('tab_adventure', matched_actions=[ClickAction()], unmatch_actions=[
+                ClickAction(template='btn_close')]),
+            SleepAction(2),
+            ClickAction(template='research'),
+            MatchAction('research_symbol', matched_actions=[
+                ClickAction(offset=(100, 200))], timeout=5),
+        ]
+        # 圣迹2级
+        actions += [
+            ClickAction(pos=(587, 231)),
+            SleepAction(1),
+            ClickAction(pos=(718, 146)),
+            *_get_clean_oneshot(),
+            SleepAction(1),
+            ClickAction(pos=(37, 33)),
+            SleepAction(1)
+        ]
+        # 神殿2级
+        actions += [
+            ClickAction(pos=(800, 240)),
+            SleepAction(1),
+            ClickAction(pos=(718, 146)),
+            *_get_clean_oneshot(),
+            SleepAction(1)
+        ]
+        self.action_squential(*actions)
 
 @register("schedule")
 class Schedule(BaseTask):
