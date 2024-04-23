@@ -1,4 +1,5 @@
 from pcrscript import *
+from pcrscript.floordict import FloorDict
 import threading
 import time
 import yaml

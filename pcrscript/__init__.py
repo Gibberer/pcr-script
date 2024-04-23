@@ -1,5 +1,4 @@
 from pcrscript.robot import Robot
-from pcrscript.floordict import FloorDict
-from pcrscript.simulator import DNSimulator
+from pcrscript.simulator import DNSimulator,GeneralSimulator
 
-__all__ = ['Robot','FloorDict','DNSimulator']
+__all__ = ['Robot','DNSimulator', 'GeneralSimulator']

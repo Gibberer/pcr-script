@@ -30,7 +30,7 @@ class Robot:
     def __init__(self, driver: Driver, name=None):
         super().__init__()
         self.driver = driver
-        self.devicewidth, self.deviceheight = driver.getScreenSize()
+        self.devicewidth, self.deviceheight = driver.get_screen_size()
         global num
         if not name:
             name = "Robot#{}".format(num)

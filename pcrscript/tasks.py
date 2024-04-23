@@ -279,7 +279,9 @@ class QuickClean(BaseTask):
                     ThrowErrorAction("No Power!!!")
                 ], unmeet_actions=[
                     MatchAction(template='btn_ok_blue',matched_actions=[ClickAction()],timeout=0.1)
-                ])
+                ]),
+                ClickAction("btn_ok"),
+                ClickAction("btn_not_store_next"),
             ]),
             MatchAction(template='btn_skip_ok', matched_actions=[
                             ClickAction()], timeout=2, delay=0.1),
