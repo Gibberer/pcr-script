@@ -21,7 +21,10 @@ class Template(metaclass=ABCMeta):
         return _OrTemplate(self, other)
     
     @abstractmethod
-    def match(self, screenshot:np.ndarray):
+    def match(self, screenshot:np.ndarray)->None|tuple:
+        '''
+        返回值基于screenshot
+        '''
         pass
 
 class _AndTemplate(Template):
@@ -60,6 +63,9 @@ class ImageTemplate(Template):
         self._threshold = threshold
         self._mode = mode
         self._ret_count = ret_count
+    
+    def _create_result(self, x, y, twidth, theight, scalex, scaley):
+        return (scalex * (x + twidth/2), scaley * (y + theight/2))
 
     def match(self, screenshot: np.ndarray):
         source = screenshot
@@ -68,8 +74,16 @@ class ImageTemplate(Template):
         theight, twidth = template.shape[:2]
         fx = width/self.define_width
         fy = height/self.define_height
-        template = cv.resize(template, None, fx=fx, fy=fy,
-                             interpolation=cv.INTER_AREA)
+        ret_scalex = 1
+        ret_scaley = 1
+        if fx > 1 and fy > 1: 
+            ret_scalex = fx
+            ret_scaley = fy
+            source = cv.resize(source, None, fx=1/fx, fy=1/fy, interpolation=cv.INTER_AREA)
+        elif fx < 1 and fy < 1:
+            template = cv.resize(template, None, fx=fx, fy=fy, interpolation=cv.INTER_AREA)
+        elif not (fx == 1 and fy == 1):
+            template = cv.resize(template, None, fx=fx, fy=fy, interpolation=cv.INTER_AREA)
         theight, twidth = template.shape[:2]
         if self._mode:
             if self._mode == 'binarization':
@@ -84,7 +98,7 @@ class ImageTemplate(Template):
         if self._ret_count == 1:
             min_val, max_val, min_loc, max_loc = cv.minMaxLoc(ret)
             if max_val > self._threshold:
-                return (max_loc[0] + twidth/2, max_loc[1] + theight/2)
+                return self._create_result(max_loc[0], max_loc[1], twidth, theight, ret_scalex, ret_scaley)
             else:
                 return None
         else:
@@ -99,7 +113,7 @@ class ImageTemplate(Template):
                 if not duplicate:
                     matched_points.append((x,y))
             if matched_points:
-                matched_points = list(map(lambda point: (point[0] + twidth/2, point[1] + theight/2), matched_points))
+                matched_points = list(map(lambda point: self._create_result(point[0], point[1], twidth, theight, ret_scalex, ret_scaley), matched_points))
                 if self._ret_count > 0:
                     return matched_points[:self._ret_count]
                 else:

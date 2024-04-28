@@ -64,12 +64,19 @@ class MatchAction(Action):
         if ret:
             if self.matched_actions:
                 for action in self.matched_actions:
+                    action.bindTask(self.task)
                     if hasattr(action, 'pos') and action.pos is None:
-                        action.pos = ret
+                        # 将基于屏幕获取的坐标转换为定义的坐标
+                        device_width = robot.devicewidth
+                        device_height = robot.deviceheight
+                        base_width = self.task.define_width
+                        base_height = self.task.define_height
+                        action.pos = (int((ret[0]/device_width)*base_width), int((ret[1]/device_height)*base_height))
                     action.do(screenshot, robot)
             self._done = True
         elif self.unmatch_action:
             for action in self.unmatch_action:
+                action.bindTask(self.task)
                 action.do(screenshot, robot)
                 if isinstance(action, CanSkipMatchAction):
                     if action.skip:
@@ -189,16 +196,18 @@ class IfCondition(CanSkipMatchAction):
             if self._meet_actions:
                 for action in self._meet_actions:
                     action._done = False
+                    action.bindTask(self.task)
                     if isinstance(action, SkipAction):
                         self.skip = True
-                robot._action_squential(*self._meet_actions)
+                robot.action_squential(*self._meet_actions)
         else:
             if self._unmeet_actions:
                 for action in self._unmeet_actions:
                     action._done = False
+                    action.bindTask(self.task)
                     if isinstance(action, SkipAction):
                         self.skip = True
-                robot._action_squential(*self._unmeet_actions)
+                robot.action_squential(*self._unmeet_actions)
         self._done = True
 
 class CustomIfCondition(Action):
@@ -216,10 +225,12 @@ class CustomIfCondition(Action):
             if self._meet_actions:
                 for action in self._meet_actions:
                     action._done = False
-                robot._action_squential(*self._meet_actions)
+                    action.bindTask(self.task)
+                robot.action_squential(*self._meet_actions)
         else:
             if self._unmeet_actions:
                 for action in self._unmeet_actions:
                     action._done = False
-                robot._action_squential(*self._unmeet_actions)
+                    action.bindTask(self.task)
+                robot.action_squential(*self._unmeet_actions)
         self._done = True

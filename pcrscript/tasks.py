@@ -78,7 +78,7 @@ class BaseTask(metaclass=ABCMeta):
     def action_squential(self, *actions: Action):
         for action in actions:
             action.bindTask(self)
-        self.robot._action_squential(*actions)
+        self.robot.action_squential(*actions)
     
     def action_once(self, action: Action):
         action.bindTask(self)
@@ -533,7 +533,7 @@ class ClearStory(BaseTask):
                 return
             if self._can_scroll(screenshot):
                 self.action_once(SwipeAction((700, 350), (700, 150)))
-                time.sleep(2)
+                time.sleep(1)
                 self.resolve_sub_list()
             else:
                 # 返回上一级页面
@@ -639,7 +639,7 @@ class Arena(BaseTask):
             SleepAction(3),
             ClickAction(pos=(849, 454)),
             SleepAction(2),
-            MatchAction(template='btn_arena_skip', matched_actions=[ClickAction()], timeout=5),
+            MatchAction(template='btn_arena_skip', matched_actions=[ClickAction()], timeout=8),
             MatchAction(['btn_next_step_small', 'btn_next_step'], matched_actions=[ClickAction()], unmatch_actions=[
                 ClickAction(template='btn_close')]),
         )
@@ -672,7 +672,7 @@ class PrincessArena(BaseTask):
             SleepAction(1),
             ClickAction(pos=(849, 454)),
             SleepAction(2),
-            MatchAction(template='btn_arena_skip', matched_actions=[ClickAction()], timeout=10),
+            MatchAction(template='btn_arena_skip', matched_actions=[ClickAction()], timeout=20),
             MatchAction(['btn_next_step_small', 'btn_next_step'], matched_actions=[ClickAction()], unmatch_actions=[
                 ClickAction(template='btn_close')]),
         )
@@ -732,7 +732,7 @@ class Schedule(BaseTask):
                             ClickAction("btn_ok"),
                             ClickAction("btn_skip_ok"),
                             ClickAction("btn_close", roi=(350,0,960,540))
-                        ]),
+                        ], delay=2),
             SleepAction(1),
             ClickAction(pos=(270, 480)), # 关闭
         )

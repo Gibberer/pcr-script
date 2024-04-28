@@ -25,12 +25,18 @@ num = 0
 class NetError(Exception):
     def __str__(self):
         return "发生网络异常!!!"
+
+class _DummyTask(BaseTask):
+
+    def run(self, *args):
+        pass
     
 class Robot:
     def __init__(self, driver: Driver, name=None):
         super().__init__()
         self.driver = driver
         self.devicewidth, self.deviceheight = driver.get_screen_size()
+        self._dummy_task = _DummyTask(self)
         global num
         if not name:
             name = "Robot#{}".format(num)
@@ -49,9 +55,9 @@ class Robot:
                     # 当前是欢迎页，执行登录操作
                     actions = (
                         MatchAction('btn_change_account', matched_actions=[
-                                    ClickAction()], unmatch_actions=[ClickAction(pos=self.__pos(850, 30))], delay=0),
+                                    ClickAction()], unmatch_actions=[ClickAction(pos=(850, 30))], delay=0),
                         SleepAction(0.5),
-                        ClickAction(pos=self.__pos(354,374)),
+                        ClickAction(pos=(354,374)),
                         SleepAction(0.5),
                         ClickAction(template='symbol_bilibili_logo'),
                         ClickAction(template='edit_account'),
@@ -61,18 +67,18 @@ class Robot:
                         ClickAction(template='btn_login'),
                         SleepAction(5)  # 延迟下，后续需要判断是否出现用户协议弹窗
                     )
-                    self._action_squential(*actions)
+                    self.__action_squential(*actions)
                     # 执行登录操作之后判断是否出现用户协议
                     while self.__find_match_pos(self.driver.screenshot(), 'user_agreement_symbol'):
-                        self._action_squential(
-                            ClickAction(pos=self.__pos(704, 334)),  # 滑动到底部
+                        self.__action_squential(
+                            ClickAction(pos=(704, 334)),  # 滑动到底部
                             SleepAction(2),
-                            ClickAction(pos=self.__pos(536, 388)),  # 点击同意
+                            ClickAction(pos=(536, 388)),  # 点击同意
                             SleepAction(2)
                         )
                     break
                 else:
-                    self._action_squential(ClickAction(pos=self.__pos(30,200)))
+                    self.__action_squential(ClickAction(pos=(30,200)))
                     break
             else:
                 # 在游戏里退出账号
@@ -81,7 +87,7 @@ class Robot:
                     self.driver.click(*ret)
                 ret = self.__find_match_pos(screenshot, 'tab_main_menu')
                 if ret:
-                    self._action_squential(
+                    self.__action_squential(
                         ClickAction(pos=ret),
                         SleepAction(1),
                         ClickAction(template='btn_back_welcome'),
@@ -91,33 +97,33 @@ class Robot:
                 ret = self.__find_match_pos(
                     screenshot, 'btn_back_welcome')
                 if ret:
-                    self._action_squential(
+                    self.__action_squential(
                         ClickAction(template='btn_back_welcome'),
                         SleepAction(1),
                         ClickAction(template='btn_ok_blue')
                     )
-                ClickAction(pos=self.__pos(50, 300)).do(screenshot, self)
+                ClickAction(pos=(50, 300)).do(screenshot, self)
             time.sleep(3)
 
     def _first_enter_check(self):
         pos = random.choice(((199, 300), (400, 300), (590, 300), (790, 300)))
-        self._action_squential(MatchAction('shop', unmatch_actions=(
+        self.__action_squential(MatchAction('shop', unmatch_actions=(
             ClickAction(template='btn_close'),
             ClickAction(template="btn_ok_blue"),
             ClickAction(template="btn_download"),
             ClickAction(template='btn_skip'),
             ClickAction(template='btn_cancel'),
             ClickAction(template='select_branch_first'),
-            ClickAction(pos=self.__pos(90, 500)),
+            ClickAction(pos=(90, 500)),
             # 处理兰德索尔杯的情况
             IfCondition(condition_template="symbol_landsol_cup", meet_actions=[
-                ClickAction(pos=self.__pos(*pos)),
+                ClickAction(pos=pos),
                 SleepAction(2),
-                ClickAction(pos=self.__pos(838, 494))
+                ClickAction(pos=(838, 494))
             ])
         ), timeout=0), net_error_check=False)
         time.sleep(3)
-        ClickAction(template='btn_close').do(self.driver.screenshot(), self)
+        ClickAction(template='btn_close').bindTask(self._dummy_task).do(self.driver.screenshot(), self)
 
     @trace
     def work(self, tasklist=None):
@@ -173,14 +179,14 @@ class Robot:
         '''
         进入游戏主页面
         '''
-        self._action_squential(MatchAction('shop', unmatch_actions=(
+        self.__action_squential(MatchAction('shop', unmatch_actions=(
             ClickAction(template='btn_close'),
             ClickAction(template="btn_ok_blue"),
             ClickAction(template="btn_download"),
             ClickAction(template='btn_skip'),
             ClickAction(template='btn_cancel'),
             ClickAction(template='select_branch_first'),
-            ClickAction(pos=self.__pos(*click_pos)),
+            ClickAction(pos=click_pos),
         ), timeout=timeout), net_error_check=False)
     
     @trace
@@ -195,7 +201,7 @@ class Robot:
         # 首先进入商店页
         actions.append(ClickAction(template='shop'))
         actions.append(MatchAction(template='symbol_shop', unmatch_actions=[
-                       ClickAction(pos=self.__pos(77, 258)), ClickAction(template='shop')]))
+                       ClickAction(pos=(77, 258)), ClickAction(template='shop')]))
         actions.append(SleepAction(1))
         tabs = collections.defaultdict(dict)
         for key, value in rule.items():
@@ -240,14 +246,14 @@ class Robot:
                     for _ in range(int((item.pos - line * line_count - 1) / line_count) + 1):
                         if slow_swipe:
                             tab_actions += [
-                                SwipeAction(start=self.__pos(580, 377),
-                                            end=self.__pos(580, 114), duration=5000),
+                                SwipeAction(start=(580, 377),
+                                            end=(580, 114), duration=5000),
                                 SleepAction(1)
                             ]
                         else:
                             tab_actions += [
-                                SwipeAction(start=self.__pos(580, 380),
-                                            end=self.__pos(580, 180), duration=300),
+                                SwipeAction(start=(580, 380),
+                                            end=(580, 180), duration=300),
                                 SleepAction(1)
                             ]
                         line += 1
@@ -261,8 +267,13 @@ class Robot:
                     click_pos = SHOP_ITEM_LOCATION[(item.pos - 1) % line_count]
 
                 if item.threshold <= 0:
+                    if tab == 1:
+                        tab_actions += [
+                            ClickAction(pos=(690, 125)),
+                            SleepAction(0.5),
+                        ]
                     tab_actions += [
-                        ClickAction(pos=self.__pos(*click_pos)),
+                        ClickAction(pos=click_pos),
                         SleepAction(0.1)
                     ]
                 else:
@@ -272,11 +283,11 @@ class Robot:
                     tab_actions += [
                         SleepAction(swipe_time * 1 + 1),
                         CustomIfCondition(condition_function, item, click_pos, meet_actions=[
-                                          ClickAction(pos=self.__pos(*click_pos))]),
+                                          ClickAction(pos=click_pos)]),
                         SleepAction(0.8),
                     ]
             tab_actions += [
-                ClickAction(pos=self.__pos(700, 438)),
+                ClickAction(pos=(700, 438)),
                 SleepAction(0.2),
                 MatchAction(template='btn_ok_blue',matched_actions=[ClickAction()], timeout=2),
                 SleepAction(1.5),
@@ -287,7 +298,7 @@ class Robot:
             if times[tab]:
                 for i in range(times[tab] - 1):
                     copy_tab_actions = [
-                        ClickAction(pos=self.__pos(550, 440)),
+                        ClickAction(pos=(550, 440)),
                         SleepAction(0.2),
                         ClickAction(template='btn_ok_blue'),
                         SleepAction(1)
@@ -296,7 +307,7 @@ class Robot:
                     tab_main_actions += copy_tab_actions
             if tab == 8:
                 # 限定tab，判断下对应tab是否为可点击状态
-                meet_actions = [ClickAction(pos=self.__pos(*SHOP_TAB_LOCATION[tab - 1]))] + tab_main_actions
+                meet_actions = [ClickAction(pos=SHOP_TAB_LOCATION[tab - 1])] + tab_main_actions
                 actions += [
                     SleepAction(1),
                     IfCondition("limit_tab_enable_symbol", meet_actions= meet_actions),
@@ -304,16 +315,16 @@ class Robot:
                     ]
             else:
                 actions += [
-                    ClickAction(pos=self.__pos(*SHOP_TAB_LOCATION[tab - 1])),
+                    ClickAction(pos=SHOP_TAB_LOCATION[tab - 1]),
                     SleepAction(1)
                     ]
                 actions += tab_main_actions
-        self._action_squential(*actions)
+        self.__action_squential(*actions)
 
     def _enter_adventure(self, difficulty=Difficulty.NORMAL, campaign=False):
         actions = []
         actions.append(MatchAction('tab_adventure', matched_actions=[ClickAction()], unmatch_actions=[
-            ClickAction(template='btn_close'), ClickAction(pos=self.__pos(15, 200))]))
+            ClickAction(template='btn_close'), ClickAction(pos=(15, 200))]))
         actions.append(SleepAction(2))
         if campaign:
             actions.append(MatchAction(template=['story_campaign_symbol', 'story_campaign_reprint_symbol'], matched_actions=[ClickAction()]))
@@ -328,8 +339,8 @@ class Robot:
         if campaign:
             unmatch_actions += [
                 IfCondition(ImageTemplate('symbol_campaign_home',threshold=0.8*THRESHOLD),
-                            meet_actions=[ClickAction(pos=self.__pos(560, 170))],
-                            unmeet_actions=[ClickAction(pos=self.__pos(15, 200))])]
+                            meet_actions=[ClickAction(pos=(560, 170))],
+                            unmeet_actions=[ClickAction(pos=(15, 200))])]
         if difficulty == Difficulty.NORMAL:
             unmatch_actions = [ClickAction(
                 template=ImageTemplate('btn_normal', threshold=0.9))] + unmatch_actions
@@ -345,9 +356,9 @@ class Robot:
                 template=ImageTemplate("btn_very_hard", threshold=0.9))] + unmatch_actions
             actions.append(MatchAction('btn_very_hard_selected',
                                        unmatch_actions=unmatch_actions))
-        self._action_squential(*actions)
+        self.__action_squential(*actions)
 
-    def _action_squential(self, *actions: Action, delay=0.2, net_error_check=True):
+    def action_squential(self, *actions: Action, delay=0.2, net_error_check=True):
         for action in actions:
             action_start_time = time.time()
             while not action.done():
@@ -364,8 +375,10 @@ class Robot:
                         self.driver.click(*net_error)
                         raise NetError()
     
-    def __pos(self, x, y) -> Tuple[int, int]:
-        return(int((x/BASE_WIDTH)*self.devicewidth), int((y/BASE_HEIGHT)*self.deviceheight))
+    def __action_squential(self, *actions: Action, delay=0.2, net_error_check=True):
+        for action in actions:
+            action.bindTask(self._dummy_task)
+        self.action_squential(*actions, delay=delay, net_error_check=net_error_check)
     
     def __find_match_pos(self, screenshot, template):
         return ImageTemplate(template).set_define_size(BASE_WIDTH, BASE_HEIGHT).match(screenshot)
