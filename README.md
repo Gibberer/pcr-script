@@ -10,6 +10,9 @@
 
 * 安装Python3环境，访问[Python官网](https://www.python.org/)安装
 * 使用git clone或在网页上下载本项目到电脑中解压缩
+  ```cmd
+  git clone --depth 1 git@github.com:Gibberer/pcr-script.git
+  ```
 * 在命令行中执行以下命令安装项目所需依赖
   ```cmd
   pip install opencv_python numpy pywin32 PyYAML

@@ -2,6 +2,7 @@ from typing import List
 import os
 import re
 import ast
+import subprocess
 from .driver import ADBDriver, Driver, DNDriver, MuMuDriver
 
 
@@ -41,6 +42,40 @@ class DNSimulator(GeneralSimulator):
         self.useADB = useADB
         if not useADB:
             self.fastclick = True
+        
+    def start(self):
+        running_process = os.popen("wmic process get description").read()
+        running_process = list(
+            map(lambda name: name.rstrip(), running_process.split("\n\n"))
+        )
+        if "dnplayer.exe" not in running_process:
+            subprocess.Popen(f"{self.path}\dnplayer.exe", shell=True)
+    
+    def open_app(self, packagename, device = None):
+        if self.path:
+            if not device:
+                device = 0
+            os.system(
+                f"{self.path}\ldconsole.exe runapp --index {device} --packagename {packagename}"
+            )
+            return 0
+        else:
+            if not device:
+                device = self.get_devices()[0]
+            os.system(
+                f'adb -s {device} shell monkey -p {packagename} 1'
+            )
+            return 1
+
+    def online(self)->bool:
+        if self.path:
+            command_result = os.popen(f"{self.path}\ldconsole.exe list2").read()
+            if command_result:
+                infos = list(map(lambda x: x.split(","), command_result.split("\n")))
+                if infos and int(infos[0][2]) > 0 and int(infos[0][4]) == 1:
+                    return True
+            return False
+        return super().get_devices()
 
     def get_devices(self) -> List[str]:
         if self.useADB:

@@ -305,14 +305,14 @@ class ClearCampaignFirstTime(BaseTask):
         step = 0
         retry_count = 0
         while True:
-            time.sleep(0.5)
+            time.sleep(1)
             screenshot = self.robot.driver.screenshot()
             self._ignore_niggled_scene(screenshot)
-            character_pos = self.template_match(screenshot, ImageTemplate('character', threshold=0.7))
+            character_pos = self.template_match(screenshot, ImageTemplate('character'))
             if not character_pos:
                 # 点击屏幕重新判断
                 self.action_once(ClickAction(pos=(20, 100)))
-                pos = self.template_match(screenshot, ImageTemplate("symbol_campaign_home", threshold=0.8*THRESHOLD))
+                pos = self.template_match(screenshot, ImageTemplate("symbol_campaign_home"))
                 if pos:
                     self.action_once(ClickAction(pos=(560, 170)))
                 continue
@@ -384,6 +384,7 @@ class ClearCampaignFirstTime(BaseTask):
             pos = self.template_match(screenshot, ImageTemplate(template))
             if pos:
                 self.robot.driver.click(*pos)
+                break
 @register("campaign_clean")
 class CampaignClean(BaseTask):
     '''
@@ -728,11 +729,10 @@ class Schedule(BaseTask):
             SleepAction(5),
             MatchAction(template="symbol_schedule_completed_mark", 
                         unmatch_actions=[
-                            ClickAction("btn_ok_blue"),
-                            ClickAction("btn_ok"),
-                            ClickAction("btn_skip_ok"),
-                            ClickAction("btn_close", roi=(350,0,960,540))
-                        ], delay=2),
+                            ClickAction(ImageTemplate("btn_ok_blue") | ImageTemplate("btn_ok") 
+                                        | ImageTemplate("btn_skip_ok") | ImageTemplate("btn_close"),
+                                        roi=(350,0,960,540))
+                        ]),
             SleepAction(1),
             ClickAction(pos=(270, 480)), # 关闭
         )
