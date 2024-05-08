@@ -242,14 +242,18 @@ def modify_task_list(news: EventNews, task_list: list):
                 else:
                     # 正常在剧情活动清空体力
                     pass
-        elif name == "luna_tower_clean":
+        elif name == "luna_tower_clean" or name == "luna_tower_climbing":
             if not event_valid(current, news.tower):
                 # 无露娜塔，移除任务
                 task_list.pop(i)
             else:
                 if event_first_day(current, news.tower):
                     # 露娜塔第一天，需要开启回廊
-                    task_list.pop(i)
+                    if name == "luna_tower_clean":
+                        task_list.pop(i)
+                else:
+                    if name == "luna_tower_climbing":
+                        task_list.pop(i)
         elif name == "quick_clean":
             if not news.dropItemNormal and news.dropItemHard:
                 # 只有困难双倍掉落是修改快速扫荡使用预设为3

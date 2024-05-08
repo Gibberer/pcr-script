@@ -1,13 +1,12 @@
+import functools
+import random
+import time
+
 from .driver import Driver
 from .actions import *
 from .constants import *
-import time
-from .tasks import registedTasks, BaseTask
+from .tasks import registedTasks, BaseTask, ToHomePage
 from .templates import ImageTemplate
-import functools
-import random
-import collections
-import copy
 
 
 def trace(func):
@@ -81,6 +80,10 @@ class Robot:
                     self.__action_squential(ClickAction(pos=(30,200)))
                     break
             else:
+                # 应用未响应？
+                ret = self.__find_match_pos(screenshot, 'app_no_responed')
+                if ret:
+                    self.driver.click(*ret)
                 # 在游戏里退出账号
                 ret = self.__find_match_pos(screenshot, 'btn_close')
                 if ret:
@@ -139,15 +142,15 @@ class Robot:
             for funcname, *args in pretasks:
                 getattr(self, "_" + funcname)(*args)
         self._first_enter_check()
-        self._log("已进入游戏首页")
+        self._log("======:已进入游戏首页:======")
         if tasklist:
             for funcname, *args in tasklist:
                 if funcname in registedTasks:
-                    self._runTask(funcname, registedTasks[funcname], args)
+                    self._run_task(funcname, registedTasks[funcname], args)
                 else:
                     self._call_function(funcname, args)
 
-    def _runTask(self, taskname, taskclass: BaseTask, args):
+    def _run_task(self, taskname, taskclass: BaseTask, args):
         self._log(f"start task: {taskname}")
         try:
             task = taskclass(self)
@@ -158,8 +161,8 @@ class Robot:
         except Exception as e:
             print(e)
             if isinstance(e, NetError):
-                self._tohomepage(click_pos=(60, 300))
-                self._runTask(taskname, taskclass, args)
+                self.__tohomepage(click_pos=(60, 300))
+                self._run_task(taskname, taskclass, args)
         self._log(f"end task: {taskname}")
     
     def _call_function(self, funcname, args):
@@ -168,195 +171,11 @@ class Robot:
         except Exception as e:
             print(e)
             if isinstance(e, NetError):
-                self._tohomepage(click_pos=(60, 300))
+                self.__tohomepage(click_pos=(60, 300))
                 self._call_function(funcname, args)
 
     def _log(self, msg: str):
         print("{}: {}".format(self._name, msg))
-
-    @trace
-    def _tohomepage(self, click_pos=(90, 500), timeout=0):
-        '''
-        进入游戏主页面
-        '''
-        self.__action_squential(MatchAction('shop', unmatch_actions=(
-            ClickAction(template='btn_close'),
-            ClickAction(template="btn_ok_blue"),
-            ClickAction(template="btn_download"),
-            ClickAction(template='btn_skip'),
-            ClickAction(template='btn_cancel'),
-            ClickAction(template='select_branch_first'),
-            ClickAction(pos=click_pos),
-        ), timeout=timeout), net_error_check=False)
-    
-    @trace
-    def _shop_buy(self, rule):
-        '''
-        商店购买
-        Paramters:
-        ---
-        rule: 规则
-        '''
-        actions = []
-        # 首先进入商店页
-        actions.append(ClickAction(template='shop'))
-        actions.append(MatchAction(template='symbol_shop', unmatch_actions=[
-                       ClickAction(pos=(77, 258)), ClickAction(template='shop')]))
-        actions.append(SleepAction(1))
-        tabs = collections.defaultdict(dict)
-        for key, value in rule.items():
-            if isinstance(key, int):
-                tabs[key]['items'] = value
-            else:
-                tabs[int(key.split("_")[0])].update(value)
-        Item = collections.namedtuple(
-            "Item", ["pos", "threshold"], defaults=[0, -1])
-        times = collections.defaultdict(int)
-        item_total_count = collections.defaultdict(lambda:-1)
-        for key in tabs:
-            value = tabs[key]
-            tabs[key] = []
-            items = tabs[key]
-            if 'items' in value:
-                for normal_item in value['items']:
-                    items.append(Item(normal_item))
-            items.sort(key=lambda item: item.pos)
-            if 'time' in value:
-                times[key] = value['time']
-            if 'total_item_count' in value:
-                item_total_count[key] = value['total_item_count']
-        for tab, items in tabs.items():
-            tab_main_actions = []
-
-            tab_actions = []
-
-            line_count = 4
-            line = 1
-            slow_swipe = False
-            for item in items:
-                if item.threshold > 0:
-                    slow_swipe = True
-                    break
-            last_line = 100000
-            if slow_swipe:
-                last_line = item_total_count[tab]
-            for item in items:
-                swipe_time = 0
-                if item.pos > line * line_count:
-                    for _ in range(int((item.pos - line * line_count - 1) / line_count) + 1):
-                        if slow_swipe:
-                            tab_actions += [
-                                SwipeAction(start=(580, 377),
-                                            end=(580, 114), duration=5000),
-                                SleepAction(1)
-                            ]
-                        else:
-                            tab_actions += [
-                                SwipeAction(start=(580, 380),
-                                            end=(580, 180), duration=300),
-                                SleepAction(1)
-                            ]
-                        line += 1
-                        swipe_time += 1
-                if tab in (1, 8) and item.pos < 0:
-                    click_pos = (860,126) # 全选按钮
-                elif line == last_line:
-                    click_pos = SHOP_ITEM_LOCATION_FOR_LAST_LINE[(
-                        item.pos - 1) % line_count]
-                else:
-                    click_pos = SHOP_ITEM_LOCATION[(item.pos - 1) % line_count]
-
-                if item.threshold <= 0:
-                    if tab == 1:
-                        tab_actions += [
-                            ClickAction(pos=(690, 125)),
-                            SleepAction(0.5),
-                        ]
-                    tab_actions += [
-                        ClickAction(pos=click_pos),
-                        SleepAction(0.1)
-                    ]
-                else:
-                    def condition_function(screenshot, item, click_pos):
-                        return False
-
-                    tab_actions += [
-                        SleepAction(swipe_time * 1 + 1),
-                        CustomIfCondition(condition_function, item, click_pos, meet_actions=[
-                                          ClickAction(pos=click_pos)]),
-                        SleepAction(0.8),
-                    ]
-            tab_actions += [
-                ClickAction(pos=(700, 438)),
-                SleepAction(0.2),
-                MatchAction(template='btn_ok_blue',matched_actions=[ClickAction()], timeout=2),
-                SleepAction(1.5),
-                MatchAction(template='btn_ok_blue',matched_actions=[ClickAction()], timeout=2),
-                SleepAction(1.5)
-            ]
-            tab_main_actions += tab_actions
-            if times[tab]:
-                for i in range(times[tab] - 1):
-                    copy_tab_actions = [
-                        ClickAction(pos=(550, 440)),
-                        SleepAction(0.2),
-                        ClickAction(template='btn_ok_blue'),
-                        SleepAction(1)
-                    ]
-                    copy_tab_actions += copy.deepcopy(tab_actions)
-                    tab_main_actions += copy_tab_actions
-            if tab == 8:
-                # 限定tab，判断下对应tab是否为可点击状态
-                meet_actions = [ClickAction(pos=SHOP_TAB_LOCATION[tab - 1])] + tab_main_actions
-                actions += [
-                    SleepAction(1),
-                    IfCondition("limit_tab_enable_symbol", meet_actions= meet_actions),
-                    SleepAction(1)
-                    ]
-            else:
-                actions += [
-                    ClickAction(pos=SHOP_TAB_LOCATION[tab - 1]),
-                    SleepAction(1)
-                    ]
-                actions += tab_main_actions
-        self.__action_squential(*actions)
-
-    def _enter_adventure(self, difficulty=Difficulty.NORMAL, campaign=False):
-        actions = []
-        actions.append(MatchAction('tab_adventure', matched_actions=[ClickAction()], unmatch_actions=[
-            ClickAction(template='btn_close'), ClickAction(pos=(15, 200))]))
-        actions.append(SleepAction(2))
-        if campaign:
-            actions.append(MatchAction(template=['story_campaign_symbol', 'story_campaign_reprint_symbol'], matched_actions=[ClickAction()]))
-        else:
-            actions.append(ClickAction(ImageTemplate('btn_main_plot',threshold=0.8*THRESHOLD)))
-        actions.append(SleepAction(2))
-        unmatch_actions = [ClickAction(ImageTemplate('btn_close', threshold=0.6)),
-                           ClickAction('btn_skip_blue'),
-                           ClickAction('btn_novocal_blue'),
-                           ClickAction('symbol_menu_in_story'),
-                           ClickAction('btn_skip_in_story')]
-        if campaign:
-            unmatch_actions += [
-                IfCondition(ImageTemplate('symbol_campaign_home',threshold=0.8*THRESHOLD),
-                            meet_actions=[ClickAction(pos=(560, 170))],
-                            unmeet_actions=[ClickAction(pos=(15, 200))])]
-        if difficulty == Difficulty.NORMAL:
-            unmatch_actions = [ClickAction(
-                template=ImageTemplate('btn_normal', threshold=0.9))] + unmatch_actions
-            actions.append(MatchAction('btn_normal_selected',
-                                       unmatch_actions=unmatch_actions))
-        elif difficulty == Difficulty.HARD:
-            unmatch_actions = [ClickAction(
-                template=ImageTemplate("btn_hard", threshold=0.9))] + unmatch_actions
-            actions.append(MatchAction('btn_hard_selected',
-                                       unmatch_actions=unmatch_actions))
-        else:
-            unmatch_actions = [ClickAction(
-                template=ImageTemplate("btn_very_hard", threshold=0.9))] + unmatch_actions
-            actions.append(MatchAction('btn_very_hard_selected',
-                                       unmatch_actions=unmatch_actions))
-        self.__action_squential(*actions)
 
     def action_squential(self, *actions: Action, delay=0.2, net_error_check=True):
         for action in actions:
@@ -374,6 +193,9 @@ class Robot:
                     if net_error:
                         self.driver.click(*net_error)
                         raise NetError()
+                    
+    def __tohomepage(self, click_pos=(90, 500), timeout=0):
+        ToHomePage(self).run(click_pos=click_pos, timeout=timeout)
     
     def __action_squential(self, *actions: Action, delay=0.2, net_error_check=True):
         for action in actions:

@@ -26,7 +26,7 @@ class Driver(metaclass=ABCMeta):
         pass
 
     @abstractmethod
-    def screenshot(self, output="screen_shot.png"):
+    def screenshot(self, output="screen_shot.png") -> np.ndarray:
         pass
 
     @abstractmethod

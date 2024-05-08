@@ -56,6 +56,9 @@ class BooleanTemplate(Template):
         return self._value
 
 class ImageTemplate(Template):
+    '''
+    使用模版匹配
+    '''
 
     def __init__(self, name, threshold=THRESHOLD, mode=None, ret_count=1):
         super().__init__()
@@ -120,3 +123,72 @@ class ImageTemplate(Template):
                     return matched_points
             else:
                 return None
+
+class ImageFeatureTemplate(Template):
+    '''
+    Feature Matching with FLANN
+    '''
+
+    def __init__(self, name, threshold=10, checks=50) -> None:
+        super().__init__()
+        self._name = name
+        self._threshold = threshold
+        self._checks = checks
+
+    def match(self, screenshot: np.ndarray) -> None | tuple:
+        query = cv.imread(f"images/{self._name}.png")
+        source = screenshot
+        qh, qw = query.shape[:2]
+        sift = cv.SIFT_create()
+        kp1, des1 = sift.detectAndCompute(query,None)
+        kp2, des2 = sift.detectAndCompute(source,None)
+        flann = cv.FlannBasedMatcher({'algorithm':1, 'trees':5}, {'checks':self._checks})
+        matches = flann.knnMatch(des1,des2,k=2)
+        good = []
+        for m,n in matches:
+            if m.distance < 0.7*n.distance:
+                good.append(m)
+        if len(good) > self._threshold:
+            src_pts = np.float32([ kp1[m.queryIdx].pt for m in good ]).reshape(-1,1,2)
+            dst_pts = np.float32([ kp2[m.trainIdx].pt for m in good ]).reshape(-1,1,2)
+            M, _ = cv.findHomography(src_pts, dst_pts, cv.RANSAC,5.0)
+            pts = np.float32([ [0,0],[0,qh-1],[qw-1,qh-1],[qw-1,0] ]).reshape(-1,1,2)
+            dst = cv.perspectiveTransform(pts,M)
+            return ((dst[0][0][0] + dst[0][2][0]) / 2, (dst[0][0][1] + dst[0][2][1]) / 2)
+        else:
+            return None
+
+class CharaIconTemplate(Template):
+    '''
+    角色头像图标匹配
+    '''
+    
+    def __init__(self, id, threshold=10, mask=None) -> None:
+        super().__init__()
+        self._id = id
+        self._mask = mask
+        self._sift = cv.SIFT_create()
+        self._flann = cv.FlannBasedMatcher({'algorithm':1, 'trees':5}, {'checks':50})
+        self._threshold = threshold
+    
+    def match(self, screenshot: np.ndarray) -> None | tuple:
+        from pcrscript.extras import get_character_icon
+        packs = get_character_icon(self._id)
+        if not packs:
+            return None
+        kp2, des2 = self._sift.detectAndCompute(screenshot, self._mask)
+        for icon, kp, des in packs:
+            h,w,_ = icon.shape
+            matches = self._flann.knnMatch(des,des2,k=2)
+            good = []
+            for m,n in matches:
+                if m.distance < 0.7*n.distance:
+                    good.append(m)
+            if len(good) > self._threshold:
+                src_pts = np.float32([ kp[m.queryIdx].pt for m in good ]).reshape(-1,1,2)
+                dst_pts = np.float32([ kp2[m.trainIdx].pt for m in good ]).reshape(-1,1,2)
+                M, _ = cv.findHomography(src_pts, dst_pts, cv.RANSAC,5.0)
+                pts = np.float32([ [0,0],[0,h-1],[w-1,h-1],[w-1,0] ]).reshape(-1,1,2)
+                dst = cv.perspectiveTransform(pts,M)
+                return ((dst[0][0][0] + dst[2][0][0]) / 2, (dst[1][0][1] + dst[3][0][1]) / 2)
+        return None

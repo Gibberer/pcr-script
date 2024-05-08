@@ -1,9 +1,18 @@
 from abc import ABCMeta, abstractmethod
+import time
+import copy
+from typing import TYPE_CHECKING
+import collections
+import numpy as np
+import sqlite3
+import re
+
+from pcrscript import Robot
+from pcrscript.actions import Robot
+
 from .constants import *
 from pcrscript.actions import *
-from typing import TYPE_CHECKING
-from .templates import Template,ImageTemplate
-import time
+from .templates import Template,ImageTemplate,CharaIconTemplate
 
 if TYPE_CHECKING:
     from pcrscript import Robot
@@ -19,7 +28,9 @@ def register(name):
         return cls
     return wrap
 
-def _get_combat_actions(check_auto=False, combat_duration=35, interval=1):
+#======一些可复用task序列
+
+def _combat_actions(check_auto=False, combat_duration=35, interval=1):
     actions = []
     actions.append(ClickAction(template='btn_challenge'))
     actions.append(SleepAction(1))
@@ -41,12 +52,11 @@ def _get_combat_actions(check_auto=False, combat_duration=35, interval=1):
     actions.append(SleepAction(1))
     actions.append(MatchAction('btn_next_step', matched_actions=[ClickAction()], unmatch_actions=[
         ClickAction(template='btn_close'),ClickAction(template='btn_cancel'),ClickAction(template='btn_ok_blue')]))
-    return actions
+    return actions       
 
-def _get_clean_oneshot(duration=2000):
+def _clean_oneshot_actions(duration=2000):
     return [
             MatchAction('btn_challenge'),
-            SwipeAction((877, 330), (877, 330), duration),
             ClickAction(pos=(757, 330)),
             SleepAction(0.5),
             ClickAction(template='btn_ok_blue'),
@@ -67,11 +77,50 @@ def _get_clean_oneshot(duration=2000):
             ClickAction(pos=(666, 457))
         ]
 
+def _enter_adventure_actions(difficulty=Difficulty.NORMAL, campaign=False):
+    actions = []
+    actions.append(MatchAction('tab_adventure', matched_actions=[ClickAction()], unmatch_actions=[
+        ClickAction(template='btn_close'), ClickAction(pos=(15, 200))]))
+    actions.append(SleepAction(2))
+    if campaign:
+        actions.append(MatchAction(template=['story_campaign_symbol', 'story_campaign_reprint_symbol'], matched_actions=[ClickAction()]))
+    else:
+        actions.append(ClickAction(ImageTemplate('btn_main_plot',threshold=0.8*THRESHOLD)))
+    actions.append(SleepAction(2))
+    unmatch_actions = [ClickAction(ImageTemplate('btn_close', threshold=0.6)),
+                       ClickAction('btn_skip_blue'),
+                       ClickAction('btn_novocal_blue'),
+                       ClickAction('symbol_menu_in_story'),
+                       ClickAction('btn_skip_in_story')]
+    if campaign:
+        unmatch_actions += [
+            IfCondition(ImageTemplate('symbol_campaign_home',threshold=0.8*THRESHOLD),
+                        meet_actions=[ClickAction(pos=(560, 170))],
+                        unmeet_actions=[ClickAction(pos=(15, 200))])]
+    if difficulty == Difficulty.NORMAL:
+        unmatch_actions = [ClickAction(
+            template=ImageTemplate('btn_normal', threshold=0.9))] + unmatch_actions
+        actions.append(MatchAction('btn_normal_selected',
+                                   unmatch_actions=unmatch_actions))
+    elif difficulty == Difficulty.HARD:
+        unmatch_actions = [ClickAction(
+            template=ImageTemplate("btn_hard", threshold=0.9))] + unmatch_actions
+        actions.append(MatchAction('btn_hard_selected',
+                                   unmatch_actions=unmatch_actions))
+    else:
+        unmatch_actions = [ClickAction(
+            template=ImageTemplate("btn_very_hard", threshold=0.9))] + unmatch_actions
+        actions.append(MatchAction('btn_very_hard_selected',
+                                   unmatch_actions=unmatch_actions))
+    return actions
+
+#======
 
 class BaseTask(metaclass=ABCMeta):
 
     def __init__(self, robot:'Robot'):
         self.robot = robot
+        self.driver = robot.driver
         self.define_width = BASE_WIDTH
         self.define_height = BASE_HEIGHT
 
@@ -88,10 +137,36 @@ class BaseTask(metaclass=ABCMeta):
     def template_match(self, screenshot, template:Template):
         template.set_define_size(self.define_width, self.define_height)
         return template.match(screenshot)
+    
+    def in_region(self, r, pos):
+        return (r[0] < pos[0] < r[2]) and (r[1] < pos[1] < r[3])
+    
+    def center_region(self, r):
+        return (int((r[0]+r[2])/2), int((r[1]+r[3])/2))
+    
+    def adapted_region(self, r, w, h):
+        hscale = w/self.define_width
+        vscale = h/self.define_height
+        return (int(r[0]*hscale), int(r[1]*vscale), int(r[2]*hscale), int(r[3]*vscale))
 
     @abstractmethod
     def run(self, *args):
         pass
+
+#======以下部分为具体task列表,其中task在配置文件中的名称为@register("name")的name部分。
+@register("tohomepage")
+class ToHomePage(BaseTask):
+    '''
+    前往游戏首页
+    '''
+    
+    def run(self, click_pos=(90, 500), timeout=0):
+        self.robot.action_squential(MatchAction('shop', unmatch_actions=(
+            ClickAction(ImageTemplate('btn_close') | ImageTemplate('btn_ok_blue')
+                        | ImageTemplate('btn_download') | ImageTemplate('btn_skip')
+                        | ImageTemplate('btn_cancel') | ImageTemplate('select_branch_first')),
+            ClickAction(pos=click_pos),
+        ),timeout=timeout), net_error_check=False)
 
 @register("get_gift")
 class GetGift(BaseTask):
@@ -213,7 +288,6 @@ class LunaTowerClean(BaseTask):
             ClickAction(template="btn_luna_tower_entrance"),
             MatchAction(template="symbol_luna_tower"),
             MatchAction(template='symbol_luna_tower_lock',matched_actions=[ThrowErrorAction("回廊未解锁")],timeout=2),
-            SwipeAction(start=(890, 376), end=(890, 376), duration=2000),
             ClickAction(pos=(815, 375)),
             SleepAction(0.5),
             ClickAction(template='btn_ok_blue'),
@@ -250,11 +324,144 @@ class CommonAdventure(BaseTask):
                 match_action = MatchAction(template='btn_challenge', timeout=5)
                 self.action_squential(match_action)
                 if not match_action.is_timeout:
-                    actions = _get_combat_actions(combat_duration=estimate_combat_duration)
+                    actions = _combat_actions(combat_duration=estimate_combat_duration)
                     actions += [SleepAction(2)]
                     self.action_squential(*actions)
             else:
                 self.action_squential(MatchAction(template=ImageTemplate(character_symbol, threshold=0.7), unmatch_actions=[ClickAction(template='btn_cancel'), ClickAction(template='btn_close')]))
+@register("shop_buy")
+class ShopBuy(BaseTask):
+    '''
+    商店购买药水、道具等
+    '''
+
+    def run(self, rule:dict):
+        '''
+        rule: 购买规则
+        '''
+        actions = []
+        # 首先进入商店页
+        actions.append(ClickAction(template='shop'))
+        actions.append(MatchAction(template='symbol_shop', unmatch_actions=[
+                       ClickAction(pos=(77, 258)), ClickAction(template='shop')]))
+        actions.append(SleepAction(1))
+        tabs = collections.defaultdict(dict)
+        for key, value in rule.items():
+            if isinstance(key, int):
+                tabs[key]['items'] = value
+            else:
+                tabs[int(key.split("_")[0])].update(value)
+        Item = collections.namedtuple(
+            "Item", ["pos", "threshold"], defaults=[0, -1])
+        times = collections.defaultdict(int)
+        item_total_count = collections.defaultdict(lambda:-1)
+        for key in tabs:
+            value = tabs[key]
+            tabs[key] = []
+            items = tabs[key]
+            if 'items' in value:
+                for normal_item in value['items']:
+                    items.append(Item(normal_item))
+            items.sort(key=lambda item: item.pos)
+            if 'time' in value:
+                times[key] = value['time']
+            if 'total_item_count' in value:
+                item_total_count[key] = value['total_item_count']
+        for tab, items in tabs.items():
+            tab_main_actions = []
+
+            tab_actions = []
+
+            line_count = 4
+            line = 1
+            slow_swipe = False
+            for item in items:
+                if item.threshold > 0:
+                    slow_swipe = True
+                    break
+            last_line = 100000
+            if slow_swipe:
+                last_line = item_total_count[tab]
+            for item in items:
+                swipe_time = 0
+                if item.pos > line * line_count:
+                    for _ in range(int((item.pos - line * line_count - 1) / line_count) + 1):
+                        if slow_swipe:
+                            tab_actions += [
+                                SwipeAction(start=(580, 377),
+                                            end=(580, 114), duration=5000),
+                                SleepAction(1)
+                            ]
+                        else:
+                            tab_actions += [
+                                SwipeAction(start=(580, 380),
+                                            end=(580, 180), duration=300),
+                                SleepAction(1)
+                            ]
+                        line += 1
+                        swipe_time += 1
+                if tab in (1, 8) and item.pos < 0:
+                    click_pos = (860,126) # 全选按钮
+                elif line == last_line:
+                    click_pos = SHOP_ITEM_LOCATION_FOR_LAST_LINE[(
+                        item.pos - 1) % line_count]
+                else:
+                    click_pos = SHOP_ITEM_LOCATION[(item.pos - 1) % line_count]
+
+                if item.threshold <= 0:
+                    if tab == 1:
+                        tab_actions += [
+                            ClickAction(pos=(690, 125)),
+                            SleepAction(0.5),
+                        ]
+                    tab_actions += [
+                        ClickAction(pos=click_pos),
+                        SleepAction(0.1)
+                    ]
+                else:
+                    def condition_function(screenshot, item, click_pos):
+                        return False
+
+                    tab_actions += [
+                        SleepAction(swipe_time * 1 + 1),
+                        CustomIfCondition(condition_function, item, click_pos, meet_actions=[
+                                          ClickAction(pos=click_pos)]),
+                        SleepAction(0.8),
+                    ]
+            tab_actions += [
+                ClickAction(pos=(700, 438)),
+                SleepAction(0.2),
+                MatchAction(template='btn_ok_blue',matched_actions=[ClickAction()], timeout=2),
+                SleepAction(1.5),
+                MatchAction(template='btn_ok_blue',matched_actions=[ClickAction()], timeout=2),
+                SleepAction(1.5)
+            ]
+            tab_main_actions += tab_actions
+            if times[tab]:
+                for _ in range(times[tab] - 1):
+                    copy_tab_actions = [
+                        ClickAction(pos=(550, 440)),
+                        SleepAction(0.2),
+                        ClickAction(template='btn_ok_blue'),
+                        SleepAction(1)
+                    ]
+                    copy_tab_actions += copy.deepcopy(tab_actions)
+                    tab_main_actions += copy_tab_actions
+            if tab == 8:
+                # 限定tab，判断下对应tab是否为可点击状态
+                meet_actions = [ClickAction(pos=SHOP_TAB_LOCATION[tab - 1])] + tab_main_actions
+                actions += [
+                    SleepAction(1),
+                    IfCondition("limit_tab_enable_symbol", meet_actions= meet_actions),
+                    SleepAction(1)
+                    ]
+            else:
+                actions += [
+                    ClickAction(pos=SHOP_TAB_LOCATION[tab - 1]),
+                    SleepAction(1)
+                    ]
+                actions += tab_main_actions
+        self.action_squential(*actions)
 @register("quick_clean")
 class QuickClean(BaseTask):
     '''
@@ -267,7 +474,7 @@ class QuickClean(BaseTask):
             return
         pref_pos = QuickClean._pos[pos - 1]
         # 进入冒险图
-        self.robot._enter_adventure()
+        self.action_squential(*_enter_adventure_actions())
         actions = [
             ClickAction(pos=(920, 144)),
             SleepAction(2),
@@ -300,7 +507,7 @@ class ClearCampaignFirstTime(BaseTask):
     剧情活动首次过图
     '''
     def run(self, exhaust_power=False):
-        self.robot._enter_adventure(difficulty=Difficulty.NORMAL, campaign=True)
+        self.action_squential(*_enter_adventure_actions(difficulty=Difficulty.NORMAL, campaign=True))
         pre_pos = (-100,-100)
         step = 0
         retry_count = 0
@@ -332,7 +539,7 @@ class ClearCampaignFirstTime(BaseTask):
                     match_action = MatchAction(template='btn_challenge', timeout=5)
                     self.action_squential(match_action)
                     if not match_action.is_timeout:
-                        actions = _get_combat_actions(combat_duration=3, interval=0.2)
+                        actions = _combat_actions(combat_duration=3, interval=0.2)
                         actions += [SleepAction(2)]
                         self.action_squential(*actions)
                         if step == 0:
@@ -356,12 +563,12 @@ class ClearCampaignFirstTime(BaseTask):
                     match_action = MatchAction(template='btn_challenge', timeout=5)
                     self.action_squential(match_action)
                     if not match_action.is_timeout:
-                        actions = _get_combat_actions(combat_duration=15)
+                        actions = _combat_actions(combat_duration=15)
                         actions += [SleepAction(2)]
                         self.action_squential(*actions)
                         pre_pos = character_pos
         # 首次过图处理完毕，执行正常活动清体力任务步骤
-        self.robot._tohomepage()
+        ToHomePage(self.robot).run()
         CampaignClean(self.robot).run(hard_chapter=True, exhaust_power=exhaust_power)
         
 
@@ -392,7 +599,7 @@ class CampaignClean(BaseTask):
     '''
     def run(self, hard_chapter=True, exhaust_power=True):
         if hard_chapter:
-            self.robot._enter_adventure(difficulty=Difficulty.HARD, campaign=True)
+            self.action_squential(*_enter_adventure_actions(difficulty=Difficulty.HARD, campaign=True))
             actions = [
                 MatchAction(template='btn_close', matched_actions=[
                             ClickAction(), SleepAction(2)], timeout=3),
@@ -403,7 +610,6 @@ class CampaignClean(BaseTask):
             ]
             for _ in range(5):
                 actions += [
-                    SwipeAction((877, 330),(877, 330), 2000),
                     ClickAction(pos=(757, 330)),
                     SleepAction(0.5),
                     ClickAction(template='btn_ok_blue', timeout=10), # 加入超时防止卡住（可能不能稳定识别1-1）
@@ -441,12 +647,12 @@ class CampaignClean(BaseTask):
                 ClickAction(pos=(860,270)), # 如果timeout尝试点击该位置   
                 SleepAction(1),         
             ]
-            actions += _get_combat_actions(combat_duration=3, interval=0.5)
+            actions += _combat_actions(combat_duration=3, interval=0.5)
             self.action_squential(*actions)
         if exhaust_power:
             if hard_chapter:
-                self.robot._tohomepage()
-            self.robot._enter_adventure(difficulty=Difficulty.NORMAL, campaign=True)
+                ToHomePage(self.robot).run()
+            self.action_squential(*_enter_adventure_actions(difficulty=Difficulty.NORMAL, campaign=True))
             actions = []
             if not hard_chapter:
                 actions += [
@@ -458,7 +664,7 @@ class CampaignClean(BaseTask):
                             offset=(0, -20),timeout=10),
                 SleepAction(1),
                 IfCondition("character", meet_actions=[ClickAction("character"), SleepAction(1)]), # 找不到对应关卡符号时，使用人物标记查找
-                *_get_clean_oneshot(duration=6000),
+                *_clean_oneshot_actions(duration=6000),
                 SleepAction(2)
             ]
             self.action_squential(*actions)
@@ -697,7 +903,7 @@ class Research(BaseTask):
             ClickAction(pos=(587, 231)),
             SleepAction(1),
             ClickAction(pos=(718, 146)),
-            *_get_clean_oneshot(),
+            *_clean_oneshot_actions(),
             SleepAction(1),
             ClickAction(pos=(37, 33)),
             SleepAction(1)
@@ -707,7 +913,7 @@ class Research(BaseTask):
             ClickAction(pos=(800, 240)),
             SleepAction(1),
             ClickAction(pos=(718, 146)),
-            *_get_clean_oneshot(),
+            *_clean_oneshot_actions(),
             SleepAction(1)
         ]
         self.action_squential(*actions)
@@ -736,3 +942,245 @@ class Schedule(BaseTask):
             SleepAction(1),
             ClickAction(pos=(270, 480)), # 关闭
         )
+
+
+class TeamFormation(BaseTask):
+    '''
+    设置队伍编组
+    '''
+    current_team_region = (30, 400, 590, 510)
+    current_team_region_separated = [
+        (47,405,147,500),
+        (156,405,252,500),
+        (267,405,364,500),
+        (376,405,471,500),
+        (486,405,580,500),
+    ]
+    chara_mapping = None
+
+    def _gen_chara_mapping(self):
+        if TeamFormation.chara_mapping:
+            return TeamFormation.chara_mapping
+        ret = {}
+        try:
+            with sqlite3.connect("cache/redive_cn.db") as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT unit_id, unit_name FROM unit_profile")
+                for id, name in cursor.fetchall():
+                    ret[int(id/100)] = name
+                cursor.close()
+                TeamFormation.chara_mapping = ret
+        except Exception as e:
+            print("获取角色名失败", e)
+        return ret
+
+    def _in_team_formation(self):
+        for _ in range(3):
+            screenshot = self.driver.screenshot()
+            if self.template_match(screenshot, ImageTemplate("symbol_team_formation")):
+                return True
+            time.sleep(2)
+    
+    def _check_current_form(self, form:list[int])->tuple[list[int], list[int]]:
+        screenshot = self.driver.screenshot()
+        h,w,_ = screenshot.shape
+        mask = np.zeros((h,w), dtype=np.uint8)
+        team_region = self.adapted_region(TeamFormation.current_team_region, w, h)
+        mask[team_region[1]:team_region[3],team_region[0]:team_region[2]] = 0xFF
+        add_ids = form[:]
+        remove_regions = [self.adapted_region(region, w, h) for region in TeamFormation.current_team_region_separated]
+        for id in form:
+            pos = self.template_match(screenshot, CharaIconTemplate(id, mask=mask))
+            if pos:
+                add_ids.remove(id)
+                for i, region in enumerate(remove_regions):
+                    if self.in_region(region, pos):
+                        remove_regions.pop(i)
+                        break
+        return add_ids, remove_regions
+
+    def run(self, formation:list[int])->bool:
+        if not formation:
+            print("未设置期望编组")
+            return
+        if not self._in_team_formation():
+            print("未在编队窗口界面")
+            return
+        add_ids, remove_regions = self._check_current_form(formation)
+        for region in remove_regions:
+            pos = self.center_region(region)
+            self.driver.click(*pos)
+            time.sleep(0.5)
+        if add_ids:
+            # 使用搜索功能
+            name_mapping = self._gen_chara_mapping()
+            self.action_squential(SwipeAction(start=(480, 150), end=(480,350)), SleepAction(1))
+            for id in add_ids:
+                self.action_squential(
+                    ClickAction(pos=(480, 135)),
+                    SleepAction(0.5),
+                    InputAction(name_mapping[id]),
+                    SleepAction(0.5),
+                    ClickAction(pos=(110, 220)), # 丧失焦点
+                    SleepAction(0.5),
+                    ClickAction(pos=(110, 220)), # 选择匹配人物
+                    ClickAction(pos=(690, 135)),
+                )
+        return True
+
+    
+class Combat(BaseTask):
+    '''
+    普通战斗场景任务
+    '''
+    unit_regions = (
+        (678,400,763,485),
+        (557,400,643,485),
+        (438,400,522,485),
+        (315,400,402,485),
+        (196,400,282,485),
+    )
+
+    def _brightness(img:np.ndarray):
+        if len(img.shape) == 3:
+            return np.average(np.linalg.norm(img, axis=2)) / np.sqrt(3)
+        else:
+            return np.average(img)
+
+    def _check_dead_count(self, screenshot:np.ndarray, member_num):
+        h,w,_ = screenshot.shape
+        dead_count = 0
+        for region in self.adapted_region(Combat.unit_regions[:member_num], w, h):
+            if self._brightness(screenshot[region[1]:region[3],region[0]:region[2]]) <= 80:
+                dead_count += 1
+        return dead_count
+
+    def run(self, form:list[int], giveup=1, member_num=5):
+        self.action_squential(
+            MatchAction(template='btn_challenge', matched_actions=[ClickAction()], timeout=1),
+        )
+        if form:
+            TeamFormation(self.robot).run(form)
+            member_num = len(form)
+        self.action_squential(
+            ClickAction(template='btn_combat_start'),
+            MatchAction(template='btn_blue_settle',matched_actions=[ClickAction(),SleepAction(1),ClickAction(template='btn_combat_start')], timeout=3),
+            IfCondition('symbol_restore_power', 
+                               meet_actions=[
+                                ClickAction(pos=(370, 370)),
+                                SleepAction(2),
+                                ClickAction(pos=(680, 454)),
+                                SleepAction(2),
+                                ThrowErrorAction("No power!!!")]),
+            MatchAction(template='btn_menu_text'),
+        )
+        success = True
+        while True:
+            screenshot = self.driver.screenshot()
+            if self.template_match(screenshot, ImageTemplate('btn_next_step')):
+                break
+            pos = self.template_match(screenshot, ImageTemplate('btn_close') | ImageTemplate('btn_cancel'))
+            if pos:
+                self.driver.click(*pos)
+            self.action_once(ClickAction(pos=(200, 250)))
+            if self.template_match(screenshot, ImageTemplate('btn_menu_text')) \
+                and self._check_dead_count(screenshot, member_num) >= giveup:
+                success = False
+                self.action_squential(
+                    ClickAction(pos=(900, 25)),
+                    ClickAction('btn_giveup'),
+                    ClickAction('btn_giveup_blue')
+                    )
+                break
+            time.sleep(0.5)
+        if success:
+            self.action_squential(
+                MatchAction('btn_next_step', matched_actions=[ClickAction()], unmatch_actions=[
+                    ClickAction(template='btn_close') | ClickAction(template='btn_cancel')]),
+                SleepAction(1),
+                MatchAction('btn_next_step', matched_actions=[ClickAction()], unmatch_actions=[
+                    ClickAction(template='btn_close') | ClickAction(template='btn_cancel') | ClickAction(template='btn_ok_blue')])
+            )
+        return success
+            
+
+@register("luna_tower_climbing")
+class LunaTowerClimbing(BaseTask):
+    '''
+    爬露娜塔
+    '''
+    level_recognize_region = ()
+
+    def _parse_level(self, ocr_result):
+        results = ocr_result[0]
+        for result in results:
+            levels = re.findall(r'\d+', result[1][0])
+            if levels:
+                for level in levels:
+                    if int(level) > 10:
+                        return level
+        
+    def _go_luna_clean(self):
+        ToHomePage(self.robot).run()
+        LunaTowerClean(self.robot).run()
+    
+    def run(self):
+        try:
+            from .strategist import LunaTowerStrategist
+            from paddleocr import PaddleOCR
+            from paddleocr.paddleocr import logger
+            import logging
+            logger.setLevel(logging.ERROR)
+        except Exception:
+            print("当前缺失依赖，该任务需要安装额外依赖才能运行")
+            return
+        self.action_squential(
+            MatchAction('tab_adventure', matched_actions=[ClickAction()], unmatch_actions=[ClickAction(template='btn_close'), ClickAction(pos=(50, 300))]),
+            SleepAction(1),
+            ClickAction(template="btn_luna_tower_entrance"),
+            MatchAction(template="symbol_luna_tower"),
+        )
+        identify_frame = self.driver.screenshot()
+        if not self.template_match(identify_frame, ImageTemplate("symbol_luna_tower_lock")):
+            print("当前没有未解锁层数，应执行回廊扫荡")
+            self._go_luna_clean()
+            return
+        strategist = LunaTowerStrategist()
+        start = time.time()
+        print("开始拉取策略信息...")
+        strategist.gather_information()
+        print(f"生成露娜塔策略耗时：{time.time() - start}")
+        ocr = PaddleOCR(use_angle_cls=True, lang="ch", gpu=True)
+        h,w,_ = identify_frame.shape
+        level_region = self.adapted_region(LunaTowerClimbing.level_recognize_region, w, h)
+        combat = Combat(self.robot)
+        while True:
+            screenshot = self.driver.screenshot()
+            if not self.template_match(screenshot, ImageTemplate("symbol_luna_tower")):
+                time.sleep(1)
+                continue
+            if not self.template_match(screenshot, ImageTemplate("symbol_luna_tower_lock")):
+                break
+            level = self._parse_level(ocr.ocr(screenshot[level_region[1]:level_region[3],level_region[0]:level_region[2]], cls=False))
+            strategies = None
+            if level:
+                strategies = strategist.find_strategy(level)
+            else:
+                # 处理EX或回廊
+                pass
+            if not strategies:
+                # 使用系统推荐队伍
+                raise RuntimeError("Not Implement!")
+            else:
+                combat_success = False
+                for strategy in strategies:
+                    self.action_squential(ClickAction(pos=(815,430)), SleepAction(1))
+                    combat_success = combat.run(form=strategy.party)
+                    if combat_success:
+                        break
+                if not combat_success:
+                    # 使用系统推荐队伍 or 退出任务
+                    raise RuntimeError("Not Implement!")
+            time.sleep(1)
+
+        self._go_luna_clean()
