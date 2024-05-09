@@ -5,7 +5,7 @@ import time
 from .driver import Driver
 from .actions import *
 from .constants import *
-from .tasks import registedTasks, BaseTask, ToHomePage
+from .tasks import find_taskclass, BaseTask, ToHomePage
 from .templates import ImageTemplate
 
 
@@ -145,8 +145,9 @@ class Robot:
         self._log("======:已进入游戏首页:======")
         if tasklist:
             for funcname, *args in tasklist:
-                if funcname in registedTasks:
-                    self._run_task(funcname, registedTasks[funcname], args)
+                task = find_taskclass(funcname)
+                if task:
+                    self._run_task(funcname, task, args)
                 else:
                     self._call_function(funcname, args)
 

@@ -6,9 +6,9 @@ import collections
 import numpy as np
 import sqlite3
 import re
+from typing import Optional
+from dataclasses import dataclass, field
 
-from pcrscript import Robot
-from pcrscript.actions import Robot
 
 from .constants import *
 from pcrscript.actions import *
@@ -17,14 +17,20 @@ from .templates import Template,ImageTemplate,CharaIconTemplate
 if TYPE_CHECKING:
     from pcrscript import Robot
 
-# 可使用的任务列表
-registedTasks = {}
+_registedTasks = {}
+
+def find_taskclass(name:str)->'BaseTask':
+    '''
+    根据名称获取task类
+    '''
+    return _registedTasks.get(name, None)
 
 def register(name):
     def wrap(cls):
-        if name in registedTasks:
+        if name in _registedTasks:
             raise Exception(f"Task:{name} already registed.")
-        registedTasks[name] = cls
+        _registedTasks[name] = cls
+        cls.name = name
         return cls
     return wrap
 
@@ -153,6 +159,57 @@ class BaseTask(metaclass=ABCMeta):
     def run(self, *args):
         pass
 
+@dataclass
+class Event:
+    startTimestamp: float
+    endTimestamp: float
+    name: str
+    extras: dict = field(default_factory=lambda:{})
+
+    def __str__(self) -> str:
+        start = time.localtime(self.startTimestamp)
+        end = time.localtime(self.endTimestamp)
+        return (
+            f"{self.name}:{start.tm_mon}/{start.tm_mday} - {end.tm_mon}/{end.tm_mday}"
+        )
+
+@dataclass
+class EventNews:
+    freeGacha: Optional[Event] = None  # 免费扭蛋
+    tower: Optional[Event] = None  # 露娜塔
+    dropItemNormal: Optional[Event] = None  # 普通关卡掉落活动
+    dropItemHard: Optional[Event] = None # 困难关卡掉落活动
+    hatsune: Optional[Event] = None  # 剧情活动
+    clanBattle: Optional[Event] = None  # 公会战
+
+class TimeLimitTask(BaseTask):
+    '''
+    时限任务
+    '''
+    
+    @staticmethod
+    @abstractmethod
+    def valid(event_news:EventNews, args:list=None)->tuple[BaseTask, list]:
+        pass
+    
+    @staticmethod
+    def event_valid(event: Event):
+        if not event:
+            return False
+        return event.startTimestamp <= time.time() <= event.endTimestamp
+
+    @staticmethod
+    def event_first_day(event: Event):
+        if not event:
+            return False
+        current_time = time.time()
+        if current_time > event.startTimestamp:
+            return (
+                time.localtime(current_time).tm_mday
+                == time.localtime(event.startTimestamp).tm_mday
+            )
+        return False
+
 #======以下部分为具体task列表,其中task在配置文件中的名称为@register("name")的name部分。
 @register("tohomepage")
 class ToHomePage(BaseTask):
@@ -205,10 +262,14 @@ class GetGift(BaseTask):
         self.action_squential(*actions)
 
 @register("free_gacha")
-class FreeGacha(BaseTask):
+class FreeGacha(TimeLimitTask):
     '''
     抽取免费十连
     '''
+    @staticmethod
+    def valid(event_news:EventNews, args=None):
+        if FreeGacha.event_valid(event_news.freeGacha):
+            return FreeGacha, args
 
     def run(self, multi=False):
         draw_actions = [
@@ -276,10 +337,15 @@ class NormalGacha(BaseTask):
         )
 
 @register("luna_tower_clean")
-class LunaTowerClean(BaseTask):
+class LunaTowerClean(TimeLimitTask):
     '''
     露娜塔 回廊扫荡
     '''
+
+    @staticmethod
+    def valid(event_news: EventNews, args=None) -> tuple:
+        if LunaTowerClean.event_valid(event_news.tower) and not LunaTowerClean.event_first_day(event_news.tower):
+            return LunaTowerClean, args
 
     def run(self):
         actions = [
@@ -463,10 +529,16 @@ class ShopBuy(BaseTask):
                 actions += tab_main_actions
         self.action_squential(*actions)
 @register("quick_clean")
-class QuickClean(BaseTask):
+class QuickClean(TimeLimitTask):
     '''
     快速扫荡任务
     '''
+    @staticmethod
+    def valid(event_news: EventNews, args=None) -> tuple:
+        if not event_news.dropItemNormal and event_news.dropItemHard:
+            return QuickClean, [3] 
+        return QuickClean, args
+
     _pos = ((100, 80), (220, 80), (340, 80), (450, 80), (570, 80), (690, 80), (810, 80))
     def run(self, pos=0):
         if pos <= 0 or pos > len(QuickClean._pos):
@@ -502,10 +574,16 @@ class QuickClean(BaseTask):
         ]
         self.action_squential(*actions)
 @register("clear_campaign_first_time")
-class ClearCampaignFirstTime(BaseTask):
+class ClearCampaignFirstTime(TimeLimitTask):
     '''
     剧情活动首次过图
     '''
+
+    @staticmethod
+    def valid(event_news: EventNews, args=None) -> tuple:
+        if ClearCampaignFirstTime.event_first_day(event_news.hatsune):
+            return ClearCampaignFirstTime, args
+
     def run(self, exhaust_power=False):
         self.action_squential(*_enter_adventure_actions(difficulty=Difficulty.NORMAL, campaign=True))
         pre_pos = (-100,-100)
@@ -593,10 +671,21 @@ class ClearCampaignFirstTime(BaseTask):
                 self.robot.driver.click(*pos)
                 break
 @register("campaign_clean")
-class CampaignClean(BaseTask):
+class CampaignClean(TimeLimitTask):
     '''
     剧情活动扫荡
     '''
+    @staticmethod
+    def valid(event_news: EventNews, args: list = None) -> tuple[BaseTask, list]:
+        if CampaignClean.event_valid(event_news.hatsune):
+            if CampaignClean.event_first_day(event_news.hatsune):
+                return ClearCampaignFirstTime, None
+            elif event_news.hatsune.extras["original_event_id"] != 0 and event_news.dropItemNormal:
+                return None
+            else:
+                return CampaignClean, args
+
+
     def run(self, hard_chapter=True, exhaust_power=True):
         if hard_chapter:
             self.action_squential(*_enter_adventure_actions(difficulty=Difficulty.HARD, campaign=True))
@@ -1105,10 +1194,16 @@ class Combat(BaseTask):
             
 
 @register("luna_tower_climbing")
-class LunaTowerClimbing(BaseTask):
+class LunaTowerClimbing(TimeLimitTask):
     '''
     爬露娜塔
     '''
+
+    @staticmethod
+    def valid(event_news: EventNews, args=None) -> tuple:
+        if LunaTowerClimbing.event_first_day(event_news.tower):
+            return LunaTowerClimbing, args
+    
     level_recognize_region = ()
 
     def _parse_level(self, ocr_result):

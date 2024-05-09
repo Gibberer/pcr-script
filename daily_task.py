@@ -1,38 +1,12 @@
 import yaml
 import os
 import time
-from typing import Optional
-from dataclasses import dataclass, field
 from pcrscript import DNSimulator, Robot, GeneralSimulator
+from pcrscript.tasks import EventNews, Event, TimeLimitTask, find_taskclass
 import requests
 import brotli
 import sqlite3
 from datetime import datetime
-
-
-@dataclass
-class Event:
-    startTimestamp: float
-    endTimestamp: float
-    name: str
-    extras: dict = field(default_factory=lambda:{})
-
-    def __str__(self) -> str:
-        start = time.localtime(self.startTimestamp)
-        end = time.localtime(self.endTimestamp)
-        return (
-            f"{self.name}:{start.tm_mon}/{start.tm_mday} - {end.tm_mon}/{end.tm_mday}"
-        )
-
-
-@dataclass
-class EventNews:
-    freeGacha: Optional[Event] = None  # 免费扭蛋
-    tower: Optional[Event] = None  # 露娜塔
-    dropItemNormal: Optional[Event] = None  # 普通关卡掉落活动
-    dropItemHard: Optional[Event] = None # 困难关卡掉落活动
-    hatsune: Optional[Event] = None  # 剧情活动
-    clanBattle: Optional[Event] = None  # 公会战
 
 def open_leidian_emulator(dnpath):
     # 开启雷电模拟器
@@ -202,62 +176,25 @@ def fetch_event_news() -> EventNews:
         print(f"parse db file failed, filter all event special task. Case: {e}")
         return EventNews()
 
-
-def event_valid(current_time, event: Event):
-    if not event:
-        return False
-    return event.startTimestamp <= current_time <= event.endTimestamp
-
-
-def event_first_day(current_time, event: Event):
-    if current_time > event.startTimestamp:
-        return (
-            time.localtime(current_time).tm_mday
-            == time.localtime(event.startTimestamp).tm_mday
-        )
-    return False
-
-
 def modify_task_list(news: EventNews, task_list: list):
-    current = time.time()
     for i in range(len(task_list) - 1, -1, -1):
-        target_task = task_list[i]
-        name = target_task[0]
-        if name == "free_gacha":
-            if not event_valid(current, news.freeGacha):
-                # 无免费十连活动，移除任务
-                task_list.pop(i)
-        elif name == "campaign_clean":
-            if not event_valid(current, news.hatsune):
-                # 无剧情活动，移除任务
-                task_list.pop(i)
+        task_class = find_taskclass(task_list[i][0])
+        if not issubclass(task_class, TimeLimitTask):
+            continue
+        vaild_class,args = None,None
+        ret = task_class.valid(news, task_list[i][1:])
+        if ret:
+            vaild_class = ret[0]
+            if len(ret) > 1:
+                args = ret[1]
+        if not vaild_class:
+            task_list.pop(i)
+        else:
+            task_list.pop(i)
+            if args:
+                task_list.insert(i, [vaild_class.name, *args])
             else:
-                if event_first_day(current, news.hatsune):
-                    # 剧情活动第一天，需要清图,替换任务
-                    task_list.pop(i)
-                    task_list.insert(i, ["clear_campaign_first_time"]) 
-                elif news.hatsune.extras["original_event_id"] != 0 and news.dropItemNormal:
-                    # 如果是复刻活动，并且有掉落双倍则不在剧情活动清空体力
-                    task_list.pop(i)
-                else:
-                    # 正常在剧情活动清空体力
-                    pass
-        elif name == "luna_tower_clean" or name == "luna_tower_climbing":
-            if not event_valid(current, news.tower):
-                # 无露娜塔，移除任务
-                task_list.pop(i)
-            else:
-                if event_first_day(current, news.tower):
-                    # 露娜塔第一天，需要开启回廊
-                    if name == "luna_tower_clean":
-                        task_list.pop(i)
-                else:
-                    if name == "luna_tower_climbing":
-                        task_list.pop(i)
-        elif name == "quick_clean":
-            if not news.dropItemNormal and news.dropItemHard:
-                # 只有困难双倍掉落是修改快速扫荡使用预设为3
-                target_task[1] = 3
+                task_list.insert(i, [vaild_class.name])
 
 
 def run_script(config, use_adb):
