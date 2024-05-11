@@ -102,20 +102,52 @@ class _Detector:
                 icon_arr.tofile(f"{icon_dir}/{id}.png")
             if len(ids) == 5:
                 return ids
+            
+class _YoloDetector:
+
+    def __init__(self, pt:Path) -> None:
+        from ultralytics import YOLO
+        self.model = YOLO(pt)
+
+    def detect(self, directory:Path):
+        pictures = directory.glob('*.png')
+        for picture in pictures:
+            frame:np.ndarray = cv.imdecode(np.fromfile(str(picture), dtype=np.uint8), cv.IMREAD_COLOR)
+            result = self.model.predict(frame, verbose=False)[0]
+            if len(result.boxes.cls) == 5:
+                return [ result.names[int(cls)] for cls in result.boxes.cls]
+            
 
 
 class _LunaTowerLibrary:
     resouce_path = _root_path/'resource'
 
-    def __init__(self, mids:list[int]) -> None:
+    def __init__(self, mids:list[int], detect_in_thread=False) -> None:
         self.api:BilibiliApi = None
         self.mids = mids
         self._lock = Lock()
         self._collections = None
+        # self._detector = _Detector((960,540), 8)
+        self._detector = _YoloDetector(Path("cache/pcr_character.pt"))
+        self._thread_detect = detect_in_thread
+    
+    def _get_target_folder(self, mid, bvid, level)->Path:
+        return _LunaTowerLibrary.resouce_path/f'{mid}'/f'{bvid}'/f'{level}'
+    
+    def _detect_and_save(self, mid, bvid, level, lock=False):
+        target_folder = self._get_target_folder(mid, bvid, level)
+        ids = self._detector.detect(target_folder)
+        if not ids:
+            return
+        if lock:
+            with self._lock:
+                self._collections[mid][level].append(Strategy(source=bvid, party=ids))
+        else:
+            self._collections[mid][level].append(Strategy(source=bvid, party=ids))
     
     def _download_and_detect(self, mid, bvid, avid, level, cid):
         try:
-            target_folder = _LunaTowerLibrary.resouce_path/f'{mid}'/f'{bvid}'/f'{level}'
+            target_folder = self._get_target_folder(mid, bvid, level)
             target_folder.mkdir(parents=True, exist_ok=True)
             pictures = list(target_folder.glob('*.png'))
             if len(pictures) == 0:
@@ -133,11 +165,8 @@ class _LunaTowerLibrary:
                         container.seek(int(t/video.time_base)+video.start_time, backward=True, stream=video)
                         frame = next(container.decode(video))
                         frame.to_image().save(target_folder/f'frame{i}.png')
-            ids = _Detector((960,540), 8).detect(target_folder)
-            if not ids:
-                return
-            with self._lock:
-                self._collections[mid][level].append(Strategy(source=bvid, party=ids))
+            if self._thread_detect:
+                self._detect_and_save(mid, bvid, level, lock=True)
         except Exception as e:
             print(e)
     
@@ -146,6 +175,7 @@ class _LunaTowerLibrary:
         pool = ThreadPoolExecutor(max_workers=os.cpu_count())
         if not self.api:
             self.api = BilibiliApi()
+        post_detect_args = [] 
         for mid in self.mids:
             videos = self.api.searchUserVideo(mid=mid)['data']['list']['vlist']
             candiate_videos = []
@@ -166,7 +196,12 @@ class _LunaTowerLibrary:
                 if level == '回廊':
                     level = f"{level}-{target_video['created']}"
                 pool.submit(self._download_and_detect, mid, bvid, avid, level, cid)
+                if not self._thread_detect:
+                    post_detect_args.append((mid, bvid, avid, level, cid))
         pool.shutdown()
+        if post_detect_args:
+            for mid, bvid, avid, level, cid in post_detect_args:
+                self._detect_and_save(mid, bvid, level)
 
 
     def make_strategies(self)->dict[int,list[Strategy]]:

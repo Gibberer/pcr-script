@@ -181,20 +181,20 @@ def modify_task_list(news: EventNews, task_list: list):
         task_class = find_taskclass(task_list[i][0])
         if not issubclass(task_class, TimeLimitTask):
             continue
-        vaild_class,args = None,None
+        valid_class,args = None,None
         ret = task_class.valid(news, task_list[i][1:])
         if ret:
-            vaild_class = ret[0]
+            valid_class = ret[0]
             if len(ret) > 1:
                 args = ret[1]
-        if not vaild_class:
+        if not valid_class:
             task_list.pop(i)
         else:
             task_list.pop(i)
             if args:
-                task_list.insert(i, [vaild_class.name, *args])
+                task_list.insert(i, [valid_class.name, *args])
             else:
-                task_list.insert(i, [vaild_class.name])
+                task_list.insert(i, [valid_class.name])
 
 
 def run_script(config, use_adb):
