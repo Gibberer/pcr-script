@@ -5,7 +5,10 @@
 
 从视频解析阵容目前有两种方式：
 1. 使用OpenCV，较慢需要分钟级别耗时
-2. 使用Yolo，需要自行训练
+2. 使用Yolo，需要自行训练<br/>
+   可以考虑基于1.的数据进行训练,效果如下：
+   ![example](https://github.com/Gibberer/pcr-script/assets/30779939/d80a493a-91eb-4f8d-9d23-3609a4e5725b)
+
 
 ## 设备支持情况
 
