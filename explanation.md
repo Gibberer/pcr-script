@@ -1,7 +1,7 @@
 ## 露娜塔爬塔任务
 该任务采用拉取视频攻略解析阵容的方式，需要提供一些额外资源才能使用：
 * 安装额外依赖，例如pyav等
-* 在相应目录放置全角色图标（可以通过干杂里脊资源站获取）
+* 在相应目录下放置全角色图标
 
 从视频解析阵容目前有两种方式：
 1. 使用OpenCV，较慢需要分钟级别耗时
@@ -9,6 +9,7 @@
    可以考虑基于1.的数据进行训练,效果如下：
    ![example](https://github.com/Gibberer/pcr-script/assets/30779939/d80a493a-91eb-4f8d-9d23-3609a4e5725b)
 
+角色图片资源和Yolo的参数文件可以在[Release](https://github.com/Gibberer/pcr-script/releases/resources)里获取，解压到cache目录后可使用。
 
 ## 设备支持情况
 

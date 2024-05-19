@@ -4,6 +4,11 @@ import os
 import collections
 from concurrent.futures import ThreadPoolExecutor
 from threading import Lock
+from typing import TypeAlias
+
+Icon:TypeAlias = np.ndarray
+KeyPoint:TypeAlias = tuple
+KeyPointDesc:TypeAlias = np.ndarray
 
 class _CharacterStorage:
     
@@ -22,6 +27,8 @@ class _CharacterStorage:
                 continue
             chara_id = int(icon_id[:4])
             if chara_id < 1000 or chara_id > 2000:
+                continue
+            if chara_id in [1217, 1218]:
                 continue
             icon = cv.imread(os.path.join(self._root, file))
             kp, des = sift.detectAndCompute(icon,None)
@@ -48,7 +55,7 @@ class _CharacterStorage:
 
 _storage = _CharacterStorage("cache/character/")
 
-def get_character_icon(id:str|int) -> list[tuple[np.ndarray,tuple,np.ndarray]]:
+def get_character_icon(id:str|int) -> list[tuple[Icon, KeyPoint, KeyPointDesc]]:
     '''
     :param id: 角色id
     :returns:

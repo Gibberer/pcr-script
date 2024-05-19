@@ -55,9 +55,11 @@ def _combat_actions(check_auto=False, combat_duration=35, interval=1):
     actions.append(SleepAction(combat_duration))
     actions.append(MatchAction('btn_next_step', matched_actions=[ClickAction()], unmatch_actions=[
         ClickAction(template='btn_close'),ClickAction(template='btn_cancel'), ClickAction(pos=(200, 250))], delay=interval))
-    actions.append(SleepAction(1))
+    actions.append(SleepAction(3))
     actions.append(MatchAction('btn_next_step', matched_actions=[ClickAction()], unmatch_actions=[
         ClickAction(template='btn_close'),ClickAction(template='btn_cancel'),ClickAction(template='btn_ok_blue')]))
+    actions.append(MatchAction('btn_next_step', matched_actions=[ClickAction()], unmatch_actions=[
+        ClickAction(template='btn_close'),ClickAction(template='btn_cancel'),ClickAction(template='btn_ok_blue')], timeout=3))
     return actions       
 
 def _clean_oneshot_actions(duration=2000):
@@ -181,6 +183,7 @@ class EventNews:
     dropItemHard: Optional[Event] = None # 困难关卡掉落活动
     hatsune: Optional[Event] = None  # 剧情活动
     clanBattle: Optional[Event] = None  # 公会战
+    secretDungeon: Optional[Event] = None # 特别地下城
 
 class TimeLimitTask(BaseTask):
     '''
@@ -553,12 +556,13 @@ class QuickClean(TimeLimitTask):
             ClickAction(pos=pref_pos),
             SleepAction(1),
             ClickAction(pos=(815, 480)),
-            MatchAction(template="btn_challenge",matched_actions=[ClickAction()], unmatch_actions=[
-                IfCondition("symbol_restore_power", meet_actions=[
+            SleepAction(2),
+            IfCondition("symbol_restore_power", meet_actions=[
+                    ClickAction(template='btn_cancel', timeout=1),
                     ThrowErrorAction("No Power!!!")
-                ], unmeet_actions=[
-                    MatchAction(template='btn_ok_blue',matched_actions=[ClickAction()],timeout=0.1)
                 ]),
+            MatchAction(template="btn_challenge",matched_actions=[ClickAction()], unmatch_actions=[
+                ClickAction('btn_ok_blue'),
                 ClickAction("btn_ok"),
                 ClickAction("btn_not_store_next"),
             ]),
@@ -618,7 +622,6 @@ class ClearCampaignFirstTime(TimeLimitTask):
                     self.action_squential(match_action)
                     if not match_action.is_timeout:
                         actions = _combat_actions(combat_duration=3, interval=0.2)
-                        actions += [SleepAction(2)]
                         self.action_squential(*actions)
                         if step == 0:
                             # 移动到困难章节
@@ -1185,10 +1188,10 @@ class Combat(BaseTask):
         if success:
             self.action_squential(
                 MatchAction('btn_next_step', matched_actions=[ClickAction()], unmatch_actions=[
-                    ClickAction(template='btn_close') | ClickAction(template='btn_cancel')]),
+                    ClickAction(template=ImageTemplate('btn_close') | ImageTemplate('btn_cancel')),]),
                 SleepAction(1),
                 MatchAction('btn_next_step', matched_actions=[ClickAction()], unmatch_actions=[
-                    ClickAction(template='btn_close') | ClickAction(template='btn_cancel') | ClickAction(template='btn_ok_blue')])
+                    ClickAction(template=ImageTemplate('btn_close') | ImageTemplate('btn_cancel') | ImageTemplate('btn_ok_blue')),])
             )
         return success
             

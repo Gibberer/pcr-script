@@ -100,6 +100,7 @@ class ImageTemplate(Template):
         ret = cv.matchTemplate(source, template, cv.TM_CCOEFF_NORMED)
         if self._ret_count == 1:
             min_val, max_val, min_loc, max_loc = cv.minMaxLoc(ret)
+            # print(f"{self._name}:{max_val}")
             if max_val > self._threshold:
                 return self._create_result(max_loc[0], max_loc[1], twidth, theight, ret_scalex, ret_scaley)
             else:
