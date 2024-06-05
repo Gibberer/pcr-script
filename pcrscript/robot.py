@@ -1,6 +1,7 @@
 import functools
 import random
 import time
+from tqdm import tqdm
 
 from .driver import Driver
 from .actions import *
@@ -111,12 +112,11 @@ class Robot:
     def _first_enter_check(self):
         pos = random.choice(((199, 300), (400, 300), (590, 300), (790, 300)))
         self.__action_squential(MatchAction('shop', unmatch_actions=(
-            ClickAction(template='btn_close'),
-            ClickAction(template="btn_ok_blue"),
-            ClickAction(template="btn_download"),
-            ClickAction(template='btn_skip'),
-            ClickAction(template='btn_cancel'),
-            ClickAction(template='select_branch_first'),
+            ClickAction(template = ImageTemplate('btn_close') | ImageTemplate('btn_ok_blue')
+                        | ImageTemplate('btn_download') | ImageTemplate('btn_skip')
+                        | ImageTemplate('btn_cancel') | ImageTemplate('select_branch_first')
+                        | ImageTemplate('app_no_responed')),
+            ClickAction(pos=(30, 200)),
             ClickAction(pos=(90, 500)),
             # 处理兰德索尔杯的情况
             IfCondition(condition_template="symbol_landsol_cup", meet_actions=[
@@ -178,7 +178,14 @@ class Robot:
     def _log(self, msg: str):
         print("{}: {}".format(self._name, msg))
 
-    def action_squential(self, *actions: Action, delay=0.2, net_error_check=True):
+    def action_squential(self, *actions: Action, delay=0.2, net_error_check=True, show_progress=False, progress_index=None, total_step=1):
+        if show_progress:
+            progress = tqdm(actions, unit="a", bar_format='{desc}|{bar}| {n_fmt}/{total_fmt} [{elapsed}, {rate_fmt}{postfix}]')
+            if progress_index is not None:
+                progress.set_description(f"{self._name} step({progress_index}/{total_step})")
+            else:
+                progress.set_description(f"{self._name}")
+            actions = progress
         for action in actions:
             action_start_time = time.time()
             while not action.done():

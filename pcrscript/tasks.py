@@ -8,7 +8,7 @@ import sqlite3
 import re
 from typing import Optional
 from dataclasses import dataclass, field
-
+import os
 
 from .constants import *
 from pcrscript.actions import *
@@ -131,11 +131,17 @@ class BaseTask(metaclass=ABCMeta):
         self.driver = robot.driver
         self.define_width = BASE_WIDTH
         self.define_height = BASE_HEIGHT
+        self.num_step = 1
+        self.total_step = 1
+        self.show_progress = True
 
-    def action_squential(self, *actions: Action):
+    def action_squential(self, *actions: Action, show_progress:bool=None, net_error_check:bool=True):
         for action in actions:
             action.bindTask(self)
-        self.robot.action_squential(*actions)
+        if show_progress is None:
+            show_progress = self.show_progress
+        self.robot.action_squential(*actions, net_error_check=net_error_check, show_progress=show_progress, progress_index=self.num_step, total_step=self.total_step)
+        self.num_step += 1
     
     def action_once(self, action: Action):
         action.bindTask(self)
@@ -221,12 +227,14 @@ class ToHomePage(BaseTask):
     '''
     
     def run(self, click_pos=(90, 500), timeout=0):
-        self.robot.action_squential(MatchAction('shop', unmatch_actions=(
+        self.action_squential(
+            MatchAction('shop', unmatch_actions=(
             ClickAction(ImageTemplate('btn_close') | ImageTemplate('btn_ok_blue')
                         | ImageTemplate('btn_download') | ImageTemplate('btn_skip')
-                        | ImageTemplate('btn_cancel') | ImageTemplate('select_branch_first')),
+                        | ImageTemplate('btn_cancel') | ImageTemplate('select_branch_first')
+                        | ImageTemplate('app_no_responed')),
             ClickAction(pos=click_pos),
-        ),timeout=timeout), net_error_check=False)
+        ),timeout=timeout), show_progress=False, net_error_check=False)
 
 @register("get_gift")
 class GetGift(BaseTask):
@@ -378,6 +386,9 @@ class CommonAdventure(BaseTask):
     3. 进入战斗页面，开始战斗直到结束
     4. -> 1 循环
     '''
+    def __init__(self, robot: 'Robot'):
+        super().__init__(robot)
+        self.show_progress = False
 
     def run(self, character_symbol="character", estimate_combat_duration=30):
         '''
@@ -565,7 +576,7 @@ class QuickClean(TimeLimitTask):
                 ClickAction('btn_ok_blue'),
                 ClickAction("btn_ok"),
                 ClickAction("btn_not_store_next"),
-            ]),
+            ], timeout=8),
             MatchAction(template='btn_skip_ok', matched_actions=[
                             ClickAction()], timeout=2, delay=0.1),
             SleepAction(1),
@@ -589,6 +600,7 @@ class ClearCampaignFirstTime(TimeLimitTask):
             return ClearCampaignFirstTime, args
 
     def run(self, exhaust_power=False):
+        self.total_step = 'inf'
         self.action_squential(*_enter_adventure_actions(difficulty=Difficulty.NORMAL, campaign=True))
         pre_pos = (-100,-100)
         step = 0
@@ -597,7 +609,7 @@ class ClearCampaignFirstTime(TimeLimitTask):
             time.sleep(1)
             screenshot = self.robot.driver.screenshot()
             self._ignore_niggled_scene(screenshot)
-            character_pos = self.template_match(screenshot, ImageTemplate('character'))
+            character_pos = self.template_match(screenshot, ImageTemplate('character', threshold=0.7))
             if not character_pos:
                 # 点击屏幕重新判断
                 self.action_once(ClickAction(pos=(20, 100)))
@@ -690,6 +702,7 @@ class CampaignClean(TimeLimitTask):
 
 
     def run(self, hard_chapter=True, exhaust_power=True):
+        self.total_step = 'inf'
         if hard_chapter:
             self.action_squential(*_enter_adventure_actions(difficulty=Difficulty.HARD, campaign=True))
             actions = [
@@ -780,6 +793,11 @@ class CampaignClean(TimeLimitTask):
         )
 @register("clear_story")    
 class ClearStory(BaseTask):
+
+    def __init__(self, robot: 'Robot'):
+        super().__init__(robot)
+        self.show_progress = False
+
     '''
     清new剧情
     逻辑：
@@ -1055,7 +1073,11 @@ class TeamFormation(BaseTask):
             return TeamFormation.chara_mapping
         ret = {}
         try:
-            with sqlite3.connect("cache/redive_cn.db") as conn:
+            db_potential = "cache/redive_cn.db"
+            if not os.path.exists(db_potential):
+                from .news import fetch_event_news
+                fetch_event_news()
+            with sqlite3.connect(db_potential) as conn:
                 cursor = conn.cursor()
                 cursor.execute("SELECT unit_id, unit_name FROM unit_profile")
                 for id, name in cursor.fetchall():
@@ -1096,7 +1118,7 @@ class TeamFormation(BaseTask):
             print("未设置期望编组")
             return
         if not self._in_team_formation():
-            print("未在编队窗口界面")
+            print("未在编队界面")
             return
         add_ids, remove_regions = self._check_current_form(formation)
         for region in remove_regions:
@@ -1105,6 +1127,7 @@ class TeamFormation(BaseTask):
             time.sleep(0.5)
         if add_ids:
             # 使用搜索功能
+            self.total_step = 2*len(add_ids)
             name_mapping = self._gen_chara_mapping()
             self.action_squential(SwipeAction(start=(480, 150), end=(480,350)), SleepAction(1))
             for id in add_ids:
@@ -1118,6 +1141,10 @@ class TeamFormation(BaseTask):
                     ClickAction(pos=(110, 220)), # 选择匹配人物
                     ClickAction(pos=(690, 135)),
                 )
+        add_ids, remove_regions = self._check_current_form(formation)
+        if add_ids or remove_regions:
+            # 如果还存在需要操作的步骤说明未变更为预期队伍组合，可能账号没有预期编队的角色。
+            return False
         return True
 
     
@@ -1147,7 +1174,14 @@ class Combat(BaseTask):
                 dead_count += 1
         return dead_count
 
-    def run(self, form:list[int], giveup=1, member_num=5):
+    def run(self, form:list[int]=None, giveup=1, member_num=5):
+        '''
+        Args:
+            form: 提供队伍组合信息（一个由角色id构成的数组）。
+            giveup: 如果战斗中死亡人数大于{giveup}的数值时，放弃战斗，该数值默认为1.
+            member_num: 参与战斗的人数，如果已经提供了{form}那么本参数不发生效果。
+        '''
+        self.total_step = 'inf'
         self.action_squential(
             MatchAction(template='btn_challenge', matched_actions=[ClickAction()], timeout=1),
         )
@@ -1232,6 +1266,7 @@ class LunaTowerClimbing(TimeLimitTask):
         except Exception:
             print("当前缺失依赖，该任务需要安装额外依赖才能运行")
             return
+        self.total_step = 'inf'
         self.action_squential(
             MatchAction('tab_adventure', matched_actions=[ClickAction()], unmatch_actions=[ClickAction(template='btn_close'), ClickAction(pos=(50, 300))]),
             SleepAction(1),
