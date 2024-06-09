@@ -13,6 +13,7 @@ import os
 from .constants import *
 from pcrscript.actions import *
 from .templates import Template,ImageTemplate,CharaIconTemplate
+from .strategist import Member,Strategy
 
 if TYPE_CHECKING:
     from pcrscript import Robot
@@ -65,7 +66,7 @@ def _combat_actions(check_auto=False, combat_duration=35, interval=1):
 def _clean_oneshot_actions(duration=2000):
     return [
             MatchAction('btn_challenge'),
-            ClickAction(pos=(757, 330)),
+            ClickAction(pos=(757, 355)),
             SleepAction(0.5),
             ClickAction(template='btn_ok_blue'),
             SleepAction(0.5),
@@ -218,6 +219,13 @@ class TimeLimitTask(BaseTask):
                 == time.localtime(event.startTimestamp).tm_mday
             )
         return False
+    
+    @staticmethod
+    def event_last_day(event: Event):
+        if not event:
+            return False
+        current_time = time.time()
+        return 0 < current_time - event.endTimestamp < 86400
 
 #======以下部分为具体task列表,其中task在配置文件中的名称为@register("name")的name部分。
 @register("tohomepage")
@@ -702,6 +710,11 @@ class CampaignClean(TimeLimitTask):
 
 
     def run(self, hard_chapter=True, exhaust_power=True):
+        '''
+        Parameters:
+            hard_chapter: 是否扫荡困难关卡
+            exhaust_power: 是否在普通关卡中用光所有体力
+        '''
         self.total_step = 'inf'
         if hard_chapter:
             self.action_squential(*_enter_adventure_actions(difficulty=Difficulty.HARD, campaign=True))
@@ -791,6 +804,127 @@ class CampaignClean(TimeLimitTask):
             MatchAction('btn_cancel', matched_actions=[
                         ClickAction()], timeout=3)
         )
+
+@register('campaign_reward_exchange')
+class CampaignRewardExchange(TimeLimitTask):
+    '''
+    活动收尾：
+    1. 消耗所有Boss挑战券
+    2. 观看活动剧情
+    3. 观看信赖度剧情（如果存在）
+    4. 交换所有讨伐券
+    '''
+
+    @staticmethod
+    def valid(event_news: EventNews, args: list = None) -> tuple[BaseTask, list]:
+        if CampaignRewardExchange.event_last_day(event_news.hatsune):
+            return CampaignRewardExchange, args
+    
+    def _story(self):
+        self.action_squential(
+            MatchAction('symbol_campaign_home', unmatch_actions=[
+                ClickAction(pos=(33,31))
+            ], delay=0.5),
+            ClickAction('btn_campaign_story_entry'),
+            SleepAction(3),
+        )
+        symbol_new = self.template_match(self.driver.screenshot(), ImageTemplate('symbol_new_campaign_story'))
+        if symbol_new:
+            self.driver.click(*symbol_new)
+            while True:
+                time.sleep(1)
+                screenshot = self.driver.screenshot()
+                if novocal := self.template_match(screenshot, ImageTemplate('btn_novocal_blue')):
+                    self.driver.click(*novocal)
+                    continue
+                if ignore := self.template_match(screenshot, ImageTemplate('btn_close') | ImageTemplate('btn_skip_blue')):
+                    self.driver.click(*ignore)
+                    continue
+                if self.template_match(self.driver.screenshot(), ImageTemplate('symbol_menu_in_story')):
+                    self.action_squential(MatchAction(template='btn_skip_in_story', 
+                                unmatch_actions=[ClickAction(template='symbol_menu_in_story'), ClickAction(template='select_branch_first'),], 
+                                matched_actions=[ClickAction()],
+                                timeout=5))
+                    continue
+                if self.template_match(screenshot, ImageTemplate('symbol_campaign_home')):
+                    break
+                self.action_once(ClickAction(pos=(250, 60)))
+    
+    def _hard(self):
+        self.action_squential(
+            *_enter_adventure_actions(difficulty=Difficulty.HARD, campaign=True),
+            ClickAction(template=ImageTemplate('hard', threshold=0.6, mode='binarization'), offset=(0, -40)),
+            SleepAction(1),
+            *_clean_oneshot_actions(duration=600)
+        )
+    
+    def _exchange(self):
+        self.action_squential(
+            ClickAction('btn_reward_exchange'),
+            MatchAction('symbol_reward_exchange'),
+            SleepAction(1),
+            ClickAction(pos=(830,380)),
+            SleepAction(1),
+        )
+        while True:
+            time.sleep(0.5)
+            screenshot = self.driver.screenshot()
+            if self.template_match(screenshot, ImageTemplate('symbol_reward_exchange')):
+                break
+            if reset := self.template_match(screenshot, ImageTemplate('btn_reset_reward')):
+                self.driver.click(*reset)
+                continue
+            if click := self.template_match(screenshot, ImageTemplate('btn_ok') | ImageTemplate('btn_ok_blue')
+                                            | ImageTemplate('btn_reset_reward_in_dialog')
+                                            | ImageTemplate('btn_exchange_again_blue')
+                                            | ImageTemplate('btn_exchange_again_white')):
+                self.driver.click(*click)
+                continue
+    
+    def _confidence(self):
+        btn_confidence = self.template_match(self.driver.screenshot(), ImageTemplate('btn_confidence'))
+        if not btn_confidence:
+            return
+        self.driver.click(*btn_confidence)
+        while True:
+            time.sleep(0.5)
+            screenshot = self.driver.screenshot()
+            if self.template_match(screenshot, ImageTemplate('symbol_confidence_home') & ImageTemplate('symbol_help')):
+                new = self.template_match(screenshot, ImageTemplate('symbol_new_confidence'))
+                if not new:
+                    # 返回活动首页
+                    self.action_once(ClickAction(pos=(30, 35)))
+                    time.sleep(5)
+                    break
+                self.driver.click(*new)
+                continue
+            if self.template_match(screenshot, ImageTemplate('symbol_confidence_home')):
+                # 信赖度二级页面
+                if new := self.template_match(screenshot, ImageTemplate('symbol_new_confidence_inner')):
+                    self.driver.click(*new)
+                    continue
+                self.action_once(ClickAction(pos=(30, 35)))
+                continue
+            if novocal := self.template_match(screenshot, ImageTemplate('btn_novocal_blue')):
+                self.driver.click(*novocal)
+                continue
+            if ignore := self.template_match(screenshot, ImageTemplate('btn_close') | ImageTemplate('btn_skip_blue') | ImageTemplate('select_branch_first')):
+                self.driver.click(*ignore)
+                continue
+            self.action_once(ClickAction(pos=(14, 200)))
+            
+
+    def run(self):
+        self.total_step = 'inf'
+        self._hard()
+        self._story()
+        self._confidence()
+        self._exchange()
+        
+        
+        
+        
+
 @register("clear_story")    
 class ClearStory(BaseTask):
 
@@ -1048,7 +1182,7 @@ class Schedule(BaseTask):
                             ClickAction(ImageTemplate("btn_ok_blue") | ImageTemplate("btn_ok") 
                                         | ImageTemplate("btn_skip_ok") | ImageTemplate("btn_close"),
                                         roi=(350,0,960,540))
-                        ]),
+                        ], delay=1.5),
             SleepAction(1),
             ClickAction(pos=(270, 480)), # 关闭
         )
@@ -1095,25 +1229,26 @@ class TeamFormation(BaseTask):
                 return True
             time.sleep(2)
     
-    def _check_current_form(self, form:list[int])->tuple[list[int], list[int]]:
+    def _check_current_form(self, form:list[Member])->tuple[list[int], list[int]]:
         screenshot = self.driver.screenshot()
         h,w,_ = screenshot.shape
         mask = np.zeros((h,w), dtype=np.uint8)
         team_region = self.adapted_region(TeamFormation.current_team_region, w, h)
         mask[team_region[1]:team_region[3],team_region[0]:team_region[2]] = 0xFF
-        add_ids = form[:]
+        add_ids = [mem.id for mem in form]
         remove_regions = [self.adapted_region(region, w, h) for region in TeamFormation.current_team_region_separated]
-        for id in form:
+        for index in range(len(add_ids)-1,-1,-1):
+            id = add_ids[index]
             pos = self.template_match(screenshot, CharaIconTemplate(id, mask=mask))
             if pos:
-                add_ids.remove(id)
+                add_ids.pop()
                 for i, region in enumerate(remove_regions):
                     if self.in_region(region, pos):
                         remove_regions.pop(i)
                         break
         return add_ids, remove_regions
 
-    def run(self, formation:list[int])->bool:
+    def run(self, formation:list[Member])->bool:
         if not formation:
             print("未设置期望编组")
             return
@@ -1174,11 +1309,11 @@ class Combat(BaseTask):
                 dead_count += 1
         return dead_count
 
-    def run(self, form:list[int]=None, giveup=1, member_num=5):
+    def run(self, form:list[Member]=None, giveup=1, member_num=5):
         '''
         Args:
-            form: 提供队伍组合信息（一个由角色id构成的数组）。
-            giveup: 如果战斗中死亡人数大于{giveup}的数值时，放弃战斗，该数值默认为1.
+            form: 提供队伍组合信息。
+            giveup: 如果战斗中死亡人数大于{giveup}的数值时，放弃战斗，该数值默认为1。
             member_num: 参与战斗的人数，如果已经提供了{form}那么本参数不发生效果。
         '''
         self.total_step = 'inf'
@@ -1201,6 +1336,7 @@ class Combat(BaseTask):
             MatchAction(template='btn_menu_text'),
         )
         success = True
+        set_instant = False
         while True:
             screenshot = self.driver.screenshot()
             if self.template_match(screenshot, ImageTemplate('btn_next_step')):
@@ -1209,15 +1345,23 @@ class Combat(BaseTask):
             if pos:
                 self.driver.click(*pos)
             self.action_once(ClickAction(pos=(200, 250)))
-            if self.template_match(screenshot, ImageTemplate('btn_menu_text')) \
-                and self._check_dead_count(screenshot, member_num) >= giveup:
-                success = False
-                self.action_squential(
-                    ClickAction(pos=(900, 25)),
-                    ClickAction('btn_giveup'),
-                    ClickAction('btn_giveup_blue')
-                    )
-                break
+            if self.template_match(screenshot, ImageTemplate('btn_menu_text')):
+                if self._check_dead_count(screenshot, member_num) >= giveup:
+                    success = False
+                    self.action_squential(
+                        ClickAction(pos=(900, 25)),
+                        ClickAction('btn_giveup'),
+                        ClickAction('btn_giveup_blue')
+                        )
+                    break
+                if form and not set_instant:
+                    regions = self.adapted_region(Combat.unit_regions, screenshot.shape[1], screenshot.shape[0])
+                    for i,mem in enumerate(form):
+                        if mem.instant:
+                            region = regions[i]
+                            self.driver.click((region[0]+region[2])//2, (region[1]+region[3])//2)
+                            time.sleep(0.2)
+                    set_instant = True
             time.sleep(0.5)
         if success:
             self.action_squential(

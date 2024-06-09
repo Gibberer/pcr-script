@@ -32,10 +32,11 @@ class _DummyTask(BaseTask):
         pass
     
 class Robot:
-    def __init__(self, driver: Driver, name=None):
+    def __init__(self, driver: Driver, name=None, show_progress=True):
         super().__init__()
         self.driver = driver
         self.devicewidth, self.deviceheight = driver.get_screen_size()
+        self.show_progress = show_progress
         self._dummy_task = _DummyTask(self)
         global num
         if not name:
@@ -50,6 +51,15 @@ class Robot:
                 f.write("{}:{}\n".format(self._name, account))
         while True:
             screenshot = self.driver.screenshot()
+            dialog = None
+            for name in ('app_no_responed','btn_close','btn_download','btn_cancel'):
+                dialog = self.__find_match_pos(screenshot, name)
+                if dialog:
+                    self.driver.click(*dialog)
+                    break
+            if dialog:
+                time.sleep(1)
+                continue
             if self.__find_match_pos(screenshot, 'welcome_main_menu'):
                 if account:
                     # 当前是欢迎页，执行登录操作
@@ -81,14 +91,7 @@ class Robot:
                     self.__action_squential(ClickAction(pos=(30,200)))
                     break
             else:
-                # 应用未响应？
-                ret = self.__find_match_pos(screenshot, 'app_no_responed')
-                if ret:
-                    self.driver.click(*ret)
                 # 在游戏里退出账号
-                ret = self.__find_match_pos(screenshot, 'btn_close')
-                if ret:
-                    self.driver.click(*ret)
                 ret = self.__find_match_pos(screenshot, 'tab_main_menu')
                 if ret:
                     self.__action_squential(
@@ -179,7 +182,7 @@ class Robot:
         print("{}: {}".format(self._name, msg))
 
     def action_squential(self, *actions: Action, delay=0.2, net_error_check=True, show_progress=False, progress_index=None, total_step=1):
-        if show_progress:
+        if self.show_progress and show_progress:
             progress = tqdm(actions, unit="a", bar_format='{desc}|{bar}| {n_fmt}/{total_fmt} [{elapsed}, {rate_fmt}{postfix}]')
             if progress_index is not None:
                 progress.set_description(f"{self._name} step({progress_index}/{total_step})")

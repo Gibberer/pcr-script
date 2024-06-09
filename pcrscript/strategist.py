@@ -13,9 +13,14 @@ from abc import ABC, abstractmethod
 
 from .extras import BilibiliApi, get_character_icon
 
+class Member(BaseModel):
+    id:int
+    instant:bool = False
+    star:int = 5 
+
 class Strategy(BaseModel):
     source:str
-    party:list[int]
+    party:list[Member]
 
 
 _root_path = Path("cache/strategy/")
@@ -95,7 +100,7 @@ class _Detector:
         self.dsize = dsize
         self.threshold = threshold
     
-    def detect(self, directory:Path):
+    def detect(self, directory:Path) -> list[Member]:
         pictures = directory.glob('*.png')
         sift = cv.SIFT_create()
         flann = cv.FlannBasedMatcher({'algorithm':1, 'trees':5}, {'checks':50})
@@ -132,7 +137,7 @@ class _Detector:
                 _,icon_arr = cv.imencode(".png", icon)
                 icon_arr.tofile(f"{icon_dir}/{id}.png")
             if len(ids) == 5:
-                return ids
+                return [ Member(id) for id in ids]
             
 class _YoloDetector:
 
@@ -154,7 +159,7 @@ class _YoloDetector:
         _,img = cv.imencode(".png", result.orig_img)
         img.tofile(target)
 
-    def detect(self, directory:Path):
+    def detect(self, directory:Path) -> list[Member]:
         pictures = directory.glob('*.png')
         for picture in pictures:
             frame:np.ndarray = cv.imdecode(np.fromfile(str(picture), dtype=np.uint8), cv.IMREAD_COLOR)
@@ -170,7 +175,7 @@ class _YoloDetector:
                     continue
                 ids.append(id)
             if len(ids) == 5:
-                return ids
+                return [Member(id) for id in ids]
             
 class _Query(ABC):
     
@@ -241,14 +246,14 @@ class _BilibiliLibrary:
     
     def _detect_and_save(self, mid, bvid, level, lock=False):
         target_folder = self._get_target_folder(mid, bvid, level)
-        ids = self._detector.detect(target_folder)
-        if not ids:
+        members = self._detector.detect(target_folder)
+        if not members:
             return
         if lock:
             with self._lock:
-                self._collections[mid][level].append(Strategy(source=bvid, party=ids))
+                self._collections[mid][level].append(Strategy(source=bvid, party=members))
         else:
-            self._collections[mid][level].append(Strategy(source=bvid, party=ids))
+            self._collections[mid][level].append(Strategy(source=bvid, party=members))
     
     def _download_and_detect(self, mid, bvid, avid, level, cid):
         try:
