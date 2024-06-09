@@ -224,8 +224,7 @@ class TimeLimitTask(BaseTask):
     def event_last_day(event: Event):
         if not event:
             return False
-        current_time = time.time()
-        return 0 < current_time - event.endTimestamp < 86400
+        return 0 < event.endTimestamp - time.time() < 86400
 
 #======以下部分为具体task列表,其中task在配置文件中的名称为@register("name")的name部分。
 @register("tohomepage")
