@@ -63,9 +63,10 @@ def _combat_actions(check_auto=False, combat_duration=35, interval=1):
         ClickAction(template='btn_close'),ClickAction(template='btn_cancel'),ClickAction(template='btn_ok_blue')], timeout=3))
     return actions       
 
-def _clean_oneshot_actions(duration=2000):
+def _clean_oneshot_actions(duration=0):
     return [
             MatchAction('btn_challenge'),
+            SwipeAction((877, 355), (877, 355), duration) if duration > 0 else SleepAction(0.5),
             ClickAction(pos=(757, 355)),
             SleepAction(0.5),
             ClickAction(template='btn_ok_blue'),
@@ -821,7 +822,7 @@ class CampaignRewardExchange(TimeLimitTask):
     
     def _story(self):
         self.action_squential(
-            MatchAction('symbol_campaign_home', unmatch_actions=[
+            MatchAction(ImageTemplate('symbol_campaign_home') & ImageTemplate('btn_campaign_story_entry'), unmatch_actions=[
                 ClickAction(pos=(33,31))
             ], delay=0.5),
             ClickAction('btn_campaign_story_entry'),
@@ -848,13 +849,15 @@ class CampaignRewardExchange(TimeLimitTask):
                 if self.template_match(screenshot, ImageTemplate('symbol_campaign_home')):
                     break
                 self.action_once(ClickAction(pos=(250, 60)))
+        else:
+            self.action_once(ClickAction('btn_close'))
     
     def _hard(self):
         self.action_squential(
             *_enter_adventure_actions(difficulty=Difficulty.HARD, campaign=True),
             ClickAction(template=ImageTemplate('hard', threshold=0.6, mode='binarization'), offset=(0, -40)),
             SleepAction(1),
-            *_clean_oneshot_actions(duration=600)
+            *_clean_oneshot_actions(duration=6000)
         )
     
     def _exchange(self):
@@ -915,14 +918,11 @@ class CampaignRewardExchange(TimeLimitTask):
 
     def run(self):
         self.total_step = 'inf'
+        # 以下流程顺序有关联，不能随意切换
         self._hard()
         self._story()
         self._confidence()
         self._exchange()
-        
-        
-        
-        
 
 @register("clear_story")    
 class ClearStory(BaseTask):
