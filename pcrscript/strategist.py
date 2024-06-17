@@ -43,7 +43,7 @@ class LunaTowerStrategist:
         else:
             self._make_strategies()
 
-    def find_strategy(self, level:str) -> list[Strategy]:
+    def get_strategy(self, level:str) -> list[Strategy]:
         if not self.strategies:
             raise RuntimeError("没有获取到策略信息")
         strategy = self.strategies.get(level, None)
@@ -51,6 +51,15 @@ class LunaTowerStrategist:
             self._make_strategies()
             strategy = self.strategies.get(level, None)
         return strategy
+    
+    def search_strategy(self, query:str) -> list[Strategy]:
+        if not self.strategies:
+            raise RuntimeError("没有获取到策略信息")
+        ret = []
+        for key, strategy in self.strategies.items():
+            if query in key:
+                ret += strategy
+        return ret
 
 class SecretDungeonStrategist:
     save_path = _root_path/'saved_secret_dungeon_strategies.txt'
@@ -137,7 +146,7 @@ class _Detector:
                 _,icon_arr = cv.imencode(".png", icon)
                 icon_arr.tofile(f"{icon_dir}/{id}.png")
             if len(ids) == 5:
-                return [ Member(id) for id in ids]
+                return [ Member(id=id) for id in ids]
             
 class _YoloDetector:
 
@@ -175,7 +184,7 @@ class _YoloDetector:
                     continue
                 ids.append(id)
             if len(ids) == 5:
-                return [Member(id) for id in ids]
+                return [Member(id=id) for id in ids]
             
 class _Query(ABC):
     
@@ -202,6 +211,8 @@ class _LunaTowerQuery(_Query):
     
     def parse_page(self, video_info, page) -> str:
         level = re.findall(r'【(.*?)】', page['part'])
+        if not level:
+            level = re.findall(r'\d+', page['part'])
         if not level:
             return None
         level = level[0]

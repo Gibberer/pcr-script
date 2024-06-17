@@ -136,6 +136,11 @@ class BaseTask(metaclass=ABCMeta):
         self.num_step = 1
         self.total_step = 1
         self.show_progress = True
+    
+    def set_progress(self, total_step=1, num_step=1, show_progress=True):
+        self.total_step = total_step
+        self.num_step = num_step
+        self.show_progress = show_progress
 
     def action_squential(self, *actions: Action, show_progress:bool=None, net_error_check:bool=True):
         for action in actions:
@@ -1261,7 +1266,7 @@ class TeamFormation(BaseTask):
             time.sleep(0.5)
         if add_ids:
             # 使用搜索功能
-            self.total_step = 2*len(add_ids)
+            self.set_progress(total_step=2*len(add_ids))
             name_mapping = self._gen_chara_mapping()
             self.action_squential(SwipeAction(start=(480, 150), end=(480,350)), SleepAction(1))
             for id in add_ids:
@@ -1272,7 +1277,7 @@ class TeamFormation(BaseTask):
                     SleepAction(0.5),
                     ClickAction(pos=(110, 220)), # 丧失焦点
                     SleepAction(0.5),
-                    ClickAction(pos=(110, 220)), # 选择匹配人物
+                    ClickAction(template=CharaIconTemplate(id)), # 选择匹配人物
                     ClickAction(pos=(690, 135)),
                 )
         add_ids, remove_regions = self._check_current_form(formation)
@@ -1282,6 +1287,77 @@ class TeamFormation(BaseTask):
         return True
 
     
+class TeamFormationEx(TeamFormation):
+    '''
+    多个队伍编队
+    '''
+
+    def run(self, formations:list[list[Member]]):
+        if not formations:
+            print("未设置期望编组")
+            return
+        if not self._in_team_formation():
+            print("未在编队界面")
+            return
+        self.set_progress(total_step="inf")
+        
+        for i in range(len(formations)):
+            for region in TeamFormationEx.current_team_region_separated:
+                pos = self.center_region(region)
+                self.driver.click(*pos)
+                time.sleep(0.5)
+            if i + 1 < len(formations):
+                self.action_squential(
+                    ClickAction(pos=(834, 448)),
+                    SleepAction(1),
+                )
+        for _ in range(len(formations) - 1):
+            self.action_squential(
+                ClickAction(pos=(673, 441)),
+                SleepAction(1),
+            )
+            
+        for i,formation in enumerate(formations):
+            member = formation[0]
+            if member.id >= 1000:
+                add_ids, remove_regions = self._check_current_form(formation)
+                for region in remove_regions:
+                    pos = self.center_region(region)
+                    self.driver.click(*pos)
+                    time.sleep(0.5)
+                if add_ids:
+                    # 使用搜索功能
+                    name_mapping = self._gen_chara_mapping()
+                    self.action_squential(SwipeAction(start=(480, 185), end=(480,350)), SleepAction(1))
+                    for id in add_ids:
+                        self.action_squential(
+                            ClickAction(pos=(480, 200)),
+                            SleepAction(0.5),
+                            InputAction(name_mapping[id]),
+                            SleepAction(0.5),
+                            ClickAction(pos=(110, 290)), # 丧失焦点
+                            SleepAction(0.5),
+                            ClickAction(template=CharaIconTemplate(id)), # 选择匹配人物
+                            ClickAction(pos=(690, 200)),
+                        )
+                add_ids, remove_regions = self._check_current_form(formation)
+                if add_ids or remove_regions:
+                    # 如果还存在需要操作的步骤说明未变更为预期队伍组合，可能账号没有预期编队的角色。
+                    return False
+            else:
+                # 非法formation，可能队伍不需要，随便点击几个角色加入
+                actions = []
+                for j in range((i-1)*4,i*4):
+                    actions.append(ClickAction(pos=(112 + j*100, 250)))
+                    actions.append(SleepAction(1))
+                self.action_squential(*actions)
+            if i + 1 < len(formations):
+                self.action_squential(
+                    ClickAction(pos=(834, 448)),
+                    SleepAction(0.5),
+                )
+        return True
+
 class Combat(BaseTask):
     '''
     普通战斗场景任务
@@ -1294,7 +1370,7 @@ class Combat(BaseTask):
         (196,400,282,485),
     )
 
-    def _brightness(img:np.ndarray):
+    def _brightness(self, img:np.ndarray):
         if len(img.shape) == 3:
             return np.average(np.linalg.norm(img, axis=2)) / np.sqrt(3)
         else:
@@ -1303,24 +1379,29 @@ class Combat(BaseTask):
     def _check_dead_count(self, screenshot:np.ndarray, member_num):
         h,w,_ = screenshot.shape
         dead_count = 0
-        for region in self.adapted_region(Combat.unit_regions[:member_num], w, h):
+        for region in Combat.unit_regions[:member_num]:
+            region = self.adapted_region(region, w, h)
             if self._brightness(screenshot[region[1]:region[3],region[0]:region[2]]) <= 80:
                 dead_count += 1
         return dead_count
 
-    def run(self, form:list[Member]=None, giveup=1, member_num=5):
+    def run(self, form:list[Member]|list[list[Member]]=None, giveup=1, member_num=5):
         '''
         Args:
             form: 提供队伍组合信息。
             giveup: 如果战斗中死亡人数大于{giveup}的数值时，放弃战斗，该数值默认为1。
             member_num: 参与战斗的人数，如果已经提供了{form}那么本参数不发生效果。
         '''
-        self.total_step = 'inf'
+        self.set_progress(total_step=3)
         self.action_squential(
             MatchAction(template='btn_challenge', matched_actions=[ClickAction()], timeout=1),
         )
         if form:
-            TeamFormation(self.robot).run(form)
+            if isinstance(form[0], list):
+                TeamFormationEx(self.robot).run(form)
+            else:
+                TeamFormation(self.robot).run(form)
+            form = form[0] # 暂时战斗中操作不支持多队伍
             member_num = len(form)
         self.action_squential(
             ClickAction(template='btn_combat_start'),
@@ -1349,12 +1430,14 @@ class Combat(BaseTask):
                     success = False
                     self.action_squential(
                         ClickAction(pos=(900, 25)),
+                        SleepAction(1),
                         ClickAction('btn_giveup'),
+                        SleepAction(0.5),
                         ClickAction('btn_giveup_blue')
                         )
                     break
                 if form and not set_instant:
-                    regions = self.adapted_region(Combat.unit_regions, screenshot.shape[1], screenshot.shape[0])
+                    regions = [self.adapted_region(region, screenshot.shape[1], screenshot.shape[0]) for region in Combat.unit_regions]
                     for i,mem in enumerate(form):
                         if mem.instant:
                             region = regions[i]
@@ -1371,53 +1454,110 @@ class Combat(BaseTask):
                     ClickAction(template=ImageTemplate('btn_close') | ImageTemplate('btn_cancel') | ImageTemplate('btn_ok_blue')),])
             )
         return success
-            
 
 @register("luna_tower_climbing")
 class LunaTowerClimbing(TimeLimitTask):
     '''
     爬露娜塔
     '''
+    class State(Enum):
+        CONTINUE = 1
+        BREAK = 2
+        LEVEL = 3
+        CORRIDOR = 4
+        EX = 5
 
     @staticmethod
     def valid(event_news: EventNews, args=None) -> tuple:
         if LunaTowerClimbing.event_first_day(event_news.tower):
             return LunaTowerClimbing, args
     
-    level_recognize_region = ()
+    level_recognize_region = (334, 78, 414, 117)
 
     def _parse_level(self, ocr_result):
         results = ocr_result[0]
+        if not results:
+            return None
         for result in results:
             levels = re.findall(r'\d+', result[1][0])
             if levels:
                 for level in levels:
                     if int(level) > 10:
                         return level
+    
+    def _brightness(self, img:np.ndarray):
+        if len(img.shape) == 3:
+            return np.average(np.linalg.norm(img, axis=2)) / np.sqrt(3)
+        else:
+            return np.average(img)
         
     def _go_luna_clean(self):
         ToHomePage(self.robot).run()
         LunaTowerClean(self.robot).run()
     
-    def run(self):
+    def _system_recommend_party(self, combat:Combat)->bool:
+        self.action_squential(
+            MatchAction("btn_use_blue", matched_actions=[ClickAction()], unmatch_actions=[ClickAction("btn_pass_party")]),
+            SleepAction(1),
+            ClickAction("btn_check_battle"),
+            SleepAction(1),
+        )
+        return combat.run()
+    
+    def _check_state(self, screenshot) -> 'LunaTowerClimbing.State':
+        if not hasattr(self, '_check_state_times'):
+            self._check_state_times = 0
+        if self.template_match(screenshot, ImageTemplate("symbol_luna_tower_lock") & ImageTemplate("btn_pass_party")):
+            self._check_state_times = 0
+            return LunaTowerClimbing.State.LEVEL
+        if self.template_match(screenshot, ImageTemplate("btn_pass_party")):
+            self._check_state_times = 0
+            h,w,_ = screenshot.shape
+            ex_pass = False
+            corridor_pass = False
+            ex_region = self.adapted_region((70, 336, 247, 408), w, h)
+            cr = self.adapted_region((776, 356, 849, 389), w, h)
+            if self._brightness(screenshot[cr[1]:cr[3],cr[0]:cr[2]]) < 200:
+                corridor_pass = True
+            pass_poses = self.template_match(screenshot, ImageTemplate("symbol_pass", ret_count=-1))
+            if pass_poses:
+                for pos in pass_poses:
+                    if self.in_region(ex_region, pos):
+                        ex_pass = True
+            if not corridor_pass:
+                return LunaTowerClimbing.State.CORRIDOR
+            if not ex_pass:
+                return LunaTowerClimbing.State.EX
+            return LunaTowerClimbing.State.BREAK
+        if self._check_state_times > 3:
+            self._check_state_times = 0
+            return LunaTowerClimbing.State.BREAK
+        else:
+            self._check_state_times += 1
+            return LunaTowerClimbing.State.CONTINUE
+
+    
+    def run(self, allow_system_recommend=False):
         try:
             from .strategist import LunaTowerStrategist
             from paddleocr import PaddleOCR
             from paddleocr.paddleocr import logger
             import logging
             logger.setLevel(logging.ERROR)
-        except Exception:
+        except Exception as e:
             print("当前缺失依赖，该任务需要安装额外依赖才能运行")
+            print(e)
             return
         self.total_step = 'inf'
         self.action_squential(
             MatchAction('tab_adventure', matched_actions=[ClickAction()], unmatch_actions=[ClickAction(template='btn_close'), ClickAction(pos=(50, 300))]),
             SleepAction(1),
             ClickAction(template="btn_luna_tower_entrance"),
-            MatchAction(template="symbol_luna_tower"),
+            MatchAction(template="symbol_luna_tower", unmatch_actions=[ClickAction(template='btn_close')]),
         )
         identify_frame = self.driver.screenshot()
-        if not self.template_match(identify_frame, ImageTemplate("symbol_luna_tower_lock")):
+        state = self._check_state(identify_frame)
+        if state == LunaTowerClimbing.State.CONTINUE or state == LunaTowerClimbing.State.BREAK:
             print("当前没有未解锁层数，应执行回廊扫荡")
             self._go_luna_clean()
             return
@@ -1426,7 +1566,7 @@ class LunaTowerClimbing(TimeLimitTask):
         print("开始拉取策略信息...")
         strategist.gather_information()
         print(f"生成露娜塔策略耗时：{time.time() - start}")
-        ocr = PaddleOCR(use_angle_cls=True, lang="ch", gpu=True)
+        ocr = PaddleOCR(use_angle_cls=True, lang="ch", gpu=False)
         h,w,_ = identify_frame.shape
         level_region = self.adapted_region(LunaTowerClimbing.level_recognize_region, w, h)
         combat = Combat(self.robot)
@@ -1435,28 +1575,51 @@ class LunaTowerClimbing(TimeLimitTask):
             if not self.template_match(screenshot, ImageTemplate("symbol_luna_tower")):
                 time.sleep(1)
                 continue
-            if not self.template_match(screenshot, ImageTemplate("symbol_luna_tower_lock")):
-                break
-            level = self._parse_level(ocr.ocr(screenshot[level_region[1]:level_region[3],level_region[0]:level_region[2]], cls=False))
+            state = self._check_state(screenshot)
             strategies = None
-            if level:
-                strategies = strategist.find_strategy(level)
-            else:
-                # 处理EX或回廊
-                pass
+            if state == LunaTowerClimbing.State.CONTINUE:
+                time.sleep(1)
+                continue
+            elif state == LunaTowerClimbing.State.BREAK:
+                break
+            elif state == LunaTowerClimbing.State.LEVEL:
+                level = self._parse_level(ocr.ocr(screenshot[level_region[1]:level_region[3],level_region[0]:level_region[2]], cls=False))
+                print(f"当前处理露娜塔层级: {level}")
+                strategies = strategist.get_strategy(level)
+            elif state == LunaTowerClimbing.State.EX:
+                print(f"当前处理露娜塔EX")
+                if self.template_match(screenshot, ImageTemplate("symbol_corridor")):
+                    self.action_once(ClickAction(template="btn_luna_floor_ex"))
+                    time.sleep(1)
+                strategies = strategist.search_strategy("EX")
+                if strategies:
+                    tmp = []
+                    for strategy in strategies:
+                        strategy = strategy.model_copy()
+                        strategy.party = [strategy.party, [Member(id=0)], [Member(id=0)]]
+                        tmp.append(strategy)
+                    strategies = tmp
+            elif state == LunaTowerClimbing.State.CORRIDOR:
+                print(f"当前处理露娜塔回廊")
+                strategies = strategist.search_strategy("回廊")
             if not strategies:
-                # 使用系统推荐队伍
-                raise RuntimeError("Not Implement!")
+                if allow_system_recommend:
+                    print("无策略信息，尝试使用系统推荐组合")
+                    self._system_recommend_party(combat)
+                else:
+                    raise RuntimeError("无处理对应层的策略信息")
             else:
                 combat_success = False
                 for strategy in strategies:
-                    self.action_squential(ClickAction(pos=(815,430)), SleepAction(1))
-                    combat_success = combat.run(form=strategy.party)
-                    if combat_success:
-                        break
+                    for _ in range(2):
+                        self.action_squential(ClickAction(pos=(815,430)), SleepAction(1))
+                        combat_success = combat.run(form=strategy.party)
+                        if combat_success:
+                            break
                 if not combat_success:
                     # 使用系统推荐队伍 or 退出任务
-                    raise RuntimeError("Not Implement!")
+                    if not allow_system_recommend or not self._system_recommend_party(combat): 
+                        raise RuntimeError("所有尝试组合皆推塔失败，退出任务")
             time.sleep(1)
 
         self._go_luna_clean()

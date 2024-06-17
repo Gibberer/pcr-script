@@ -20,6 +20,9 @@ class Template(metaclass=ABCMeta):
     def __or__(self, other):
         return _OrTemplate(self, other)
     
+    def __invert__(self):
+        return _InvertTemplate(self)
+    
     @abstractmethod
     def match(self, screenshot:np.ndarray)->None|tuple:
         '''
@@ -46,6 +49,15 @@ class _OrTemplate(Template):
     
     def match(self, screenshot: np.ndarray):
         return self._a.match(screenshot) or self._b.match(screenshot)
+
+class _InvertTemplate(Template):
+
+    def __init__(self, target:Template) -> None:
+        super().__init__()
+        self._target = target
+
+    def match(self, screenshot: np.ndarray) -> None | tuple:
+        return not self._target.match(screenshot)
 
 class BooleanTemplate(Template):
     def __init__(self, value:bool):

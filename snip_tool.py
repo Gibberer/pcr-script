@@ -7,6 +7,7 @@ from pcrscript import DNSimulator
 from pcrscript.driver import Driver
 import yaml
 import cv2 as cv
+import numpy as np
 
 
 class Screenshot(QLabel):
@@ -87,6 +88,19 @@ class SnipTool(QMainWindow):
         container.setLayout(layout)
         self.setCentralWidget(container)
     
+    def _brightness(self, pixmap:QPixmap):
+        size = pixmap.size()
+        w = size.width()
+        h = size.height()
+        img = pixmap.toImage()
+        b = img.bits()
+        b.setsize(w*h*4)
+        img = np.frombuffer(b, np.uint8).reshape((h, w, 4))
+        if len(img.shape) == 3:
+            return np.average(np.linalg.norm(img, axis=2)) / np.sqrt(3)
+        else:
+            return np.average(img)
+    
     def export(self):
         lt = self.label_image.begin
         rb = self.label_image.end
@@ -94,7 +108,7 @@ class SnipTool(QMainWindow):
             QMessageBox.warning(self, "Warn", "未设置截取区域")
             return
         cropped = self.label_image.pixmap().copy(QRect(lt, rb))
-        fileName, _ = QFileDialog.getSaveFileName(self, "导出截图", "images", "Image Files (*.png)")
+        fileName, _ = QFileDialog.getSaveFileName(self, f"导出截图:{int(self._brightness(cropped))}", "images", "Image Files (*.png)")
         if fileName:
             cropped.save(fileName, "PNG")
 
