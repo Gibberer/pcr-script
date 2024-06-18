@@ -205,3 +205,31 @@ class CharaIconTemplate(Template):
                 dst = cv.perspectiveTransform(pts,M)
                 return ((dst[0][0][0] + dst[2][0][0]) / 2, (dst[1][0][1] + dst[3][0][1]) / 2)
         return None
+
+class BrightnessTemplate(Template):
+
+    def __init__(self, region:tuple[int,int,int,int], threshold:int) -> None:
+        '''
+        Parameters:
+            region: 计算区域
+            threshold: 0-255
+        '''
+        super().__init__()
+        self._region = region
+        self._threshold = threshold
+    
+    def _brightness(self, img:np.ndarray):
+        if len(img.shape) == 3:
+            return np.average(np.linalg.norm(img, axis=2)) / np.sqrt(3)
+        else:
+            return np.average(img)
+    
+    def match(self, screenshot: np.ndarray) -> None | tuple:
+        h,w,_ = screenshot.shape
+        hscale = w/self.define_width
+        vscale = h/self.define_height
+        r = self._region
+        r = (int(r[0]*hscale), int(r[1]*vscale), int(r[2]*hscale), int(r[3]*vscale))
+        if self._brightness(screenshot[r[1]:r[3],r[0]:r[2]]) >= self._threshold:
+            return (int((r[0]+r[2])/2), int((r[1]+r[3])/2))
+        return None

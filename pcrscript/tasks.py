@@ -12,8 +12,8 @@ import os
 
 from .constants import *
 from pcrscript.actions import *
-from .templates import Template,ImageTemplate,CharaIconTemplate
-from .strategist import Member,Strategy
+from .templates import Template,ImageTemplate,CharaIconTemplate,BrightnessTemplate
+from .strategist import Member
 
 if TYPE_CHECKING:
     from pcrscript import Robot
@@ -1370,18 +1370,10 @@ class Combat(BaseTask):
         (196,400,282,485),
     )
 
-    def _brightness(self, img:np.ndarray):
-        if len(img.shape) == 3:
-            return np.average(np.linalg.norm(img, axis=2)) / np.sqrt(3)
-        else:
-            return np.average(img)
-
     def _check_dead_count(self, screenshot:np.ndarray, member_num):
-        h,w,_ = screenshot.shape
         dead_count = 0
         for region in Combat.unit_regions[:member_num]:
-            region = self.adapted_region(region, w, h)
-            if self._brightness(screenshot[region[1]:region[3],region[0]:region[2]]) <= 80:
+            if not self.template_match(screenshot, BrightnessTemplate(region, 80)):
                 dead_count += 1
         return dead_count
 
@@ -1484,14 +1476,8 @@ class LunaTowerClimbing(TimeLimitTask):
                 for level in levels:
                     if int(level) > 10:
                         return level
-    
-    def _brightness(self, img:np.ndarray):
-        if len(img.shape) == 3:
-            return np.average(np.linalg.norm(img, axis=2)) / np.sqrt(3)
-        else:
-            return np.average(img)
         
-    def _go_luna_clean(self):
+    def _goto_luna_clean(self):
         ToHomePage(self.robot).run()
         LunaTowerClean(self.robot).run()
     
@@ -1516,8 +1502,7 @@ class LunaTowerClimbing(TimeLimitTask):
             ex_pass = False
             corridor_pass = False
             ex_region = self.adapted_region((70, 336, 247, 408), w, h)
-            cr = self.adapted_region((776, 356, 849, 389), w, h)
-            if self._brightness(screenshot[cr[1]:cr[3],cr[0]:cr[2]]) < 200:
+            if not self.template_match(screenshot, BrightnessTemplate((776, 356, 849, 389), 150)):
                 corridor_pass = True
             pass_poses = self.template_match(screenshot, ImageTemplate("symbol_pass", ret_count=-1))
             if pass_poses:
@@ -1559,7 +1544,7 @@ class LunaTowerClimbing(TimeLimitTask):
         state = self._check_state(identify_frame)
         if state == LunaTowerClimbing.State.CONTINUE or state == LunaTowerClimbing.State.BREAK:
             print("当前没有未解锁层数，应执行回廊扫荡")
-            self._go_luna_clean()
+            self._goto_luna_clean()
             return
         strategist = LunaTowerStrategist()
         start = time.time()
@@ -1596,7 +1581,11 @@ class LunaTowerClimbing(TimeLimitTask):
                     tmp = []
                     for strategy in strategies:
                         strategy = strategy.model_copy()
-                        strategy.party = [strategy.party, [Member(id=0)], [Member(id=0)]]
+                        # 目前策略获取所能获取的信息不包含多个队伍以及是否存在立即释放模式
+                        # 但是在Luna塔EX层中通常为一个队伍并且为全Set所以这里特殊修改下
+                        for member in strategy.party:
+                            member.instant = True
+                        strategy.party = [strategy.party, [Member(id=0, instant=True)], [Member(id=0, instant=True)]]
                         tmp.append(strategy)
                     strategies = tmp
             elif state == LunaTowerClimbing.State.CORRIDOR:
@@ -1622,4 +1611,4 @@ class LunaTowerClimbing(TimeLimitTask):
                         raise RuntimeError("所有尝试组合皆推塔失败，退出任务")
             time.sleep(1)
 
-        self._go_luna_clean()
+        self._goto_luna_clean()

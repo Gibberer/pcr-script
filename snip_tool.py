@@ -95,11 +95,8 @@ class SnipTool(QMainWindow):
         img = pixmap.toImage()
         b = img.bits()
         b.setsize(w*h*4)
-        img = np.frombuffer(b, np.uint8).reshape((h, w, 4))
-        if len(img.shape) == 3:
-            return np.average(np.linalg.norm(img, axis=2)) / np.sqrt(3)
-        else:
-            return np.average(img)
+        img = np.frombuffer(b, np.uint8).reshape((h, w, 4))[:,:,:3]
+        return np.average(np.linalg.norm(img, axis=2)) / np.sqrt(3)
     
     def export(self):
         lt = self.label_image.begin
