@@ -839,6 +839,9 @@ class CampaignRewardExchange(TimeLimitTask):
             while True:
                 time.sleep(1)
                 screenshot = self.driver.screenshot()
+                if ignore := self.template_match(screenshot, ImageTemplate('btn_close', roi=(262,115,687,434))):
+                    self.driver.click(*ignore)
+                    continue
                 if novocal := self.template_match(screenshot, ImageTemplate('btn_novocal_blue')):
                     self.driver.click(*novocal)
                     continue
@@ -877,11 +880,16 @@ class CampaignRewardExchange(TimeLimitTask):
             time.sleep(0.5)
             screenshot = self.driver.screenshot()
             if self.template_match(screenshot, ImageTemplate('symbol_reward_exchange')):
-                break
+                if self.template_match(screenshot, ~BrightnessTemplate((740, 336, 920, 415), 200)):
+                    break
+                # 抽取下一轮
+                self.action_once(ClickAction(pos=(830,380)))
+                continue
             if reset := self.template_match(screenshot, ImageTemplate('btn_reset_reward')):
                 self.driver.click(*reset)
                 continue
             if click := self.template_match(screenshot, ImageTemplate('btn_ok') | ImageTemplate('btn_ok_blue')
+                                            | ImageTemplate('btn_check_reward')
                                             | ImageTemplate('btn_reset_reward_in_dialog')
                                             | ImageTemplate('btn_exchange_again_blue')
                                             | ImageTemplate('btn_exchange_again_white')):
@@ -889,6 +897,7 @@ class CampaignRewardExchange(TimeLimitTask):
                 continue
     
     def _confidence(self):
+        time.sleep(1)
         btn_confidence = self.template_match(self.driver.screenshot(), ImageTemplate('btn_confidence'))
         if not btn_confidence:
             return

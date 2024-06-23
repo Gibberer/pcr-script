@@ -72,12 +72,13 @@ class ImageTemplate(Template):
     使用模版匹配
     '''
 
-    def __init__(self, name, threshold=THRESHOLD, mode=None, ret_count=1):
+    def __init__(self, name, threshold=THRESHOLD, mode=None, ret_count=1, roi=None):
         super().__init__()
         self._name = name
         self._threshold = threshold
         self._mode = mode
         self._ret_count = ret_count
+        self._roi = roi
     
     def _create_result(self, x, y, twidth, theight, scalex, scaley):
         return (scalex * (x + twidth/2), scaley * (y + theight/2))
@@ -89,6 +90,12 @@ class ImageTemplate(Template):
         theight, twidth = template.shape[:2]
         fx = width/self.define_width
         fy = height/self.define_height
+        if self._roi:
+            roi = self._roi
+            roi = (int(roi[0]*fx), int(roi[1]*fy), int(roi[2]*fx), int(roi[3]*fy))
+            temp = np.zeros_like(source)
+            temp[roi[1]:roi[3],roi[0]:roi[2]] = source[roi[1]:roi[3],roi[0]:roi[2]]
+            source = temp
         ret_scalex = 1
         ret_scaley = 1
         if fx > 1 and fy > 1: 
