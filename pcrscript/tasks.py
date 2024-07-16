@@ -1093,7 +1093,7 @@ class Arena(BaseTask):
             MatchAction('tab_adventure', matched_actions=[ClickAction()], unmatch_actions=[
                 ClickAction(template='btn_close')]),
             SleepAction(1.5),
-            ClickAction(pos=(590, 240)),
+            ClickAction(pos=(590, 400)),
             SleepAction(1),
             MatchAction(template='btn_cancel', matched_actions=[
                 ClickAction(), SleepAction(1)], timeout=2),
@@ -1120,7 +1120,7 @@ class PrincessArena(BaseTask):
             MatchAction('tab_adventure', matched_actions=[ClickAction()], unmatch_actions=[
                 ClickAction(template='btn_close')]),
             SleepAction(1.5),
-            ClickAction(pos=(810, 240)),
+            ClickAction(pos=(810, 400)),
             SleepAction(1),
             MatchAction(template='btn_cancel', matched_actions=[
                 ClickAction(), SleepAction(1)], timeout=2),
