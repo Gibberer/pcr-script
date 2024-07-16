@@ -72,18 +72,20 @@ class ImageTemplate(Template):
     使用模版匹配
     '''
 
-    def __init__(self, name, threshold=THRESHOLD, mode=None, ret_count=1, roi=None):
+    def __init__(self, name, threshold=THRESHOLD, mode=None, ret_count=1, roi=None, consecutive_hit=1):
         super().__init__()
         self._name = name
         self._threshold = threshold
         self._mode = mode
         self._ret_count = ret_count
         self._roi = roi
+        self._con_hit = consecutive_hit
+        self._hit_count = 0
     
     def _create_result(self, x, y, twidth, theight, scalex, scaley):
         return (scalex * (x + twidth/2), scaley * (y + theight/2))
 
-    def match(self, screenshot: np.ndarray):
+    def _match(self, screenshot:np.ndarray):
         source = screenshot
         template = cv.imread(f"images/{self._name}.png")
         height, width = source.shape[:2]
@@ -143,6 +145,20 @@ class ImageTemplate(Template):
                     return matched_points
             else:
                 return None
+
+    def match(self, screenshot: np.ndarray):
+        ret = self._match(screenshot)
+        if self._con_hit > 1:
+            if not ret:
+                self._hit_count = 0
+                return ret
+            self._hit_count += 1
+            if self._hit_count >= self._con_hit:
+                return ret
+            else:
+                return None
+        else:
+            return ret
 
 class ImageFeatureTemplate(Template):
     '''

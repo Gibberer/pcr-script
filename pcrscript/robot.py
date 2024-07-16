@@ -114,7 +114,7 @@ class Robot:
 
     def _first_enter_check(self):
         pos = random.choice(((199, 300), (400, 300), (590, 300), (790, 300)))
-        self.__action_squential(MatchAction('shop', unmatch_actions=(
+        self.__action_squential(MatchAction(ImageTemplate('shop', consecutive_hit=3), unmatch_actions=(
             ClickAction(template = ImageTemplate('btn_close') | ImageTemplate('btn_ok_blue')
                         | ImageTemplate('btn_download') | ImageTemplate('btn_skip')
                         | ImageTemplate('btn_cancel') | ImageTemplate('select_branch_first')

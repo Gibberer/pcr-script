@@ -170,6 +170,9 @@ class BaseTask(metaclass=ABCMeta):
         vscale = h/self.define_height
         return (int(r[0]*hscale), int(r[1]*vscale), int(r[2]*hscale), int(r[3]*vscale))
 
+    def __call__(self, *args, **kwds):
+        return self.run(*args)
+
     @abstractmethod
     def run(self, *args):
         pass
@@ -241,11 +244,11 @@ class ToHomePage(BaseTask):
     
     def run(self, click_pos=(90, 500), timeout=0):
         self.action_squential(
-            MatchAction('shop', unmatch_actions=(
+            MatchAction(ImageTemplate('shop', consecutive_hit=2), unmatch_actions=(
             ClickAction(ImageTemplate('btn_close') | ImageTemplate('btn_ok_blue')
                         | ImageTemplate('btn_download') | ImageTemplate('btn_skip')
                         | ImageTemplate('btn_cancel') | ImageTemplate('select_branch_first')
-                        | ImageTemplate('app_no_responed')),
+                        | ImageTemplate('app_no_responed') | ImageTemplate('btn_close_2')),
             ClickAction(pos=click_pos),
         ),timeout=timeout), show_progress=False, net_error_check=False)
 
@@ -1090,8 +1093,6 @@ class Arena(BaseTask):
             MatchAction('tab_adventure', matched_actions=[ClickAction()], unmatch_actions=[
                 ClickAction(template='btn_close')]),
             SleepAction(1.5),
-            ClickAction(pos=(587, 411)),
-            SleepAction(1.5),
             ClickAction(pos=(590, 240)),
             SleepAction(1),
             MatchAction(template='btn_cancel', matched_actions=[
@@ -1118,8 +1119,6 @@ class PrincessArena(BaseTask):
         self.action_squential(
             MatchAction('tab_adventure', matched_actions=[ClickAction()], unmatch_actions=[
                 ClickAction(template='btn_close')]),
-            SleepAction(1.5),
-            ClickAction(pos=(587, 411)),
             SleepAction(1.5),
             ClickAction(pos=(810, 240)),
             SleepAction(1),
