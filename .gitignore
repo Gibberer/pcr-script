@@ -7,3 +7,4 @@ daily_config.yml
 autobattle/gui
 plugins/battleline_extractor/output.yaml
 cache/
+assets/

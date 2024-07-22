@@ -1399,9 +1399,9 @@ class Combat(BaseTask):
         if form:
             if isinstance(form[0], list):
                 TeamFormationEx(self.robot).run(form)
+                form = form[0] # 暂时战斗中操作不支持多队伍
             else:
                 TeamFormation(self.robot).run(form)
-            form = form[0] # 暂时战斗中操作不支持多队伍
             member_num = len(form)
         self.action_squential(
             ClickAction(template='btn_combat_start'),
@@ -1510,7 +1510,7 @@ class LunaTowerClimbing(TimeLimitTask):
             ex_pass = False
             corridor_pass = False
             ex_region = self.adapted_region((70, 336, 247, 408), w, h)
-            if not self.template_match(screenshot, BrightnessTemplate((776, 356, 849, 389), 150)):
+            if not self.template_match(screenshot, BrightnessTemplate((776, 356, 849, 389), 130)):
                 corridor_pass = True
             pass_poses = self.template_match(screenshot, ImageTemplate("symbol_pass", ret_count=-1))
             if pass_poses:
