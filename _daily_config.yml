@@ -32,6 +32,10 @@ Task: #配置执行任务,配置任务名称，如果需要传入参数在下面
     -
       - tohomepage
     -
+      - adventure_daily
+    -
+      - tohomepage
+    -
       - get_quest_reward #领取任务奖励（获取赠送的体力）
     -
       - tohomepage
@@ -55,7 +59,7 @@ Task: #配置执行任务,配置任务名称，如果需要传入参数在下面
       -
         1: # 第一个tab（通常）
           - -1 # 表示点击全选按钮即全部经验药水
-        8: #限定商店
+        9: #限定商店
           - -1 # 表示点击全选按钮即全部经验药水
     -
       - tohomepage

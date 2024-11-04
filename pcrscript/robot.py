@@ -181,10 +181,12 @@ class Robot:
     def _log(self, msg: str):
         print("{}: {}".format(self._name, msg))
 
-    def action_squential(self, *actions: Action, delay=0.2, net_error_check=True, show_progress=False, progress_index=None, total_step=1):
+    def action_squential(self, *actions: Action, delay=0.2, net_error_check=True, show_progress=False, progress_index=None, total_step=1, title=None):
         if self.show_progress and show_progress:
             progress = tqdm(actions, unit="a", bar_format='{desc}|{bar}| {n_fmt}/{total_fmt} [{elapsed}, {rate_fmt}{postfix}]')
-            if progress_index is not None:
+            if title:
+                progress.set_description(f"{self._name} {title}")
+            elif progress_index is not None:
                 progress.set_description(f"{self._name} step({progress_index}/{total_step})")
             else:
                 progress.set_description(f"{self._name}")

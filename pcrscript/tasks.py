@@ -142,12 +142,12 @@ class BaseTask(metaclass=ABCMeta):
         self.num_step = num_step
         self.show_progress = show_progress
 
-    def action_squential(self, *actions: Action, show_progress:bool=None, net_error_check:bool=True):
+    def action_squential(self, *actions: Action, show_progress:bool=None, net_error_check:bool=True, title=None):
         for action in actions:
             action.bindTask(self)
         if show_progress is None:
             show_progress = self.show_progress
-        self.robot.action_squential(*actions, net_error_check=net_error_check, show_progress=show_progress, progress_index=self.num_step, total_step=self.total_step)
+        self.robot.action_squential(*actions, net_error_check=net_error_check, show_progress=show_progress, progress_index=self.num_step, total_step=self.total_step, title=title)
         self.num_step += 1
     
     def action_once(self, action: Action):
@@ -317,7 +317,9 @@ class FreeGacha(TimeLimitTask):
                 SleepAction(0.5),
                 IfCondition("symbol_reward_select", meet_actions=[
                     ClickAction(pos=(600, 265)),
+                    SleepAction(0.5),
                     ClickAction(template="btn_ok_blue", timeout=5),
+                    SleepAction(0.5),
                     ClickAction(template="btn_close"),
                     SleepAction(0.5),
                     ClickAction(pos=(871, 355)),
@@ -543,7 +545,7 @@ class ShopBuy(BaseTask):
                     ]
                     copy_tab_actions += copy.deepcopy(tab_actions)
                     tab_main_actions += copy_tab_actions
-            if tab == 8:
+            if tab == 9:
                 # 限定tab，判断下对应tab是否为可点击状态
                 meet_actions = [ClickAction(pos=SHOP_TAB_LOCATION[tab - 1])] + tab_main_actions
                 actions += [
@@ -734,6 +736,12 @@ class CampaignClean(TimeLimitTask):
                 ClickAction(template=ImageTemplate('1-1', threshold=0.6, mode='binarization'), offset=(0, -20)),  # 点击第一个活动困难本
                 MatchAction(ImageTemplate('btn_challenge', threshold=0.9*THRESHOLD)),
             ]
+            # 1-1可能误识别为其他关卡
+            for _ in range(4):
+                actions += [
+                    ClickAction(pos=(33, 275)),
+                    SleepAction(0.5)
+                ]
             for _ in range(5):
                 actions += [
                     ClickAction(pos=(757, 330)),
@@ -835,6 +843,7 @@ class CampaignRewardExchange(TimeLimitTask):
             ], delay=0.5),
             ClickAction('btn_campaign_story_entry'),
             SleepAction(3),
+            title="剧情奖励"
         )
         symbol_new = self.template_match(self.driver.screenshot(), ImageTemplate('symbol_new_campaign_story'))
         if symbol_new:
@@ -868,16 +877,18 @@ class CampaignRewardExchange(TimeLimitTask):
             *_enter_adventure_actions(difficulty=Difficulty.HARD, campaign=True),
             ClickAction(template=ImageTemplate('hard', threshold=0.6, mode='binarization'), offset=(0, -40)),
             SleepAction(1),
-            *_clean_oneshot_actions(duration=6000)
+            *_clean_oneshot_actions(duration=6000),
+            title="清空券"
         )
     
     def _exchange(self):
         self.action_squential(
-            ClickAction('btn_reward_exchange'),
+            MatchAction('btn_reward_exchange', matched_actions=[ClickAction()], unmatch_actions=[ClickAction(template="btn_close")]),
             MatchAction('symbol_reward_exchange'),
             SleepAction(1),
             ClickAction(pos=(830,380)),
             SleepAction(1),
+            title="交换阶段"
         )
         while True:
             time.sleep(0.5)
@@ -897,6 +908,7 @@ class CampaignRewardExchange(TimeLimitTask):
                                             | ImageTemplate('btn_exchange_again_blue')
                                             | ImageTemplate('btn_exchange_again_white')):
                 self.driver.click(*click)
+                time.sleep(0.5)
                 continue
     
     def _confidence(self):
@@ -915,7 +927,7 @@ class CampaignRewardExchange(TimeLimitTask):
                     self.action_once(ClickAction(pos=(30, 35)))
                     time.sleep(5)
                     break
-                self.driver.click(*new)
+                self.driver.click(new[0], int(new[1] + screenshot.shape[0] * 0.1))
                 continue
             if self.template_match(screenshot, ImageTemplate('symbol_confidence_home')):
                 # 信赖度二级页面
@@ -1191,8 +1203,8 @@ class Schedule(BaseTask):
             SleepAction(5),
             MatchAction(template="symbol_schedule_completed_mark", 
                         unmatch_actions=[
-                            ClickAction(ImageTemplate("btn_ok_blue") | ImageTemplate("btn_ok") 
-                                        | ImageTemplate("btn_skip_ok") | ImageTemplate("btn_close"),
+                            ClickAction(ImageTemplate("btn_ok_blue") | ImageTemplate("btn_ok", threshold=0.9) 
+                                        | ImageTemplate("btn_skip_ok") | ImageTemplate("btn_close", threshold=0.9),
                                         roi=(350,0,960,540))
                         ], delay=1.5),
             SleepAction(1),
@@ -1398,11 +1410,14 @@ class Combat(BaseTask):
         )
         if form:
             if isinstance(form[0], list):
-                TeamFormationEx(self.robot).run(form)
+                ret = TeamFormationEx(self.robot).run(form)
+                form = form[0] # 暂时战斗中操作不支持多队伍
             else:
-                TeamFormation(self.robot).run(form)
-            form = form[0] # 暂时战斗中操作不支持多队伍
+                ret = TeamFormation(self.robot).run(form)
             member_num = len(form)
+            if not ret:
+                print("编组失败")
+                return False
         self.action_squential(
             ClickAction(template='btn_combat_start'),
             MatchAction(template='btn_blue_settle',matched_actions=[ClickAction(),SleepAction(1),ClickAction(template='btn_combat_start')], timeout=3),
@@ -1504,13 +1519,17 @@ class LunaTowerClimbing(TimeLimitTask):
         if self.template_match(screenshot, ImageTemplate("symbol_luna_tower_lock") & ImageTemplate("btn_pass_party")):
             self._check_state_times = 0
             return LunaTowerClimbing.State.LEVEL
-        if self.template_match(screenshot, ImageTemplate("btn_pass_party")):
+        match_special = 0
+        while self.template_match(screenshot, ImageTemplate("btn_pass_party")) and match_special < 3:
+            match_special += 1
+            time.sleep(1)
+        if match_special >= 3:
             self._check_state_times = 0
             h,w,_ = screenshot.shape
             ex_pass = False
             corridor_pass = False
             ex_region = self.adapted_region((70, 336, 247, 408), w, h)
-            if not self.template_match(screenshot, BrightnessTemplate((776, 356, 849, 389), 150)):
+            if not self.template_match(screenshot, BrightnessTemplate((776, 356, 849, 389), 130)):
                 corridor_pass = True
             pass_poses = self.template_match(screenshot, ImageTemplate("symbol_pass", ret_count=-1))
             if pass_poses:
@@ -1620,3 +1639,37 @@ class LunaTowerClimbing(TimeLimitTask):
             time.sleep(1)
 
         self._goto_luna_clean()
+
+@register("adventure_daily")
+class AdventureDaily(BaseTask):
+    '''
+    探险
+    '''
+    def run(self):
+        receive_action = MatchAction('btn_adventure_receive',matched_actions=[ClickAction()], unmatch_actions=[ClickAction("btn_adventure")], timeout=10)
+        self.action_squential(
+            MatchAction('tab_adventure', matched_actions=[ClickAction()], unmatch_actions=[ClickAction('btn_close')]),
+            receive_action,
+            title="确认一键归来"
+        )
+        if not receive_action.is_timeout:
+            self.action_squential(
+                MatchAction('btn_adventure_rerun', matched_actions=[ClickAction()], unmatch_actions=[ClickAction('btn_adventure_skip')], timeout=8),
+                SleepAction(2),
+                ClickAction('btn_adventure_depart'),
+                ClickAction('btn_confirm', timeout=2),
+                ClickAction('btn_close', timeout=2),
+                title="执行回收"
+            )
+        # try clear event in adventure scene
+        while self.template_match(self.driver.screenshot(), ImageTemplate("symbol_adventure_event")):
+            self.action_squential(
+                ClickAction("symbol_adventure_event"),
+                SleepAction(1),
+                ClickAction(pos=(self.define_width//2, self.define_height//2)),
+                ClickAction("btn_skip", timeout=5),
+                SleepAction(3),
+                ClickAction(pos=(self.define_width//2, self.define_height//2)),
+                SleepAction(5),
+                title="清理Event"
+            )
