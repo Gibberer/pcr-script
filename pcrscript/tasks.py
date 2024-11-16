@@ -498,7 +498,7 @@ class ShopBuy(BaseTask):
                             ]
                         line += 1
                         swipe_time += 1
-                if tab in (1, 8) and item.pos < 0:
+                if tab in (1, 9) and item.pos < 0:
                     click_pos = (860,126) # 全选按钮
                 elif line == last_line:
                     click_pos = SHOP_ITEM_LOCATION_FOR_LAST_LINE[(
@@ -507,7 +507,7 @@ class ShopBuy(BaseTask):
                     click_pos = SHOP_ITEM_LOCATION[(item.pos - 1) % line_count]
 
                 if item.threshold <= 0:
-                    if tab == 1:
+                    if tab in (1, 9):
                         tab_actions += [
                             ClickAction(pos=(690, 125)),
                             SleepAction(0.5),
@@ -545,20 +545,11 @@ class ShopBuy(BaseTask):
                     ]
                     copy_tab_actions += copy.deepcopy(tab_actions)
                     tab_main_actions += copy_tab_actions
-            if tab == 9:
-                # 限定tab，判断下对应tab是否为可点击状态
-                meet_actions = [ClickAction(pos=SHOP_TAB_LOCATION[tab - 1])] + tab_main_actions
-                actions += [
-                    SleepAction(1),
-                    IfCondition("limit_tab_enable_symbol", meet_actions= meet_actions),
-                    SleepAction(1)
-                    ]
-            else:
-                actions += [
-                    ClickAction(pos=SHOP_TAB_LOCATION[tab - 1]),
-                    SleepAction(1)
-                    ]
-                actions += tab_main_actions
+            actions += [
+                ClickAction(pos=SHOP_TAB_LOCATION[tab - 1]),
+                SleepAction(1)
+            ]
+            actions += tab_main_actions
         self.action_squential(*actions)
 @register("quick_clean")
 class QuickClean(TimeLimitTask):
@@ -1104,7 +1095,7 @@ class Arena(BaseTask):
         self.action_squential(
             MatchAction('tab_adventure', matched_actions=[ClickAction()], unmatch_actions=[
                 ClickAction(template='btn_close')]),
-            SleepAction(1.5),
+            SleepAction(3),
             ClickAction(pos=(590, 400)),
             SleepAction(1),
             MatchAction(template='btn_cancel', matched_actions=[
@@ -1131,7 +1122,7 @@ class PrincessArena(BaseTask):
         self.action_squential(
             MatchAction('tab_adventure', matched_actions=[ClickAction()], unmatch_actions=[
                 ClickAction(template='btn_close')]),
-            SleepAction(1.5),
+            SleepAction(3),
             ClickAction(pos=(810, 400)),
             SleepAction(1),
             MatchAction(template='btn_cancel', matched_actions=[
@@ -1206,7 +1197,7 @@ class Schedule(BaseTask):
                             ClickAction(ImageTemplate("btn_ok_blue") | ImageTemplate("btn_ok", threshold=0.9) 
                                         | ImageTemplate("btn_skip_ok") | ImageTemplate("btn_close", threshold=0.9),
                                         roi=(350,0,960,540))
-                        ], delay=1.5),
+                        ], delay=2),
             SleepAction(1),
             ClickAction(pos=(270, 480)), # 关闭
         )
@@ -1654,13 +1645,19 @@ class AdventureDaily(BaseTask):
         )
         if not receive_action.is_timeout:
             self.action_squential(
-                MatchAction('btn_adventure_rerun', matched_actions=[ClickAction()], unmatch_actions=[ClickAction('btn_adventure_skip')], timeout=8),
-                SleepAction(2),
+                MatchAction('btn_adventure_rerun', matched_actions=[ClickAction()], unmatch_actions=[
+                        ClickAction(ImageTemplate('btn_adventure_skip') | ImageTemplate('select_branch_first')),
+                        ClickAction(pos=(50, 300))
+                    ], timeout=20),
+                SleepAction(5),
                 ClickAction('btn_adventure_depart'),
-                ClickAction('btn_confirm', timeout=2),
-                ClickAction('btn_close', timeout=2),
+                SleepAction(2),
+                ClickAction('btn_ok', timeout=3),
+                SleepAction(2),
+                ClickAction('btn_close', timeout=3),
                 title="执行回收"
             )
+        time.sleep(3)
         # try clear event in adventure scene
         while self.template_match(self.driver.screenshot(), ImageTemplate("symbol_adventure_event")):
             self.action_squential(
@@ -1668,6 +1665,7 @@ class AdventureDaily(BaseTask):
                 SleepAction(1),
                 ClickAction(pos=(self.define_width//2, self.define_height//2)),
                 ClickAction("btn_skip", timeout=5),
+                MatchAction("select_branch_first",matched_actions=[ClickAction(), SleepAction(5)], timeout=5),
                 SleepAction(3),
                 ClickAction(pos=(self.define_width//2, self.define_height//2)),
                 SleepAction(5),
