@@ -866,7 +866,8 @@ class CampaignRewardExchange(TimeLimitTask):
     def _hard(self):
         self.action_squential(
             *_enter_adventure_actions(difficulty=Difficulty.HARD, campaign=True),
-            ClickAction(template=ImageTemplate('hard', threshold=0.6, mode='binarization'), offset=(0, -40)),
+            # btn_challenge 的额外匹配用于当匹配不到困难标签时手动点击困难保证任务可以继续进行
+            ClickAction(template=ImageTemplate('hard', threshold=0.6, mode='binarization') | ImageTemplate('btn_challenge'), offset=(0, -40)),
             SleepAction(1),
             *_clean_oneshot_actions(duration=6000),
             title="清空券"
@@ -1194,7 +1195,7 @@ class Schedule(BaseTask):
             SleepAction(5),
             MatchAction(template="symbol_schedule_completed_mark", 
                         unmatch_actions=[
-                            ClickAction(ImageTemplate("btn_ok_blue") | ImageTemplate("btn_ok", threshold=0.9) 
+                            ClickAction(ImageTemplate("btn_ok_blue") | ImageTemplate("btn_ok", threshold=0.95) 
                                         | ImageTemplate("btn_skip_ok") | ImageTemplate("btn_close", threshold=0.9),
                                         roi=(350,0,960,540))
                         ], delay=2),
@@ -1659,15 +1660,25 @@ class AdventureDaily(BaseTask):
             )
         time.sleep(3)
         # try clear event in adventure scene
-        while self.template_match(self.driver.screenshot(), ImageTemplate("symbol_adventure_event")):
+        while self.template_match(self.driver.screenshot(), ImageTemplate("symbol_adventure_event") | ImageTemplate("symbol_adventure_event_1")):
+            '''
+            1. 确认画面中是否包含Event图标（有两种Event且配色不同） -> 2.
+            2. 点击Event图标会移动画面并将Event事件放置于画面中间，点击进入Event页面 -> 3.
+            3. 点击跳过按钮或等待动画结束，普通Event -> 4. 特殊Event -> 5.
+            4. 点击画面确认由Event获取到的奖励内容 -> 6.
+            5. 出现选择分支，点击任意分支经过一段动画演出 -> 4.
+            6. 一段结束动画演出后回到最初画面 -> 1.
+            '''
+            center_pos = (self.define_width//2, self.define_height//2)
             self.action_squential(
                 ClickAction("symbol_adventure_event"),
                 SleepAction(1),
-                ClickAction(pos=(self.define_width//2, self.define_height//2)),
+                ClickAction(pos=center_pos),
                 ClickAction("btn_skip", timeout=5),
-                MatchAction("select_branch_first",matched_actions=[ClickAction(), SleepAction(5)], timeout=5),
+                # Special Event, 需要做一次选项选择并且消耗更长的时间通过动画
+                MatchAction("select_branch_first", matched_actions=[ClickAction(), SleepAction(6), ClickAction(pos=center_pos), SleepAction(4)], timeout=5),
                 SleepAction(3),
-                ClickAction(pos=(self.define_width//2, self.define_height//2)),
+                ClickAction(pos=center_pos),
                 SleepAction(5),
                 title="清理Event"
             )
