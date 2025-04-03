@@ -609,7 +609,7 @@ class ClearCampaignFirstTime(TimeLimitTask):
             return ClearCampaignFirstTime, args
 
     def run(self, exhaust_power=False):
-        self.total_step = 'inf'
+        self.total_step = '∞'
         self.action_squential(*_enter_adventure_actions(difficulty=Difficulty.NORMAL, campaign=True))
         pre_pos = (-100,-100)
         step = 0
@@ -716,7 +716,7 @@ class CampaignClean(TimeLimitTask):
             hard_chapter: 是否扫荡困难关卡
             exhaust_power: 是否在普通关卡中用光所有体力
         '''
-        self.total_step = 'inf'
+        self.total_step = '∞'
         if hard_chapter:
             self.action_squential(*_enter_adventure_actions(difficulty=Difficulty.HARD, campaign=True))
             actions = [
@@ -797,7 +797,7 @@ class CampaignClean(TimeLimitTask):
         # 领取任务
         self.action_squential(
             SleepAction(1),
-            MatchAction(template='symbol_campaign_quest',
+            MatchAction(template=ImageTemplate('symbol_campaign_quest') | ImageTemplate('symbol_campaign_quest_1'),
                         unmatch_actions=[ClickAction(pos=(5, 150)), 
                                          ClickAction(template='quest'),
                                          ClickAction(template="btn_cancel"),
@@ -836,9 +836,11 @@ class CampaignRewardExchange(TimeLimitTask):
             SleepAction(3),
             title="剧情奖励"
         )
-        symbol_new = self.template_match(self.driver.screenshot(), ImageTemplate('symbol_new_campaign_story'))
+        screenshot = self.driver.screenshot()
+        symbol_new = self.template_match(screenshot, ImageTemplate('symbol_new_campaign_story'))
         if symbol_new:
-            self.driver.click(*symbol_new)
+            self.driver.click(symbol_new[0], symbol_new[1] + int(screenshot.shape[0]*.05))
+            con_match_times = 0
             while True:
                 time.sleep(1)
                 screenshot = self.driver.screenshot()
@@ -858,7 +860,11 @@ class CampaignRewardExchange(TimeLimitTask):
                                 timeout=5))
                     continue
                 if self.template_match(screenshot, ImageTemplate('symbol_campaign_home')):
-                    break
+                    if (con_match_times := con_match_times+1) > 2:
+                        # 完成一次剧情读取会先显示活动主界面之后再弹出新的剧情引导弹窗，避免恰好在弹出弹窗前截图导致的误判断认为剧情已全部阅读完毕
+                        break
+                else:
+                    con_match_times = 0
                 self.action_once(ClickAction(pos=(250, 60)))
         else:
             self.action_once(ClickAction('btn_close'))
@@ -938,7 +944,7 @@ class CampaignRewardExchange(TimeLimitTask):
             
 
     def run(self):
-        self.total_step = 'inf'
+        self.total_step = '∞'
         # 以下流程顺序有关联，不能随意切换
         self._hard()
         self._story()
@@ -1097,6 +1103,8 @@ class Arena(BaseTask):
             MatchAction('tab_adventure', matched_actions=[ClickAction()], unmatch_actions=[
                 ClickAction(template='btn_close')]),
             SleepAction(3),
+            ClickAction(pos=(587, 411)),
+            SleepAction(1.5),
             ClickAction(pos=(590, 400)),
             SleepAction(1),
             MatchAction(template='btn_cancel', matched_actions=[
@@ -1124,6 +1132,8 @@ class PrincessArena(BaseTask):
             MatchAction('tab_adventure', matched_actions=[ClickAction()], unmatch_actions=[
                 ClickAction(template='btn_close')]),
             SleepAction(3),
+            ClickAction(pos=(587, 411)),
+            SleepAction(1.5),
             ClickAction(pos=(810, 400)),
             SleepAction(1),
             MatchAction(template='btn_cancel', matched_actions=[
@@ -1311,7 +1321,7 @@ class TeamFormationEx(TeamFormation):
         if not self._in_team_formation():
             print("未在编队界面")
             return
-        self.set_progress(total_step="inf")
+        self.set_progress(total_step="∞")
         
         for i in range(len(formations)):
             for region in TeamFormationEx.current_team_region_separated:
@@ -1552,7 +1562,7 @@ class LunaTowerClimbing(TimeLimitTask):
             print("当前缺失依赖，该任务需要安装额外依赖才能运行")
             print(e)
             return
-        self.total_step = 'inf'
+        self.total_step = '∞'
         self.action_squential(
             MatchAction('tab_adventure', matched_actions=[ClickAction()], unmatch_actions=[ClickAction(template='btn_close'), ClickAction(pos=(50, 300))]),
             SleepAction(1),
@@ -1677,7 +1687,7 @@ class AdventureDaily(BaseTask):
                 ClickAction("btn_skip", timeout=5),
                 # Special Event, 需要做一次选项选择并且消耗更长的时间通过动画
                 MatchAction("select_branch_first", matched_actions=[ClickAction(), SleepAction(6), ClickAction(pos=center_pos), SleepAction(4)], timeout=5),
-                SleepAction(3),
+                SleepAction(6),
                 ClickAction(pos=center_pos),
                 SleepAction(5),
                 title="清理Event"

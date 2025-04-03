@@ -105,10 +105,26 @@ def _query_drop_hard_event(conn: sqlite3.Connection):
                                  event_producer=gen_event)
 
 def _query_secret_dungeon(conn: sqlite3.Connection):
-    return _query_event_duration(conn, 'secret_dungeon_schedule', desc="特别地下城")
+    try:
+        return _query_event_duration(conn, 'secret_dungeon_schedule', desc="特别地下城")
+    except Exception:
+        # 暂时找到的老版本数据库还没有特别地下城，实际脚本也不用这个内容暂时忽略
+        return None
 
 def _iso_datetime(date):
     return str(datetime.strptime(date, _time_format))
+
+def _build_event_news(cache_path, db_file):
+    with sqlite3.connect(os.path.join(cache_path, db_file)) as conn:
+            conn.create_function('ISO', 1, _iso_datetime)
+            free_gacha = _query_free_gacha_event(conn)
+            hatsune = _query_hatsune_event(conn)
+            tower = _query_tower_event(conn)
+            drop_normal = _query_drop_normal_event(conn)
+            drop_hard = _query_drop_hard_event(conn)
+            secret_dungeon = _query_secret_dungeon(conn)
+    return EventNews(freeGacha=free_gacha, hatsune=hatsune, tower=tower, dropItemNormal=drop_normal, 
+                         dropItemHard=drop_hard, secretDungeon=secret_dungeon)
 
 def fetch_event_news() -> EventNews:
     # 从redive.estertion.win抓国服信息
@@ -130,16 +146,26 @@ def fetch_event_news() -> EventNews:
     except Exception:
         print("fetch event news failed")
     try:
-        with sqlite3.connect(os.path.join(cache_path, db_file)) as conn:
-            conn.create_function('ISO', 1, _iso_datetime)
-            free_gacha = _query_free_gacha_event(conn)
-            hatsune = _query_hatsune_event(conn)
-            tower = _query_tower_event(conn)
-            drop_normal = _query_drop_normal_event(conn)
-            drop_hard = _query_drop_hard_event(conn)
-            secret_dungeon = _query_secret_dungeon(conn)
-        return EventNews(freeGacha=free_gacha, hatsune=hatsune, tower=tower, dropItemNormal=drop_normal, 
-                         dropItemHard=drop_hard, secretDungeon=secret_dungeon)
+        return _build_event_news(cache_path, db_file)
     except Exception as e:
         print(f"parse db file failed, filter all event special task. Case: {e}")
-        return EventNews()
+        print("try repair db table names and rebuild event info")
+        try_repair_db(cache_path, db_file)
+        return _build_event_news(cache_path, db_file)
+    
+
+def try_repair_db(cache_path, db_file):
+    meta_file = os.path.join("other", "redive_cn_meta.db")
+    target_file = os.path.join(cache_path, db_file)
+    repair_tools = os.path.join(cache_path, "db_repair_tools.exe")
+    if not os.path.exists(target_file) or not os.path.exists(meta_file):
+        return
+    if not os.path.exists(repair_tools):
+        response = requests.get("https://github.com/peterli110/pcr-hash-table-rename/releases/download/v1.3/pcr_hash_rename_tool_windows_amd64.exe", stream=True)
+        with response as r:
+            r.raise_for_status()
+            with open(repair_tools, "wb") as f:
+                for chunk in r.iter_content(chunk_size=8192):
+                    f.write(chunk)
+    os.system(f".\{repair_tools} -n {target_file} -r {meta_file} -g {target_file}")
+    
