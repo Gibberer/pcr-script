@@ -66,8 +66,8 @@ def _combat_actions(check_auto=False, combat_duration=35, interval=1):
 def _clean_oneshot_actions(duration=0):
     return [
             MatchAction('btn_challenge'),
-            SwipeAction((877, 355), (877, 355), duration) if duration > 0 else SleepAction(0.5),
-            ClickAction(pos=(757, 355)),
+            SwipeAction((877, 360), (877, 360), duration) if duration > 0 else SleepAction(0.5),
+            ClickAction(pos=(757, 360)),
             SleepAction(0.5),
             ClickAction(template='btn_ok_blue'),
             SleepAction(0.5),
@@ -382,7 +382,8 @@ class LunaTowerClean(TimeLimitTask):
             SleepAction(1),
             ClickAction(template="btn_luna_tower_entrance"),
             MatchAction(template="symbol_luna_tower"),
-            MatchAction(template='symbol_luna_tower_lock',matched_actions=[ThrowErrorAction("回廊未解锁")],timeout=2),
+            SleepAction(2),
+            MatchAction(template='symbol_luna_tower_lock',matched_actions=[ThrowErrorAction("回廊未解锁")],timeout=5),
             ClickAction(pos=(815, 375)),
             SleepAction(0.5),
             ClickAction(template='btn_ok_blue'),
@@ -828,14 +829,21 @@ class CampaignRewardExchange(TimeLimitTask):
             return CampaignRewardExchange, args
     
     def _story(self):
+        entry_action = MatchAction('btn_campaign_story_entry', matched_actions=[ClickAction()] ,timeout=5)
         self.action_squential(
             MatchAction(ImageTemplate('symbol_campaign_home') & ImageTemplate('btn_campaign_story_entry'), unmatch_actions=[
                 ClickAction(pos=(33,31))
-            ], delay=0.5),
-            ClickAction('btn_campaign_story_entry'),
+            ], delay=0.5, timeout=15),
+            entry_action,
             SleepAction(3),
             title="剧情奖励"
         )
+        if entry_action.is_timeout:
+            self.action_squential(
+                ClickAction(pos=(870, 345)),
+                SleepAction(3),
+                title="剧情入口超时点击"
+            )
         screenshot = self.driver.screenshot()
         symbol_new = self.template_match(screenshot, ImageTemplate('symbol_new_campaign_story'))
         if symbol_new:
@@ -1647,6 +1655,13 @@ class AdventureDaily(BaseTask):
     '''
     探险
     '''
+
+    def check_current_has_event(self):
+        action = MatchAction(ImageTemplate("symbol_adventure_event") | ImageTemplate("symbol_adventure_event_1"), timeout=3)
+        self.action_squential(action, show_progress=False)
+        return not action.is_timeout
+
+
     def run(self):
         receive_action = MatchAction('btn_adventure_receive',matched_actions=[ClickAction()], unmatch_actions=[ClickAction("btn_adventure")], timeout=10)
         self.action_squential(
@@ -1670,7 +1685,7 @@ class AdventureDaily(BaseTask):
             )
         time.sleep(3)
         # try clear event in adventure scene
-        while self.template_match(self.driver.screenshot(), ImageTemplate("symbol_adventure_event") | ImageTemplate("symbol_adventure_event_1")):
+        while self.check_current_has_event():
             '''
             1. 确认画面中是否包含Event图标（有两种Event且配色不同） -> 2.
             2. 点击Event图标会移动画面并将Event事件放置于画面中间，点击进入Event页面 -> 3.

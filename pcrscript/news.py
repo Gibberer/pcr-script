@@ -10,8 +10,9 @@ from pcrscript.tasks import EventNews, Event
 
 
 def _upgrade_db_file(config, db_dir, db_file):
-    response = requests.get("https://redive.estertion.win/last_version_cn.json")
-    remote_version = int(response.json()["TruthVersion"])
+    response = requests.post("https://wthee.xyz/pcr/api/v1/db/info/v2", json={"regionCode":"cn"})
+
+    remote_version = int(response.json()["data"]["truthVersion"])
     if "version" in config:
         if remote_version > config["version"]:
             should_download = True
@@ -24,7 +25,7 @@ def _upgrade_db_file(config, db_dir, db_file):
     if should_download:
         compressed_file = os.path.join(db_dir, "redive_cn.db.br")
         response = requests.get(
-            "https://redive.estertion.win/db/redive_cn.db.br", stream=True
+            "https://wthee.xyz/db/redive_cn.db.br", stream=True
         )
         with response as r:
             r.raise_for_status()
