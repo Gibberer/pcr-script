@@ -13,10 +13,10 @@ import os
 from .constants import *
 from pcrscript.actions import *
 from .templates import Template,ImageTemplate,CharaIconTemplate,BrightnessTemplate
-from .strategist import Member
 
 if TYPE_CHECKING:
     from pcrscript import Robot
+    from .strategist import Member
 
 _registedTasks = {}
 
@@ -1263,7 +1263,7 @@ class TeamFormation(BaseTask):
                 return True
             time.sleep(2)
     
-    def _check_current_form(self, form:list[Member])->tuple[list[int], list[int]]:
+    def _check_current_form(self, form:list['Member'])->tuple[list[int], list[int]]:
         screenshot = self.driver.screenshot()
         h,w,_ = screenshot.shape
         mask = np.zeros((h,w), dtype=np.uint8)
@@ -1282,7 +1282,7 @@ class TeamFormation(BaseTask):
                         break
         return add_ids, remove_regions
 
-    def run(self, formation:list[Member])->bool:
+    def run(self, formation:list['Member'])->bool:
         if not formation:
             print("未设置期望编组")
             return
@@ -1322,7 +1322,7 @@ class TeamFormationEx(TeamFormation):
     多个队伍编队
     '''
 
-    def run(self, formations:list[list[Member]]):
+    def run(self, formations:list[list['Member']]):
         if not formations:
             print("未设置期望编组")
             return
@@ -1407,7 +1407,7 @@ class Combat(BaseTask):
                 dead_count += 1
         return dead_count
 
-    def run(self, form:list[Member]|list[list[Member]]=None, giveup=1, member_num=5):
+    def run(self, form:list['Member']|list[list['Member']]=None, giveup=1, member_num=5):
         '''
         Args:
             form: 提供队伍组合信息。
@@ -1561,7 +1561,7 @@ class LunaTowerClimbing(TimeLimitTask):
     
     def run(self, allow_system_recommend=False):
         try:
-            from .strategist import LunaTowerStrategist
+            from .strategist import LunaTowerStrategist, Member
             from paddleocr import PaddleOCR
             from paddleocr.paddleocr import logger
             import logging

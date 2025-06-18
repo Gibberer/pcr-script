@@ -14,6 +14,10 @@
   ```cmd
   pip install opencv_python numpy pywin32 PyYAML
   ```
+  以及日常类脚本需要的额外依赖
+  ```cmd
+  pip install Requests tqdm Brotli
+  ```
 * 设置配置文件：修改[_daily_config.yml](_daily_config.yml)中的雷电模拟器路径，之后将该文件重命名为**daily_config.yml**。
   * 如果是其他模拟器可以不设置路径，不过需要保证本机ADB命令可用，脚本会尝试使用ADB命令与设备交互，当然还请注意保持模拟器分辨率为960x540。
 * 执行[daily_task.bat](daily_task.bat)或[daily_task.py](daily_task.py)来启动脚本程序。

@@ -42,13 +42,39 @@ class DNSimulator(GeneralSimulator):
         self.useADB = useADB
         if not useADB:
             self.fastclick = True
+
+    def _get_process_descriptions():
+        command = "Get-CimInstance -ClassName Win32_Process | Select-Object -Property Description"
+        try:
+            result = subprocess.run(
+                ["powershell.exe", "-Command", command],
+                capture_output=True,
+                text=True,
+                check=True,
+                encoding='utf-8' 
+            )
+
+            raw_output = result.stdout
+            lines = raw_output.strip().splitlines()
+        
+            # 移除前两行的标题 ("Description") 和分隔线 ("-----------")
+            # 并过滤掉可能存在的空字符串
+            descriptions = [line.strip() for line in lines[2:] if line.strip()]
+        
+            return descriptions
+
+        except FileNotFoundError:
+            print("错误: 'powershell.exe' 未找到。请确保 PowerShell 已安装并在系统 PATH 中。")
+            return None
+        except subprocess.CalledProcessError as e:
+            print(f"执行 PowerShell 命令时出错:")
+            print(f"返回码: {e.returncode}")
+            print(f"输出: {e.stdout}")
+            print(f"错误信息: {e.stderr}")
+            return None
         
     def start(self):
-        running_process = os.popen("wmic process get description").read()
-        running_process = list(
-            map(lambda name: name.rstrip(), running_process.split("\n\n"))
-        )
-        if "dnplayer.exe" not in running_process:
+        if "dnplayer.exe" not in DNSimulator._get_process_descriptions():
             subprocess.Popen(f"{self.path}\dnplayer.exe", shell=True)
     
     def open_app(self, packagename, device = None):
