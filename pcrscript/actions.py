@@ -234,3 +234,13 @@ class CustomIfCondition(Action):
                     action.bindTask(self.task)
                 robot.action_squential(*self._unmeet_actions)
         self._done = True
+
+class CustomCallAction(Action):
+
+    def __init__(self, target_call):
+        super().__init__()
+        self._target = target_call
+    
+    def do(self, screenshot, robot):
+        self._target()
+        return super().do(screenshot, robot)

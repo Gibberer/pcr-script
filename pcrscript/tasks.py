@@ -1656,10 +1656,27 @@ class AdventureDaily(BaseTask):
     探险
     '''
 
+    def _create_event_template(self) -> ImageTemplate:
+        return ImageTemplate("symbol_adventure_event") | ImageTemplate("symbol_adventure_event_1") | ImageTemplate("symbol_adventure_event_special")
+
     def check_current_has_event(self):
-        action = MatchAction(ImageTemplate("symbol_adventure_event") | ImageTemplate("symbol_adventure_event_1"), timeout=3)
+        action = MatchAction(self._create_event_template(), timeout=3)
         self.action_squential(action, show_progress=False)
         return not action.is_timeout
+    
+    def adventure_scene_skip(self):
+        center_pos = (self.define_width//2, self.define_height//2)
+        self.action_squential(
+            ClickAction(pos=(235,325)), # 选择左侧分支
+            SleepAction(1.5),
+            ClickAction(pos=(235, 325)), # 确认左侧分支
+            ClickAction("btn_skip", timeout=5), # 点击跳过按钮
+            SleepAction(3),
+            ClickAction(pos=center_pos), # 确认奖励
+            SleepAction(3),
+            IfCondition("symbol_adventure_adventure_event", meet_actions=[CustomCallAction(self.adventure_scene_skip)]), # 循环确认
+            show_progress=False)
+
 
 
     def run(self):
@@ -1696,14 +1713,17 @@ class AdventureDaily(BaseTask):
             '''
             center_pos = (self.define_width//2, self.define_height//2)
             self.action_squential(
-                ClickAction("symbol_adventure_event"),
+                ClickAction(self._create_event_template()),
                 SleepAction(1),
                 ClickAction(pos=center_pos),
+                SleepAction(1),
                 ClickAction("btn_skip", timeout=5),
                 # Special Event, 需要做一次选项选择并且消耗更长的时间通过动画
                 MatchAction("select_branch_first", matched_actions=[ClickAction(), SleepAction(6), ClickAction(pos=center_pos), SleepAction(4)], timeout=5),
-                SleepAction(6),
-                ClickAction(pos=center_pos),
+                # 另一种带选择的特殊Event
+                IfCondition("symbol_adventure_adventure_event", 
+                            meet_actions=[CustomCallAction(self.adventure_scene_skip)],
+                            unmeet_actions=[SleepAction(6),ClickAction(pos=center_pos)]),
                 SleepAction(5),
                 title="清理Event"
             )
