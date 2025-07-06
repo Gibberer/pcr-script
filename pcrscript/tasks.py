@@ -1670,10 +1670,11 @@ class AdventureDaily(BaseTask):
             ClickAction(pos=(235,325)), # 选择左侧分支
             SleepAction(1.5),
             ClickAction(pos=(235, 325)), # 确认左侧分支
+            SleepAction(1.5),
             ClickAction("btn_skip", timeout=5), # 点击跳过按钮
-            SleepAction(3),
+            SleepAction(5),
             ClickAction(pos=center_pos), # 确认奖励
-            SleepAction(3),
+            SleepAction(5),
             IfCondition("symbol_adventure_adventure_event", meet_actions=[CustomCallAction(self.adventure_scene_skip)]), # 循环确认
             show_progress=False)
 
