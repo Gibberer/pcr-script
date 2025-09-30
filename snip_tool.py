@@ -95,16 +95,19 @@ class SnipTool(QMainWindow):
         img = pixmap.toImage()
         b = img.bits()
         b.setsize(w*h*4)
-        img = np.frombuffer(b, np.uint8).reshape((h, w, 4))[:,:,:3]
-        return np.average(np.linalg.norm(img, axis=2)) / np.sqrt(3)
+        # Weird，如果进行全屏截图的情况这里不能覆盖img变量，并且没有日志报错
+        # 猜测可能是覆盖变量导致原图片触发析构函数释放了图片，但是这个图片是当前页面渲染需要的所以程序异常退出
+        new_img = np.frombuffer(b, np.uint8).reshape((h, w, 4))[:,:,:3]
+        return np.average(np.linalg.norm(new_img, axis=2)) / np.sqrt(3)
     
     def export(self):
         lt = self.label_image.begin
         rb = self.label_image.end
+        cropped = None
         if lt is None or rb is None:
-            QMessageBox.warning(self, "Warn", "未设置截取区域")
-            return
-        cropped = self.label_image.pixmap().copy(QRect(lt, rb))
+            cropped = self.label_image.pixmap()
+        else:
+            cropped = self.label_image.pixmap().copy(QRect(lt, rb))
         fileName, _ = QFileDialog.getSaveFileName(self, f"导出截图:{int(self._brightness(cropped))}", "images", "Image Files (*.png)")
         if fileName:
             cropped.save(fileName, "PNG")

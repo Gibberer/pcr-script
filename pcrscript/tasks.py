@@ -568,6 +568,8 @@ class QuickClean(TimeLimitTask):
         if pos <= 0 or pos > len(QuickClean._pos):
             print(f"不支持的预设选项:{pos}")
             return
+        # 分两个步骤1进入冒险图2执行快速扫荡
+        self.set_progress(total_step=2)
         pref_pos = QuickClean._pos[pos - 1]
         # 进入冒险图
         self.action_squential(*_enter_adventure_actions())
@@ -770,7 +772,8 @@ class CampaignClean(TimeLimitTask):
             actions += [
                 ClickAction(template=ImageTemplate('very', threshold=0.6, mode='binarization'), 
                             offset=(0, -40), timeout=5),
-                ClickAction(pos=(860,270)), # 如果timeout尝试点击该位置   
+                ClickAction(pos=(860,270)), # 如果timeout尝试点击该位置
+                ClickAction(pos=(665,203)),   
                 SleepAction(1),         
             ]
             actions += _combat_actions(combat_duration=3, interval=0.5)
@@ -1111,9 +1114,7 @@ class Arena(BaseTask):
             MatchAction('tab_adventure', matched_actions=[ClickAction()], unmatch_actions=[
                 ClickAction(template='btn_close')]),
             SleepAction(3),
-            ClickAction(pos=(587, 411)),
-            SleepAction(1.5),
-            ClickAction(pos=(590, 400)),
+            ClickAction(pos=(550, 411)),
             SleepAction(1),
             MatchAction(template='btn_cancel', matched_actions=[
                 ClickAction(), SleepAction(1)], timeout=2),
@@ -1140,9 +1141,7 @@ class PrincessArena(BaseTask):
             MatchAction('tab_adventure', matched_actions=[ClickAction()], unmatch_actions=[
                 ClickAction(template='btn_close')]),
             SleepAction(3),
-            ClickAction(pos=(587, 411)),
-            SleepAction(1.5),
-            ClickAction(pos=(810, 400)),
+            ClickAction(pos=(705, 411)),
             SleepAction(1),
             MatchAction(template='btn_cancel', matched_actions=[
                 ClickAction(), SleepAction(1)], timeout=2),
@@ -1173,12 +1172,12 @@ class Research(BaseTask):
                 ClickAction(template='btn_close')]),
             SleepAction(2),
             ClickAction(template='research'),
-            MatchAction('research_symbol', matched_actions=[
+            MatchAction('symbol_research', matched_actions=[
                 ClickAction(offset=(100, 200))], timeout=5),
         ]
         # 圣迹2级
         actions += [
-            ClickAction(pos=(587, 231)),
+            ClickAction(pos=(587, 400)),
             SleepAction(1),
             ClickAction(pos=(718, 146)),
             *_clean_oneshot_actions(),
@@ -1188,7 +1187,7 @@ class Research(BaseTask):
         ]
         # 神殿2级
         actions += [
-            ClickAction(pos=(800, 240)),
+            ClickAction(pos=(800, 400)),
             SleepAction(1),
             ClickAction(pos=(718, 146)),
             *_clean_oneshot_actions(),
@@ -1723,8 +1722,9 @@ class AdventureDaily(BaseTask):
                 MatchAction("select_branch_first", matched_actions=[ClickAction(), SleepAction(6), ClickAction(pos=center_pos), SleepAction(4)], timeout=5),
                 # 另一种带选择的特殊Event
                 IfCondition("symbol_adventure_adventure_event", 
-                            meet_actions=[CustomCallAction(self.adventure_scene_skip)],
-                            unmeet_actions=[SleepAction(6),ClickAction(pos=center_pos)]),
+                            meet_actions=[CustomCallAction(self.adventure_scene_skip)]),
+                SleepAction(6),
+                ClickAction(pos=center_pos),
                 SleepAction(5),
                 title="清理Event"
             )
