@@ -66,7 +66,7 @@ def _combat_actions(check_auto=False, combat_duration=35, interval=1):
 def _clean_oneshot_actions(duration=0):
     return [
             MatchAction('btn_challenge'),
-            SwipeAction((877, 360), (877, 360), duration) if duration > 0 else SleepAction(0.5),
+            SwipeAction((840, 360), (840, 360), duration) if duration > 0 else SleepAction(0.5),
             ClickAction(pos=(757, 360)),
             SleepAction(0.5),
             ClickAction(template='btn_ok_blue'),
@@ -612,6 +612,8 @@ class ClearCampaignFirstTime(TimeLimitTask):
             return ClearCampaignFirstTime, args
 
     def run(self, exhaust_power=False):
+        print("已失效，跳过任务")
+        return
         self.total_step = '∞'
         self.action_squential(*_enter_adventure_actions(difficulty=Difficulty.NORMAL, campaign=True))
         pre_pos = (-100,-100)
@@ -719,6 +721,8 @@ class CampaignClean(TimeLimitTask):
             hard_chapter: 是否扫荡困难关卡
             exhaust_power: 是否在普通关卡中用光所有体力
         '''
+        print("已失效，跳过任务")
+        return
         self.total_step = '∞'
         if hard_chapter:
             self.action_squential(*_enter_adventure_actions(difficulty=Difficulty.HARD, campaign=True))
@@ -955,12 +959,7 @@ class CampaignRewardExchange(TimeLimitTask):
             
 
     def run(self):
-        self.total_step = '∞'
-        # 以下流程顺序有关联，不能随意切换
-        self._hard()
-        self._story()
-        self._confidence()
-        self._exchange()
+        print("已失效，跳过任务")
 
 @register("clear_story")    
 class ClearStory(BaseTask):
@@ -1171,13 +1170,13 @@ class Research(BaseTask):
             MatchAction('tab_adventure', matched_actions=[ClickAction()], unmatch_actions=[
                 ClickAction(template='btn_close')]),
             SleepAction(2),
-            ClickAction(template='research'),
+            ClickAction(pos=(740, 150)),
             MatchAction('symbol_research', matched_actions=[
                 ClickAction(offset=(100, 200))], timeout=5),
         ]
         # 圣迹2级
         actions += [
-            ClickAction(pos=(587, 400)),
+            ClickAction(pos=(587, 300)),
             SleepAction(1),
             ClickAction(pos=(718, 146)),
             *_clean_oneshot_actions(),
@@ -1187,7 +1186,7 @@ class Research(BaseTask):
         ]
         # 神殿2级
         actions += [
-            ClickAction(pos=(800, 400)),
+            ClickAction(pos=(800, 300)),
             SleepAction(1),
             ClickAction(pos=(718, 146)),
             *_clean_oneshot_actions(),

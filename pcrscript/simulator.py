@@ -3,6 +3,9 @@ import os
 import re
 import ast
 import subprocess
+import win32api
+import win32gui
+import win32con
 from .driver import ADBDriver, Driver, DNDriver, MuMuDriver
 
 
@@ -120,6 +123,40 @@ class DNSimulator(GeneralSimulator):
         devices = self.get_devices()
         if devices:
             return [DNDriver(device, self.path, i, click_by_mouse=self.fastclick) for i, device in enumerate(devices)]
+        
+    
+    def move_to_screen(self, index):
+        """
+        将窗口移动到指定索引的屏幕居中位置。
+        :param index: 屏幕索引 (0 为主屏，1、2... 为副屏)
+        """
+        hwnd = win32gui.FindWindow(None, "雷电模拟器")
+        if not hwnd:
+            return
+
+        monitors = win32api.EnumDisplayMonitors()
+        if index < 0 or index >= len(monitors):
+            return
+
+        hMonitor = monitors[index][0]
+        m_left, m_top, m_right, m_bottom = win32api.GetMonitorInfo(hMonitor)["Work"]
+        m_width = m_right - m_left
+        m_height = m_bottom - m_top
+
+        win_rect = win32gui.GetWindowRect(hwnd)
+        w_width = win_rect[2] - win_rect[0]
+        w_height = win_rect[3] - win_rect[1]
+
+        center_x = m_left + (m_width - w_width) // 2
+        center_y = m_top + (m_height - w_height) // 2
+
+        win32gui.SetWindowPos(
+            hwnd, 
+            win32con.HWND_TOP, 
+            center_x, center_y, 
+            0, 0, 
+            win32con.SWP_NOSIZE | win32con.SWP_SHOWWINDOW
+        )
 
 class MuMuSimulator(GeneralSimulator):
     '''

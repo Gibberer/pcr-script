@@ -14,6 +14,7 @@ def open_leidian_emulator(dnpath):
     retry_count = 0
     while retry_count < 10:
         if simulator.online():
+            # simulator.move_to_screen(1)
             print("the emulator is ready.")
             break
         else:
