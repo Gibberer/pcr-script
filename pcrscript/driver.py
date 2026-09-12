@@ -61,6 +61,7 @@ class ADBDriver(Driver):
         self._shell("input text {}".format(text))
 
     def screenshot(self, output="screen_shot.png"):
+        self._assert_adb_allowed()
         if ADBDriver.png:
             self._shell("screencap -p /sdcard/opsd.png")
             output = "{}-{}".format(self.device_name, output)
@@ -98,6 +99,9 @@ class ADBDriver(Driver):
             os.system(cmd)
         else:
             return os.popen(cmd).read()
+
+    def _assert_adb_allowed(self):
+        pass
 
 class Win32Driver(ADBDriver):
     '''
@@ -211,15 +215,26 @@ class DNDriver(Win32Driver):
         self.window_height = -1
         self.scale = 1
         self._init_window_info()
+
+    def _cmd(self, cmd, ret=False):
+        # 雷电窗口模式不得在截图/点击失败后偷偷切换到 ADB。
+        self._assert_adb_allowed()
+        return super()._cmd(cmd, ret)
+
+    def _assert_adb_allowed(self):
+        if self.click_by_mouse:
+            raise RuntimeError("雷电窗口操作失败（已禁用 ADB 回退），请检查模拟器窗口是否存在")
     
 
     def _init_window_info(self):
         if os.path.exists(f'{self.dnpath}/ldconsole.exe'):
-            output = os.popen(f"{self.dnpath}/ldconsole.exe list2").read()
+            output = subprocess.check_output(
+                [os.path.join(self.dnpath, 'ldconsole.exe'), 'list2'],
+                encoding='mbcs', errors='replace', timeout=15)
             if output:
                 infos = list(map(lambda x : x.split(','), output.split('\n')))
-                if len(infos) > self.index:
-                    info = infos[self.index]
+                info = next((row for row in infos if len(row) >= 9 and row[0] == str(self.index)), None)
+                if info:
                     self.window_title = info[1]
                     self.binded_hwnd_id = int(info[3])
                     self.window_width = int(info[7])
@@ -256,12 +271,9 @@ class DNDriver(Win32Driver):
         adb 不支持中文使用dnconsole接口
         '''
         if self.click_by_mouse:
-            try:
-                os.system(
-                    '{}\ldconsole.exe action --index {} --key call.input --value "{}"'.format(self.dnpath, self.index, text))
-            except Exception as e:
-                print(f"fallback adb input:{e}")
-                super().input(text)
+            subprocess.run([os.path.join(self.dnpath, 'ldconsole.exe'), 'action',
+                            '--index', str(self.index), '--key', 'call.input', '--value', text],
+                           check=True, timeout=15)
         else:
             contain_hanzi = False
             for char in text:
@@ -379,4 +391,3 @@ class MuMuDriver(Win32Driver):
     
     def _shell(self, cmd, ret=False):
         return os.popen(f'cmd /C ""{self.path}/shell/MuMuManager.exe" adb -v {self.index} shell {cmd}"').read()
-    

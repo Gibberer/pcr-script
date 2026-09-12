@@ -1,0 +1,67 @@
+# 本活动作业；后续活动需添加匹配自身标题的配置，禁止复用到未知首领。
+# 六星、专武1、专武2开启状态必须与作业一致；省略 unique/unique2 表示未开启。
+# null 表示攻略未明确该开关；该候选队会被拦截，等待补齐资料。
+# 专武仅比较是否开启，不自动升级，不设专武等级门槛。
+# 来源的专武等级、骑士强化与本账号可能不同，不能保证来源中的刀数。
+events:
+  - match: 'AndIWill|IWish.*后传'
+    special:
+      - name: 霸瞳皇帝-魔法队
+        source: https://gamewith.jp/pricone-re/article/show/516586
+        max_attempts: 4
+        members:
+          - {name: 厄里斯, level: 352, rank: 38, stars: 5, skill_level: 352}
+          - {name: 兰法, level: 352, rank: 38, stars: 5, skill_level: 352, unique: true}
+          - {name: 似似花（阿尔法）, level: 352, rank: 37, stars: 5, skill_level: 352}
+          - {name: 凯露（公主）, level: 352, rank: 38, stars: 5, skill_level: 352, unique: true}
+          - {name: 薇奥莉特, level: 352, rank: 38, stars: 5, skill_level: 352}
+      - name: 霸瞳皇帝-美空替换队
+        source: https://gamewith.jp/pricone-re/article/show/516586
+        max_attempts: 4
+        members:
+          - {name: 厄里斯, level: 352, rank: 38, stars: 5, skill_level: 352}
+          - {name: 兰法, level: 352, rank: 38, stars: 5, skill_level: 352, unique: true}
+          - {name: 美空, level: 352, rank: 38, stars: 5, skill_level: 352}
+          - {name: 凯露（公主）, level: 352, rank: 38, stars: 5, skill_level: 352, unique: true}
+          - {name: 薇奥莉特, level: 352, rank: 38, stars: 5, skill_level: 352}
+    special_plus:
+      - name: 霸瞳皇帝+-模式1
+        source: https://gamewith.jp/pricone-re/article/show/516593
+        modes: [1]
+        max_attempts: 3
+        members:
+          - {name: 涅妃＝涅菈, level: 352, rank: 37, stars: 5, skill_level: 352, instant: false}
+          - {name: 凤凰, level: 352, rank: 37, stars: 5, skill_level: 352, instant: false}
+          - {name: 艾拉, level: 352, rank: 38, stars: 5, skill_level: 352}
+          - {name: 日和莉（公主）, level: 352, rank: 37, stars: 5, skill_level: 352, unique: true}
+          - {name: 怜（新年）, level: 352, rank: 38, stars: 6, skill_level: 352, unique: true}
+      - name: 霸瞳皇帝+-模式1怜替换队
+        source: https://gamewith.jp/pricone-re/article/show/516593
+        modes: [1]
+        max_attempts: 3
+        members:
+          - {name: 涅妃＝涅菈, level: 352, rank: 37, stars: 5, skill_level: 352, instant: false}
+          - {name: 凤凰, level: 352, rank: 37, stars: 5, skill_level: 352, instant: false}
+          - {name: 怜, level: 352, rank: 38, stars: 6, skill_level: 352, unique: true, unique2: null}
+          - {name: 日和莉（公主）, level: 352, rank: 37, stars: 5, skill_level: 352, unique: true}
+          - {name: 怜（新年）, level: 352, rank: 38, stars: 6, skill_level: 352, unique: true}
+      - name: 霸瞳皇帝+-模式2与3
+        source: https://gamewith.jp/pricone-re/article/show/516593
+        modes: [2, 3]
+        max_attempts: 5
+        members:
+          - {name: 涅妃＝涅菈, level: 352, rank: 37, stars: 5, skill_level: 352, instant: false}
+          - {name: 凤凰, level: 352, rank: 37, stars: 5, skill_level: 352, instant: false}
+          - {name: 日和莉（星幽）, level: 352, rank: 38, stars: 5, skill_level: 352, unique: true, instant: false}
+          - {name: 艾拉, level: 352, rank: 38, stars: 5, skill_level: 352}
+          - {name: 怜（新年）, level: 352, rank: 38, stars: 6, skill_level: 352, unique: true}
+      - name: 霸瞳皇帝+-模式2与3怜替换队
+        source: https://gamewith.jp/pricone-re/article/show/516593
+        modes: [2, 3]
+        max_attempts: 5
+        members:
+          - {name: 涅妃＝涅菈, level: 352, rank: 37, stars: 5, skill_level: 352, instant: false}
+          - {name: 凤凰, level: 352, rank: 37, stars: 5, skill_level: 352, instant: false}
+          - {name: 日和莉（星幽）, level: 352, rank: 38, stars: 5, skill_level: 352, unique: true, instant: false}
+          - {name: 怜, level: 352, rank: 38, stars: 6, skill_level: 352, unique: true, unique2: null}
+          - {name: 怜（新年）, level: 352, rank: 38, stars: 6, skill_level: 352, unique: true}

@@ -59,6 +59,7 @@ def run_script(config, use_adb):
         return
     # 使用第一个设备
     robot = Robot(drivers[0])
+    robot.story_event_options = config.get("StoryEvent", {})
     news = fetch_event_news()
     print("当前进行的活动:")
     for value in news.__dict__.values():

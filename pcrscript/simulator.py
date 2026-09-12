@@ -98,7 +98,9 @@ class DNSimulator(GeneralSimulator):
 
     def online(self)->bool:
         if self.path:
-            command_result = os.popen(f"{self.path}\ldconsole.exe list2").read()
+            command_result = subprocess.check_output(
+                [os.path.join(self.path, 'ldconsole.exe'), 'list2'],
+                encoding='mbcs', errors='replace', timeout=15)
             if command_result:
                 infos = list(map(lambda x: x.split(","), command_result.split("\n")))
                 if infos and int(infos[0][2]) > 0 and int(infos[0][4]) == 1:
@@ -111,18 +113,21 @@ class DNSimulator(GeneralSimulator):
             return super().get_devices()
         else:
             try:
-                output = os.popen(f"{self.path}\ldconsole.exe list2").read()
+                output = subprocess.check_output(
+                    [os.path.join(self.path, 'ldconsole.exe'), 'list2'],
+                    encoding='mbcs', errors='replace', timeout=15)
                 if output:
                     infos = list(map(lambda x : x.split(','), output.split('\n')))
-                    return [info[0] for info in infos if len(info) > 1 and int(info[2]) > 0]
+                    return [info[0] for info in infos if len(info) >= 9 and int(info[2]) > 0 and int(info[4]) == 1]
             except Exception as e:
                 print(e)
-                return super().get_devices()
+                return None  # useADB=False must never fall back to ADB discovery
 
     def get_dirvers(self) -> List[Driver]:
         devices = self.get_devices()
         if devices:
-            return [DNDriver(device, self.path, i, click_by_mouse=self.fastclick) for i, device in enumerate(devices)]
+            return [DNDriver(device, self.path, i if self.useADB else int(device), click_by_mouse=self.fastclick)
+                    for i, device in enumerate(devices)]
         
     
     def move_to_screen(self, index):

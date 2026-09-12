@@ -28,6 +28,10 @@
 
 ## 关于任务内容
 
+新版剧情活动的运行、头像索引、配队检查和验证范围见 [剧情活动说明](docs/story-event.md)。该任务需要 `requirements-event.txt`，可用 `scripts/daily/story_event.py` 单独执行，雷电窗口模式无需 ADB。
+
+定时任务可使用 `scripts/daily/all.bat`（完整日常）或 `scripts/daily/story_event.bat`（仅活动）。Agent 探查工具、共用界面能力与日常代码的目录边界见 [入口分类](scripts/README.md)；后续开发先读 [AGENTS.md](AGENTS.md) 和 [游戏知识目录](docs/game-knowledge/README.md)。
+
 本条目可以查看[_daily_config.yml](_daily_config.yml)文件中的任务列表部分，脚本会按其中所列顺序依次执行每个任务条目，具体任务条目的用途可以留意文件中的注释部分。
 如果想获知该项目支持的所有任务可以查看[tasks.py](pcrscript/tasks.py)，如果需要执行单个任务可参考[test.py](test.py)。
 
@@ -37,4 +41,3 @@
 
 ---
 [其他说明](explanation.md)
-

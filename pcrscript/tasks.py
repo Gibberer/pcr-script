@@ -602,364 +602,41 @@ class QuickClean(TimeLimitTask):
         self.action_squential(*actions)
 @register("clear_campaign_first_time")
 class ClearCampaignFirstTime(TimeLimitTask):
-    '''
-    剧情活动首次过图
-    '''
-
+    """兼容旧任务名；以关卡实际进度恢复首次过图。"""
     @staticmethod
-    def valid(event_news: EventNews, args=None) -> tuple:
-        if ClearCampaignFirstTime.event_first_day(event_news.hatsune):
-            return ClearCampaignFirstTime, args
+    def valid(event_news: EventNews, args=None):
+        return ClearCampaignFirstTime, args
 
     def run(self, exhaust_power=False):
-        print("已失效，跳过任务")
-        return
-        self.total_step = '∞'
-        self.action_squential(*_enter_adventure_actions(difficulty=Difficulty.NORMAL, campaign=True))
-        pre_pos = (-100,-100)
-        step = 0
-        retry_count = 0
-        while True:
-            time.sleep(1)
-            screenshot = self.robot.driver.screenshot()
-            self._ignore_niggled_scene(screenshot)
-            character_pos = self.template_match(screenshot, ImageTemplate('character', threshold=0.7))
-            if not character_pos:
-                # 点击屏幕重新判断
-                self.action_once(ClickAction(pos=(20, 100)))
-                pos = self.template_match(screenshot, ImageTemplate("symbol_campaign_home"))
-                if pos:
-                    self.action_once(ClickAction(pos=(560, 170)))
-                continue
-            else:
-                lock_ret = self.template_match(screenshot, ImageTemplate('symbol_lock'))
-                if not lock_ret:
-                    print('未发现解锁符号，执行正常活动清理步骤')
-                    break
-                if self._is_same_pos(pre_pos, character_pos):
-                    # 位置相同，说明下一关需要挑战boss关卡
-                    print(f"位置未发生变化可能下一步是{'普通'if step == 0 else '困难'}boss关卡{f'(重试{retry_count}次)' if retry_count > 0 else ''}")
-                    if step == 0:
-                        # 普通关卡
-                        self.action_squential(ClickAction(template=ImageTemplate('normal', threshold=0.7), timeout=5))
-                    else:
-                        self.action_squential(ClickAction(template=ImageTemplate('hard', threshold=0.7), timeout=5))
-                    match_action = MatchAction(template='btn_challenge', timeout=5)
-                    self.action_squential(match_action)
-                    if not match_action.is_timeout:
-                        actions = _combat_actions(combat_duration=3, interval=0.2)
-                        self.action_squential(*actions)
-                        if step == 0:
-                            # 移动到困难章节
-                            time.sleep(5)
-                            self.action_squential(MatchAction('btn_hard_selected',
-                                                unmatch_actions=[ClickAction(template="btn_hard"),
-                                                    ClickAction(pos=(20, 100))]))
-                            time.sleep(3)
-                            step = 1
-                        pre_pos = character_pos
-                        retry_count = 0
-                    else:
-                        if retry_count >= 2:
-                            pre_pos = (-1, -1)
-                            retry_count = 0
-                        else:
-                            retry_count += 1
-                else:
-                    self.robot.driver.click(character_pos[0], character_pos[1] + self.robot.deviceheight * 0.1)
-                    match_action = MatchAction(template='btn_challenge', timeout=5)
-                    self.action_squential(match_action)
-                    if not match_action.is_timeout:
-                        actions = _combat_actions(combat_duration=15)
-                        actions += [SleepAction(2)]
-                        self.action_squential(*actions)
-                        pre_pos = character_pos
-        # 首次过图处理完毕，执行正常活动清体力任务步骤
-        ToHomePage(self.robot).run()
-        CampaignClean(self.robot).run(hard_chapter=True, exhaust_power=exhaust_power)
-        
+        return CampaignClean(self.robot).run(True, exhaust_power)
 
-    def _is_same_pos(self, pre_pos, pos):
-        px,py = pre_pos
-        x,y = pos
-        return  (x - 5 <= px <= x + 5) and (y - 5 <= py <= y + 5)
-    
-    def _ignore_niggled_scene(self, screenshot):
-        templates = [
-            'btn_close',
-            'btn_skip_blue',
-            'btn_novocal_blue',
-            'symbol_menu_in_story',
-            'btn_skip_in_story',
-            'btn_blue_settle',
-            'btn_cancel',
-        ]
-        for template in templates:
-            pos = self.template_match(screenshot, ImageTemplate(template))
-            if pos:
-                self.robot.driver.click(*pos)
-                break
+
 @register("campaign_clean")
 class CampaignClean(TimeLimitTask):
-    '''
-    剧情活动扫荡
-    '''
+    """新版活动：首通、首领、困难扫荡、剧情/任务奖励、全部兑换。"""
     @staticmethod
-    def valid(event_news: EventNews, args: list = None) -> tuple[BaseTask, list]:
-        if CampaignClean.event_valid(event_news.hatsune):
-            if CampaignClean.event_first_day(event_news.hatsune):
-                return ClearCampaignFirstTime, None
-            elif event_news.hatsune.extras["original_event_id"] != 0 and event_news.dropItemNormal:
-                return None
-            else:
-                return CampaignClean, args
+    def valid(event_news: EventNews, args=None):
+        # 活动改版后的日历表可能为空；由游戏入口和布局决定是否执行。
+        return CampaignClean, args
+
+    def run(self, hard_chapter=True, exhaust_power=False):
+        from .daily.story_event import StoryEventRunner
+        return StoryEventRunner(self.robot, getattr(self.robot, "story_event_options", {})).run(
+            hard_chapter, exhaust_power)
 
 
-    def run(self, hard_chapter=True, exhaust_power=True):
-        '''
-        Parameters:
-            hard_chapter: 是否扫荡困难关卡
-            exhaust_power: 是否在普通关卡中用光所有体力
-        '''
-        print("已失效，跳过任务")
-        return
-        self.total_step = '∞'
-        if hard_chapter:
-            self.action_squential(*_enter_adventure_actions(difficulty=Difficulty.HARD, campaign=True))
-            actions = [
-                MatchAction(template='btn_close', matched_actions=[
-                            ClickAction(), SleepAction(2)], timeout=3),
-                SleepAction(2),
-                # 清困难本
-                ClickAction(template=ImageTemplate('1-1', threshold=0.6, mode='binarization'), offset=(0, -20)),  # 点击第一个活动困难本
-                MatchAction(ImageTemplate('btn_challenge', threshold=0.9*THRESHOLD)),
-            ]
-            # 1-1可能误识别为其他关卡
-            for _ in range(4):
-                actions += [
-                    ClickAction(pos=(33, 275)),
-                    SleepAction(0.5)
-                ]
-            for _ in range(5):
-                actions += [
-                    ClickAction(pos=(757, 330)),
-                    SleepAction(0.5),
-                    ClickAction(template='btn_ok_blue', timeout=10), # 加入超时防止卡住（可能不能稳定识别1-1）
-                    MatchAction(template='symbol_restore_power',
-                                matched_actions=[
-                                    ClickAction(pos=(370, 370)),
-                                    SleepAction(2),
-                                    ClickAction(pos=(680, 454)),
-                                    SleepAction(2),
-                                    ThrowErrorAction("No power!!!")],
-                                timeout=1),
-                    MatchAction(template='btn_skip_ok', matched_actions=[
-                                ClickAction()], timeout=2, delay=0.1),
-                    SleepAction(1),
-                    MatchAction(template='btn_ok', matched_actions=[
-                                ClickAction()], timeout=2, delay=0.1),
-                    SleepAction(1),
-                    MatchAction(template='btn_ok',
-                                matched_actions=[ClickAction(), SleepAction(1)], timeout=1),
-                    MatchAction(template='btn_ok',
-                                matched_actions=[ClickAction(), SleepAction(1)], timeout=1),
-                    IfCondition("btn_challenge", meet_actions=[], 
-                                unmeet_actions=[MatchAction(template='btn_cancel', matched_actions=[ClickAction(), SleepAction(1)], timeout=1)]), # 限时商店
-                    ClickAction(pos=(939, 251)),
-                    SleepAction(2)
-                ]
-            actions += [
-                ClickAction(pos=(666, 457)),
-                SleepAction(2)
-            ]
-            # 高难
-            actions += [
-                ClickAction(template=ImageTemplate('very', threshold=0.6, mode='binarization'), 
-                            offset=(0, -40), timeout=5),
-                ClickAction(pos=(860,270)), # 如果timeout尝试点击该位置
-                ClickAction(pos=(665,203)),   
-                SleepAction(1),         
-            ]
-            actions += _combat_actions(combat_duration=3, interval=0.5)
-            self.action_squential(*actions)
-        if exhaust_power:
-            if hard_chapter:
-                ToHomePage(self.robot).run()
-            self.action_squential(*_enter_adventure_actions(difficulty=Difficulty.NORMAL, campaign=True))
-            actions = []
-            if not hard_chapter:
-                actions += [
-                    MatchAction(template='btn_close', matched_actions=[
-                                ClickAction(), SleepAction(2)], timeout=3)
-                ]
-            actions += [
-                ClickAction(template=ImageTemplate('15', threshold=0.6, mode='binarization'),
-                            offset=(0, -20),timeout=10),
-                SleepAction(1),
-                IfCondition("character", meet_actions=[ClickAction("character"), SleepAction(1)]), # 找不到对应关卡符号时，使用人物标记查找
-                *_clean_oneshot_actions(duration=6000),
-                SleepAction(2)
-            ]
-            self.action_squential(*actions)
-        self.action_squential(SleepAction(2))
-        # 领取任务
-        self.action_squential(
-            SleepAction(1),
-            MatchAction(template=ImageTemplate('symbol_campaign_quest') | ImageTemplate('symbol_campaign_quest_1'),
-                        unmatch_actions=[ClickAction(pos=(5, 150)), 
-                                         ClickAction(template='quest'),
-                                         ClickAction(template="btn_cancel"),
-                                         ClickAction(template="symbol_guild_down_arrow", offset=(0, 70))]),
-            SleepAction(3),
-            MatchAction('btn_all_rec', matched_actions=[
-                        ClickAction()], timeout=5),
-            MatchAction('btn_close', matched_actions=[
-                        ClickAction()], timeout=5),
-            MatchAction('btn_ok', matched_actions=[ClickAction()], timeout=3),
-            MatchAction('btn_cancel', matched_actions=[
-                        ClickAction()], timeout=3)
-        )
-
-@register('campaign_reward_exchange')
+@register("campaign_reward_exchange")
 class CampaignRewardExchange(TimeLimitTask):
-    '''
-    活动收尾：
-    1. 消耗所有Boss挑战券
-    2. 观看活动剧情
-    3. 观看信赖度剧情（如果存在）
-    4. 交换所有讨伐券
-    '''
-
+    """保留独立领奖入口，现在可每天运行。"""
     @staticmethod
-    def valid(event_news: EventNews, args: list = None) -> tuple[BaseTask, list]:
-        if CampaignRewardExchange.event_last_day(event_news.hatsune):
-            return CampaignRewardExchange, args
-    
-    def _story(self):
-        entry_action = MatchAction('btn_campaign_story_entry', matched_actions=[ClickAction()] ,timeout=5)
-        self.action_squential(
-            MatchAction(ImageTemplate('symbol_campaign_home') & ImageTemplate('btn_campaign_story_entry'), unmatch_actions=[
-                ClickAction(pos=(33,31))
-            ], delay=0.5, timeout=15),
-            entry_action,
-            SleepAction(3),
-            title="剧情奖励"
-        )
-        if entry_action.is_timeout:
-            self.action_squential(
-                ClickAction(pos=(870, 345)),
-                SleepAction(3),
-                title="剧情入口超时点击"
-            )
-        screenshot = self.driver.screenshot()
-        symbol_new = self.template_match(screenshot, ImageTemplate('symbol_new_campaign_story'))
-        if symbol_new:
-            self.driver.click(symbol_new[0], symbol_new[1] + int(screenshot.shape[0]*.05))
-            con_match_times = 0
-            while True:
-                time.sleep(1)
-                screenshot = self.driver.screenshot()
-                if ignore := self.template_match(screenshot, ImageTemplate('btn_close', roi=(262,115,687,434))):
-                    self.driver.click(*ignore)
-                    continue
-                if novocal := self.template_match(screenshot, ImageTemplate('btn_novocal_blue')):
-                    self.driver.click(*novocal)
-                    continue
-                if ignore := self.template_match(screenshot, ImageTemplate('btn_close') | ImageTemplate('btn_skip_blue')):
-                    self.driver.click(*ignore)
-                    continue
-                if self.template_match(self.driver.screenshot(), ImageTemplate('symbol_menu_in_story')):
-                    self.action_squential(MatchAction(template='btn_skip_in_story', 
-                                unmatch_actions=[ClickAction(template='symbol_menu_in_story'), ClickAction(template='select_branch_first'),], 
-                                matched_actions=[ClickAction()],
-                                timeout=5))
-                    continue
-                if self.template_match(screenshot, ImageTemplate('symbol_campaign_home')):
-                    if (con_match_times := con_match_times+1) > 2:
-                        # 完成一次剧情读取会先显示活动主界面之后再弹出新的剧情引导弹窗，避免恰好在弹出弹窗前截图导致的误判断认为剧情已全部阅读完毕
-                        break
-                else:
-                    con_match_times = 0
-                self.action_once(ClickAction(pos=(250, 60)))
-        else:
-            self.action_once(ClickAction('btn_close'))
-    
-    def _hard(self):
-        self.action_squential(
-            *_enter_adventure_actions(difficulty=Difficulty.HARD, campaign=True),
-            # btn_challenge 的额外匹配用于当匹配不到困难标签时手动点击困难保证任务可以继续进行
-            ClickAction(template=ImageTemplate('hard', threshold=0.6, mode='binarization') | ImageTemplate('btn_challenge'), offset=(0, -40)),
-            SleepAction(1),
-            *_clean_oneshot_actions(duration=6000),
-            title="清空券"
-        )
-    
-    def _exchange(self):
-        self.action_squential(
-            MatchAction('btn_reward_exchange', matched_actions=[ClickAction()], unmatch_actions=[ClickAction(template="btn_close")]),
-            MatchAction('symbol_reward_exchange'),
-            SleepAction(1),
-            ClickAction(pos=(830,380)),
-            SleepAction(1),
-            title="交换阶段"
-        )
-        while True:
-            time.sleep(0.5)
-            screenshot = self.driver.screenshot()
-            if self.template_match(screenshot, ImageTemplate('symbol_reward_exchange')):
-                if self.template_match(screenshot, ~BrightnessTemplate((740, 336, 920, 415), 200)):
-                    break
-                # 抽取下一轮
-                self.action_once(ClickAction(pos=(830,380)))
-                continue
-            if reset := self.template_match(screenshot, ImageTemplate('btn_reset_reward')):
-                self.driver.click(*reset)
-                continue
-            if click := self.template_match(screenshot, ImageTemplate('btn_ok') | ImageTemplate('btn_ok_blue')
-                                            | ImageTemplate('btn_check_reward')
-                                            | ImageTemplate('btn_reset_reward_in_dialog')
-                                            | ImageTemplate('btn_exchange_again_blue')
-                                            | ImageTemplate('btn_exchange_again_white')):
-                self.driver.click(*click)
-                time.sleep(0.5)
-                continue
-    
-    def _confidence(self):
-        time.sleep(1)
-        btn_confidence = self.template_match(self.driver.screenshot(), ImageTemplate('btn_confidence'))
-        if not btn_confidence:
-            return
-        self.driver.click(*btn_confidence)
-        while True:
-            time.sleep(0.5)
-            screenshot = self.driver.screenshot()
-            if self.template_match(screenshot, ImageTemplate('symbol_confidence_home') & ImageTemplate('symbol_help')):
-                new = self.template_match(screenshot, ImageTemplate('symbol_new_confidence'))
-                if not new:
-                    # 返回活动首页
-                    self.action_once(ClickAction(pos=(30, 35)))
-                    time.sleep(5)
-                    break
-                self.driver.click(new[0], int(new[1] + screenshot.shape[0] * 0.1))
-                continue
-            if self.template_match(screenshot, ImageTemplate('symbol_confidence_home')):
-                # 信赖度二级页面
-                if new := self.template_match(screenshot, ImageTemplate('symbol_new_confidence_inner')):
-                    self.driver.click(*new)
-                    continue
-                self.action_once(ClickAction(pos=(30, 35)))
-                continue
-            if novocal := self.template_match(screenshot, ImageTemplate('btn_novocal_blue')):
-                self.driver.click(*novocal)
-                continue
-            if ignore := self.template_match(screenshot, ImageTemplate('btn_close') | ImageTemplate('btn_skip_blue') | ImageTemplate('select_branch_first')):
-                self.driver.click(*ignore)
-                continue
-            self.action_once(ClickAction(pos=(14, 200)))
-            
+    def valid(event_news: EventNews, args=None):
+        return CampaignRewardExchange, args
 
     def run(self):
-        print("已失效，跳过任务")
+        from .daily.story_event import StoryEventRunner
+        options = {**getattr(self.robot, "story_event_options", {}), "first_clear": False, "bosses": False}
+        return StoryEventRunner(self.robot, options).run(False, False)
+
 
 @register("clear_story")    
 class ClearStory(BaseTask):
