@@ -26,6 +26,7 @@ def open_leidian_emulator(dnpath):
         return -1
     else:
         print("try start princess connect application")
+        time.sleep(10)
         exit_code = simulator.open_app("com.bilibili.priconne")
         time.sleep(30)
         return exit_code
@@ -60,6 +61,7 @@ def run_script(config, use_adb):
     # 使用第一个设备
     robot = Robot(drivers[0])
     robot.story_event_options = config.get("StoryEvent", {})
+    robot.gift_options = config.get("Gift", {})
     news = fetch_event_news()
     print("当前进行的活动:")
     for value in news.__dict__.values():

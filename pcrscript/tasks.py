@@ -259,34 +259,8 @@ class GetGift(BaseTask):
     '''
 
     def run(self, exclude_stamina=True):
-        actions = []
-        if not exclude_stamina:
-            actions = [
-                SleepAction(1),
-                ClickAction(template='gift'),
-                SleepAction(3),
-                MatchAction('btn_all_rec', matched_actions=[
-                        ClickAction(pos=(360,480)),SleepAction(0.5),ClickAction()], timeout=3),
-                MatchAction('btn_ok_blue', matched_actions=[
-                        ClickAction()], timeout=3),
-                MatchAction('btn_ok', matched_actions=[ClickAction()], timeout=3),
-                MatchAction('btn_cancel', matched_actions=[
-                        ClickAction()], timeout=3)
-            ]
-        else:
-            actions = [
-                SleepAction(1),
-                ClickAction(template='gift'),
-                SleepAction(3),
-                MatchAction('btn_all_rec', matched_actions=[
-                        ClickAction()], timeout=3),
-                MatchAction('btn_ok_blue', matched_actions=[
-                        ClickAction()], timeout=3),
-                MatchAction('btn_ok', matched_actions=[ClickAction()], timeout=3),
-                MatchAction('btn_cancel', matched_actions=[
-                        ClickAction()], timeout=3)
-            ]
-        self.action_squential(*actions)
+        from .daily.gifts import GiftRunner
+        return GiftRunner(self.robot, getattr(self.robot, "gift_options", {})).run(exclude_stamina)
 
 @register("free_gacha")
 class FreeGacha(TimeLimitTask):
@@ -613,7 +587,7 @@ class ClearCampaignFirstTime(TimeLimitTask):
 
 @register("campaign_clean")
 class CampaignClean(TimeLimitTask):
-    """新版活动：首通、首领、困难扫荡、剧情/任务奖励、全部兑换。"""
+    """新版活动重复日：困难扫荡、剧情/任务、兑换；首通/首领须显式启用。"""
     @staticmethod
     def valid(event_news: EventNews, args=None):
         # 活动改版后的日历表可能为空；由游戏入口和布局决定是否执行。
@@ -854,7 +828,7 @@ class Research(BaseTask):
         # 圣迹2级
         actions += [
             ClickAction(pos=(587, 300)),
-            SleepAction(1),
+            SleepAction(2),
             ClickAction(pos=(718, 146)),
             *_clean_oneshot_actions(),
             SleepAction(1),
@@ -864,7 +838,7 @@ class Research(BaseTask):
         # 神殿2级
         actions += [
             ClickAction(pos=(800, 300)),
-            SleepAction(1),
+            SleepAction(2),
             ClickAction(pos=(718, 146)),
             *_clean_oneshot_actions(),
             SleepAction(1)

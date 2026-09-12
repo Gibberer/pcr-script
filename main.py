@@ -66,6 +66,7 @@ def main():
     for driver in drivers:
         robot = Robot(driver)
         robot.story_event_options = config.get("StoryEvent", {})
+        robot.gift_options = config.get("Gift", {})
         thread_list.append(threading.Thread(target=dostaff, args=(robot, lock, account_list,total_size, task_dict)))
     start_time = time.time()
     print("start {} thread".format(len(thread_list)))

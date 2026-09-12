@@ -68,6 +68,10 @@ class StoryEventRunner:
                 return True
             if s.find("关卡一览", (300, 0, 700, 70)):
                 self.ui.expect_click("取消", (460, 440, 710, 520), exact=True)
+            elif s.find("一?键扫荡确认", (250, 0, 710, 70)):
+                # A previous run stopped before confirming a spend. Cancel it
+                # and rebuild the plan from current counts, never blindly resume.
+                self.ui.expect_click("取消", (250, 440, 480, 520), exact=True)
             elif s.story_list or s.find("活动任务", (0, 0, 280, 65)):
                 self.ui.click((32, 30))
             elif s.find("主线关卡"):
@@ -269,7 +273,10 @@ class StoryEventRunner:
                 raise EventUIError("无法确认扫荡列表已解除之前的选项")
             selected = None
             for page in range(10):
-                s = self.ui.capture()
+                # Clearing an already empty selection emits a toast over H-2's
+                # remaining-attempts field. Wait for it, never OCR through it.
+                s = self.ui.wait(lambda s: s.find("关卡一览", (300, 0, 700, 70))
+                                 and not s.find("未勾选任何关卡|正在进行数据连接"), "扫荡列表稳定")
                 for row in s.all(rf"活动关卡{kind}-\d+", (35, 135, 350, 375)):
                     name = normalized(row.text)
                     if name in finished:
@@ -291,13 +298,14 @@ class StoryEventRunner:
                 self.ui.expect_click("取消", (460, 440, 710, 520), exact=True)
                 self.log("困难关卡今日次数已检查完毕" if hard else "未找到可扫荡普通关卡")
                 return
+            # Stamina is optional batching information, never a prerequisite.
+            # If its digits are missing, request one sweep and let the game
+            # decide affordability. Do not spend time retrying stamina OCR.
             stamina = s.number((270, 386, 335, 416))
-            if stamina is None:
-                raise EventUIError("系统扫荡体力数值无法识别")
-            count = min(selected[2] if hard else 99, stamina // cost)
+            count = min(selected[2] if hard else 99, stamina // cost) if stamina is not None else 1
             if count < 1:
                 self.ui.expect_click("取消", (460, 440, 710, 520), exact=True)
-                self.report["pending"].append(f"体力不足，尚有{'困难' if hard else '普通'}关卡可扫荡（剩余体力 {stamina}）")
+                self.report["pending"].append(f"体力不足，尚有{'困难' if hard else '普通'}关卡可扫荡")
                 return
             self.ui.click((851, selected[1]+16))
             for _ in range(100):
@@ -315,9 +323,15 @@ class StoryEventRunner:
                 self.ui.expect_click("取消", (460, 440, 710, 520), exact=True)
                 self.report["pending"].append("系统扫荡体力不足；未购买体力")
                 return
+            button = s.find("一键扫荡", (700, 440, 920, 520), exact=True)
+            if button is None or not s.blue_button(button):
+                self.ui.expect_click("取消", (460, 440, 710, 520), exact=True)
+                self.report["pending"].append("扫荡按钮不可用，停止扫荡并继续活动领奖")
+                return
             self.ui.save(f"sweep_{batch:02d}_plan", s)
-            self.ui.click(s.find("一键扫荡", (700, 440, 920, 520), exact=True))
-            self.settle_sweep(selected[0], count, cost, selected[2], stamina)
+            self.ui.click(button)
+            if self.settle_sweep(selected[0], count, cost, selected[2], stamina) is False:
+                return
             self.log(f"系统扫荡 {selected[0]} × {count}")
             if hard and count == selected[2]:
                 finished.add(selected[0])
@@ -348,13 +362,19 @@ class StoryEventRunner:
                 stamina = s.number((270, 386, 335, 416))
                 verified = (remaining_before is not None and remaining == remaining_before-expected_count)
                 if remaining_before is None:
-                    verified = stamina_before is not None and stamina is not None and 0 <= stamina-(stamina_before-expected_count*cost) <= 1
+                    verified = seen_result or (stamina_before is not None and stamina is not None
+                                               and 0 <= stamina-(stamina_before-expected_count*cost) <= 1)
+                    if not verified:
+                        self.report["pending"].append("普通扫荡结算未能核实，停止追加扫荡并继续活动领奖")
+                        self.ui.click(s.find("取消", (460, 440, 710, 520), exact=True))
+                        self.ui.wait(lambda s: s.event_quests, "停止普通扫荡")
+                        return False
                 if not verified:
                     raise EventUIError("扫荡后次数/体力变化未能核实，停止重复消耗")
                 self.ui.click(s.find("取消", (460, 440, 710, 520), exact=True))
                 self.ui.wait(lambda s: s.event_quests, "扫荡完成返回关卡")
                 return
-            if s.find("一键扫荡确认", (250, 0, 710, 70)):
+            if s.find("一?键扫荡确认", (250, 0, 710, 70)):
                 if confirmed:
                     time.sleep(.5)
                     continue
@@ -430,9 +450,17 @@ class StoryEventRunner:
             self.home()
             from .event_battle import EventBattles
             battles = EventBattles(self)
-            if self.options.get("first_clear", True):
+            if hard_chapter and not self.options.get("first_clear", False):
+                catalog = battles.quest_catalog()
+                if any(catalog.get(f"活动关卡H-{i}") != 3 for i in (1, 2, 3)):
+                    self.report["pending"].append("困难关卡尚未全部三星，首日处理暂缓；见 pending-validation.md")
+                    self.log(self.report["pending"][-1])
+                    self.report["status"] = "deferred"
+                    self.home()
+                    return self.report
+            if self.options.get("first_clear", False):
                 battles.first_clear()
-            if self.options.get("bosses", True):
+            if self.options.get("bosses", False):
                 battles.bosses()
             if hard_chapter:
                 self.sweep()

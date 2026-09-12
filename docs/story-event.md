@@ -1,6 +1,6 @@
 # 新版剧情活动
 
-`campaign_clean` 现在执行新版活动的首通检查、未通关首领、困难扫荡、剧情/回忆录、活动任务和活动券兑换。以游戏实际进度为准，可以中断后重新运行；不依赖旧活动日历表中的“第一天”。旧地图复刻尚未适配。
+`campaign_clean` 默认执行新版活动的重复日日常：困难扫荡、剧情/回忆录、活动任务和活动券兑换。首通与未通关首领暂时关闭，等待用户在新活动首日交付实测。困难关卡尚未全三星时报告 `deferred` 并跳过本轮活动任务；以游戏实际进度为准，不依赖旧日历的“第一天”。旧地图复刻尚未适配。跨会话接续见 [等待验证的场景](game-knowledge/pending-validation.md)。
 
 ## 安装与运行
 
@@ -20,8 +20,8 @@ python -m venv .venv
 ```yaml
 StoryEvent:
   teams: config/event_teams.yml
-  first_clear: true
-  bosses: true
+  first_clear: false # 等待新活动首日实测
+  bosses: false # 等待未通关首领实战验证
   stories: true
   memoirs: true
   missions: true

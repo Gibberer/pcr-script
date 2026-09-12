@@ -4,6 +4,7 @@
 
 - [操作与角色识别](characters.md)：雷电后台操作、角色衣装、轮播剑徽、培养数据。
 - [新版剧情活动](story-events.md)：页面、任务顺序、扫荡/兑换结算与本期特有剧情。
+- [礼物与特别装备](gifts.md)：满仓恢复、自动分解设置、库存核验和分批领取。
 - [等待验证的场景](pending-validation.md)：触发条件、预期、当前验证边界。
 
 代码/命令分类见 [入口分类](../../scripts/README.md)：Agent 工具在 `scripts/agent/`，定时任务在 `scripts/daily/`，共享界面能力在 `pcrscript/game_ui/`，固化活动逻辑在 `pcrscript/daily/`。

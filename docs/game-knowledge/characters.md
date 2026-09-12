@@ -5,6 +5,7 @@
 - 雷电 `DNDriver(click_by_mouse=True)` 使用后台窗口消息。`ldconsole list2` 第一列才是实例编号，不应按数组下标选实例。
 - 后台中文搜索通过 `ldconsole action --index N --key call.input --value 名字`，异步入队，输入后需等待约 1 秒再点击搜索框外。
 - 坐标按 960×540 归一化；截图失败时停止，不回退 ADB。Windows 中文文件名用 `cv.imencode(...).tofile(path)` 保存，避免 `cv.imwrite` 乱码。
+- 共享 `EventUI.capture` 每帧按原始截图更新宽高，识别图像归一化到 960×540，点击/滑动从设计坐标换算回实际宽高。960×540、1280×720、1920×1080、1200×800 的换算已离线检查；仅 960×540 实机验证，非 16:9 布局/黑边适配另留待办。
 - RapidOCR 3.9.2 会记住调用传入的 `use_det/use_cls` 标志。数字框使用 `use_det=False` 后，下一次全屏 OCR 必须显式恢复 `use_det=True, use_cls=True, use_rec=True`，否则只返回文本、没有 boxes。已用实际数字 1→0 的连续识别做回归测试。
 
 ## 编队（2026-09-12，本期特别战斗＋编队，实测）

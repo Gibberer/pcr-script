@@ -10,8 +10,8 @@ Extra:
   dnpath: '' #雷电模拟器路径，例如：F:\leidian\LDPlayer9
 StoryEvent:
   teams: config/event_teams.yml # 每期活动按标题匹配作业；未知活动不复用旧队伍
-  first_clear: true
-  bosses: true
+  first_clear: false # 首日验证待办，日常不执行首通
+  bosses: false # 未通关首领留待活动首日实测
   stories: true
   memoirs: true
   missions: true # 每天检查每日、普通、特别、称号四栏奖励
@@ -19,6 +19,11 @@ StoryEvent:
   max_boss_attempts: 10
   battle_timeout: 220
   timeout: 1800
+Gift:
+  auto_dismantle: true # 满仓时使用游戏已有的自动分解设置，不改筛选规则
+  free_slots: 750 # 目标空位，允许 500～1000
+  max_gift_batches: 30 # 一批最多收取 100 件礼物
+  timeout: 900
 Task: #配置执行任务,配置任务名称，如果需要传入参数在下面增加参数，可以根据不同的账号序号配置任务。
   1: # 多账号相关，可以针对账号配置不同的任务，如果是单账号日常不需要关注。
     -
@@ -51,7 +56,7 @@ Task: #配置执行任务,配置任务名称，如果需要传入参数在下面
     -
       - tohomepage
     -
-      - campaign_clean  # 新版活动：首次过图、未通关首领、剧情、任务、兑换
+      - campaign_clean  # 新版活动重复日：困难扫荡、剧情、任务、兑换（首通暂不执行）
       - True # 是否扫荡活动困难关卡
       - False # 是否将剩余体力花费在活动普通章节上
     -

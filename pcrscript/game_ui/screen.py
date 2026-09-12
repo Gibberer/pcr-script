@@ -1,4 +1,4 @@
-"""Screenshot-only UI primitives for the redesigned story event (960 x 540).
+"""Background UI primitives using a normalized 960 x 540 coordinate space.
 
 No game network API or foreground input is used. OCR is loaded only by this task.
 """
@@ -97,6 +97,9 @@ class EventUI:
         img = self.driver.screenshot()
         if img is None or not img.size:
             raise EventUIError("模拟器截图失败")
+        # Capture size is authoritative (the emulator can change resolution
+        # after driver construction). OCR, templates and ROIs stay normalized.
+        self.height, self.width = img.shape[:2]
         img = cv.resize(img, (960, 540), interpolation=cv.INTER_AREA)
         items = []
         if ocr:
@@ -154,6 +157,17 @@ class EventUI:
         raw_scores = result.scores if result.scores is not None else []
         texts = [normalized(t) for t, score in zip(raw_texts, raw_scores) if score >= .95]
         return int(texts[0]) if len(texts) == 1 and texts[0].isdigit() else None
+
+    def read_region(self, screen, roi):
+        """Retry small missed labels at 3x, retaining baseline coordinates."""
+        x1, y1, x2, y2 = roi
+        patch = cv.resize(screen.image[y1:y2, x1:x2], None, fx=3, fy=3)
+        result = self._ocr(patch, use_det=True, use_cls=True, use_rec=True)
+        items = []
+        if result.txts:
+            items = [TextBox(t, float(score), (np.asarray(box)/3 + (x1, y1)).tolist())
+                     for t, score, box in zip(result.txts, result.scores, result.boxes)]
+        return EventScreen(screen.image, items)
 
     def swipe(self, start, end, duration=450):
         conv = lambda p: (round(p[0]*self.width/960), round(p[1]*self.height/540))

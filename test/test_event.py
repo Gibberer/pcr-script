@@ -48,6 +48,8 @@ class ReplayUI:
         self.clicks.append(item.text if isinstance(item, TextBox) else item)
     def save(self, *args):
         pass
+    def number(self, screen, roi):
+        return screen.number(roi)
     def wait(self, predicate, *args, **kwargs):
         s = self.capture()
         assert predicate(s)
@@ -121,6 +123,31 @@ class EventRecognitionTests(TestCase):
 
 
 class SweepReplayTests(TestCase):
+    def test_unreadable_stamina_uses_game_insufficient_hint_without_spending(self):
+        r = StoryEventRunner.__new__(StoryEventRunner)
+        r.check_deadline = Mock()
+        r.quests = Mock()
+        r.report = {"pending": []}
+        r.settle_sweep = Mock()
+        bulk = frame(("关卡一览", 480, 40), ("全部勾选", 850, 110),
+                     ("活动关卡H-2", 112, 222), ("3/3", 470, 248))
+        selected = frame(("1", 808, 416), ("体力不足", 105, 474))
+        r.ui = ReplayUI([bulk, bulk, selected, selected])
+        r.ui.expect_click = Mock()
+        r.sweep()
+        self.assertEqual(r.ui.clicks, [(851, 238)])  # Select only, no consumption.
+        r.settle_sweep.assert_not_called()
+        self.assertTrue(any("体力不足" in text for text in r.report["pending"]))
+
+    def test_normal_settlement_without_stamina_stops_sweeping_without_raising(self):
+        r = StoryEventRunner.__new__(StoryEventRunner)
+        r.report = {"pending": []}
+        bulk = frame(("关卡一览", 480, 40), ("活动关卡N-10", 112, 158), ("取消", 582, 480))
+        r.ui = ReplayUI([self.confirm("活动关卡N-10", "20"), bulk, frame(("活动关卡·首领", 155, 30))])
+        self.assertFalse(r.settle_sweep("活动关卡N-10", 2, 10))
+        self.assertTrue(r.report["pending"])
+        self.assertEqual(r.ui.clicks, ["挑战", "取消"])
+
     def run_replay(self, frames, name="活动关卡H-3", count=2, remaining=3):
         r = StoryEventRunner.__new__(StoryEventRunner)
         r.ui = ReplayUI(frames)
@@ -144,6 +171,19 @@ class SweepReplayTests(TestCase):
         bulk = frame(("关卡一览", 480, 40), ("活动关卡H-3", 112, 158), ("3/3", 471, 184))
         with self.assertRaisesRegex(EventUIError, "变化未能核实"):
             self.run_replay([self.confirm(), bulk])
+
+    def test_missing_leading_one_in_confirmation_title_still_checks_cost(self):
+        for cost in ("40", "60"):
+            confirm = self.confirm(cost=cost)
+            confirm.items[0].text = "键扫荡确认"
+            if cost == "60":
+                with self.assertRaisesRegex(EventUIError, "计划不一致"):
+                    self.run_replay([confirm])
+            else:
+                bulk = frame(("关卡一览", 480, 40), ("活动关卡H-3", 112, 158),
+                             ("1/3", 471, 184), ("取消", 582, 480))
+                clicks = self.run_replay([confirm, bulk, frame(("活动关卡·首领", 155, 30))])
+                self.assertEqual(clicks, ["挑战", "取消"])
 
     def test_connecting_overlay_waits_for_server_counter_update(self):
         loading = frame(("关卡一览", 480, 40), ("正在进行数据连接", 830, 35),
@@ -271,11 +311,12 @@ class WorkflowTests(TestCase):
         for name in ("sweep", "stories", "memoirs", "missions", "exchange"):
             setattr(r, name, Mock(side_effect=lambda name=name: sequence.append(name)))
         with TemporaryDirectory() as folder, patch("pcrscript.daily.event_battle.EventBattles") as battles:
+            battles.return_value.quest_catalog.return_value = {f"活动关卡H-{i}": 3 for i in (1, 2, 3)}
             battles.return_value.first_clear.side_effect = lambda: sequence.append("first_clear")
             battles.return_value.bosses.side_effect = lambda: sequence.append("bosses")
             r.ui = SimpleNamespace(output=Path(folder), save=Mock())
             self.assertEqual(r.run()["status"], "complete")
-        self.assertEqual(sequence, ["first_clear", "bosses", "sweep", "stories", "memoirs", "missions", "exchange"])
+        self.assertEqual(sequence, ["sweep", "stories", "memoirs", "missions", "exchange"])
 
     def test_cleared_bosses_never_start_a_replay(self):
         battles = EventBattles.__new__(EventBattles)
@@ -286,6 +327,22 @@ class WorkflowTests(TestCase):
         battles.bosses()
         battles.ui.click.assert_not_called()
         battles.ui.expect_click.assert_not_called()
+
+    def test_unfinished_first_day_defers_without_sweep_or_battle(self):
+        r = StoryEventRunner.__new__(StoryEventRunner)
+        r.options = {}
+        r.report = {"pending": [], "steps": [], "battles": []}
+        r.enter = Mock(return_value=True)
+        r.home = Mock()
+        r.log = Mock()
+        r.sweep = Mock()
+        with TemporaryDirectory() as folder, patch("pcrscript.daily.event_battle.EventBattles") as battles:
+            battles.return_value.quest_catalog.return_value = {"活动关卡H-1": 0}
+            r.ui = SimpleNamespace(output=Path(folder), save=Mock())
+            self.assertEqual(r.run()["status"], "deferred")
+            r.sweep.assert_not_called()
+            battles.return_value.first_clear.assert_not_called()
+            battles.return_value.bosses.assert_not_called()
 
 
 class DriverTests(TestCase):
