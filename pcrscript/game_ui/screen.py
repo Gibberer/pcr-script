@@ -70,6 +70,15 @@ class EventScreen:
         return float(np.mean((hsv[:, :, 0] > 85) & (hsv[:, :, 0] < 120)
                              & (hsv[:, :, 1] > 90) & (hsv[:, :, 2] > 180))) > .15
 
+    def notification(self, roi):
+        """Pink diamond notification, checked only at an entry's known badge."""
+        x1, y1, x2, y2 = roi
+        hsv = cv.cvtColor(self.image[y1:y2, x1:x2], cv.COLOR_BGR2HSV)
+        mask = cv.inRange(hsv, np.array([145, 70, 140]), np.array([179, 255, 255]))
+        _, _, stats, _ = cv.connectedComponentsWithStats(mask)
+        return any(10 <= w <= 22 and 10 <= h <= 22 and 60 <= area <= 250
+                   and .35 <= area/(w*h) <= .75 for _, _, w, h, area in stats[1:])
+
     @property
     def event_home(self):
         return bool(self.find("活动剧情", (650, 280, 960, 465)) and self.find("报酬[交兑]换", (0, 280, 400, 465)))

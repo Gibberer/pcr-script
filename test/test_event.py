@@ -14,6 +14,7 @@ from pcrscript.daily.event_battle import boss_cleared, boss_mode, quest_stars, E
 from pcrscript.daily.event_formation import count_stars
 from pcrscript.daily.event_strategy import MemberRequirement, CharacterStatus, readiness, load_parties
 from pcrscript.daily.story_event import StoryEventRunner
+from pcrscript.daily.event_sweep import HardSweep
 from pcrscript.driver import DNDriver, ADBDriver
 from pcrscript.simulator import DNSimulator
 from pcrscript.tasks import CampaignClean, ClearCampaignFirstTime, CampaignRewardExchange
@@ -57,6 +58,14 @@ class ReplayUI:
 
 
 class EventRecognitionTests(TestCase):
+    def test_entry_diamonds_against_marked_and_cleared_live_crops(self):
+        for name in ("stories", "memoirs", "missions"):
+            for kind in ("marked", "clear"):
+                with self.subTest(entry=name, state=kind):
+                    crop = cv.imread(str(FIXTURES/f"{name}_{kind}.png"))
+                    h, w = crop.shape[:2]
+                    self.assertEqual(EventScreen(crop, []).notification((0, 0, w, h)), kind == "marked")
+
     def test_rotating_star_frame_never_means_no_equipment(self):
         badges = EquipmentBadges()
         for i in range(5):
@@ -123,22 +132,6 @@ class EventRecognitionTests(TestCase):
 
 
 class SweepReplayTests(TestCase):
-    def test_unreadable_stamina_uses_game_insufficient_hint_without_spending(self):
-        r = StoryEventRunner.__new__(StoryEventRunner)
-        r.check_deadline = Mock()
-        r.quests = Mock()
-        r.report = {"pending": []}
-        r.settle_sweep = Mock()
-        bulk = frame(("关卡一览", 480, 40), ("全部勾选", 850, 110),
-                     ("活动关卡H-2", 112, 222), ("3/3", 470, 248))
-        selected = frame(("1", 808, 416), ("体力不足", 105, 474))
-        r.ui = ReplayUI([bulk, bulk, selected, selected])
-        r.ui.expect_click = Mock()
-        r.sweep()
-        self.assertEqual(r.ui.clicks, [(851, 238)])  # Select only, no consumption.
-        r.settle_sweep.assert_not_called()
-        self.assertTrue(any("体力不足" in text for text in r.report["pending"]))
-
     def test_normal_settlement_without_stamina_stops_sweeping_without_raising(self):
         r = StoryEventRunner.__new__(StoryEventRunner)
         r.report = {"pending": []}
@@ -206,6 +199,79 @@ class SweepReplayTests(TestCase):
                 self.run_replay([self.confirm(name, cost)])
 
 
+class HardBulkTests(TestCase):
+    @staticmethod
+    def bulk(counts=(3, 3, 3), insufficient=False):
+        items = [("关卡一览", 480, 40), ("全部勾选", 850, 110),
+                 ("3", 808, 416), ("一键扫荡", 810, 480), ("取消", 585, 480)]
+        for stage, y, count in zip((3, 2, 1), (158, 222, 286), counts):
+            items += [(f"活动关卡H-{stage}", 112, y), (f"{count}/3", 470, y+26)]
+        if insufficient:
+            items.append(("体力不足", 105, 474))
+        s = frame(*items)
+        s.blue_button = lambda button: True
+        return s
+
+    @staticmethod
+    def preview(plan, spend=None):
+        items = [("一键扫荡确认", 480, 40), (str(spend if spend is not None else sum(plan.values())*20), 245, 357),
+                 ("挑战", 590, 480)]
+        for (name, count), y in zip(plan.items(), (118, 184, 250)):
+            items += [(name, 120, y), (str(count), 880, y+25)]
+        return frame(*items)
+
+    def runner(self, frames):
+        ui = ReplayUI(frames)
+        ui.expect_click = Mock()
+        return SimpleNamespace(ui=ui, quests=Mock(), check_deadline=Mock(), log=Mock(), report={"pending": []})
+
+    def test_three_stages_are_selected_and_consumed_in_one_confirmation(self):
+        plan = {f"活动关卡H-{i}": 3 for i in (1, 2, 3)}
+        r = self.runner([self.bulk(), self.bulk(), self.preview(plan),
+                         frame(("扫荡结果", 480, 40), ("确认", 480, 480)),
+                         self.bulk((0, 0, 0)), frame(("活动关卡·首领", 155, 30))])
+        HardSweep(r).run()
+        self.assertEqual(r.ui.clicks, [(851, 174), (851, 238), (851, 302), "一键扫荡", "挑战", "确认"])
+        r.quests.assert_called_once()
+        self.assertEqual(r.report["pending"], [])  # No stamina digits in any frame.
+
+    def test_exhausted_day_exits_without_selecting_or_scrolling(self):
+        r = self.runner([self.bulk((0, 0, 0)), frame(("活动关卡·首领", 155, 30))])
+        self.assertTrue(HardSweep(r).run())
+        self.assertEqual(r.ui.clicks, [])
+
+    def test_insufficient_stamina_stops_bulk_without_single_stage_retries(self):
+        r = self.runner([self.bulk(), self.bulk(insufficient=True), frame(("活动关卡·首领", 155, 30))])
+        self.assertFalse(HardSweep(r).run())
+        self.assertEqual(len(r.ui.clicks), 3)
+        self.assertTrue(any("体力不足" in text for text in r.report["pending"]))
+
+    def test_normal_stage_wrong_count_or_cost_never_confirms_spending(self):
+        plan = {f"活动关卡H-{i}": 3 for i in (1, 2, 3)}
+        wrong_stage = {**plan, "活动关卡N-10": 3}
+        wrong_count = {**plan, "活动关卡H-2": 2}
+        for actual, cost in ((wrong_stage, 240), (wrong_count, 160), (plan, 200)):
+            r = self.runner([self.preview(actual, cost)])
+            with self.assertRaisesRegex(EventUIError, "未确认消费"):
+                HardSweep(r).settle(plan)
+            self.assertEqual(r.ui.clicks, [])
+
+    def test_mixed_remaining_attempts_follow_exact_preview_and_settlement(self):
+        plan = {"活动关卡H-1": 1, "活动关卡H-2": 2, "活动关卡H-3": 3}
+        preview = self.preview(plan)
+        r = self.runner([preview, preview, self.bulk((0, 0, 0)), frame(("活动关卡·首领", 155, 30))])
+        with patch("pcrscript.daily.event_sweep.time.sleep"):
+            HardSweep(r).settle(plan)
+        self.assertEqual(r.ui.clicks, ["挑战"])
+
+    def test_stale_remaining_counts_never_trigger_another_consumption(self):
+        plan = {f"活动关卡H-{i}": 3 for i in (1, 2, 3)}
+        r = self.runner([self.preview(plan), self.bulk()])
+        with self.assertRaisesRegex(EventUIError, "停止重复消费"):
+            HardSweep(r).settle(plan)
+        self.assertEqual(r.ui.clicks, ["挑战"])
+
+
 class StrategyTests(TestCase):
     def test_unknown_build_and_missing_unique_are_rejected(self):
         need = MemberRequirement("怜（新年）", 352, 38, 6, unique=True, skill_level=352)
@@ -260,6 +326,67 @@ class AvatarTests(TestCase):
 
 
 class WorkflowTests(TestCase):
+    def test_cleared_story_memoir_and_mission_entries_never_open_pages(self):
+        r = StoryEventRunner.__new__(StoryEventRunner)
+        s = fixture("event_home")
+        for name, (x1, y1, x2, y2) in (("stories", (692, 355, 738, 402)),
+                                      ("memoirs", (78, 253, 120, 301)), ("missions", (787, 3, 832, 45))):
+            s.image[y1:y2, x1:x2] = cv.imread(str(FIXTURES/f"{name}_clear.png"))
+        r.home = Mock(return_value=s)
+        r.log = Mock()
+        r.ui = Mock()
+        r.stories()
+        r.memoirs()
+        r.missions()
+        r.ui.click.assert_not_called()
+        r.ui.wait.assert_not_called()
+        r.ui.swipe.assert_not_called()
+
+    def test_zero_tickets_on_home_never_opens_exchange(self):
+        r = StoryEventRunner.__new__(StoryEventRunner)
+        r.home = Mock(return_value=frame(("0", 295, 357)))
+        r.ui = Mock()
+        r.log = Mock()
+        r.exchange()
+        r.ui.click.assert_not_called()
+
+    def test_main_quest_map_returns_to_adventure_before_checking_event(self):
+        r = StoryEventRunner.__new__(StoryEventRunner)
+        r.check_deadline = Mock()
+        r.log = Mock()
+        r.ui = ReplayUI([frame(("主线关卡", 110, 30)),
+                         frame(("主线关卡", 700, 240), ("剧情活动", 411, 420)),
+                         fixture("event_home")])
+        self.assertTrue(r.enter())
+        self.assertEqual(r.ui.clicks, [(32, 30), "剧情活动"])
+
+    def test_daily_login_receipt_is_closed_before_enter_or_home(self):
+        for method in ("enter", "home"):
+            with self.subTest(method=method):
+                r = StoryEventRunner.__new__(StoryEventRunner)
+                r.check_deadline = Mock()
+                r.log = Mock()
+                receipt = fixture("event_login_reward")
+                # OCR may also see labels behind the modal. Its close action
+                # must take priority over accepting that background as home.
+                receipt.items.extend(fixture("event_home").items)
+                r.ui = ReplayUI([receipt, fixture("event_home"), fixture("event_home")])
+                self.assertTrue(getattr(r, method)())
+                self.assertEqual(r.ui.clicks, ["关闭"])
+
+    def test_login_handler_does_not_accept_unrelated_dialogs(self):
+        r = StoryEventRunner.__new__(StoryEventRunner)
+        r.ui = ReplayUI([])
+        self.assertFalse(r.entry_dialog(frame(("购买体力", 480, 148), ("关闭", 480, 372))))
+        self.assertEqual(r.ui.clicks, [])
+
+    def test_login_receipt_missing_close_stops_without_blind_clicks(self):
+        r = StoryEventRunner.__new__(StoryEventRunner)
+        r.ui = ReplayUI([])
+        with self.assertRaisesRegex(EventUIError, "关闭按钮"):
+            r.entry_dialog(frame(("获得活动登录奖励", 480, 148)))
+        self.assertEqual(r.ui.clicks, [])
+
     def test_retreat_uses_battle_menu_and_stops_at_boss_details(self):
         ui = ReplayUI([frame(("btn_menu_text", 900, 25)), frame(("btn_giveup", 480, 300)),
                        frame(("btn_giveup_blue", 590, 390)), fixture("boss_plus")])
@@ -311,11 +438,11 @@ class WorkflowTests(TestCase):
         for name in ("sweep", "stories", "memoirs", "missions", "exchange"):
             setattr(r, name, Mock(side_effect=lambda name=name: sequence.append(name)))
         with TemporaryDirectory() as folder, patch("pcrscript.daily.event_battle.EventBattles") as battles:
-            battles.return_value.quest_catalog.return_value = {f"活动关卡H-{i}": 3 for i in (1, 2, 3)}
             battles.return_value.first_clear.side_effect = lambda: sequence.append("first_clear")
             battles.return_value.bosses.side_effect = lambda: sequence.append("bosses")
             r.ui = SimpleNamespace(output=Path(folder), save=Mock())
             self.assertEqual(r.run()["status"], "complete")
+            battles.assert_not_called()
         self.assertEqual(sequence, ["sweep", "stories", "memoirs", "missions", "exchange"])
 
     def test_cleared_bosses_never_start_a_replay(self):
@@ -328,21 +455,6 @@ class WorkflowTests(TestCase):
         battles.ui.click.assert_not_called()
         battles.ui.expect_click.assert_not_called()
 
-    def test_unfinished_first_day_defers_without_sweep_or_battle(self):
-        r = StoryEventRunner.__new__(StoryEventRunner)
-        r.options = {}
-        r.report = {"pending": [], "steps": [], "battles": []}
-        r.enter = Mock(return_value=True)
-        r.home = Mock()
-        r.log = Mock()
-        r.sweep = Mock()
-        with TemporaryDirectory() as folder, patch("pcrscript.daily.event_battle.EventBattles") as battles:
-            battles.return_value.quest_catalog.return_value = {"活动关卡H-1": 0}
-            r.ui = SimpleNamespace(output=Path(folder), save=Mock())
-            self.assertEqual(r.run()["status"], "deferred")
-            r.sweep.assert_not_called()
-            battles.return_value.first_clear.assert_not_called()
-            battles.return_value.bosses.assert_not_called()
 
 
 class DriverTests(TestCase):

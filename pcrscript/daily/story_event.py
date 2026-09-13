@@ -22,6 +22,20 @@ class StoryEventRunner:
         if time.monotonic() > self.deadline:
             raise EventUIError("活动任务达到总运行时间上限")
 
+    def entry_dialog(self, s):
+        """Dismiss the daily event login receipt, not an arbitrary reward modal."""
+        title_roi = (240, 110, 720, 185)
+        if not s.find("获得活动登录奖励", title_roi, exact=True):
+            return False
+        close = s.find("关闭", (350, 330, 615, 410), exact=True)
+        if close is None:
+            raise EventUIError("活动登录奖励弹窗的关闭按钮无法识别")
+        self.ui.save("event_login_reward", s)
+        self.ui.click(close)
+        self.ui.wait(lambda frame: not frame.find("获得活动登录奖励", title_roi, exact=True), "关闭活动登录奖励")
+        self.log("已关闭活动每日登录奖励弹窗")
+        return True
+
     def story_dialog(self, s):
         """Only story-specific controls, never a global 'OK' clicker."""
         if s.find("剧情梗概|跳过这个剧情|跳过剧情吗|跳过这个视频"):
@@ -54,6 +68,8 @@ class StoryEventRunner:
         for _ in range(90):
             self.check_deadline()
             s = self.ui.capture()
+            if self.entry_dialog(s):
+                continue
             if s.find("角色详情", (300, 0, 700, 70)):
                 self.ui.expect_click("确认", (320, 450, 650, 515), exact=True)
                 continue
@@ -73,6 +89,10 @@ class StoryEventRunner:
                 # and rebuild the plan from current counts, never blindly resume.
                 self.ui.expect_click("取消", (250, 440, 480, 520), exact=True)
             elif s.story_list or s.find("活动任务", (0, 0, 280, 65)):
+                self.ui.click((32, 30))
+            elif s.find("主线关卡", (45, 0, 240, 65), exact=True):
+                # The main-quest map has the same words as the adventure-menu
+                # card. Its missing event button does not mean no event exists.
                 self.ui.click((32, 30))
             elif s.find("主线关卡"):
                 entry = s.find("剧情活动", (0, 250, 500, 465))
@@ -100,6 +120,8 @@ class StoryEventRunner:
     def home(self):
         for _ in range(45):
             s = self.ui.capture()
+            if self.entry_dialog(s):
+                continue
             if s.event_home:
                 return s
             if s.find("角色详情", (300, 0, 700, 70)):
@@ -130,6 +152,9 @@ class StoryEventRunner:
 
     def stories(self):
         s = self.home()
+        if not s.notification((692, 355, 738, 402)):
+            self.log("活动剧情入口无未领取提示，跳过")
+            return
         self.ui.click(s.find("活动剧情", (650, 280, 960, 465)))
         self.ui.wait(lambda s: s.story_list, "活动剧情列表")
         read_count = 0
@@ -166,6 +191,9 @@ class StoryEventRunner:
                 self.ui.swipe((830, 150), (830, 435))
             elif s.event_home:
                 # Some events return home and unlock the next story there.
+                if not s.notification((692, 355, 738, 402)):
+                    self.log("活动剧情入口提示已清除")
+                    return
                 self.ui.click(s.find("活动剧情", (650, 280, 960, 465)))
             elif s.find("下载", (200, 300, 750, 480)) and s.find("剧情|语音"):
                 self.ui.expect_click("不下载|无语音|不含语音")
@@ -179,6 +207,9 @@ class StoryEventRunner:
 
     def missions(self):
         s = self.home()
+        if not s.notification((787, 3, 832, 45)):
+            self.log("活动任务入口无可领取提示，跳过")
+            return
         self.ui.click(s.find("任务", (700, 0, 840, 85), exact=True))
         self.ui.wait(lambda s: s.find("活动任务", (0, 0, 280, 65)), "活动任务")
         for tab in ("每日", "普通", "特别", "称号"):
@@ -203,6 +234,9 @@ class StoryEventRunner:
         s = self.home()
         entry = s.find("回忆录", (0, 220, 170, 355))
         if not entry:
+            return
+        if not s.notification((78, 253, 120, 301)):
+            self.log("回忆录入口无未领取提示，跳过")
             return
         self.ui.click(entry)
         idle = 0
@@ -254,12 +288,14 @@ class StoryEventRunner:
         raise EventUIError("回忆录达到步骤上限，已保存当前进度")
 
     def sweep(self, hard=True):
-        """Use the game's bulk sweeper, normalizing remembered selections first.
+        if hard:
+            from .event_sweep import HardSweep
+            return HardSweep(self).run()
+        return self.sweep_normal()
 
-        One stage per batch allows a short stamina balance to make useful
-        progress without buying stamina or accidentally selecting normal maps.
-        """
-        kind, cost = ("H", 20) if hard else ("N", 10)
+    def sweep_normal(self):
+        """Optional normal-stage sweeps using the player's remaining stamina."""
+        kind, cost = "N", 10
         finished = set()
         for batch in range(30):
             self.check_deadline()
@@ -284,8 +320,6 @@ class StoryEventRunner:
                     y = row.center[1]
                     attempts = s.find(r"\d+/\d+", (435, y, 495, min(y+48, 378)))
                     remaining = int(normalized(attempts.text).split("/")[0]) if attempts else None
-                    if hard and remaining is None:
-                        raise EventUIError(f"无法识别 {name} 剩余次数")
                     if remaining == 0:
                         finished.add(name)
                         continue
@@ -296,16 +330,16 @@ class StoryEventRunner:
                 self.ui.swipe((700, 340), (700, 150))
             if not selected:
                 self.ui.expect_click("取消", (460, 440, 710, 520), exact=True)
-                self.log("困难关卡今日次数已检查完毕" if hard else "未找到可扫荡普通关卡")
+                self.log("未找到可扫荡普通关卡")
                 return
             # Stamina is optional batching information, never a prerequisite.
             # If its digits are missing, request one sweep and let the game
             # decide affordability. Do not spend time retrying stamina OCR.
             stamina = s.number((270, 386, 335, 416))
-            count = min(selected[2] if hard else 99, stamina // cost) if stamina is not None else 1
+            count = min(99, stamina // cost) if stamina is not None else 1
             if count < 1:
                 self.ui.expect_click("取消", (460, 440, 710, 520), exact=True)
-                self.report["pending"].append(f"体力不足，尚有{'困难' if hard else '普通'}关卡可扫荡")
+                self.report["pending"].append("体力不足，尚有普通关卡可扫荡")
                 return
             self.ui.click((851, selected[1]+16))
             for _ in range(100):
@@ -333,8 +367,6 @@ class StoryEventRunner:
             if self.settle_sweep(selected[0], count, cost, selected[2], stamina) is False:
                 return
             self.log(f"系统扫荡 {selected[0]} × {count}")
-            if hard and count == selected[2]:
-                finished.add(selected[0])
         raise EventUIError("扫荡批次数达到上限")
 
     def settle_sweep(self, expected_name, expected_count, cost, remaining_before=None, stamina_before=None):
@@ -402,6 +434,9 @@ class StoryEventRunner:
 
     def exchange(self):
         s = self.home()
+        if s.number((260, 340, 315, 377)) == 0:
+            self.log("活动首页券余额为 0，跳过兑换")
+            return
         self.ui.click(s.find("报酬[交兑]换", (180, 300, 350, 460)))
         self.ui.wait(lambda s: s.find("报酬[交兑]换", (0, 0, 300, 65)), "活动兑换")
         before = None
@@ -447,17 +482,9 @@ class StoryEventRunner:
             if not self.enter():
                 self.report["status"] = "unavailable"
                 return self.report
-            self.home()
-            from .event_battle import EventBattles
-            battles = EventBattles(self)
-            if hard_chapter and not self.options.get("first_clear", False):
-                catalog = battles.quest_catalog()
-                if any(catalog.get(f"活动关卡H-{i}") != 3 for i in (1, 2, 3)):
-                    self.report["pending"].append("困难关卡尚未全部三星，首日处理暂缓；见 pending-validation.md")
-                    self.log(self.report["pending"][-1])
-                    self.report["status"] = "deferred"
-                    self.home()
-                    return self.report
+            if self.options.get("first_clear", False) or self.options.get("bosses", False):
+                from .event_battle import EventBattles
+                battles = EventBattles(self)
             if self.options.get("first_clear", False):
                 battles.first_clear()
             if self.options.get("bosses", False):
