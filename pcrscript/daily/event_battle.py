@@ -58,6 +58,8 @@ class EventCombat:
             self.ui.click(menu)
         for _ in range(15):
             s = self.ui.capture()
+            if s.find('WIN|战斗胜利|伤害报告') or self.match('btn_next_step', s):
+                return BattleResult('settled', '战斗已结束，取消撤退并核对结果')
             if s.event_quests or s.find("BOSS详情|关卡详情|队伍编组", (0, 0, 730, 70)):
                 self.r.log("已退出本次战斗："+reason)
                 return BattleResult("retreated", reason)
@@ -71,51 +73,76 @@ class EventCombat:
         self.ui.save("retreat_failed")
         raise EventUIError("无法确认战斗撤退，停止后续操作")
 
-    def run(self, party=None, order=None):
-        formation = self.ui.capture()
-        start = formation.find("战斗开始", (740, 390, 950, 510), exact=True)
-        if not formation.blue_button(start):
-            return BattleResult("blocked", "战斗开始按钮不可用，未消耗挑战次数")
-        self.ui.click(start)
+    @staticmethod
+    def paused_instant(screen, index):
+        x = round(306+87.5*index)
+        hsv = cv.cvtColor(screen.image[190:217, x+23:x+49], cv.COLOR_BGR2HSV)
+        return np.mean((hsv[:, :, 0] > 80) & (hsv[:, :, 0] < 110) &
+                       (hsv[:, :, 1] > 90) & (hsv[:, :, 2] > 160)) > .25
+
+    def configure_paused(self, party, order):
+        """Pause during setup so animations and stage stories cannot race SET."""
+        for _ in range(30):
+            s = self.ui.capture()
+            if s.find('进行中战斗') and s.find('主菜单'):
+                break
+            if s.find('WIN|战斗胜利|伤害报告'):
+                return False
+            menu = s.find('菜单', (840, 0, 960, 60), exact=True)
+            if menu:
+                self.ui.click(menu, delay=.2)
+            elif not self.r.story_dialog(s):
+                time.sleep(.3)
+        else:
+            raise EventUIError('无法暂停战斗核对SET，停止后续操作')
+        self.ui.save('battle_before_settings', s)
+        if party:
+            required = {normalized(m.name): m.instant for m in party.members}
+            if not order or len(order) != 5 or set(map(normalized, order)) != set(required):
+                raise EventUIError('SET对应角色顺序未核验')
+            for index, name in enumerate(order):
+                s = self.ui.capture()
+                if self.paused_instant(s, index) != required[normalized(name)]:
+                    self.ui.click((round(306+87.5*index), 237), delay=.2)
+                    s = self.ui.capture()
+                    if self.paused_instant(s, index) != required[normalized(name)]:
+                        raise EventUIError('暂停菜单内SET状态核验失败，保留暂停状态')
+        s = self.ui.capture()
+        if s.find('AUTO关闭', (400, 330, 550, 385)):
+            self.ui.click((480, 358))
+        s = self.ui.wait(lambda frame: frame.find('AUTO开启', (400, 330, 550, 385)), 'AUTO开启', timeout=5)
+        self.ui.save('battle_after_settings', s)
+        self.ui.expect_click('返回', (260, 405, 410, 465), exact=True)
+        return True
+
+    def run(self, party=None, order=None, resume=False):
+        if not resume:
+            formation = self.ui.capture()
+            start = formation.find("战斗开始", (740, 390, 950, 510), exact=True)
+            if not formation.blue_button(start):
+                return BattleResult("blocked", "战斗开始按钮不可用，未消耗挑战次数")
+            self.ui.click(start)
         deadline = time.monotonic()+self.r.options.get("battle_timeout", 220)
         started = None
         configured = False
         dead_frames = 0
         result = None
-        requirements = {normalized(m.name): m for m in party.members} if party else {}
         while time.monotonic() < deadline:
             self.r.check_deadline()
             s = self.ui.capture()
             if s.find("体力回复|体力恢复|购买体力"):
                 self.ui.expect_click("取消", (200, 300, 800, 510), exact=True)
                 return BattleResult("blocked", "体力不足")
-            in_battle = self.match("btn_menu_text", s)
+            if s.find('进行中战斗') and s.find('主菜单'):
+                started = started or time.monotonic()
+                configured = self.configure_paused(party, order)
+                continue
+            in_battle = self.match("btn_menu_text", s) or s.find(r"\d:\d{2}", (750, 0, 850, 55))
             if in_battle:
                 started = started or time.monotonic()
                 if not configured:
-                    auto = self.match("btn_auto", s)
-                    if auto:
-                        self.ui.click(auto, delay=.2)
-                    if party:
-                        # SET is a toggle. Verify its visible state before each
-                        # change instead of blindly toggling remembered values.
-                        for name, (x1, y1, x2, y2) in zip(order, self.portraits):
-                            current = self.ui.capture(ocr=False)
-                            x = (x1+x2)//2
-                            patch = current.image[382:407, x-35:x+35]
-                            hsv = cv.cvtColor(patch, cv.COLOR_BGR2HSV)
-                            enabled = float(np.mean((hsv[:, :, 0] > 12) & (hsv[:, :, 0] < 40)
-                                                    & (hsv[:, :, 1] > 110) & (hsv[:, :, 2] > 160))) > .15
-                            if enabled != requirements[normalized(name)].instant:
-                                self.ui.click((x, (y1+y2)//2), delay=.15)
-                                checked = self.ui.capture(ocr=False)
-                                patch = checked.image[382:407, x-35:x+35]
-                                hsv = cv.cvtColor(patch, cv.COLOR_BGR2HSV)
-                                now = float(np.mean((hsv[:, :, 0] > 12) & (hsv[:, :, 0] < 40)
-                                                    & (hsv[:, :, 1] > 110) & (hsv[:, :, 2] > 160))) > .15
-                                if now != requirements[normalized(name)].instant:
-                                    return self.retreat("SET 状态未能确认，请检查 UB 即发动模式设置")
-                    configured = True
+                    configured = self.configure_paused(party, order)
+                    continue
                 # Require multiple stable frames; UB flashes alone must not
                 # count as a KO. This uses the existing script's portrait cue.
                 if time.monotonic()-started > 8:
@@ -135,13 +162,14 @@ class EventCombat:
                 result = BattleResult("settled", "战斗结算，待核对首领状态")
             elif s.find("WIN|胜利|获得经验|获得玛那") or self.match("btn_next_step", s):
                 result = result or BattleResult("settled", "战斗结算，待核对关卡状态")
-            if s.event_quests or (started and s.find("BOSS详情|关卡详情", (0, 0, 730, 70))):
+            if (s.event_quests or (started and s.find("BOSS详情|关卡详情", (0, 0, 730, 70)))
+                    or (started and getattr(self.r, 'combat_return', lambda frame: False)(s))):
                 return result or BattleResult("settled", "已返回关卡，待核对进度")
             if result:
                 button = self.match("btn_next_step", s) or s.find("下一步|确认|确定|关闭", (250, 330, 950, 525), exact=True)
                 if button:
                     self.ui.click(button)
-            elif not in_battle and self.r.story_dialog(s):
+            elif not in_battle and (getattr(self.r, 'combat_dialog', lambda frame: False)(s) or self.r.story_dialog(s)):
                 continue
             elif s.find("战斗设定", (250, 0, 720, 100)):
                 self.ui.expect_click("确认|确定", (400, 350, 900, 510), exact=True)
@@ -244,7 +272,7 @@ class EventBattles:
                 else:
                     if mode is None:
                         raise EventUIError("未能确认特别战斗当前模式")
-                    parties = load_parties(self.r.options.get("teams", "config/event_teams.yml"), title, difficulty, mode)
+                    parties = load_parties(self.r.options.get("teams", "cache/game/strategies/event_teams.yml"), title, difficulty, mode)
                     available = [p for p in parties if attempts[(mode, p.name)] < p.max_attempts]
                     if not available:
                         self.r.report["pending"].append(f"{difficulty} 模式{mode} 无可用达标队伍；请查看 roster.json/作业配置")

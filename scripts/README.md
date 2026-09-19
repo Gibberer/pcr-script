@@ -6,12 +6,13 @@
 | `scripts/daily/all.bat` | 完整日常定时入口，自动设置工作目录和本地 Python，无暂停 | 是 |
 | `scripts/daily/story_event.py` | 单独执行固化的剧情活动日常 | 是 |
 | `scripts/daily/story_event.bat` | 单独活动的 Windows 定时入口，无暂停 | 是 |
+| `scripts/daily/revival_event.py` / `.bat` | 情报识别复刻，每期首通及领奖一次，完成后跳过 | 是 |
 | `scripts/daily/gifts.py` | 单独领取礼物，自动恢复特别装备满仓 | 是 |
 | `scripts/agent/game.py` | 截图、OCR、后台点击/输入、配队审查 | 否 |
 | `scripts/agent/update_avatars.py` | 维护日服头像索引 | 否，按需更新 |
 | `scripts/_game.py` | 共用启动配置，无任务动作 | 不是运行入口 |
 
-共享界面能力在 `pcrscript/game_ui/`；活动流程在 `pcrscript/daily/`；作业在 `config/`；Agent 知识在 `docs/game-knowledge/`。
+共享界面能力在 `pcrscript/game_ui/`；活动流程在 `pcrscript/daily/`；真实作业为本地运行数据，存 `cache/game/strategies/`，不提交；Agent 知识在 `docs/game-knowledge/`。Agent 工具仅用于分析，正式入口不得依赖先运行它们。当前头像与队伍方案的正式自动获取链路仍待实现，不能将已有缓存下的成功当作端到端完成。
 
 ```powershell
 # 日常；也可继续运行原来的 daily_task.py

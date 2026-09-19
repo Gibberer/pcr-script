@@ -1,4 +1,4 @@
-"""Redesigned story-event workflow. Legacy map events are detected and skipped."""
+"""List-layout story-event workflow, reusable for new and revival editions."""
 import json
 import re
 import time
@@ -115,7 +115,7 @@ class StoryEventRunner:
             else:
                 time.sleep(1)
         self.ui.save("unrecognized_entry")
-        raise EventUIError("无法进入新版剧情活动；复刻旧地图不使用新版坐标")
+        raise EventUIError("无法进入列表式剧情活动；地图布局不使用列表坐标")
 
     def home(self):
         for _ in range(45):

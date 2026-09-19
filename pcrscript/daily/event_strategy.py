@@ -73,6 +73,10 @@ class EventParty:
 
 
 def load_parties(path, event_title, difficulty, mode):
+    # Local runtime data; automatic acquisition upstream is still pending.
+    # Absence must block combat rather than require a shipped real-event file.
+    if not Path(path).exists():
+        return []
     data = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
     matches = [v for v in data.get("events", []) if
                re.search(v["match"], normalized(event_title), re.IGNORECASE)]

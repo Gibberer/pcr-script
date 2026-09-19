@@ -294,10 +294,20 @@ class StrategyTests(TestCase):
         self.assertTrue(readiness(MemberRequirement("怜（新年）", 1, 1, 1), CharacterStatus("怜", 352, 38, 6)))
 
     def test_unknown_event_never_reuses_party(self):
-        self.assertEqual(load_parties("config/event_teams.yml", "另外一期活动", "special_plus", 1), [])
-        parties = load_parties("config/event_teams.yml", "[I Wish]后传 And I will", "special_plus", 1)
-        self.assertTrue(parties)
-        self.assertTrue(all(len(p.members) == 5 and p.source.startswith("https://") for p in parties))
+        # Synthetic schema fixture, independent of private runtime caches.
+        with TemporaryDirectory() as root:
+            path = Path(root)/'teams.json'
+            self.assertEqual(load_parties(path, '测试活动', 'special_plus', 1), [])
+            path.write_text(json.dumps({'events':[{'match':'测试活动','special_plus':[{
+                'name':'测试队伍','source':'https://example.invalid/strategy','modes':[1],
+                'members':[{'name':f'测试角色{i}','level':1,'rank':1,'stars':1,
+                            'unique':False,'unique2':False} for i in range(5)]
+            }]}]}),encoding='utf-8')
+            self.assertEqual(load_parties(path, '另外一期活动', 'special_plus', 1), [])
+            self.assertEqual(load_parties(path, '测试活动', 'special_plus', 2), [])
+            parties = load_parties(path, '测试活动', 'special_plus', 1)
+            self.assertTrue(parties)
+            self.assertTrue(all(len(p.members) == 5 and p.source.startswith('https://') for p in parties))
         self.assertNotIn("unique_level", MemberRequirement.__dataclass_fields__)
 
     def test_stale_calendar_preserves_daily_and_first_clear_arguments(self):

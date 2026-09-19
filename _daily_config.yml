@@ -9,7 +9,7 @@ Accounts: #多账号相关：存账号信息
 Extra:
   dnpath: '' #雷电模拟器路径，例如：F:\leidian\LDPlayer9
 StoryEvent:
-  teams: config/event_teams.yml # 每期活动按标题匹配作业；未知活动不复用旧队伍
+  teams: cache/game/strategies/event_teams.yml # 每期活动按标题匹配作业；未知活动不复用旧队伍
   first_clear: false # 首日验证待办，日常不执行首通
   bosses: false # 未通关首领留待活动首日实测
   stories: true
@@ -19,6 +19,11 @@ StoryEvent:
   max_boss_attempts: 10
   battle_timeout: 220
   timeout: 1800
+RevivalEvent:
+  account_key: default # 同一账号保持不变；切换账号时使用不同值
+  teams: cache/game/strategies/revival_teams.yml
+  timeout: 2400
+  battle_timeout: 220
 Gift:
   auto_dismantle: true # 满仓时使用游戏已有的自动分解设置，不改筛选规则
   free_slots: 750 # 目标空位，允许 500～1000
@@ -53,6 +58,10 @@ Task: #配置执行任务,配置任务名称，如果需要传入参数在下面
       - tohomepage
     -
       - get_quest_reward #领取任务奖励（获取赠送的体力）
+    -
+      - tohomepage
+    -
+      - revival_event_once # 复刻情报筛选；每期完成后自动跳过
     -
       - tohomepage
     -

@@ -35,6 +35,19 @@ class EquipmentBadges:
             orb_scores.append(max(float(cv.matchTemplate(area, t, cv.TM_CCOEFF_NORMED).max()) for t in self.orbs))
         if min(orb_scores[:2]) >= .85 and orb_scores[2] >= .60:
             return False, False
+        # Filled red/blue/yellow orbs have the same geometry but their portrait
+        # backgrounds can lower grayscale correlation (Violet, 2026-09-19).
+        # Require all three colors at the information-frame positions; numeric
+        # star frames and sword+shifted-orb frames cannot satisfy this pattern.
+        hsv = cv.cvtColor(card, cv.COLOR_BGR2HSV)
+        expected = ((13, lambda h: (h < 8) | (h > 168)),
+                    (22, lambda h: (h > 100) & (h < 125)),
+                    (31, lambda h: (h >= 12) & (h < 35)))
+        if all(np.mean(check(hsv[87:90, x-1:x+2, 0]) &
+                       (hsv[87:90, x-1:x+2, 1] > 90) &
+                       (hsv[87:90, x-1:x+2, 2] > 150)) >= .85
+               for x, check in expected):
+            return False, False
         return None
 
     def observe(self, ui, rectangle, frames=12):

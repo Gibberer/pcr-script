@@ -31,7 +31,7 @@ def main():
         if not runner.enter():
             raise SystemExit("当前没有可审查的新版剧情活动")
         title = runner.home().text((0, 160, 940, 460))
-        parties = load_parties(runner.options.get("teams", "config/event_teams.yml"), title, "special_plus", 1)
+        parties = load_parties(runner.options.get("teams", "cache/game/strategies/event_teams.yml"), title, "special_plus", 1)
         if not parties:
             raise SystemExit("本活动没有可审查的队伍配置")
         runner.quests(bosses=True)

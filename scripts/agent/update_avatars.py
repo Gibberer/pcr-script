@@ -32,7 +32,7 @@ SOURCE = "https://redive.estertion.win/icon/unit/"
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--all", action="store_true")
-    parser.add_argument("--teams", default="config/event_teams.yml")
+    parser.add_argument("--teams", default="cache/game/strategies/event_teams.yml")
     parser.add_argument("--database", default="cache/redive_cn.db")
     parser.add_argument("--icons", default="cache/character")
     parser.add_argument("--output", default="cache/game/avatars")

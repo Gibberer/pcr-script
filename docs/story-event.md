@@ -1,6 +1,26 @@
 # 新版剧情活动
 
-`campaign_clean` 默认执行新版活动的重复日日常：多选三个困难关卡一键扫荡，首页有未领取提示才进入剧情/回忆录和活动任务，最后兑换活动券。首通与未通关首领暂时关闭，等待用户在新活动首日交付实测。每天不遍历关卡核对首通；困难扫荡尚未开放时记录原因并继续领奖。旧地图复刻尚未适配。跨会话接续见 [等待验证的场景](game-knowledge/pending-validation.md)。
+**实现边界纠正（2026-09-19）：** 正式程序应自动获取/更新头像、自动获取并校验当期队伍方案，Agent 仅用于分析验证。当前实现仍消费本地预备索引与方案，这两条自动获取链路尚待实现；本期人工分析、分段实战及有缓存运行不能作为端到端完成证明。真实方案已迁到忽略的 `cache/game/strategies/`，不作为仓库配置分发。下文中的本地方案、头像维护脚本描述现状，不是正式运行应要求的人工前置步骤。
+
+`campaign_clean` 默认执行列表式活动的重复日日常：多选三个困难关卡一键扫荡，首页有未领取提示才进入剧情/回忆录和活动任务，最后兑换活动券。首通与未通关首领暂时关闭，等待用户在新活动首日交付实测。每天不遍历关卡核对首通；困难扫荡尚未开放时记录原因并继续领奖。复刻由独立的一次性任务处理，见下文。跨会话接续见 [等待验证的场景](game-knowledge/pending-validation.md)。
+
+## 复刻完整一次任务
+
+任务名 `revival_event_once`，已加入配置示例。独立入口：
+
+```powershell
+./.venv/Scripts/python.exe -X utf8 scripts/daily/revival_event.py
+```
+
+先通过活动情报的 `original_event_id > 0` 获取当期复刻及开放时间，再从冒险页的“复刻”进入。复刻身份不决定 UI 布局；实测地图布局走独立流程，未来列表式复刻复用列表流程（尚待真实活动验证）。
+
+本期地图活动“幻惑的妖精”包含普通 10 关、困难 5 关、普通/困难/高难/SP 首领、剧情与水都回忆、四类任务和讨伐证兑换。SP 完成以“表演赛”解锁核验，不重复练习。兑换逐批核验次数、消费及余额，只在奖池已全部抽空时切换下一轮，最后确认余额为零。
+
+`RevivalEvent.account_key` 用于账号隔离，同一账号保持不变，切换游戏账号必须换值。完成回执保存在 `cache/daily/revival_state/`，按账号、活动 ID 和开放时间隔离。完整成功后才写入完成；后续执行直接跳过，未完成则保留原因供接续。独立入口在显式配置账号标识时，可在枚举模拟器前跳过已完成活动。运行报告在 `cache/daily/revival_event/report.json`。
+
+高难/SP 必须匹配 `cache/game/strategies/revival_teams.yml` 中当期来源作业，并实时核验培养状态。困难首领的当前队伍试打是本期用户单次授权，只有本地配置 `hard_trial_event_id: 10171` 启用；在消费前持久化已尝试标记，失败不再试。该授权不随活动迁移。其他地图活动缺少关卡与特殊剧情记录时保留待办，不套用本期配置。实测证据与页面规律见 [复刻知识](game-knowledge/revival-events.md)。
+
+复刻离线回归：`./.venv/Scripts/python.exe -X utf8 -m unittest discover -s test -p test_revival.py -v`。共用活动回归仍使用 `test_event.py`。
 
 ## 安装与运行
 
@@ -9,7 +29,6 @@
 ```powershell
 python -m venv .venv
 ./.venv/Scripts/python.exe -m pip install -r requirements-event.txt
-./.venv/Scripts/python.exe -X utf8 scripts/agent/update_avatars.py --all
 ./.venv/Scripts/python.exe -X utf8 scripts/daily/story_event.py
 ```
 
@@ -19,7 +38,7 @@ python -m venv .venv
 
 ```yaml
 StoryEvent:
-  teams: config/event_teams.yml
+  teams: cache/game/strategies/event_teams.yml
   first_clear: false # 等待新活动首日实测
   bosses: false # 等待未通关首领实战验证
   stories: true
@@ -54,7 +73,7 @@ Task:
 
 ## 首领作业与失败处理
 
-`config/event_teams.yml` 按活动标题、难度和模式匹配，包含来源、五名角色要求、SET 设置及尝试次数。当前作业对应 “I Wish 后传 And I will” 的霸瞳皇帝，参考 [SP 作业](https://gamewith.jp/pricone-re/article/show/516586) 和 [SP＋作业](https://gamewith.jp/pricone-re/article/show/516593)，包含替换队。后续不同活动需要添加对应作业，未知首领不会套用旧队伍。
+`cache/game/strategies/event_teams.yml` 按活动标题、难度和模式匹配，包含来源、五名角色要求、SET 设置及尝试次数。当前作业对应 “I Wish 后传 And I will” 的霸瞳皇帝，参考 [SP 作业](https://gamewith.jp/pricone-re/article/show/516586) 和 [SP＋作业](https://gamewith.jp/pricone-re/article/show/516593)，包含替换队。后续不同活动需要添加对应作业，未知首领不会套用旧队伍。
 
 来源的专武等级、骑士强化、装备细节可能与本账号不同；仅检查专武开启不会保证来源的刀数。缺人、培养不达标或识别不确定时尝试备用队；无可用队则记录待处理并继续领奖。减员连续确认后从战斗菜单撤退；单场和整体均有限时、限次。SP 的结算和通关分开判断，回到首领页面后核实通关/模式，已通关首领每天跳过。不会点击首领详情中会重置整场进度的“放弃”。
 

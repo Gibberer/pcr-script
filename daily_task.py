@@ -62,6 +62,7 @@ def run_script(config, use_adb):
     robot = Robot(drivers[0])
     robot.story_event_options = config.get("StoryEvent", {})
     robot.gift_options = config.get("Gift", {})
+    robot.revival_event_options = config.get("RevivalEvent", {})
     news = fetch_event_news()
     print("当前进行的活动:")
     for value in news.__dict__.values():

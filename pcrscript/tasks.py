@@ -200,6 +200,7 @@ class EventNews:
     hatsune: Optional[Event] = None  # 剧情活动
     clanBattle: Optional[Event] = None  # 公会战
     secretDungeon: Optional[Event] = None # 特别地下城
+    revival: Optional[Event] = None # 单独查询复刻，避免与同期新活动互相覆盖
 
 class TimeLimitTask(BaseTask):
     '''
@@ -612,7 +613,26 @@ class CampaignRewardExchange(TimeLimitTask):
         return StoryEventRunner(self.robot, options).run(False, False)
 
 
-@register("clear_story")    
+@register("revival_event_once")
+class RevivalEventOnce(TimeLimitTask):
+    """活动情报筛选复刻；每个账号每期仅完整执行一次。"""
+    @staticmethod
+    def valid(event_news: EventNews, args=None):
+        event = event_news.revival
+        if event and RevivalEventOnce.event_valid(event):
+            return RevivalEventOnce, [event]
+
+    def run(self, event=None):
+        if event is None:
+            from .news import fetch_event_news
+            event = fetch_event_news().revival
+        if not event or not self.event_valid(event):
+            return {'status': 'unavailable'}
+        from .daily.revival_event import RevivalEventRunner
+        return RevivalEventRunner(self.robot, event, getattr(self.robot, 'revival_event_options', {})).run()
+
+
+@register("clear_story")
 class ClearStory(BaseTask):
 
     def __init__(self, robot: 'Robot'):
