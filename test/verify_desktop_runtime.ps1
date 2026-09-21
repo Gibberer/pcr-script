@@ -74,4 +74,3 @@ foreach ($included in @('scripts/agent-only.txt', 'docs/notes.txt', 'desktop/gui
     if (-not (Test-Path (Join-Path $fullTarget $included))) { throw "Full download missing: $included" }
 }
 Write-Output "Full repository download and GUI verification passed: $fullTarget"
-

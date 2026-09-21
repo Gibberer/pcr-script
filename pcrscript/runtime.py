@@ -131,4 +131,3 @@ def run_script(config: dict[str, Any], use_adb: bool = False) -> None:
     # 对于日常脚本不需要切换账号（提供账号），只是返回游戏欢迎页面
     robot.changeaccount()
     robot.work(task_list)
-

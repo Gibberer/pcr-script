@@ -23,11 +23,11 @@ dotnet build desktop/PcrDesktop/PcrDesktop.csproj -c Release -o artifacts/gui -p
 
 本地 .NET SDK 在忽略目录 cache/build/dotnet；可用它替换 dotnet 命令，并设置 DOTNET_CLI_HOME=cache/build/cli、NUGET_PACKAGES=cache/build/nuget。离线 UI 验证需要正常 Windows 权限以终止测试自建的超时子进程，沙箱可能拒绝 taskkill；无需管理员操作模拟器。
 
-本地证据 artifacts/gui-final-smoke.png*，回归日志 cache/build/final-tests.log。最终本地包 artifacts/PcrDesktop-win-x64-final.zip（不提交产物）。GitHub workflow 名 Windows GUI，上传 PcrDesktop-win-x64 和 GUI-smoke-evidence；只读仓库权限，运行文件限5 MB。
+本地证据 artifacts/gui-final-smoke.png*，回归日志 cache/build/final-tests.log。最终 GUI 从 GitHub 已推送分支实际下载核心文件并运行接口/离屏验证通过，证据 artifacts/gui-github-smoke.png*，仅检出 pcrscript、images、requirements.txt（另生成本地 cache）。最终本地包 artifacts/PcrDesktop-win-x64-final.zip（不提交产物）。GitHub workflow 名 Windows GUI，上传 PcrDesktop-win-x64 和 GUI-smoke-evidence；只读仓库权限，运行文件限5 MB。
 
 ## 发布状态
 
-分支 codex/agent-driven-story-events。本次提交推送后核对同一提交的 workflow 成功状态、全部步骤和 GUI ZIP/SHA256 产物，再补充构建链接。本段待云端结果回填。
+分支 codex/agent-driven-story-events。功能提交 db39c1818441be8c610c1f122c1987c29ef5fe7c 已推送。首次未触发因仓库 Actions 未启用；用户已启用，后续收尾提交重新触发。待核对 workflow 成功状态、全部步骤和 GUI ZIP/SHA256 产物后回填构建链接。
 
 ## 留给后续 Agent
 
