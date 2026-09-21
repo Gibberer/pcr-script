@@ -22,12 +22,14 @@ def main():
     parser.add_argument("--input", help="向已聚焦的游戏输入框写入文本")
     parser.add_argument("--name", default="inspect")
     args = parser.parse_args()
+    from pcrscript.run_session import assert_inspection_allowed
+    assert_inspection_allowed()
     runner = runner_from_config(args.config, "cache/agent/story_event")
     if args.audit:
         if args.click or args.swipe or args.input:
             parser.error("配队审查不能与手动探查动作同时使用")
-        from pcrscript.daily.event_battle import EventBattles
-        from pcrscript.daily.event_strategy import load_parties
+        from pcrscript.tasks.event_battle import EventBattles
+        from pcrscript.tasks.event_strategy import load_parties
         if not runner.enter():
             raise SystemExit("当前没有可审查的新版剧情活动")
         title = runner.home().text((0, 160, 940, 460))

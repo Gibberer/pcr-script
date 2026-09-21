@@ -60,9 +60,7 @@ def run_script(config, use_adb):
         return
     # 使用第一个设备
     robot = Robot(drivers[0])
-    robot.story_event_options = config.get("StoryEvent", {})
-    robot.gift_options = config.get("Gift", {})
-    robot.revival_event_options = config.get("RevivalEvent", {})
+    robot.configure(config)
     news = fetch_event_news()
     print("当前进行的活动:")
     for value in news.__dict__.values():
@@ -75,7 +73,7 @@ def run_script(config, use_adb):
     robot.changeaccount()
     robot.work(task_list)
 
-if __name__ == "__main__":
+def main():
     with open("daily_config.yml", encoding="utf-8") as f:
         config = yaml.load(f, Loader=yaml.FullLoader)
     dnpath = config["Extra"]["dnpath"]
@@ -94,3 +92,9 @@ if __name__ == "__main__":
         time.sleep(30)
         run_script(config, True)
         
+
+
+if __name__ == "__main__":
+    from pcrscript.run_session import RunSession
+    with RunSession("daily"):
+        main()

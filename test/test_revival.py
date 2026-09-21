@@ -10,16 +10,16 @@ import numpy as np
 
 from pcrscript.news import _query_revival_event, _iso_datetime
 from pcrscript.tasks import Event, EventNews, RevivalEventOnce
-from pcrscript.daily.revival_state import RevivalState
+from pcrscript.tasks.revival_state import RevivalState
 from pcrscript.game_ui.event_layout import event_layout
 from test_event import frame
 from test_event import ReplayUI
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
-from pcrscript.daily.event_battle import EventCombat
+from pcrscript.tasks.event_battle import EventCombat
 from pcrscript.game_ui.equipment import EquipmentBadges
-from pcrscript.daily.revival_map import RevivalMap
-from pcrscript.daily.revival_event import RevivalEventRunner
+from pcrscript.tasks.revival_map import RevivalMap
+from pcrscript.tasks.task_revival_event import RevivalEventOnce
 from pcrscript.game_ui.screen import EventUIError
 
 
@@ -30,7 +30,7 @@ class RevivalTests(unittest.TestCase):
             RevivalState(root, 'a', event).save({'status':'complete'})
             robot = SimpleNamespace(driver=Mock())
             robot.driver.get_screen_size.return_value = (960,540)
-            runner = RevivalEventRunner(robot,event,{'account_key':'a','state_dir':root,'output':root})
+            runner = RevivalEventOnce(robot,event,{'account_key':'a','state_dir':root,'output':root})
             runner.enter = Mock(side_effect=AssertionError('completed task must not enter game'))
             self.assertEqual(runner.run()['status'],'already_complete')
 
@@ -40,11 +40,11 @@ class RevivalTests(unittest.TestCase):
         with TemporaryDirectory() as root:
             robot = SimpleNamespace(driver=Mock())
             robot.driver.get_screen_size.return_value = (960,540)
-            runner = RevivalEventRunner(robot,event,{'account_key':'a','state_dir':root,'output':root})
+            runner = RevivalEventOnce(robot,event,{'account_key':'a','state_dir':root,'output':root})
             runner.enter = Mock(side_effect=lambda: setattr(runner,'layout','list'))
             for name in ('stories','memoirs','missions','exchange'):
                 setattr(runner,name,Mock())
-            with patch('pcrscript.daily.event_battle.EventBattles') as battles:
+            with patch('pcrscript.tasks.event_battle.EventBattles') as battles:
                 battles.return_value.bosses.side_effect = lambda: runner.report['pending'].append('缺少当期作业')
                 report = runner.run()
             self.assertEqual(report['status'],'partial')
@@ -97,7 +97,7 @@ class RevivalTests(unittest.TestCase):
         flow.special_complete = Mock(return_value=False)
         flow.boss_detail = Mock(return_value=frame(('特别难度/阶段1',320,45)))
         flow.home = Mock()
-        with patch('pcrscript.daily.revival_map.load_parties',return_value=[]):
+        with patch('pcrscript.tasks.revival_map.load_parties',return_value=[]):
             flow.sourced_boss('特别','special')
         ui.number.assert_not_called()
         self.assertTrue(flow.r.report['pending'])
@@ -106,7 +106,7 @@ class RevivalTests(unittest.TestCase):
         connecting = self.exchange_frame(184)
         connecting.items.extend(frame(('正在进行数据连接',800,25)).items)
         flow, ui = self.exchange_runner([self.exchange_frame(184),connecting,self.exchange_frame(84,84),self.exchange_frame(0)])
-        with patch('pcrscript.daily.revival_map.time.sleep'):
+        with patch('pcrscript.tasks.revival_map.time.sleep'):
             flow.exchange(already_open=True)
         self.assertEqual(ui.clicks,['100次交换','84次交换'])
 

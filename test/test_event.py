@@ -10,11 +10,11 @@ import cv2 as cv
 import numpy as np
 
 from pcrscript.game_ui.screen import EventScreen, TextBox, EventUIError, EventUI
-from pcrscript.daily.event_battle import boss_cleared, boss_mode, quest_stars, EventBattles, EventCombat
-from pcrscript.daily.event_formation import count_stars
-from pcrscript.daily.event_strategy import MemberRequirement, CharacterStatus, readiness, load_parties
-from pcrscript.daily.story_event import StoryEventRunner
-from pcrscript.daily.event_sweep import HardSweep
+from pcrscript.tasks.event_battle import boss_cleared, boss_mode, quest_stars, EventBattles, EventCombat
+from pcrscript.tasks.event_formation import count_stars
+from pcrscript.tasks.event_strategy import MemberRequirement, CharacterStatus, readiness, load_parties
+from pcrscript.tasks.task_story_event import CampaignClean
+from pcrscript.tasks.event_sweep import HardSweep
 from pcrscript.driver import DNDriver, ADBDriver
 from pcrscript.simulator import DNSimulator
 from pcrscript.tasks import CampaignClean, ClearCampaignFirstTime, CampaignRewardExchange
@@ -133,7 +133,7 @@ class EventRecognitionTests(TestCase):
 
 class SweepReplayTests(TestCase):
     def test_normal_settlement_without_stamina_stops_sweeping_without_raising(self):
-        r = StoryEventRunner.__new__(StoryEventRunner)
+        r = CampaignClean.__new__(CampaignClean)
         r.report = {"pending": []}
         bulk = frame(("关卡一览", 480, 40), ("活动关卡N-10", 112, 158), ("取消", 582, 480))
         r.ui = ReplayUI([self.confirm("活动关卡N-10", "20"), bulk, frame(("活动关卡·首领", 155, 30))])
@@ -142,9 +142,9 @@ class SweepReplayTests(TestCase):
         self.assertEqual(r.ui.clicks, ["挑战", "取消"])
 
     def run_replay(self, frames, name="活动关卡H-3", count=2, remaining=3):
-        r = StoryEventRunner.__new__(StoryEventRunner)
+        r = CampaignClean.__new__(CampaignClean)
         r.ui = ReplayUI(frames)
-        with patch("pcrscript.daily.story_event.time.sleep"):
+        with patch("pcrscript.tasks.task_story_event.time.sleep"):
             r.settle_sweep(name, count, 20, remaining, 58)
         return r.ui.clicks
 
@@ -260,7 +260,7 @@ class HardBulkTests(TestCase):
         plan = {"活动关卡H-1": 1, "活动关卡H-2": 2, "活动关卡H-3": 3}
         preview = self.preview(plan)
         r = self.runner([preview, preview, self.bulk((0, 0, 0)), frame(("活动关卡·首领", 155, 30))])
-        with patch("pcrscript.daily.event_sweep.time.sleep"):
+        with patch("pcrscript.tasks.event_sweep.time.sleep"):
             HardSweep(r).settle(plan)
         self.assertEqual(r.ui.clicks, ["挑战"])
 
@@ -337,7 +337,7 @@ class AvatarTests(TestCase):
 
 class WorkflowTests(TestCase):
     def test_cleared_story_memoir_and_mission_entries_never_open_pages(self):
-        r = StoryEventRunner.__new__(StoryEventRunner)
+        r = CampaignClean.__new__(CampaignClean)
         s = fixture("event_home")
         for name, (x1, y1, x2, y2) in (("stories", (692, 355, 738, 402)),
                                       ("memoirs", (78, 253, 120, 301)), ("missions", (787, 3, 832, 45))):
@@ -353,7 +353,7 @@ class WorkflowTests(TestCase):
         r.ui.swipe.assert_not_called()
 
     def test_zero_tickets_on_home_never_opens_exchange(self):
-        r = StoryEventRunner.__new__(StoryEventRunner)
+        r = CampaignClean.__new__(CampaignClean)
         r.home = Mock(return_value=frame(("0", 295, 357)))
         r.ui = Mock()
         r.log = Mock()
@@ -361,7 +361,7 @@ class WorkflowTests(TestCase):
         r.ui.click.assert_not_called()
 
     def test_main_quest_map_returns_to_adventure_before_checking_event(self):
-        r = StoryEventRunner.__new__(StoryEventRunner)
+        r = CampaignClean.__new__(CampaignClean)
         r.check_deadline = Mock()
         r.log = Mock()
         r.ui = ReplayUI([frame(("主线关卡", 110, 30)),
@@ -373,7 +373,7 @@ class WorkflowTests(TestCase):
     def test_daily_login_receipt_is_closed_before_enter_or_home(self):
         for method in ("enter", "home"):
             with self.subTest(method=method):
-                r = StoryEventRunner.__new__(StoryEventRunner)
+                r = CampaignClean.__new__(CampaignClean)
                 r.check_deadline = Mock()
                 r.log = Mock()
                 receipt = fixture("event_login_reward")
@@ -385,13 +385,13 @@ class WorkflowTests(TestCase):
                 self.assertEqual(r.ui.clicks, ["关闭"])
 
     def test_login_handler_does_not_accept_unrelated_dialogs(self):
-        r = StoryEventRunner.__new__(StoryEventRunner)
+        r = CampaignClean.__new__(CampaignClean)
         r.ui = ReplayUI([])
         self.assertFalse(r.entry_dialog(frame(("购买体力", 480, 148), ("关闭", 480, 372))))
         self.assertEqual(r.ui.clicks, [])
 
     def test_login_receipt_missing_close_stops_without_blind_clicks(self):
-        r = StoryEventRunner.__new__(StoryEventRunner)
+        r = CampaignClean.__new__(CampaignClean)
         r.ui = ReplayUI([])
         with self.assertRaisesRegex(EventUIError, "关闭按钮"):
             r.entry_dialog(frame(("获得活动登录奖励", 480, 148)))
@@ -415,14 +415,14 @@ class WorkflowTests(TestCase):
         self.assertEqual(combat.ui.clicks, [])
 
     def test_boss_detail_cancel_uses_the_left_aligned_title(self):
-        r = StoryEventRunner.__new__(StoryEventRunner)
+        r = CampaignClean.__new__(CampaignClean)
         r.ui = ReplayUI([fixture("boss_plus"), fixture("event_home")])
         r.ui.expect_click = Mock()
         self.assertTrue(r.home().event_home)
         r.ui.expect_click.assert_called_once_with("取消", (550, 420, 950, 520), exact=True)
 
     def test_old_event_layout_is_skipped_without_new_layout_clicks(self):
-        r = StoryEventRunner.__new__(StoryEventRunner)
+        r = CampaignClean.__new__(CampaignClean)
         r.check_deadline = Mock()
         r.log = Mock()
         r.ui = ReplayUI([frame(("活动剧情", 810, 430), ("报酬交换", 270, 415))])
@@ -430,16 +430,16 @@ class WorkflowTests(TestCase):
         self.assertEqual(r.ui.clicks, [])
 
     def test_absent_event_entry_is_checked_on_three_frames(self):
-        r = StoryEventRunner.__new__(StoryEventRunner)
+        r = CampaignClean.__new__(CampaignClean)
         r.check_deadline = Mock()
         r.log = Mock()
         r.ui = ReplayUI([frame(("主线关卡", 700, 240)) for _ in range(3)])
-        with patch("pcrscript.daily.story_event.time.sleep"):
+        with patch("pcrscript.tasks.task_story_event.time.sleep"):
             self.assertFalse(r.enter())
         self.assertEqual(r.ui.clicks, [])
 
     def test_daily_missions_precede_exchange_and_follow_sweep(self):
-        r = StoryEventRunner.__new__(StoryEventRunner)
+        r = CampaignClean.__new__(CampaignClean)
         r.options = {}
         r.report = {"pending": [], "steps": [], "battles": []}
         r.enter = Mock(return_value=True)
@@ -447,7 +447,7 @@ class WorkflowTests(TestCase):
         sequence = []
         for name in ("sweep", "stories", "memoirs", "missions", "exchange"):
             setattr(r, name, Mock(side_effect=lambda name=name: sequence.append(name)))
-        with TemporaryDirectory() as folder, patch("pcrscript.daily.event_battle.EventBattles") as battles:
+        with TemporaryDirectory() as folder, patch("pcrscript.tasks.event_battle.EventBattles") as battles:
             battles.return_value.first_clear.side_effect = lambda: sequence.append("first_clear")
             battles.return_value.bosses.side_effect = lambda: sequence.append("bosses")
             r.ui = SimpleNamespace(output=Path(folder), save=Mock())

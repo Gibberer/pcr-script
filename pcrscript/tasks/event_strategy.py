@@ -1,4 +1,5 @@
 """Explicit, source-backed event parties and conservative readiness checks."""
+from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 import re
@@ -37,7 +38,7 @@ class CharacterStatus:
     observed_at: float | None = None
 
 
-def readiness(requirement, actual):
+def readiness(requirement: MemberRequirement, actual: CharacterStatus) -> list[str]:
     """Unknown is not equivalent to ready. Unique equipment has no level gate."""
     reasons = []
     if not actual.identity_verified:
@@ -72,7 +73,7 @@ class EventParty:
     allow_deaths: int = 0
 
 
-def load_parties(path, event_title, difficulty, mode):
+def load_parties(path: str | Path, event_title: str, difficulty: str, mode: int) -> list[EventParty]:
     # Local runtime data; automatic acquisition upstream is still pending.
     # Absence must block combat rather than require a shipped real-event file.
     if not Path(path).exists():
@@ -93,7 +94,7 @@ def load_parties(path, event_title, difficulty, mode):
     return result
 
 
-def skill_names(name, database="cache/redive_cn.db"):
+def skill_names(name: str, database: str | Path = "cache/redive_cn.db") -> dict[str, str]:
     """Map displayed skill names to base/evolved skills in the local game DB."""
     with sqlite3.connect(database) as conn:
         conn.row_factory = sqlite3.Row

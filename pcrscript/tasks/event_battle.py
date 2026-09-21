@@ -1,8 +1,15 @@
 """Bounded event combat: inspect builds before spending an attempt."""
+from __future__ import annotations
+from typing import TYPE_CHECKING, Sequence
+from .base import Point
+from .event_strategy import EventParty
+from ..game_ui.screen import EventScreen, TextBox
+if TYPE_CHECKING:
+    from .task_story_event import CampaignClean
 from collections import defaultdict
 from dataclasses import dataclass
 import re
-import time
+from pcrscript.run_session import clock as time
 
 import cv2 as cv
 import numpy as np
@@ -13,7 +20,7 @@ from .event_strategy import load_parties
 from ..templates import ImageTemplate
 
 
-def quest_stars(screen, row):
+def quest_stars(screen: EventScreen, row: TextBox) -> int:
     y = row.center[1]+13
     patch = screen.image[max(0, y-18):y+18, 495:579]
     hsv = cv.cvtColor(patch, cv.COLOR_BGR2HSV)
@@ -21,11 +28,11 @@ def quest_stars(screen, row):
     return sum(float(np.mean(mask[:, x-8:x+9] > 0)) > .18 for x in (16, 43, 69))
 
 
-def boss_cleared(screen, row):
+def boss_cleared(screen: EventScreen, row: TextBox) -> bool:
     return bool(screen.find("通关", (730, row.center[1]-30, 785, row.center[1]-5)))
 
 
-def boss_mode(screen):
+def boss_mode(screen: EventScreen) -> int | None:
     item = screen.find(r"(?:模式|MODE)\s*[123]", (0, 0, 940, 100))
     return int(re.search(r"[123]", item.text)[0]) if item else None
 
@@ -41,16 +48,16 @@ class EventCombat:
     portraits = [(196, 400, 282, 485), (315, 400, 402, 485),
                  (438, 400, 522, 485), (557, 400, 643, 485), (678, 400, 763, 485)]
 
-    def __init__(self, runner):
+    def __init__(self, runner: CampaignClean) -> None:
         self.r = runner
         self.ui = runner.ui
         self.templates = {k: ImageTemplate(k) for k in
                           ("btn_menu_text", "btn_giveup", "btn_giveup_blue", "btn_next_step", "btn_auto")}
 
-    def match(self, key, screen):
+    def match(self, key: str, screen: EventScreen) -> Point | None:
         return self.templates[key].match(screen.image)
 
-    def retreat(self, reason):
+    def retreat(self, reason: str) -> BattleResult:
         """The battle-menu retreat only; never the boss-detail run reset."""
         s = self.ui.capture()
         menu = self.match("btn_menu_text", s)
@@ -74,13 +81,13 @@ class EventCombat:
         raise EventUIError("无法确认战斗撤退，停止后续操作")
 
     @staticmethod
-    def paused_instant(screen, index):
+    def paused_instant(screen: EventScreen, index: int) -> bool:
         x = round(306+87.5*index)
         hsv = cv.cvtColor(screen.image[190:217, x+23:x+49], cv.COLOR_BGR2HSV)
-        return np.mean((hsv[:, :, 0] > 80) & (hsv[:, :, 0] < 110) &
-                       (hsv[:, :, 1] > 90) & (hsv[:, :, 2] > 160)) > .25
+        return bool(np.mean((hsv[:, :, 0] > 80) & (hsv[:, :, 0] < 110) &
+                            (hsv[:, :, 1] > 90) & (hsv[:, :, 2] > 160)) > .25)
 
-    def configure_paused(self, party, order):
+    def configure_paused(self, party: EventParty, order: Sequence[str]) -> bool:
         """Pause during setup so animations and stage stories cannot race SET."""
         for _ in range(30):
             s = self.ui.capture()
@@ -115,7 +122,7 @@ class EventCombat:
         self.ui.expect_click('返回', (260, 405, 410, 465), exact=True)
         return True
 
-    def run(self, party=None, order=None, resume=False):
+    def run(self, party: EventParty | None = None, order: Sequence[str] | None = None, resume: bool = False) -> BattleResult:
         if not resume:
             formation = self.ui.capture()
             start = formation.find("战斗开始", (740, 390, 950, 510), exact=True)
@@ -178,7 +185,7 @@ class EventCombat:
 
 
 class EventBattles:
-    def __init__(self, runner):
+    def __init__(self, runner: CampaignClean) -> None:
         self.r = runner
         self.ui = runner.ui
         self.formation = EventFormation(self.ui)
@@ -204,7 +211,7 @@ class EventBattles:
             raise EventUIError("没有识别到新版活动关卡")
         return catalog
 
-    def first_clear(self):
+    def first_clear(self) -> None:
         attempts = defaultdict(int)
         for _ in range(30):
             catalog = self.quest_catalog()
@@ -239,7 +246,7 @@ class EventBattles:
             self.r.home()
         raise EventUIError("首次过图达到步骤上限")
 
-    def bosses(self):
+    def bosses(self) -> None:
         title = self.r.home().text((0, 160, 940, 460))
         self.r.report["event"] = title
         for difficulty, label in (("scenario", "剧本模式"), ("special", "特别"), ("special_plus", "特别战斗\\+")):

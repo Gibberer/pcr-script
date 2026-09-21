@@ -8,7 +8,7 @@ from unittest.mock import Mock, patch
 import numpy as np
 import cv2 as cv
 
-from pcrscript.daily.gifts import GiftRunner, inventory, stamina_excluded
+from pcrscript.tasks.task_gifts import GetGift, inventory, stamina_excluded
 from pcrscript.game_ui.screen import EventUI, EventUIError, EventScreen, TextBox
 
 
@@ -49,7 +49,7 @@ class GiftTests(TestCase):
 
     def test_repeated_gift_limit_only_recovers_once(self):
         with TemporaryDirectory() as folder:
-            g = GiftRunner(SimpleNamespace(driver=Mock(get_screen_size=Mock(return_value=(960, 540)))), {"output": folder})
+            g = GetGift(SimpleNamespace(driver=Mock(get_screen_size=Mock(return_value=(960, 540)))), {"output": folder})
             g.open_gifts = Mock()
             g.free_space = Mock(return_value=True)
             gifts = screen(("全部收取", 800, 477))
@@ -64,7 +64,7 @@ class GiftTests(TestCase):
 
     def test_enough_space_does_not_auto_select_or_dismantle(self):
         with TemporaryDirectory() as folder:
-            g = GiftRunner(SimpleNamespace(driver=Mock(get_screen_size=Mock(return_value=(960, 540)))), {"output": folder})
+            g = GetGift(SimpleNamespace(driver=Mock(get_screen_size=Mock(return_value=(960, 540)))), {"output": folder})
             g.home = Mock(return_value=screen(("商店", 690, 455)))
             g.ui = Mock()
             g.ui.wait.return_value = screen(("一键分解", 850, 31), ("4250/5000", 552, 87))
@@ -75,7 +75,7 @@ class GiftTests(TestCase):
 
     def test_unknown_inventory_never_confirms_dismantle(self):
         with TemporaryDirectory() as folder:
-            g = GiftRunner(SimpleNamespace(driver=Mock(get_screen_size=Mock(return_value=(960, 540)))), {"output": folder})
+            g = GetGift(SimpleNamespace(driver=Mock(get_screen_size=Mock(return_value=(960, 540)))), {"output": folder})
             g.home = Mock(return_value=screen(("商店", 690, 455)))
             g.ui = Mock()
             g.ui.wait.return_value = screen(("一键分解", 850, 31))
@@ -85,7 +85,7 @@ class GiftTests(TestCase):
 
     def test_other_item_limit_does_not_dismantle_nonfull_ex_inventory(self):
         with TemporaryDirectory() as folder:
-            g = GiftRunner(SimpleNamespace(driver=Mock(get_screen_size=Mock(return_value=(960, 540)))), {"output": folder})
+            g = GetGift(SimpleNamespace(driver=Mock(get_screen_size=Mock(return_value=(960, 540)))), {"output": folder})
             g.home = Mock(return_value=screen(("商店", 690, 455)))
             g.ui = Mock()
             g.ui.wait.return_value = screen(("一键分解", 850, 31), ("4950/5000", 552, 87))
@@ -98,7 +98,7 @@ class GiftTests(TestCase):
             with TemporaryDirectory() as folder:
                 driver = Mock(get_screen_size=Mock(return_value=(960, 540)))
                 with self.assertRaises(ValueError):
-                    GiftRunner(SimpleNamespace(driver=driver), {"output": folder, "free_slots": target})
+                    GetGift(SimpleNamespace(driver=driver), {"output": folder, "free_slots": target})
                 driver.click.assert_not_called()
 
 

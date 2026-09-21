@@ -1,8 +1,13 @@
 """Read party members in the real game and reject unverified builds."""
+from __future__ import annotations
+from typing import Sequence
+from .base import Screenshot, Point, Region, TaskReport
+from .event_strategy import EventParty
+from ..game_ui.screen import EventUI
 from dataclasses import asdict
 import json
 import re
-import time
+from pcrscript.run_session import clock as time
 
 import cv2 as cv
 import numpy as np
@@ -13,7 +18,7 @@ from ..game_ui.avatars import AvatarIndex, card_rectangles, search_card_rectangl
 from ..game_ui.equipment import EquipmentBadges
 
 
-def count_stars(image):
+def count_stars(image: Screenshot) -> int | None:
     hsv = cv.cvtColor(image[103:129, 589:705], cv.COLOR_BGR2HSV)
     mask = ((hsv[:, :, 0] >= 12) & (hsv[:, :, 0] <= 40) | (hsv[:, :, 0] >= 140)) & (hsv[:, :, 1] > 90) & (hsv[:, :, 2] > 120)
     # Adjacent star outlines touch; connected-components merge them. Sample
@@ -25,13 +30,13 @@ def count_stars(image):
 class EventFormation:
     slots = [(96+109*i, 452) for i in range(5)]
 
-    def __init__(self, ui):
+    def __init__(self, ui: EventUI) -> None:
         self.ui = ui
         self.observed = {}
         self.avatars = AvatarIndex()
         self.badges = EquipmentBadges()
 
-    def inspect(self, pos, full=True, rectangle=None, expected_name=None):
+    def inspect(self, pos: Point, full: bool = True, rectangle: Region | None = None, expected_name: str | None = None) -> CharacterStatus:
         before = self.ui.capture(ocr=False)
         rect = rectangle or next((r for r in card_rectangles(before.image)
                      if r[0] <= pos[0] <= r[0]+r[2] and r[1] <= pos[1] <= r[1]+r[3]), None)
@@ -94,7 +99,7 @@ class EventFormation:
         self.ui.wait(lambda s: s.find("队伍编组", (300, 0, 650, 70)), "返回编队")
         return actual
 
-    def inspect_current(self, full=True, expected_names=()):
+    def inspect_current(self, full: bool = True, expected_names: Sequence[str] = ()) -> list[CharacterStatus]:
         results = []
         for pos in self.slots:
             rect = (pos[0]-48, 405, 96, 96)
@@ -109,7 +114,7 @@ class EventFormation:
             results.append(actual)
         return results
 
-    def select(self, party):
+    def select(self, party: EventParty) -> tuple[bool, TaskReport]:
         """Use the game's hidden search bar, then one batch avatar query."""
         unspecified = [{"character": member.name, "reasons": ["攻略尚未明确专武开启状态"]}
                        for member in party.members if member.unique is None or member.unique2 is None]
@@ -177,7 +182,7 @@ class EventFormation:
             return False, {"errors": ["最终编队与作业不一致"], "order": order}
         return True, {"order": order}
 
-    def _select_by_scrolling(self, party):
+    def _select_by_scrolling(self, party: EventParty) -> tuple[bool, TaskReport]:
         """Scan actual owned cards; inspect the full name to disambiguate variants.
 
         No avatar downloads, OCR guesses, upgrades, or automatic resource use.

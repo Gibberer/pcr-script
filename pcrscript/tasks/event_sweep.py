@@ -1,5 +1,10 @@
 """One bulk sweep for the three event hard stages; no quest-map audit."""
-import time
+from __future__ import annotations
+from typing import TYPE_CHECKING
+from ..game_ui.screen import EventScreen, TextBox
+if TYPE_CHECKING:
+    from .task_story_event import CampaignClean
+from pcrscript.run_session import clock as time
 
 from ..game_ui.screen import EventUIError, normalized
 
@@ -7,34 +12,34 @@ from ..game_ui.screen import EventUIError, normalized
 HARD_STAGES = {f"活动关卡H-{i}" for i in (1, 2, 3)}
 
 
-def hard_rows(screen):
+def hard_rows(screen: EventScreen) -> dict[str, TextBox]:
     return {normalized(row.text): row for row in
             screen.all(r"活动关卡H-[123]", (35, 135, 350, 375))}
 
 
-def attempts(screen, row):
+def attempts(screen: EventScreen, row: TextBox) -> int | None:
     y = row.center[1]
     item = screen.find(r"[0-3]/3", (435, y, 495, min(y+48, 378)), exact=True)
     return int(normalized(item.text)[0]) if item else None
 
 
 class HardSweep:
-    def __init__(self, runner):
+    def __init__(self, runner: CampaignClean) -> None:
         self.r = runner
         self.ui = runner.ui
 
-    def stable_list(self):
+    def stable_list(self) -> EventScreen:
         return self.ui.wait(lambda s: s.find("关卡一览", (300, 0, 700, 70))
                             and not s.find("未勾选任何关卡|正在进行数据连接"), "困难扫荡列表")
 
-    def leave(self, pending=None):
+    def leave(self, pending: str | None = None) -> bool:
         self.ui.expect_click("取消", (460, 440, 710, 520), exact=True)
         self.ui.wait(lambda s: s.event_quests, "返回活动关卡")
         if pending:
             self.r.report["pending"].append(pending)
         return pending is None
 
-    def run(self):
+    def run(self) -> bool | None:
         self.r.check_deadline()
         self.r.quests()
         self.ui.expect_click("扫荡", (790, 95, 940, 150), exact=True)
@@ -98,7 +103,7 @@ class HardSweep:
         self.settle(plan)
         self.r.log("一键扫荡 " + "、".join(f"{name} × {count}" for name, count in sorted(plan.items())))
 
-    def settle(self, plan):
+    def settle(self, plan: dict[str, int]) -> None:
         confirmed = False
         for _ in range(40):
             self.r.check_deadline()

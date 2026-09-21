@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 import json
 import re
-import time
+from pcrscript.run_session import clock as time
 import unicodedata
 
 import cv2 as cv
@@ -125,6 +125,8 @@ class EventUI:
             if result.txts:
                 items = [TextBox(t, float(s), b.tolist()) for t, s, b in
                          zip(result.txts, result.scores, result.boxes)]
+        from pcrscript.run_session import emit
+        emit("ocr", items=[dict(text=i.text, score=i.score, box=i.box) for i in items])
         self.last = EventScreen(img, items)
         self.save("current", self.last)
         return self.last
@@ -184,6 +186,8 @@ class EventUI:
         time.sleep(.8)
 
     def wait(self, predicate, description, timeout=None, handle=None):
+        from pcrscript.run_session import emit
+        emit("wait", description=description, timeout=timeout or self.timeout)
         deadline = time.monotonic() + (self.timeout if timeout is None else timeout)
         while time.monotonic() < deadline:
             s = self.capture()

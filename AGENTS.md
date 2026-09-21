@@ -25,12 +25,18 @@
 
 ## 目录边界
 
+- 项目目录与任务文件说明集中放在 `docs/project-structure.md`，不在代码目录新增 README。
+
+- 具体任务实现统一命名为 `pcrscript/tasks/task_<功能>.py`，基类、注册表和辅助模块不加 `task_` 前缀；新增任务时同步维护 `docs/project-structure.md` 的注册名索引，明确未独立注册的复用子任务。
+
+- **任务基类按能力划分（2026-09-21 用户纠正）**：`BaseTask` 只定义公共上下文、配置与执行契约；图片动作任务继承 `ImageTask`，OCR 任务组合共享 UI 能力，不强制继承图片匹配方法。限时规则由 `TimeLimitTask` 独立提供，两类任务共用注册与调度。
+
 - **正式自动化必须独立于 Agent 操作（2026-09-19 用户明确纠正）**：Agent 的搜索、截图、审查、校准和试打仅用于分析与验证，不能成为日常入口的人工前置步骤。头像获取/增量更新/建索引，以及当期队伍来源获取/解析/生成/校验必须由正式程序自动完成，不能要求 Agent 每期搜攻略、手填 YAML 或先运行探查工具后才可执行。
 - 头像、实际队伍方案、账号配置均属本地运行数据，不上传、不提交。实际方案及来源、获取时间、解析版本、证据存入忽略的 `cache/game/strategies/`；头像存入 `cache/game/avatars/`。仓库只保留通用实现、数据格式说明和不含真实活动/账号数据的最小示例与测试。不得将真实作业换名为测试样本继续提交。
 - 缓存缺失或过期时应自动获取/更新并校验；来源无法确认则保留待办，不猜测角色和培养要求。手动分析成功、已有缓存可运行、某期实战成功均不等于从空缓存开始的端到端自动化已完成。未实现的获取环节必须明确记入待办，不能称为“仅等待新活动验证”。
 
 - `pcrscript/game_ui/`：共享的观察/操作/识别能力，Agent 和日常均可复用，不绑定每日任务顺序。
-- `pcrscript/daily/`：固化的每日活动流程、配队检查和有限次战斗逻辑。
+- `pcrscript/tasks/`：所有正式任务的唯一实现目录，含原有任务、活动、礼物和按需驾车游；`base.py` 为基类，`registry.py` 为唯一注册表，按功能拆分模块。不得另建 `pcrscript/daily/` 或绕过 Task 新建平行 Runner 框架（2026-09-21 用户明确纠正）。新接口尽量标明输入、返回值和状态类型。
 - `scripts/daily/`：用户可用于定时任务的命令入口。原有完整日常 `daily_task.py` 保持兼容。
 - `scripts/agent/`：Agent 分析、探查、审查和校准工具；可调用共享能力，但正式运行不能依赖先运行这些工具。
 - 不再使用 `config/` 目录，也不为它添加忽略规则；实际活动队伍数据存已忽略的 `cache/game/strategies/`。`docs/game-knowledge/`：跨 session 的分析知识和待验证记录。
@@ -49,3 +55,7 @@
 - 活动离线检查：`./.venv/Scripts/python.exe -X utf8 -m unittest discover -s test -p test_event.py -v`。
 - 礼物与坐标换算离线检查：`./.venv/Scripts/python.exe -X utf8 -m unittest discover -s test -p test_gifts.py -v`。库存检查用截图和计数回归，不为验证而制造满仓或修改分解设置。
 - 独立活动入口：`scripts/daily/story_event.py`。审查使用 `scripts/agent/game.py --audit`，不开始战斗。运行方式及配置见 `docs/story-event.md`。
+
+## 运行中诊断
+
+每日入口自动留存 cache/daily/runs。排查先读 docs/run-diagnostics.md，使用 scripts/agent/run_control.py 查询、暂停、保存现场和继续。必须收到 state=paused 的确认才能探查同一模拟器；请求超时不算暂停。恢复前结束探查进程，页面变化造成旧操作停止时重新从任务入口运行。Agent 只用于分析，不能成为正式运行日志/控制功能的前置依赖。

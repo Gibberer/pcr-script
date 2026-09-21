@@ -1,6 +1,13 @@
 """Gift collection with bounded EX inventory recovery using saved game settings."""
+from __future__ import annotations
+from .registry import register
 import json
-import time
+from typing import TYPE_CHECKING
+from .base import BaseTask, TaskOptions, TaskReport
+from ..game_ui.screen import EventScreen
+if TYPE_CHECKING:
+    from pcrscript import Robot
+from pcrscript.run_session import clock as time
 
 import cv2 as cv
 import numpy as np
@@ -8,7 +15,7 @@ import numpy as np
 from ..game_ui.screen import EventUI, EventUIError, normalized
 
 
-def inventory(screen):
+def inventory(screen: EventScreen) -> tuple[int, int]:
     item = screen.find(r"\d+/\d+", (495, 65, 605, 103), exact=True)
     if item is None or item.score < .95:
         raise EventUIError("特别装备持有数无法确认")
@@ -18,29 +25,34 @@ def inventory(screen):
     return used, capacity
 
 
-def stamina_excluded(screen):
+def stamina_excluded(screen: EventScreen) -> bool:
     # Checkbox tick is blue; the unchecked box has a white/gray interior.
     hsv = cv.cvtColor(screen.image[458:492, 343:379], cv.COLOR_BGR2HSV)
-    return np.mean((hsv[:, :, 0] > 85) & (hsv[:, :, 0] < 120)
-                   & (hsv[:, :, 1] > 90) & (hsv[:, :, 2] > 180)) > .12
+    return bool(np.mean((hsv[:, :, 0] > 85) & (hsv[:, :, 0] < 120)
+                        & (hsv[:, :, 1] > 90) & (hsv[:, :, 2] > 180)) > .12)
 
 
-class GiftRunner:
-    def __init__(self, robot, options=None):
-        self.options = options or {}
+@register("get_gift")
+class GetGift(BaseTask):
+    config_section = 'Gift'
+    config_attribute = 'gift_options'
+
+    def __init__(self, robot: Robot, options: TaskOptions | None = None) -> None:
+        super().__init__(robot)
+        self.options = self.task_options() if options is None else options
         self.ui = EventUI(robot.driver, self.options.get("output", "cache/daily/gifts"))
         self.target = int(self.options.get("free_slots", 750))
         if not 500 <= self.target <= 1000:
             raise ValueError("Gift.free_slots 必须为 500～1000")
         self.deadline = time.monotonic() + self.options.get("timeout", 900)
-        self.report = {"status": "running", "gift_batches": 0, "dismantled": 0,
+        self.report: TaskReport = {"status": "running", "gift_batches": 0, "dismantled": 0,
                        "inventory": [], "pending": []}
 
-    def check(self):
+    def check(self) -> None:
         if time.monotonic() > self.deadline:
             raise EventUIError("礼物任务达到总运行时间上限")
 
-    def home(self):
+    def home(self) -> EventScreen:
         # Recover only recognized interrupted dialogs. Never accept a pending
         # dismantle/collection proposal just to navigate to the home page.
         for _ in range(5):
@@ -64,11 +76,11 @@ class GiftRunner:
         return self.ui.wait(lambda s: s.find("商店", (645, 400, 735, 475), exact=True)
                             and s.find("礼物", (860, 400, 950, 475), exact=True), "返回首页")
 
-    def gift_list(self):
+    def gift_list(self) -> EventScreen:
         return self.ui.wait(lambda s: s.find("礼物箱", (300, 20, 660, 65), exact=True)
                             and not s.find("持有上限|收取礼物|收取结果|收取完成", (240, 20, 720, 175)), "礼物列表")
 
-    def open_gifts(self, exclude_stamina):
+    def open_gifts(self, exclude_stamina: bool) -> EventScreen:
         s = self.home()
         self.ui.click(s.find("礼物", (860, 400, 950, 475), exact=True))
         s = self.gift_list()
@@ -81,7 +93,7 @@ class GiftRunner:
                 raise EventUIError("礼物体力选项切换失败")
         return s
 
-    def free_space(self, require_full=False):
+    def free_space(self, require_full: bool = False) -> bool:
         """Only auto-dismantle via the game's saved rules; never touch settings.
 
         Live 2026-09-12: one automatic batch removes 50 items. Read inventory
@@ -135,7 +147,7 @@ class GiftRunner:
                 raise EventUIError("自动分解数量与已验证的每批 1～50 件不符，停止后续分解")
         return False
 
-    def run(self, exclude_stamina=True):
+    def run(self, exclude_stamina: bool = True) -> TaskReport:
         recovered = False
         try:
             self.open_gifts(exclude_stamina)
@@ -176,6 +188,8 @@ class GiftRunner:
             self.report["status"] = "partial"
             return self.report
         except Exception as error:
+            from pcrscript.run_session import failure
+            failure(error)
             self.report["status"] = "error"
             self.report["pending"].append(str(error))
             self.ui.save("error")

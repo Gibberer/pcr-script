@@ -51,7 +51,7 @@ class EquipmentBadges:
         return None
 
     def observe(self, ui, rectangle, frames=12):
-        import time
+        from pcrscript.run_session import clock as time
         confirmed = None
         repeats = 0
         for _ in range(frames):

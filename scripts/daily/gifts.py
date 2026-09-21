@@ -1,6 +1,5 @@
-"""Collect gifts and recover full EX inventory through saved auto-dismantle rules."""
+"""Compatibility command for the registered gifts task."""
 import argparse
-import json
 import os
 from pathlib import Path
 import sys
@@ -9,21 +8,17 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 os.chdir(ROOT)
 
-import yaml
-from scripts._game import runner_from_config
-from pcrscript.daily.gifts import GiftRunner
+from scripts._game import run_task_from_config, print_report
+from pcrscript.run_session import RunSession
 
-
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--config", default="daily_config.yml")
-    parser.add_argument("--include-stamina", action="store_true")
+    parser.add_argument('--config', default='daily_config.yml')
+    parser.add_argument('--include-stamina', action='store_true')
     args = parser.parse_args()
-    config = yaml.safe_load(Path(args.config).read_text(encoding="utf-8"))
-    robot = runner_from_config(args.config).robot
-    result = GiftRunner(robot, config.get("Gift", {})).run(not args.include_stamina)
-    print(json.dumps(result, ensure_ascii=False, indent=2))
+    print_report(run_task_from_config(args.config, 'get_gift', not args.include_stamina))
 
 
-if __name__ == "__main__":
-    main()
+if __name__ == '__main__':
+    with RunSession('gifts'):
+        main()

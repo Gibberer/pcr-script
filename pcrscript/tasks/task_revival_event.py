@@ -1,26 +1,45 @@
 """One completion per revival occurrence, selected by news and live UI layout."""
+from __future__ import annotations
+from .registry import register
 import json
-import time
+from typing import TYPE_CHECKING, Any
+from .base import BaseTask, Event, EventNews, TaskOptions, TaskReport, TaskConfig, PreparedTask
+if TYPE_CHECKING:
+    from pcrscript import Robot
+from pcrscript.run_session import clock as time
 
-from .story_event import StoryEventRunner
+from .task_story_event import CampaignClean
 from .revival_state import RevivalState
 from ..game_ui.event_layout import event_layout, map_dialogue
 from ..game_ui.screen import EventUIError
 
 
-class RevivalEventRunner(StoryEventRunner):
-    def __init__(self, robot, event, options=None):
+@register("revival_event_once")
+class RevivalEventOnce(CampaignClean):
+    config_section = "RevivalEvent"
+    config_attribute = "revival_event_options"
+
+    def __init__(self, robot: Robot, event: Event | None = None, options: TaskOptions | None = None) -> None:
+        self.robot = robot
+        options = self.task_options() if options is None else options
         options = {'output': 'cache/daily/revival_event', **(options or {})}
         super().__init__(robot, options)
         self.event = event
         self.layout = None
+        self.state = None
+        if event is not None:
+            self.set_event(event)
+
+    def set_event(self, event: Event) -> None:
+        self.event = event
+        options = self.options
         self.state = RevivalState(options.get('state_dir', 'cache/daily/revival_state'),
-                                  options.get('account_key', getattr(robot.driver, 'index', 0)), event)
+                                  options.get('account_key', getattr(self.robot.driver, 'index', 0)), event)
         self.report.update(event_id=event.extras['event_id'], event=event.name)
         if self.state.data.get('hard_trial_started'):
             self.report['hard_trial_started'] = True
 
-    def enter(self):
+    def enter(self) -> bool:
         # Always traverse the explicit revival entrance, even if another event
         # is already open. The calendar describes the edition, not the layout.
         s = self.ui.capture()
@@ -62,7 +81,13 @@ class RevivalEventRunner(StoryEventRunner):
             time.sleep(.5)
         raise EventUIError('复刻入口后的页面布局无法识别')
 
-    def run(self, hard_chapter=True, exhaust_power=False):
+    def run(self, event: Event | None = None) -> TaskReport:
+        if event is not None or self.state is None:
+            args, _, report = self.prepare({self.config_section: self.options}, event or self.event)
+            if report is not None:
+                self.report.update(report)
+                return self.report
+            self.set_event(args[0])
         if self.state.complete:
             self.report['status'] = 'already_complete'
             return self.report
@@ -87,6 +112,8 @@ class RevivalEventRunner(StoryEventRunner):
             self.report['status'] = 'partial' if self.report['pending'] else 'complete'
             return self.report
         except Exception as error:
+            from pcrscript.run_session import failure
+            failure(error)
             self.report['status'] = 'error'
             self.report['pending'].append(str(error))
             self.ui.save('error')
@@ -94,3 +121,24 @@ class RevivalEventRunner(StoryEventRunner):
         finally:
             self.state.save(self.report)
             (self.ui.output / 'report.json').write_text(json.dumps(self.report, ensure_ascii=False, indent=2), encoding='utf-8')
+
+    @classmethod
+    def prepare(cls, config: TaskConfig, event: Event | None = None) -> PreparedTask:
+        if event is None:
+            from ..news import fetch_event_news
+            event = fetch_event_news().revival
+        if not event or not cls.event_valid(event):
+            return (), {}, {'status': 'unavailable'}
+        from .revival_state import RevivalState
+        options = config.get(cls.config_section, {})
+        account = options.get('account_key')
+        if account is not None and RevivalState(options.get('state_dir', 'cache/daily/revival_state'), account, event).complete:
+            return (), {}, {'status': 'already_complete', 'event_id': event.extras['event_id']}
+        return (event,), {}, None
+
+
+    @staticmethod
+    def valid(event_news: EventNews, args: list[Any] | None = None) -> tuple[type[BaseTask], list[Any] | None] | None:
+        event = event_news.revival
+        if event and RevivalEventOnce.event_valid(event):
+            return RevivalEventOnce, [event]

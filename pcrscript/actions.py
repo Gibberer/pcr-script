@@ -1,18 +1,26 @@
 from .constants import *
-from typing import Tuple,TYPE_CHECKING
+from typing import Tuple, TYPE_CHECKING, Protocol, Self
 from .templates import Template,ImageTemplate
-import time
+from pcrscript.run_session import clock as time
 
 if TYPE_CHECKING:
     from pcrscript import Robot
-    from tasks import BaseTask
+
+
+class ActionContext(Protocol):
+    """Actions need design coordinates, not a concrete Task implementation."""
+
+    define_width: int
+    define_height: int
+
+
 class Action:
     def __init__(self):
         super().__init__()
         self._done = False
-        self.task:'BaseTask' = None
+        self.task: ActionContext | None = None
     
-    def bindTask(self, task):
+    def bindTask(self, task: ActionContext | None) -> Self:
         self.task = task
         return self
 
@@ -34,7 +42,12 @@ class Action:
     def _match(self, screenshot, template:Template)->Template:
         if self.task:
             template.set_define_size(self.task.define_width, self.task.define_height)
-        return template.match(screenshot)
+        result = template.match(screenshot)
+        from .run_session import emit
+        emit('match', template=getattr(template, '_name', type(template).__name__),
+             result=result, threshold=getattr(template, '_threshold', None),
+             roi=getattr(template, '_roi', None))
+        return result
 
 class MatchAction(Action):
     def __init__(self, template, matched_actions:list['Action']=None, unmatch_actions:list['Action']=None, delay=1, timeout=0):
@@ -49,7 +62,7 @@ class MatchAction(Action):
 
     def do(self, screenshot, robot):
         if self.starttime == 0:
-            self.starttime = time.time()
+            self.starttime = time.monotonic()
         if self.delay > 0:
             time.sleep(self.delay)
         ret = None
@@ -83,7 +96,7 @@ class MatchAction(Action):
                         self._done = True
                         break
         if self.timeout > 0:
-            if time.time() - self.starttime > self.timeout:
+            if time.monotonic() - self.starttime > self.timeout:
                 self.is_timeout = True
                 self._done = True
 
@@ -131,7 +144,7 @@ class ClickAction(Action):
 
     def do(self, screenshot, robot):
         if self.starttime == 0:
-            self.starttime = time.time()
+            self.starttime = time.monotonic()
         if self.template:
             if not isinstance(self.template, Template):
                 self.template = ImageTemplate(self.template)
@@ -155,7 +168,7 @@ class ClickAction(Action):
                                    pos[1] + offset[1])
             self._done = True
         if self.timeout > 0:
-            if time.time() - self.starttime > self.timeout:
+            if time.monotonic() - self.starttime > self.timeout:
                 self._done = True
 
 

@@ -8,8 +8,15 @@
 - [新版剧情活动](story-events.md)：页面、任务顺序、扫荡/兑换结算与本期特有剧情。
 - [复刻剧情活动](revival-events.md)：活动情报、布局分流、一次性首通与领奖。
 - [礼物与特别装备](gifts.md)：满仓恢复、自动分解设置、库存核验和分批领取。
+- [驾车游](caravan.md)：单骰达标、区间跳过、格子事件及独立清骰子入口。
 - [等待验证的场景](pending-validation.md)：触发条件、预期、当前验证边界。
 
-代码/命令分类见 [入口分类](../../scripts/README.md)：Agent 工具在 `scripts/agent/`，定时任务在 `scripts/daily/`，共享界面能力在 `pcrscript/game_ui/`，固化活动逻辑在 `pcrscript/daily/`。
+代码/命令分类见 [入口分类](../../scripts/README.md)：Agent 工具在 `scripts/agent/`，定时任务在 `scripts/daily/`，共享界面能力在 `pcrscript/game_ui/`，固化活动逻辑在 `pcrscript/tasks/`。
 
 每条新记录请标记：**实测**（日期、活动/页面、证据）、**用户提供**、**来源资料**（链接），或 **推断待验证**。不同来源相互矛盾时保留差异并重新观察，不覆盖为确定结论。
+
+- [每日运行诊断](../run-diagnostics.md)：每次运行日志、异常截图、线程栈与协作暂停/恢复。2026-09-19 已离线验证，真实游戏验收见待验证表。
+- [每日脚本审查与优化计划](../daily-optimization-plan.md)：2026-09-21 完整日常基线、遗漏场景、性能问题及分批验收要求。
+- [统一任务架构](../task-architecture.md)：2026-09-21 用户纠正后，将 daily 实现并入 tasks 包，统一注册、配置、调度、类型与报告归档；驾车游仍按需执行。
+
+2026-09-21 代码导航调整：具体任务统一为 `tasks/task_*.py`，注册名对应关系见 [任务文件索引](../project-structure.md)。仅命名与引用调整，无新增游戏 UI 实测。

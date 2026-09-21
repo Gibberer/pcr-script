@@ -1,28 +1,44 @@
 """List-layout story-event workflow, reusable for new and revival editions."""
+from __future__ import annotations
+from .registry import register
 import json
+from typing import TYPE_CHECKING, Any
+from .base import BaseTask, TimeLimitTask, EventNews, TaskOptions, TaskReport
+from ..game_ui.screen import EventScreen
+if TYPE_CHECKING:
+    from pcrscript import Robot
 import re
-import time
+from pcrscript.run_session import clock as time
 
 from ..game_ui.screen import EventUI, EventUIError, normalized
 
 
-class StoryEventRunner:
-    def __init__(self, robot, options=None):
+@register("campaign_clean")
+class CampaignClean(TimeLimitTask):
+    config_section = 'StoryEvent'
+    config_attribute = 'story_event_options'
+
+    def __init__(self, robot: Robot, options: TaskOptions | None = None) -> None:
+        super().__init__(robot)
         self.robot = robot
-        self.options = options or {}
+        self.options = self.task_options() if options is None else options
         self.ui = EventUI(robot.driver, self.options.get("output", "cache/daily/story_event"))
-        self.report = {"status": "running", "steps": [], "pending": [], "battles": []}
+        self.report: TaskReport = {"status": "running", "steps": [], "pending": [], "battles": []}
         self.deadline = time.monotonic() + self.options.get("timeout", 1800)
 
-    def log(self, message):
+    @staticmethod
+    def valid(event_news: EventNews, args: list[Any] | None = None) -> tuple[type[BaseTask], list[Any] | None] | None:
+        return CampaignClean, args
+
+    def log(self, message: str) -> None:
         print(f"[剧情活动] {message}", flush=True)
         self.report["steps"].append(message)
 
-    def check_deadline(self):
+    def check_deadline(self) -> None:
         if time.monotonic() > self.deadline:
             raise EventUIError("活动任务达到总运行时间上限")
 
-    def entry_dialog(self, s):
+    def entry_dialog(self, s: EventScreen) -> bool:
         """Dismiss the daily event login receipt, not an arbitrary reward modal."""
         title_roi = (240, 110, 720, 185)
         if not s.find("获得活动登录奖励", title_roi, exact=True):
@@ -36,7 +52,7 @@ class StoryEventRunner:
         self.log("已关闭活动每日登录奖励弹窗")
         return True
 
-    def story_dialog(self, s):
+    def story_dialog(self, s: EventScreen) -> bool:
         """Only story-specific controls, never a global 'OK' clicker."""
         if s.find("剧情梗概|跳过这个剧情|跳过剧情吗|跳过这个视频"):
             item = s.find("跳过", (460, 300, 720, 500), exact=True)
@@ -62,7 +78,7 @@ class StoryEventRunner:
             return True
         return False
 
-    def enter(self):
+    def enter(self) -> bool:
         """Use live navigation even if the downloaded calendar is outdated."""
         missing_entry = 0
         for _ in range(90):
@@ -117,7 +133,7 @@ class StoryEventRunner:
         self.ui.save("unrecognized_entry")
         raise EventUIError("无法进入列表式剧情活动；地图布局不使用列表坐标")
 
-    def home(self):
+    def home(self) -> EventScreen:
         for _ in range(45):
             s = self.ui.capture()
             if self.entry_dialog(s):
@@ -137,7 +153,7 @@ class StoryEventRunner:
                 time.sleep(.7)
         raise EventUIError("未能返回活动首页")
 
-    def quests(self, bosses=False):
+    def quests(self, bosses: bool = False) -> EventScreen:
         s = self.ui.capture()
         if not s.event_quests:
             s = self.home()
@@ -150,7 +166,7 @@ class StoryEventRunner:
         return self.ui.wait(lambda s: bool(s.find("剧本模式|特别", (700, 150, 940, 440))) if bosses
                             else bool(s.find(r"活动关卡[HN]-\d", (460, 140, 920, 465))), "关卡列表")
 
-    def stories(self):
+    def stories(self) -> None:
         s = self.home()
         if not s.notification((692, 355, 738, 402)):
             self.log("活动剧情入口无未领取提示，跳过")
@@ -205,7 +221,7 @@ class StoryEventRunner:
                 time.sleep(1)
         raise EventUIError("剧情读取达到步骤上限")
 
-    def missions(self):
+    def missions(self) -> None:
         s = self.home()
         if not s.notification((787, 3, 832, 45)):
             self.log("活动任务入口无可领取提示，跳过")
@@ -229,7 +245,7 @@ class StoryEventRunner:
         self.home()
         self.log("已检查四类活动任务奖励")
 
-    def memoirs(self):
+    def memoirs(self) -> None:
         """This event's optional side stories; other mini-games stay untouched."""
         s = self.home()
         entry = s.find("回忆录", (0, 220, 170, 355))
@@ -287,13 +303,13 @@ class StoryEventRunner:
                 time.sleep(.6)
         raise EventUIError("回忆录达到步骤上限，已保存当前进度")
 
-    def sweep(self, hard=True):
+    def sweep(self, hard: bool = True) -> None:
         if hard:
             from .event_sweep import HardSweep
             return HardSweep(self).run()
         return self.sweep_normal()
 
-    def sweep_normal(self):
+    def sweep_normal(self) -> None:
         """Optional normal-stage sweeps using the player's remaining stamina."""
         kind, cost = "N", 10
         finished = set()
@@ -369,7 +385,7 @@ class StoryEventRunner:
             self.log(f"系统扫荡 {selected[0]} × {count}")
         raise EventUIError("扫荡批次数达到上限")
 
-    def settle_sweep(self, expected_name, expected_count, cost, remaining_before=None, stamina_before=None):
+    def settle_sweep(self, expected_name: str, expected_count: int, cost: int, remaining_before: int | None = None, stamina_before: int | None = None) -> bool | None:
         seen_result = False
         confirmed = False
         for _ in range(35):
@@ -432,7 +448,7 @@ class StoryEventRunner:
                 time.sleep(.7)
         raise EventUIError("系统扫荡结果未确认，停止重复消耗并保存截图")
 
-    def exchange(self):
+    def exchange(self) -> None:
         s = self.home()
         if s.number((260, 340, 315, 377)) == 0:
             self.log("活动首页券余额为 0，跳过兑换")
@@ -477,7 +493,27 @@ class StoryEventRunner:
                 time.sleep(.5)
         raise EventUIError("活动券兑换达到步骤上限")
 
-    def run(self, hard_chapter=True, exhaust_power=False):
+    def run_only(self, step: str) -> TaskReport:
+        if step not in ('stories', 'memoirs', 'missions', 'sweep', 'exchange'):
+            raise ValueError(f'未知活动步骤: {step}')
+        try:
+            if self.enter():
+                getattr(self, step)()
+                self.report['status'] = 'partial' if self.report['pending'] else 'complete'
+            else:
+                self.report['status'] = 'unavailable'
+            return self.report
+        except Exception as error:
+            self.report['status'] = 'error'
+            self.report['pending'].append(str(error))
+            self.ui.save('error')
+            raise
+        finally:
+            (self.ui.output / 'report.json').write_text(json.dumps(self.report, ensure_ascii=False, indent=2), encoding='utf-8')
+
+    def run(self, hard_chapter: bool = True, exhaust_power: bool = False, *, only: str = 'all') -> TaskReport:
+        if only != 'all':
+            return self.run_only(only)
         try:
             if not self.enter():
                 self.report["status"] = "unavailable"
@@ -504,9 +540,35 @@ class StoryEventRunner:
             self.report["status"] = "complete" if not self.report["pending"] else "partial"
             return self.report
         except Exception as error:
+            from pcrscript.run_session import failure
+            failure(error)
             self.report["status"] = "error"
             self.report["pending"].append(str(error))
             self.ui.save("error")
             raise
         finally:
             (self.ui.output / "report.json").write_text(json.dumps(self.report, ensure_ascii=False, indent=2), encoding="utf-8")
+
+@register("clear_campaign_first_time")
+class ClearCampaignFirstTime(TimeLimitTask):
+    """兼容旧任务名；以关卡实际进度恢复首次过图。"""
+    @staticmethod
+    def valid(event_news: EventNews, args: list[Any] | None = None) -> tuple[type[BaseTask], list[Any] | None] | None:
+        return ClearCampaignFirstTime, args
+
+    def run(self, exhaust_power: bool = False) -> TaskReport:
+        return CampaignClean(self.robot).run(True, exhaust_power)
+
+
+@register("campaign_reward_exchange")
+class CampaignRewardExchange(TimeLimitTask):
+    """保留独立领奖入口，现在可每天运行。"""
+    config_section = 'StoryEvent'
+    config_attribute = 'story_event_options'
+    @staticmethod
+    def valid(event_news: EventNews, args: list[Any] | None = None) -> tuple[type[BaseTask], list[Any] | None] | None:
+        return CampaignRewardExchange, args
+
+    def run(self) -> TaskReport:
+        options = {**self.task_options(), "first_clear": False, "bosses": False}
+        return CampaignClean(self.robot, options).run(False, False)

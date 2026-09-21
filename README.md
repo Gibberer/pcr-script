@@ -33,7 +33,7 @@
 定时任务可使用 `scripts/daily/all.bat`（完整日常）或 `scripts/daily/story_event.bat`（仅活动）。Agent 探查工具、共用界面能力与日常代码的目录边界见 [入口分类](scripts/README.md)；后续开发先读 [AGENTS.md](AGENTS.md) 和 [游戏知识目录](docs/game-knowledge/README.md)。
 
 本条目可以查看[_daily_config.yml](_daily_config.yml)文件中的任务列表部分，脚本会按其中所列顺序依次执行每个任务条目，具体任务条目的用途可以留意文件中的注释部分。
-如果想获知该项目支持的所有任务可以查看[tasks.py](pcrscript/tasks.py)，如果需要执行单个任务可参考[test.py](test.py)。
+任务统一位于 [tasks 包](pcrscript/tasks/)，可用 `scripts/daily/task.py --help` 查看注册任务，或执行 `./.venv/Scripts/python.exe -X utf8 scripts/daily/task.py caravan` 按需运行单项任务。原有任务名和每日列表兼容，组织与配置说明见[任务架构](docs/task-architecture.md)。
 
 ### 关于时限任务
 
@@ -41,3 +41,5 @@
 
 ---
 [其他说明](explanation.md)
+
+项目目录及任务文件对应关系见 [项目目录说明](docs/project-structure.md)。

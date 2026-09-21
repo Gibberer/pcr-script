@@ -1,12 +1,16 @@
 import functools
 import random
-import time
+import copy
+from typing import Any
+from pathlib import Path
+from .run_session import clock as time, wrap_driver, emit, failure, task_directory, task_result
 from tqdm import tqdm
 
 from .driver import Driver
 from .actions import *
 from .constants import *
-from .tasks import find_taskclass, BaseTask, ToHomePage
+from .tasks import find_taskclass, ImageTask, ToHomePage
+from .tasks.base import TaskExecutionRecord
 from .templates import ImageTemplate
 
 
@@ -26,17 +30,20 @@ class NetError(Exception):
     def __str__(self):
         return "发生网络异常!!!"
 
-class _DummyTask(BaseTask):
+class _DummyTask(ImageTask):
 
     def run(self, *args):
         pass
-    
+
 class Robot:
     def __init__(self, driver: Driver, name=None, show_progress=True):
         super().__init__()
-        self.driver = driver
+        self.driver = wrap_driver(driver)
         self.devicewidth, self.deviceheight = driver.get_screen_size()
         self.show_progress = show_progress
+        self.task_config: dict[str, Any] = {}
+        self.task_results: list[TaskExecutionRecord] = []
+        self._task_output: Path | None = None
         self._dummy_task = _DummyTask(self)
         global num
         if not name:
@@ -132,8 +139,8 @@ class Robot:
         ClickAction(template='btn_close').bindTask(self._dummy_task).do(self.driver.screenshot(), self)
 
     @trace
-    def work(self, tasklist=None):
-        tasklist = tasklist[:]
+    def work(self, tasklist: list[list[Any]] | None = None) -> list[TaskExecutionRecord]:
+        tasklist = list(tasklist or [])
         pretasks = []
         taskcount = len(tasklist)
         for i in range(taskcount - 1, -1, -1):
@@ -148,37 +155,53 @@ class Robot:
         self._log("======:已进入游戏首页:======")
         if tasklist:
             for funcname, *args in tasklist:
-                task = find_taskclass(funcname)
-                if task:
-                    self._run_task(funcname, task, args)
-                else:
-                    self._call_function(funcname, args)
+                self._run_task(funcname, args)
+        return self.task_results
 
-    def _run_task(self, taskname, taskclass: BaseTask, args):
-        self._log(f"start task: {taskname}")
+    def configure(self, config: dict[str, Any]) -> None:
+        self.task_config = copy.deepcopy(config)
+
+    def run_task(self, taskname: str, *args: Any, **kwargs: Any) -> Any:
+        """Shared dispatch for a daily list or one task, preserving its result.
+
+        This deliberately does not run login/home cleanup before an independent
+        task: each task owns navigation and recovery from its supported pages.
+        """
+        taskclass = find_taskclass(taskname)
+        legacy = getattr(self, '_' + taskname, None) if taskclass is None else None
+        directory = task_directory(taskname)
+        previous_output = self._task_output
+        self._task_output = directory
+        started = time.monotonic()
+        record: TaskExecutionRecord = {'task': taskname, 'status': 'running'}
+        self._log(f'start task: {taskname}')
         try:
-            task = taskclass(self)
-            if args:
-                task.run(*args)
-            else:
-                task.run()
+            if taskclass is None and not callable(legacy):
+                raise ValueError(f'未知任务: {taskname}')
+            result = taskclass(self).run(*args, **kwargs) if taskclass else legacy(*args, **kwargs)
+            # Old tasks have no postcondition report. Do not claim verified success.
+            record['status'] = result.get('status', 'finished') if isinstance(result, dict) else 'finished'
+            record['report'] = result
+            return result
+        except Exception as error:
+            record.update(status='error', error=str(error))
+            failure(error)
+            raise
+        finally:
+            record['duration_seconds'] = round(time.monotonic()-started, 3)
+            self._task_output = previous_output
+            self.task_results.append(record)
+            task_result(record, directory)
+            self._log(f'end task: {taskname} ({record["status"]})')
+
+    def _run_task(self, taskname: str, args: list[Any]) -> Any:
+        try:
+            return self.run_task(taskname, *args)
         except Exception as e:
             print(e)
-            if isinstance(e, NetError):
-                self.__tohomepage(click_pos=(60, 300))
-                self._run_task(taskname, taskclass, args)
-        self._log(f"end task: {taskname}")
-    
-    def _call_function(self, funcname, args):
-        try:
-            getattr(self, "_" + funcname)(*args)
-        except Exception as e:
-            print(e)
-            if isinstance(e, NetError):
-                self.__tohomepage(click_pos=(60, 300))
-                self._call_function(funcname, args)
 
     def _log(self, msg: str):
+        emit("task", message=msg)
         print("{}: {}".format(self._name, msg))
 
     def action_squential(self, *actions: Action, delay=0.2, net_error_check=True, show_progress=False, progress_index=None, total_step=1, title=None):
@@ -192,13 +215,14 @@ class Robot:
                 progress.set_description(f"{self._name}")
             actions = progress
         for action in actions:
-            action_start_time = time.time()
+            emit("action", action=type(action).__name__, template=str(getattr(action, "template", "")))
+            action_start_time = time.monotonic()
             while not action.done():
                 screenshot = self.driver.screenshot()
                 action.do(screenshot, self)
                 if delay > 0:
                     time.sleep(delay)
-                if net_error_check and time.time() - action_start_time > 10:
+                if net_error_check and time.monotonic() - action_start_time > 10:
                     # 如果一个任务检测超过10s，校验是否存在网络异常
                     net_error = self.__find_match_pos(screenshot, "btn_return_title_blue")
                     if not net_error:
@@ -206,14 +230,14 @@ class Robot:
                     if net_error:
                         self.driver.click(*net_error)
                         raise NetError()
-                    
+
     def __tohomepage(self, click_pos=(90, 500), timeout=0):
         ToHomePage(self).run(click_pos=click_pos, timeout=timeout)
-    
+
     def __action_squential(self, *actions: Action, delay=0.2, net_error_check=True):
         for action in actions:
             action.bindTask(self._dummy_task)
         self.action_squential(*actions, delay=delay, net_error_check=net_error_check)
-    
+
     def __find_match_pos(self, screenshot, template):
         return ImageTemplate(template).set_define_size(BASE_WIDTH, BASE_HEIGHT).match(screenshot)

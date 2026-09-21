@@ -1,6 +1,6 @@
 """Legacy map revival flow. Coordinates are normalized; unknown branches stop."""
 import re
-import time
+from pcrscript.run_session import clock as time
 
 import cv2 as cv
 import numpy as np
@@ -217,6 +217,8 @@ class RevivalMap:
             try:
                 self.sourced_boss(label, difficulty)
             except EventUIError as error:
+                from pcrscript.run_session import failure
+                failure(error)
                 self.r.report['pending'].append(str(error))
                 self.hub()  # Continue rewards only after a known safe return.
         self.rewards()

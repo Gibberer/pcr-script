@@ -25,6 +25,6 @@
 
 ## 代码与证据
 
-固化流程 `pcrscript/daily/gifts.py`，完整日常任务仍叫 `get_gift`；单独运行 `./.venv/Scripts/python.exe -X utf8 scripts/daily/gifts.py`。默认不领体力，可显式 `--include-stamina`。配置示例见 `_daily_config.yml` 的 `Gift`。
+固化流程 `pcrscript/tasks/task_gifts.py`，完整日常任务仍叫 `get_gift`；单独运行 `./.venv/Scripts/python.exe -X utf8 scripts/daily/gifts.py`。默认不领体力，可显式 `--include-stamina`。配置示例见 `_daily_config.yml` 的 `Gift`。
 
 初次探查截图 `cache/agent/story_event/gifts*.png`、`ex_*.png`；日常结果 `cache/daily/gifts/report.json` 和逐批库存/分解计划截图。截图不提交，后续会话按本文复用导航，只探查未知状态。待验证边界在 `pending-validation.md`。
