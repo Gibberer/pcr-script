@@ -4,6 +4,8 @@
 
 ## 接续方式
 
+2026-09-21 收尾最终状态：GUI 已提交推送，GitHub [工作流 #35596647901](https://github.com/Gibberer/pcr-script/actions/runs/35596647901) 打包成功，代码 `bd28041`，148项回归及云端离屏/下载验证通过，产物已上传。此前本页关于 GUI 云端构建“待触发”的条目已由此结果更新；实机任务和干净 Windows 安装验收仍保留待办。详细接续与产物 ID 见 `docs/desktop-handoff.md`。
+
 2026-09-21 GUI 收尾：领奖入口名称已按页面区分，唯一 requirements 清单，根目录工具归档/删除，补 Python 缺失及依赖安装引导，修复 action 中文转义；未操作模拟器。最终提交、构建证据与接续范围见 `docs/desktop-handoff.md`。下一次用户正常执行时验证礼物领取、暂停/停止和网络失败提示；不为收尾重复消费。
 
 2026-09-21 GUI 迁移为使用系统 .NET Framework 4.8 的轻量版，Python 执行逻辑不变。两种下载模式、协议/配置生成、中文进程通信与离屏界面已验证，包 `artifacts/PcrDesktop-win-x64-light.zip`，证据 `artifacts/gui-light-smoke.png*`。触发：用户在正常 Windows 10 1903+ / Windows 11 测试解压启动、目录选择、Python 环境引导及正常任务；GitHub 云端构建仍待提交推送触发。无新增游戏实测。

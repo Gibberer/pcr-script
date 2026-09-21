@@ -27,7 +27,15 @@ dotnet build desktop/PcrDesktop/PcrDesktop.csproj -c Release -o artifacts/gui -p
 
 ## 发布状态
 
-分支 codex/agent-driven-story-events。功能提交 db39c1818441be8c610c1f122c1987c29ef5fe7c 已推送。首次未触发因仓库 Actions 未启用；用户已启用，后续收尾提交重新触发。待核对 workflow 成功状态、全部步骤和 GUI ZIP/SHA256 产物后回填构建链接。
+分支 `codex/agent-driven-story-events`。功能提交 `db39c1818441be8c610c1f122c1987c29ef5fe7c`，验证提交 `bd28041cc0dc761a1cb8f005eecf3b5d1aa64ee4` 已推送。首次未触发因仓库 Actions 未启用；用户启用后重推已成功。
+
+[Windows GUI 构建 #35596647901](https://github.com/Gibberer/pcr-script/actions/runs/35596647901) 最终状态 **completed / success**，对应 `bd28041`。依赖安装、148项回归、Framework 编译、两种下载与 GUI 离屏验证、5 MB体积检查、ZIP/SHA256 打包和上传全部成功。已通过 GitHub API 核对并成功下载 artifact：
+
+- `PcrDesktop-win-x64`：artifact ID `10636946597`，566166字节（约553 KiB），包含 GUI ZIP 与 SHA256。
+- `GUI-smoke-evidence`：artifact ID `10637510615`，824317字节，含渲染证据。
+- artifact 默认到期时间 2026-12-20；到期后重新运行 workflow。没有发布 GitHub Release。
+
+本节之后仅补提交发布记录文档，不改变已验证的程序或 workflow；不会因文档提交再次打包。
 
 ## 留给后续 Agent
 

@@ -50,7 +50,7 @@ dotnet build desktop/PcrDesktop/PcrDesktop.csproj -c Release -o artifacts/gui -p
 
 输出为 `artifacts/gui/PcrDesktop.exe`。构建需要 .NET SDK（CI 使用10.x），通过 NuGet 获取 Framework 4.8 编译引用；用户电脑不需要安装该 SDK 或 .NET 10。输出包含 EXE、少量 JSON 依赖 DLL 和 Framework 配置文件。二进制和编译中间文件被 Git 忽略。
 
-`.github/workflows/desktop.yml` 在相关代码 push、PR、`gui-v*` 标签及手动触发时执行：安装 Python 依赖 → 全套离线测试 → 构建 Framework EXE → 隐藏窗口进行 GUI/Python 协议及渲染检查 → 上传 ZIP、SHA256 和渲染证据。另检查运行文件总量不超过5 MB。使用只读仓库权限，不打包账号配置、cache 或 Python 源码，不自动创建 Release。首次 workflow 成功后才能宣称 GitHub 云端构建已验证。
+`.github/workflows/desktop.yml` 在相关代码 push、PR、`gui-v*` 标签及手动触发时执行：安装 Python 依赖 → 全套离线测试 → 构建 Framework EXE → 隐藏窗口进行 GUI/Python 协议及渲染检查 → 上传 ZIP、SHA256 和渲染证据。另检查运行文件总量不超过5 MB。使用只读仓库权限，不打包账号配置、cache 或 Python 源码，不自动创建 Release。2026-09-21 首次云端构建已成功，见 [构建记录](https://github.com/Gibberer/pcr-script/actions/runs/35596647901)。
 
 无模拟器的本地 GUI 冒烟检查（程序内部只渲染离屏内容，不显示前台窗口、不修改账号配置）：
 
@@ -88,7 +88,7 @@ $p.ExitCode
 
 148项 Python 离线测试通过；Framework 编译零警告/零错误。两种下载模式、核心范围快进更新、无关 blob 排除、任务能力加载、配置生成/重载、中文与特殊字符参数传递、超时辅助进程终止、全部六页及首次引导离屏渲染检查通过。本次未启动模拟器。
 
-本地可测试包：`artifacts/PcrDesktop-win-x64-light.zip`；程序：`artifacts/gui-light/PcrDesktop.exe`；校验：`artifacts/SHA256SUMS-light.txt`。EXE 约114 KB，全部二进制约1.5 MB，压缩后小于1 MB。此前约140 MB 的自包含版本不再作为默认发布。证据：`artifacts/gui-light-smoke.png*`。GitHub workflow 已同步为轻量构建与5 MB大小上限，但首次云端运行仍需提交推送后触发。
+最终本地测试包：`artifacts/PcrDesktop-win-x64-final.zip`；程序：`artifacts/gui-final/PcrDesktop.exe`；校验：`artifacts/SHA256SUMS-final.txt`。EXE 约114 KB，全部二进制约1.5 MB，压缩后小于1 MB。此前约140 MB 的自包含版本不再作为默认发布。证据：`artifacts/gui-light-smoke.png*`。GitHub workflow 已同步为轻量构建与5 MB大小上限，云端打包已成功，见 [构建记录](https://github.com/Gibberer/pcr-script/actions/runs/35596647901)；最终包及接续状态见 `docs/desktop-handoff.md`。
 
 ## 收尾与后续接续（2026-09-21）
 
