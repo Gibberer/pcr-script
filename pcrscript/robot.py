@@ -3,7 +3,7 @@ import random
 import copy
 from typing import Any
 from pathlib import Path
-from .run_session import clock as time, wrap_driver, emit, failure, task_directory, task_result
+from .run_session import clock as time, wrap_driver, emit, failure, task_directory, task_result, RunCancelled
 from tqdm import tqdm
 
 from .driver import Driver
@@ -140,7 +140,10 @@ class Robot:
 
     @trace
     def work(self, tasklist: list[list[Any]] | None = None) -> list[TaskExecutionRecord]:
-        tasklist = list(tasklist or [])
+        # Old configurations used parameterless homepage rows as separators.
+        # Entry requirements now belong to each dispatched task; keep explicit
+        # custom-coordinate/timeout requests for backward compatibility.
+        tasklist = [row for row in (tasklist or []) if row != ['tohomepage']]
         pretasks = []
         taskcount = len(tasklist)
         for i in range(taskcount - 1, -1, -1):
@@ -164,8 +167,8 @@ class Robot:
     def run_task(self, taskname: str, *args: Any, **kwargs: Any) -> Any:
         """Shared dispatch for a daily list or one task, preserving its result.
 
-        This deliberately does not run login/home cleanup before an independent
-        task: each task owns navigation and recovery from its supported pages.
+        Tasks declare their entry requirements. OCR flows with their own safe
+        navigation and current-map tasks keep control of their starting page.
         """
         taskclass = find_taskclass(taskname)
         legacy = getattr(self, '_' + taskname, None) if taskclass is None else None
@@ -178,11 +181,17 @@ class Robot:
         try:
             if taskclass is None and not callable(legacy):
                 raise ValueError(f'未知任务: {taskname}')
+            if taskclass is not None and taskclass.requires_home is True:
+                self._log('准备任务：自动返回首页')
+                ToHomePage(self).run(timeout=60)
             result = taskclass(self).run(*args, **kwargs) if taskclass else legacy(*args, **kwargs)
             # Old tasks have no postcondition report. Do not claim verified success.
             record['status'] = result.get('status', 'finished') if isinstance(result, dict) else 'finished'
             record['report'] = result
             return result
+        except RunCancelled:
+            record['status'] = 'cancelled'
+            raise
         except Exception as error:
             record.update(status='error', error=str(error))
             failure(error)

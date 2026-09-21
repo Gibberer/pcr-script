@@ -10,7 +10,7 @@ from pcrscript import Robot
 from pcrscript.tasks import BaseTask, Caravan, GetGift, CampaignClean, RevivalEventOnce, find_taskclass
 from pcrscript.tasks.registry import registered_tasks
 from pcrscript.run_session import RunSession
-from scripts._game import run_task_from_config
+from pcrscript.runtime import run_task_from_config
 
 
 class TaskIntegrationTests(TestCase):
@@ -19,7 +19,7 @@ class TaskIntegrationTests(TestCase):
 
     def test_old_imports_and_all_registered_names_survive(self):
         from pcrscript.tasks import TeamFormation, TeamFormationEx, Combat, Event, EventNews, TimeLimitTask
-        expected = {'adventure_daily','arena','campaign_clean','campaign_reward_exchange','caravan',
+        expected = {'adventure_daily','arena','campaign_clean','caravan',
                     'clear_campaign_first_time','clear_story','common_adventure','free_gacha','get_gift',
                     'get_quest_reward','luna_tower_clean','luna_tower_climbing','normal_gacha',
                     'princess_arena','quick_clean','research','revival_event_once','schedule','shop_buy','tohomepage'}
@@ -81,17 +81,17 @@ class TaskIntegrationTests(TestCase):
 
     def test_cli_uses_registry_options_and_arguments(self):
         robot=self.robot()
-        with patch('scripts._game.load_config',return_value={'Caravan':{'timeout':12,'max_rolls':4}}), \
-             patch('scripts._game.robot_from_config',return_value=robot) as create, \
+        with patch('pcrscript.runtime.load_config',return_value={'Caravan':{'timeout':12,'max_rolls':4}}), \
+             patch('pcrscript.runtime.robot_from_config',return_value=robot) as create, \
              patch.object(robot,'run_task',return_value={'status':'complete'}) as dispatch:
             run_task_from_config('ignored.yml','caravan',option_overrides={'max_rolls':5})
             self.assertEqual(create.call_args.args[0]['Caravan'],{'timeout':12,'max_rolls':5})
             dispatch.assert_called_once_with('caravan')
 
     def test_revival_preflight_skips_device_when_unavailable(self):
-        with patch('scripts._game.load_config',return_value={}), \
+        with patch('pcrscript.runtime.load_config',return_value={}), \
              patch('pcrscript.news.fetch_event_news',return_value=Mock(revival=None)), \
-             patch('scripts._game.robot_from_config') as connect:
+             patch('pcrscript.runtime.robot_from_config') as connect:
             self.assertEqual(run_task_from_config('ignored.yml','revival_event_once')['status'],'unavailable')
             connect.assert_not_called()
 

@@ -29,6 +29,7 @@ class BaseTask(metaclass=ABCMeta):
 
     config_section: ClassVar[str | None] = None
     config_attribute: ClassVar[str | None] = None
+    requires_home: ClassVar[bool] = False
     name: ClassVar[str]
 
     def task_options(self) -> TaskOptions:

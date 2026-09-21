@@ -1,7 +1,7 @@
 ## 前言
 > 该脚本为自用脚本，主要用于清日常。
 
-实现方式基于Open CV模板匹配，模板图基于960x540的设备, 具体对设备支持情况见[设备支持情况](explanation.md#设备支持情况)。
+实现方式基于Open CV模板匹配，模板图基于960x540的设备, 具体对设备支持情况见[设备支持情况](docs/legacy-features.md#设备支持情况)。
 
 ## 使用引导
 
@@ -10,29 +10,25 @@
   ```cmd
   git clone --depth 1 git@github.com:Gibberer/pcr-script.git
   ```
-* 在命令行中执行以下命令安装项目所需依赖
+* 使用 Python 3.12+ x64，在项目根目录安装统一依赖（包含 OCR）：
   ```cmd
-  pip install opencv_python numpy pywin32 PyYAML
+  python -m pip install -r requirements.txt
   ```
-  以及日常类脚本需要的额外依赖
-  ```cmd
-  pip install Requests tqdm Brotli
-  ```
-* 设置配置文件：修改[_daily_config.yml](_daily_config.yml)中的雷电模拟器路径，之后将该文件重命名为**daily_config.yml**。
+* 设置配置文件：修改[docs/examples/daily.example.yml](docs/examples/daily.example.yml)中的雷电模拟器路径，之后复制到根目录命名为 **daily_config.yml**。
   * 如果是其他模拟器可以不设置路径，不过需要保证本机ADB命令可用，脚本会尝试使用ADB命令与设备交互，当然还请注意保持模拟器分辨率为960x540。
 * 执行[daily_task.bat](daily_task.bat)或[daily_task.py](daily_task.py)来启动脚本程序。
   * 运行后会按如下方式进行:启动模拟器->启动游戏->执行脚本任务
 ---
-* dialy_task仅支持单设备单账号并且处于已登录状态，如果需要多账号多设备可以使用[main.py](main.py)。不过在该文件中缺少对时限任务的判断，需要注意配置文件中的任务组合方式。
+* dialy_task仅支持单设备单账号并且处于已登录状态，如果需要多账号多设备可以使用[旧版多账号入口](scripts/legacy/multi_account.py)。不过在该文件中缺少对时限任务的判断，需要注意配置文件中的任务组合方式。
 * 部分任务需要依赖冒险图中的角色形象，默认使用6星佩可莉姆。如果是其他角色可以在游戏内冒险地图界面截取其中角色图像中的一部分（最好是脸部，不要截取到地图背景），将新截取的图片替换掉[images/character.png](images/character.png)这个图片即可。
 
 ## 关于任务内容
 
-新版剧情活动的运行、头像索引、配队检查和验证范围见 [剧情活动说明](docs/story-event.md)。该任务需要 `requirements-event.txt`，可用 `scripts/daily/story_event.py` 单独执行，雷电窗口模式无需 ADB。
+新版剧情活动的运行、头像索引、配队检查和验证范围见 [剧情活动说明](docs/story-event.md)。该任务需要 `requirements.txt`，可用 `scripts/daily/story_event.py` 单独执行，雷电窗口模式无需 ADB。
 
 定时任务可使用 `scripts/daily/all.bat`（完整日常）或 `scripts/daily/story_event.bat`（仅活动）。Agent 探查工具、共用界面能力与日常代码的目录边界见 [入口分类](scripts/README.md)；后续开发先读 [AGENTS.md](AGENTS.md) 和 [游戏知识目录](docs/game-knowledge/README.md)。
 
-本条目可以查看[_daily_config.yml](_daily_config.yml)文件中的任务列表部分，脚本会按其中所列顺序依次执行每个任务条目，具体任务条目的用途可以留意文件中的注释部分。
+本条目可以查看[docs/examples/daily.example.yml](docs/examples/daily.example.yml)文件中的任务列表部分，脚本会按其中所列顺序依次执行每个任务条目，具体任务条目的用途可以留意文件中的注释部分。
 任务统一位于 [tasks 包](pcrscript/tasks/)，可用 `scripts/daily/task.py --help` 查看注册任务，或执行 `./.venv/Scripts/python.exe -X utf8 scripts/daily/task.py caravan` 按需运行单项任务。原有任务名和每日列表兼容，组织与配置说明见[任务架构](docs/task-architecture.md)。
 
 ### 关于时限任务
@@ -40,6 +36,8 @@
 时限任务会在[daily_task.py](daily_task.py)中进行判断，如果对应任务的活动当前未开放，则会将配置的任务条目废弃掉不允执行。
 
 ---
-[其他说明](explanation.md)
+[其他说明](docs/legacy-features.md)
 
 项目目录及任务文件对应关系见 [项目目录说明](docs/project-structure.md)。
+
+Windows 图形控制台使用 C# / WPF，可配置任务、调用 Python 源码执行并查看状态。首次使用与 GitHub Actions EXE 下载方式见 [GUI 说明](docs/desktop.md)。

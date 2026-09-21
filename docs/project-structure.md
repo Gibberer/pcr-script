@@ -5,9 +5,17 @@
 | 路径 | 职责 |
 |---|---|
 | `daily_task.py` | 完整每日任务兼容入口 |
+| `desktop/PcrDesktop/` | C# / WPF 图形控制台源码，发布为独立 EXE |
+| `pcrscript/runtime.py` | GUI 与兼容命令入口共用的配置、每日流程及任务执行逻辑 |
+| `pcrscript/runtime_defaults.yml` | 核心运行目录自带的默认选项，无账号和默认任务 |
+| `pcrscript/desktop.py` | GUI 使用的版本化 JSON 配置、控制和运行入口 |
+| `.github/workflows/desktop.yml` | Windows GUI 自动构建、离线测试与 EXE 产物上传 |
 | `pcrscript/tasks/` | 统一任务实现、基类、注册表及任务辅助逻辑 |
 | `pcrscript/game_ui/` | 可共享的观察、识别与操作能力 |
 | `scripts/daily/` | 正式自动化命令入口，可供定时任务调用 |
+| `scripts/legacy/multi_account.py` | 旧版多账号入口，从根目录运行；不属于 GUI 核心下载 |
+| `docs/examples/daily.example.yml` | 可复制到根目录的日常示例配置 |
+| `requirements.txt` | 唯一 Python 依赖清单，包含 OCR |
 | `scripts/agent/` | 分析、探查、审查与校准工具 |
 | `test/` | 离线回归测试与最小测试样本 |
 | `docs/` | 项目结构、运行方式与设计说明 |
@@ -15,6 +23,10 @@
 | `cache/daily/` | 日常运行结果与证据，本地数据不提交 |
 | `cache/agent/` | Agent 分析证据，本地数据不提交 |
 | `cache/game/` | 共享识别数据及实际队伍方案，本地数据不提交 |
+
+GUI 下载可选择仅核心运行目录（`pcrscript/`、`images/` 和统一 requirements 清单）或完整仓库。精简运行目录无需 `scripts/` 和根目录 Python 入口。
+
+GUI 的使用、构建和发布方式见 [Windows 图形控制台](desktop.md)。
 
 ## 任务文件索引
 
@@ -33,7 +45,7 @@
 | [task_routines.py](../pcrscript/tasks/task_routines.py) | `arena`、`princess_arena`、`research`、`schedule` |
 | [task_shop.py](../pcrscript/tasks/task_shop.py) | `shop_buy` |
 | [task_story.py](../pcrscript/tasks/task_story.py) | `clear_story`、`get_quest_reward` |
-| [task_story_event.py](../pcrscript/tasks/task_story_event.py) | `campaign_clean`、`campaign_reward_exchange`、`clear_campaign_first_time` |
+| [task_story_event.py](../pcrscript/tasks/task_story_event.py) | `campaign_clean`、`clear_campaign_first_time` |
 | [task_tower.py](../pcrscript/tasks/task_tower.py) | `luna_tower_clean`、`luna_tower_climbing` |
 
 `task_combat.py` 包含可复用的 `TeamFormation`、`TeamFormationEx`、`Combat` 子任务，供其他任务通过 Python 调用，未注册为独立命令，不能直接填入配置任务列表。

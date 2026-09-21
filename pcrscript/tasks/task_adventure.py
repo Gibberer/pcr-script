@@ -48,7 +48,7 @@ class CommonAdventure(ImageTask):
                 self.action_squential(MatchAction(template=ImageTemplate(character_symbol, threshold=0.7), unmatch_actions=[ClickAction(template='btn_cancel'), ClickAction(template='btn_close')]))
 
 
-@register("quick_clean")
+@register("quick_clean", requires_home=True)
 class QuickClean(ImageTask, TimeLimitTask):
     '''
     快速扫荡任务
@@ -98,7 +98,7 @@ class QuickClean(ImageTask, TimeLimitTask):
         self.action_squential(*actions)
 
 
-@register("adventure_daily")
+@register("adventure_daily", requires_home=True)
 class AdventureDaily(ImageTask):
     '''
     探险

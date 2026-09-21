@@ -558,17 +558,3 @@ class ClearCampaignFirstTime(TimeLimitTask):
 
     def run(self, exhaust_power: bool = False) -> TaskReport:
         return CampaignClean(self.robot).run(True, exhaust_power)
-
-
-@register("campaign_reward_exchange")
-class CampaignRewardExchange(TimeLimitTask):
-    """保留独立领奖入口，现在可每天运行。"""
-    config_section = 'StoryEvent'
-    config_attribute = 'story_event_options'
-    @staticmethod
-    def valid(event_news: EventNews, args: list[Any] | None = None) -> tuple[type[BaseTask], list[Any] | None] | None:
-        return CampaignRewardExchange, args
-
-    def run(self) -> TaskReport:
-        options = {**self.task_options(), "first_clear": False, "bosses": False}
-        return CampaignClean(self.robot, options).run(False, False)

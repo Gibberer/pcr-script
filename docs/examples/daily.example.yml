@@ -32,56 +32,35 @@ Gift:
 Caravan: # 按需任务配置；存在此配置不代表加入每日任务列表
   timeout: 1800
   max_rolls: 200
+# 需要首页的任务由调度器自动返回首页，无需穿插 tohomepage。
 Task: #配置执行任务,配置任务名称，如果需要传入参数在下面增加参数，可以根据不同的账号序号配置任务。
   1: # 多账号相关，可以针对账号配置不同的任务，如果是单账号日常不需要关注。
     -
       - free_gacha #抽取免费十连（只在免费10连期间有效）
       - False #是否抽取所有免费十连，如果有多天未进行登录会有多次免费十连
     -
-      - tohomepage #回到首页，每个任务都是按照当前处于首页状态开始执行的，回到首页已保证任务能够顺利执行
-    -
       - schedule #完成日程表的内容
-    -
-      - tohomepage
     -
       - arena #打一把竞技场
     -
-      - tohomepage
-    -
       - princess_arena #打一把公主竞技场
-    -
-      - tohomepage
     -
       - research #圣迹和神殿调查
     -
-      - tohomepage
-    -
       - adventure_daily
-    -
-      - tohomepage
     -
       - get_quest_reward #领取任务奖励（获取赠送的体力）
     -
-      - tohomepage
-    -
       - revival_event_once # 复刻情报筛选；每期完成后自动跳过
-    -
-      - tohomepage
     -
       - campaign_clean  # 新版活动重复日：困难扫荡、剧情、任务、兑换（首通暂不执行）
       - True # 是否扫荡活动困难关卡
       - False # 是否将剩余体力花费在活动普通章节上
     -
-      - tohomepage
-    -
       - quick_clean #快捷扫荡
       - 2 #使用预设2，这里需要注意当只有困难关卡双倍掉落时会强行切换为使用预设3。所以建议把该预设设置为通常关卡，预设3设置为困难关卡。
     -
-      - tohomepage
-    -
       - luna_tower_clean # 进行露娜塔的回廊扫荡，通过露娜塔后开放（只在露娜塔开放期间执行）
-    -
-      - tohomepage
     -
       - shop_buy #商店购买
       -
@@ -90,11 +69,7 @@ Task: #配置执行任务,配置任务名称，如果需要传入参数在下面
         9: #限定商店
           - -1 # 表示点击全选按钮即全部经验药水
     -
-      - tohomepage
-    -
       - get_quest_reward  # 领取任务奖励（全部奖励）
-    -
-      - tohomepage
     -
       - get_gift # 领取礼物
       - True # 忽略体力收取

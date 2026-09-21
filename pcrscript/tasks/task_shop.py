@@ -12,7 +12,7 @@ if TYPE_CHECKING:
 
 from .registry import register
 
-@register("shop_buy")
+@register("shop_buy", requires_home=True)
 class ShopBuy(ImageTask):
     '''
     商店购买药水、道具等

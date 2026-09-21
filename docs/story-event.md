@@ -28,7 +28,7 @@
 
 ```powershell
 python -m venv .venv
-./.venv/Scripts/python.exe -m pip install -r requirements-event.txt
+./.venv/Scripts/python.exe -m pip install -r requirements.txt
 ./.venv/Scripts/python.exe -X utf8 scripts/daily/story_event.py
 ```
 
@@ -53,7 +53,7 @@ Task:
     - [campaign_clean, true, false]
 ```
 
-两个位置参数分别是“扫荡困难关卡”“将剩余体力用于普通关卡”。默认保留普通关卡体力。不购买体力，不重置困难次数，不自动强化角色或升级专武。困难扫荡一次勾选仍有次数的三关，核对确认页各关次数和总消耗后提交；体力不足则继续领奖。活动任务在扫荡和剧情之后按首页提示进入，检查“每日、普通、特别、称号”四栏，随后兑换全部活动券；首页券余额明确为 0 时不进入兑换页。旧任务名 `clear_campaign_first_time` 和 `campaign_reward_exchange` 仍可使用；正常日常只需要 `campaign_clean`。
+两个位置参数分别是“扫荡困难关卡”“将剩余体力用于普通关卡”。默认保留普通关卡体力。不购买体力，不重置困难次数，不自动强化角色或升级专武。困难扫荡一次勾选仍有次数的三关，核对确认页各关次数和总消耗后提交；体力不足则继续领奖。活动任务在扫荡和剧情之后按首页提示进入，检查“每日、普通、特别、称号”四栏，随后兑换全部活动券；首页券余额明确为 0 时不进入兑换页。旧首通兼容名 `clear_campaign_first_time` 保留；活动领奖和兑换统一包含在 `campaign_clean`，已移除无单独调用场景的 `campaign_reward_exchange`。旧配置若有该项需移除，不自动换成扫荡任务。
 
 日常入口可用 `--only stories|memoirs|missions|sweep|exchange` 单独运行一项。Agent 另用 `scripts/agent/game.py` 保存截图和 OCR，增加 `--audit` 选择本期特别战斗＋模式 1 的第一套作业，读取培养信息并输出达标结果，不开始战斗。目录边界见 [入口分类](../scripts/README.md)。
 

@@ -31,7 +31,7 @@
 
 ## 礼物满仓恢复
 
-`scripts/daily/gifts.py` 为独立礼物日常入口，完整日常仍使用配置中的 `get_gift`。它在持有上限阻塞后使用游戏已保存的自动分解规则腾出特别装备空间，再继续分批领取。配置见 `_daily_config.yml` 的 `Gift`；默认排除体力、目标空位 750，不修改游戏分解设置。实测导航与约束见 [礼物知识](../docs/game-knowledge/gifts.md)。
+`scripts/daily/gifts.py` 为独立礼物日常入口，完整日常仍使用配置中的 `get_gift`。它在持有上限阻塞后使用游戏已保存的自动分解规则腾出特别装备空间，再继续分批领取。配置见 `docs/examples/daily.example.yml` 的 `Gift`；默认排除体力、目标空位 750，不修改游戏分解设置。实测导航与约束见 [礼物知识](../docs/game-knowledge/gifts.md)。
 
 每日入口自动保存运行日志与异常现场；中途暂停/恢复、证据格式及排查流程见 [运行诊断](../docs/run-diagnostics.md)。控制入口为 scripts/agent/run_control.py。
 

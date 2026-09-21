@@ -1,0 +1,83 @@
+name: Windows GUI
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ['**']
+    paths:
+      - 'desktop/**'
+      - 'pcrscript/**'
+      - 'scripts/**'
+      - 'test/**'
+      - 'requirements*.txt'
+      - 'daily_task.py'
+      - 'docs/examples/daily.example.yml'
+      - '.github/workflows/desktop.yml'
+    tags: ['gui-v*']
+  pull_request:
+    paths:
+      - 'desktop/**'
+      - 'pcrscript/**'
+      - 'scripts/**'
+      - 'test/**'
+      - 'requirements*.txt'
+      - 'daily_task.py'
+      - 'docs/examples/daily.example.yml'
+      - '.github/workflows/desktop.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    env:
+      PYTHONUTF8: '1'
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+      - name: Install Python dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Offline Python regression tests
+        run: python -X utf8 -m unittest discover -s test -p 'test_*.py'
+      - name: Build lightweight .NET Framework GUI
+        run: dotnet build desktop/PcrDesktop/PcrDesktop.csproj -c Release -o artifacts/gui -p:DebugType=None -p:DebugSymbols=false
+      - name: Runtime-only download and headless GUI verification
+        shell: pwsh
+        run: ./test/verify_desktop_runtime.ps1
+      - name: Check portable package size
+        shell: pwsh
+        run: |
+          $size = (Get-ChildItem artifacts/gui -File -Recurse | Measure-Object Length -Sum).Sum
+          if ($size -gt 5MB) { throw "GUI files exceed 5 MB; check for bundled runtime: $size" }
+      - name: Package binary and usage notes
+        shell: pwsh
+        run: |
+          Copy-Item docs/desktop.md artifacts/gui/使用说明.md
+          Compress-Archive -Path artifacts/gui/* -DestinationPath artifacts/PcrDesktop-win-x64.zip
+          (Get-FileHash artifacts/PcrDesktop-win-x64.zip -Algorithm SHA256).Hash + '  PcrDesktop-win-x64.zip' | Set-Content artifacts/SHA256SUMS.txt
+      - name: Upload GUI binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: PcrDesktop-win-x64
+          path: |
+            artifacts/PcrDesktop-win-x64.zip
+            artifacts/SHA256SUMS.txt
+          if-no-files-found: error
+      - name: Upload GUI verification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: GUI-smoke-evidence
+          path: artifacts/gui-smoke.png*
+          if-no-files-found: ignore

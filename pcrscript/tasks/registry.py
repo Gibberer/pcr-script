@@ -16,11 +16,12 @@ def registered_tasks() -> tuple[str, ...]:
     return tuple(sorted(_registedTasks))
 
 
-def register(name: str) -> Callable[[TaskType], TaskType]:
+def register(name: str, *, requires_home: bool = False) -> Callable[[TaskType], TaskType]:
     def wrap(cls: TaskType) -> TaskType:
         if name in _registedTasks:
             raise Exception(f"Task:{name} already registed.")
         _registedTasks[name] = cls
         cls.name = name
+        cls.requires_home = requires_home
         return cls
     return wrap

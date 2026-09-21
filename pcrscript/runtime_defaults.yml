@@ -1,0 +1,30 @@
+# GUI runtime defaults; no account data or implicit task plan.
+Accounts: []
+Extra:
+  dnpath: ''
+StoryEvent:
+  teams: cache/game/strategies/event_teams.yml
+  first_clear: false
+  bosses: false
+  stories: true
+  memoirs: true
+  missions: true
+  exchange: true
+  max_boss_attempts: 10
+  battle_timeout: 220
+  timeout: 1800
+RevivalEvent:
+  account_key: default
+  teams: cache/game/strategies/revival_teams.yml
+  timeout: 2400
+  battle_timeout: 220
+Gift:
+  auto_dismantle: true
+  free_slots: 750
+  max_gift_batches: 30
+  timeout: 900
+Caravan:
+  timeout: 1800
+  max_rolls: 200
+Task:
+  1: []

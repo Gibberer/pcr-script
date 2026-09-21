@@ -17,7 +17,7 @@ from pcrscript.tasks.task_story_event import CampaignClean
 from pcrscript.tasks.event_sweep import HardSweep
 from pcrscript.driver import DNDriver, ADBDriver
 from pcrscript.simulator import DNSimulator
-from pcrscript.tasks import CampaignClean, ClearCampaignFirstTime, CampaignRewardExchange
+from pcrscript.tasks import CampaignClean, ClearCampaignFirstTime
 from pcrscript.game_ui.avatars import AvatarIndex, search_card_rectangles, face_crop
 from pcrscript.game_ui.equipment import EquipmentBadges
 
@@ -311,7 +311,7 @@ class StrategyTests(TestCase):
         self.assertNotIn("unique_level", MemberRequirement.__dataclass_fields__)
 
     def test_stale_calendar_preserves_daily_and_first_clear_arguments(self):
-        for cls in (CampaignClean, ClearCampaignFirstTime, CampaignRewardExchange):
+        for cls in (CampaignClean, ClearCampaignFirstTime):
             self.assertEqual(cls.valid(SimpleNamespace(hatsune=None), [True, False]), (cls, [True, False]))
 
 

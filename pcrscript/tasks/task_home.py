@@ -17,12 +17,11 @@ class ToHomePage(ImageTask):
     前往游戏首页
     '''
 
-    def run(self, click_pos=(90, 500), timeout=0):
-        self.action_squential(
-            MatchAction(ImageTemplate('shop', consecutive_hit=2), unmatch_actions=(
-            ClickAction(ImageTemplate('btn_close') | ImageTemplate('btn_ok_blue')
-                        | ImageTemplate('btn_download') | ImageTemplate('btn_skip')
-                        | ImageTemplate('btn_cancel') | ImageTemplate('select_branch_first')
-                        | ImageTemplate('app_no_responed') | ImageTemplate('btn_close_2')),
+    def run(self, click_pos=(90, 500), timeout=60):
+        action = MatchAction(ImageTemplate('shop', consecutive_hit=2), unmatch_actions=(
+            ClickAction(ImageTemplate('btn_close') | ImageTemplate('btn_cancel') | ImageTemplate('btn_close_2')),
             ClickAction(pos=click_pos),
-        ),timeout=timeout), show_progress=False, net_error_check=False)
+        ), timeout=timeout)
+        self.action_squential(action, show_progress=False, net_error_check=False)
+        if action.is_timeout:
+            raise RuntimeError('未能在时限内返回首页，任务未开始；请检查当前页面或弹窗')

@@ -25,6 +25,9 @@
 
 ## 目录边界
 
+- GUI 收尾与构建接续见 `docs/desktop-handoff.md`；运行依赖只维护根目录 `requirements.txt`，示例配置在 `docs/examples/daily.example.yml`。GUI 用系统 .NET Framework 4.8，核心下载仅 pcrscript、images 与依赖清单。
+- `desktop/PcrDesktop/` 为 C# / WPF 控制台，仅管理配置、源码、进程与记录；实际游戏逻辑保留 Python。GUI 通过 `pcrscript/desktop.py` 的版本化 JSON 接口复用正式任务与 RunSession，不依赖 Agent 入口。二进制构建产物放忽略的 `artifacts/`，说明放 `docs/desktop.md`；GitHub 构建见 `.github/workflows/desktop.yml`。
+
 - 项目目录与任务文件说明集中放在 `docs/project-structure.md`，不在代码目录新增 README。
 
 - 具体任务实现统一命名为 `pcrscript/tasks/task_<功能>.py`，基类、注册表和辅助模块不加 `task_` 前缀；新增任务时同步维护 `docs/project-structure.md` 的注册名索引，明确未独立注册的复用子任务。

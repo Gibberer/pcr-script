@@ -12,7 +12,7 @@ if TYPE_CHECKING:
 from .registry import register
 from ._actions import _clean_oneshot_actions
 
-@register("arena")
+@register("arena", requires_home=True)
 class Arena(ImageTask):
     '''
     竞技场
@@ -40,7 +40,7 @@ class Arena(ImageTask):
         )
 
 
-@register("princess_arena")
+@register("princess_arena", requires_home=True)
 class PrincessArena(ImageTask):
     '''
     公主竞技场
@@ -72,7 +72,7 @@ class PrincessArena(ImageTask):
         )
 
 
-@register("research")
+@register("research", requires_home=True)
 class Research(ImageTask):
     '''
     圣迹调查
@@ -108,7 +108,7 @@ class Research(ImageTask):
         self.action_squential(*actions)
 
 
-@register("schedule")
+@register("schedule", requires_home=True)
 class Schedule(ImageTask):
     '''
     日程表

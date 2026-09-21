@@ -11,7 +11,7 @@ if TYPE_CHECKING:
 from .base import TimeLimitTask, EventNews
 from .registry import register
 
-@register("free_gacha")
+@register("free_gacha", requires_home=True)
 class FreeGacha(ImageTask, TimeLimitTask):
     '''
     抽取免费十连
@@ -65,7 +65,7 @@ class FreeGacha(ImageTask, TimeLimitTask):
         )
 
 
-@register("normal_gacha")
+@register("normal_gacha", requires_home=True)
 class NormalGacha(ImageTask):
     '''
     普通扭蛋

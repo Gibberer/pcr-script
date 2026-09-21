@@ -12,7 +12,7 @@ if TYPE_CHECKING:
 
 from .registry import register
 
-@register("clear_story")
+@register("clear_story", requires_home=True)
 class ClearStory(ImageTask):
 
     def __init__(self, robot: 'Robot'):
@@ -134,7 +134,7 @@ class ClearStory(ImageTask):
             time.sleep(retry_interval)
 
 
-@register("get_quest_reward")
+@register("get_quest_reward", requires_home=True)
 class GetQuestReward(ImageTask):
     '''
     领取任务奖励

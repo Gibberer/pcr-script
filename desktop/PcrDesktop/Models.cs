@@ -1,0 +1,58 @@
+using System.IO;
+using System.Text.Json;
+using System.Text.Json.Nodes;
+
+namespace PcrDesktop;
+
+public sealed class TaskRow
+{
+    public bool Enabled { get; set; } = true;
+    public string Name { get; set; } = "";
+    public string Args { get; set; } = "[]";
+    public string DisplayName => Name switch
+    {
+        "get_quest_reward" => "首页任务 · 领取任务奖励",
+        "get_gift" => "礼物箱 · 领取邮件与赠礼",
+        _ => Name
+    };
+}
+
+public sealed record TaskChoice(string Name, string Label, JsonArray Parameters, string Description)
+{
+    public override string ToString() => $"{Label}  ·  {Name}";
+}
+
+public sealed record RunChoice(string Path, string Label)
+{
+    public override string ToString() => Label;
+}
+
+public sealed class Settings
+{
+    public string Workspace { get; set; } = "";
+    public string Python { get; set; } = "";
+    public string EmulatorDirectory { get; set; } = "";
+    public bool SetupCompleted { get; set; }
+    public string BootstrapPython { get; set; } = "python";
+    public string Config { get; set; } = "daily_config.yml";
+    public string Repository { get; set; } = "https://github.com/Gibberer/pcr-script.git";
+    public string Branch { get; set; } = "codex/agent-driven-story-events";
+    public bool DownloadCoreOnly { get; set; } = true;
+    public List<string> RecentConfigs { get; set; } = [];
+    public static string FilePath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "PcrDesktop", "settings.json");
+
+    public static Settings Load()
+    {
+        try { return JsonSerializer.Deserialize<Settings>(File.ReadAllText(FilePath)) ?? new(); }
+        catch (Exception e) when (e is IOException or JsonException) { return new(); }
+    }
+
+    public void Save()
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
+        var temp = FilePath + ".tmp";
+        File.WriteAllText(temp, JsonSerializer.Serialize(this));
+        if (File.Exists(FilePath)) File.Replace(temp, FilePath, null);
+        else File.Move(temp, FilePath);
+    }
+}

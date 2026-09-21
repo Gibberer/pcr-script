@@ -51,7 +51,7 @@ class TaskBaseTests(TestCase):
                 self.assertFalse(hasattr(task, 'define_width'))
 
     def test_existing_registered_image_tasks_keep_action_capabilities(self):
-        ocr_names = {'caravan', 'get_gift', 'campaign_clean', 'campaign_reward_exchange',
+        ocr_names = {'caravan', 'get_gift', 'campaign_clean',
                      'clear_campaign_first_time', 'revival_event_once'}
         for name in set(registered_tasks()) - ocr_names:
             self.assertTrue(issubclass(find_taskclass(name), ImageTask), name)

@@ -116,7 +116,7 @@ class EventUI:
                 try:
                     from rapidocr import RapidOCR
                 except ImportError as error:
-                    raise EventUIError("活动任务需要安装 requirements-event.txt 中的 OCR 依赖") from error
+                    raise EventUIError("活动任务需要安装 requirements.txt 中的 OCR 依赖") from error
                 self._ocr = RapidOCR(params={"EngineConfig.onnxruntime.intra_op_num_threads": 2,
                                               "EngineConfig.onnxruntime.inter_op_num_threads": 1})
             # RapidOCR remembers per-call mode flags. Restore detection after

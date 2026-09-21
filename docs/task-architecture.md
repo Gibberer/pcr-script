@@ -9,7 +9,7 @@
 - `task_story_event.py`、`task_revival_event.py`、`task_gifts.py`、`task_caravan.py`：直接实现并注册 Task；活动战斗、配队、扫荡、作业校验及复刻地图等辅助模块同属 tasks 包。
 - `game_ui/` 仍仅放可共享的识别/操作能力；`scripts/agent/` 仅分析；`scripts/daily/` 仅命令适配与原有兼容入口。
 
-原来的 `from pcrscript.tasks import BaseTask, CampaignClean, ...`、21个注册任务名及任务列表位置参数保持兼容。原 `pcrscript.daily.*` 是此次被移除的内部路径，工程内引用和测试均已迁移。
+原来的 `from pcrscript.tasks import BaseTask, CampaignClean, ...`、任务列表位置参数保持兼容；2026-09-21 收尾按用户要求移除独立 `campaign_reward_exchange`，活动日常自动处理领奖/兑换，目前20个注册任务。原 `pcrscript.daily.*` 是此次被移除的内部路径，工程内引用和测试均已迁移。
 
 具体任务文件统一以 `task_` 开头，基础设施和辅助模块不加此前缀；完整注册名与文件对应关系见 [任务索引](project-structure.md)。`task_combat.py` 是未独立注册的可复用子任务，索引中单独说明。原模块路径随文件名调整，对外类导出、注册名和脚本命令不变。
 
@@ -55,3 +55,5 @@
 收尾离线验收：基类拆分后全套124项测试通过（其中8项任务整合集成测试、6项基类拆分测试）；Python编译检查及 git diff --check 通过。
 
 基类拆分另有6项离线回归，覆盖 OCR 无图片能力依赖、原图片任务继承、动作绑定与坐标换算、进度、Robot 旧动作入口及两类限时任务筛选。本次拆分不操作模拟器；上述零骰子实测发生在拆分之前，拆分后的真实运行留待下次正常任务执行。
+
+2026-09-21：首页要求通过注册参数 `requires_home=True` 声明，由 `Robot.run_task()` 执行前置导航（60秒超时，失败不开始任务）。旧列表无参数 `tohomepage` 分隔项自动省略，带自定义参数的手动项保留。OCR 自有导航和当前地图任务不强制回首页。GUI 任务能力说明与配置编辑见 `docs/desktop.md`。

@@ -49,6 +49,16 @@ def task_result(record: dict, directory: Path | None = None) -> None:
 
 
 class _Clock:
+    def sleep(self, seconds):
+        if _current is None or threading.get_ident() != _current.owner:
+            return _time.sleep(seconds)
+        deadline = self.monotonic() + seconds
+        while self.monotonic() < deadline:
+            # Pause stays at driver boundaries so resume still checks stale pixels.
+            if _current.command().get('action') == 'stop':
+                _current.checkpoint()
+            _time.sleep(min(.1, max(0, deadline - self.monotonic())))
+
     def time(self):
         return _time.time()
 
@@ -64,6 +74,10 @@ clock = _Clock()
 
 class ResumeUnsafe(BaseException):
     """Must escape legacy catch-and-continue handlers before any stale click."""
+
+
+class RunCancelled(BaseException):
+    """Cooperative cancellation must escape task-level exception handlers."""
 
 
 class _Tee:
@@ -88,8 +102,10 @@ class _Tee:
 
 
 class RunSession:
-    def __init__(self, name, root='cache/daily/runs', stall_seconds=120):
-        self.path = Path(root) / (_time.strftime('%Y%m%d-%H%M%S') + '-' + str(os.getpid()) + '-' + uuid.uuid4().hex[:6])
+    def __init__(self, name, root='cache/daily/runs', stall_seconds=120, run_id=None):
+        if run_id is not None:
+            run_id = str(uuid.UUID(run_id))
+        self.path = Path(root) / (run_id or (_time.strftime('%Y%m%d-%H%M%S') + '-' + str(os.getpid()) + '-' + uuid.uuid4().hex[:6]))
         self.path.mkdir(parents=True)
         self.name = name
         self.stall_seconds = stall_seconds
@@ -114,7 +130,7 @@ class RunSession:
     def event(self, kind, **data):
         with self.lock:
             if kind in ('task', 'action', 'wait'):
-                step = (kind, json.dumps(data, default=str, sort_keys=True))
+                step = (kind, json.dumps(data, ensure_ascii=False, default=str, sort_keys=True))
                 if step != self.step:
                     self.step, self.step_since = step, _time.monotonic()
             self.events.write(json.dumps(dict(time=_time.time(), kind=kind, **data), ensure_ascii=False, default=str) + '\n')
@@ -174,6 +190,9 @@ class RunSession:
 
     def checkpoint(self):
         command = self.command()
+        if command.get('action') == 'stop' and command.get('id') != self.command_id:
+            self.command_id = command['id']
+            raise RunCancelled('用户请求停止任务')
         if command.get('id') == self.command_id or command.get('action') != 'pause':
             return False
         start = _time.monotonic()
@@ -184,6 +203,9 @@ class RunSession:
             self.status()
         while not self.stop.wait(.1):
             command = self.command()
+            if command.get('action') == 'stop' and command.get('id') != self.command_id:
+                self.command_id = command['id']
+                raise RunCancelled('用户请求停止任务')
             if command.get('action') == 'resume' and command.get('id') != self.command_id:
                 break
         with self.lock:
@@ -249,9 +271,9 @@ class RunSession:
         self.stop.set()
         self.thread.join(timeout=2)
         try:
-            if error is not None and not (isinstance(error, SystemExit) and error.code in (None, 0)):
+            if error is not None and not isinstance(error, RunCancelled) and not (isinstance(error, SystemExit) and error.code in (None, 0)):
                 self.incident('uncaught exception', error)
-            self.state = 'failed' if self.errors else 'finished'
+            self.state = 'cancelled' if isinstance(error, RunCancelled) else ('failed' if self.errors else 'finished')
             self.event('end', state=self.state)
             self.status()
         finally:
@@ -262,6 +284,7 @@ class RunSession:
             self.run_lock.close()
         if error is None and self.errors:
             raise SystemExit(1)
+        return isinstance(error, RunCancelled)
 
 
 class TracedDriver:

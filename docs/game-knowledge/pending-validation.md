@@ -4,6 +4,18 @@
 
 ## 接续方式
 
+2026-09-21 GUI 收尾：领奖入口名称已按页面区分，唯一 requirements 清单，根目录工具归档/删除，补 Python 缺失及依赖安装引导，修复 action 中文转义；未操作模拟器。最终提交、构建证据与接续范围见 `docs/desktop-handoff.md`。下一次用户正常执行时验证礼物领取、暂停/停止和网络失败提示；不为收尾重复消费。
+
+2026-09-21 GUI 迁移为使用系统 .NET Framework 4.8 的轻量版，Python 执行逻辑不变。两种下载模式、协议/配置生成、中文进程通信与离屏界面已验证，包 `artifacts/PcrDesktop-win-x64-light.zip`，证据 `artifacts/gui-light-smoke.png*`。触发：用户在正常 Windows 10 1903+ / Windows 11 测试解压启动、目录选择、Python 环境引导及正常任务；GitHub 云端构建仍待提交推送触发。无新增游戏实测。
+
+2026-09-21 GUI 下载提供核心/完整两种范围；核心白名单含 pcrscript、images 和 requirements 清单。正式运行已解除 scripts 与根目录入口依赖。两种范围的本地 Git 下载、核心文件 blob 边界、快进更新与离屏 GUI 已验证；GitHub 远端下载、干净机器依赖安装和实机运行仍待用户正常使用验证。证据 `artifacts/gui-v5-smoke.png*`；复现 `test/verify_desktop_runtime.ps1`，详情见 `docs/desktop.md`。无新增游戏规则或模拟器操作。
+
+2026-09-21 GUI 首次启动改为工程/雷电/Python 环境引导，配置文件非必需；单任务运行选项走内存接口，不读写任务配置。触发：用户测试新版 EXE。验收：现有工程识别→选择雷电→直接单任务；另一空目录验证 GitHub 下载及环境初始化，非空无关目录不得覆盖。无文件单任务与界面已离线验证，下载/环境初始化和真实任务仍待用户正常使用；证据 `artifacts/gui-v4-smoke.png.setup.png` 与 `cache/daily/runs/<UUID>/`。
+
+2026-09-21 按用户要求新增隐式首页前置条件。触发：下次正常执行 GUI 单项任务或完整配置，从非首页已知页面开始。验收：需首页任务先自动返回，已在首页快速确认，未知弹窗/超时停止该任务；OCR 自有导航及 common_adventure 保持原起点，旧无参数首页分隔项不重复执行。离线覆盖导航顺序、失败阻断和特殊任务豁免，未新增实机证据。证据目标 `cache/daily/runs/<UUID>/`，原首通/首领默认开关未改。
+
+2026-09-21 新增 Windows WPF GUI 与 GitHub EXE 打包 workflow。GUI 配置与 Python 协议、停止/锁释放以离线测试验证；真实模拟器执行仍等下次正常日常，不重复消费。验收：GUI 加载当前工程 → 运行每日列表 → 核对任务顺序、实时状态与结果 → 在安全页面请求暂停并等确认 → 恢复或停止，核对 `cache/daily/runs/<UUID>/`。当前首通/首领开关未改。GitHub Actions 尚需提交后触发首次云端构建，下载 artifact 在 Windows 启动；实现与限制见 `docs/desktop.md`。
+
 2026-09-21 基类进一步拆分为公共 `BaseTask` 与图片能力 `ImageTask`，OCR 任务不再携带图片动作接口；限时规则与统一调度保留。本次只做离线回归，无新增 UI 实测。下次正常运行完整日常时，同时验收旧图片任务的动作/进度和 OCR 任务结果；证据存 `cache/daily/runs/<run>/`，当前配置和开关不变，不为重构重复消费。
 
 2026-09-21 任务架构已按用户要求统一到 `pcrscript/tasks/`，详见 `docs/task-architecture.md`。新旧入口同走 Robot 调度，报告和新任务证据按任务实例归档；原有公开导入及21个任务名保持兼容。通用入口 `scripts/daily/task.py caravan` 零骰子实测 complete、spent=0，证据 `cache/daily/runs/20260921-185618-28520-d52e74/tasks/001-caravan/`。完整日常改用统一配置后的消费验收，等下次正常日常触发，不为重构重复消费；下一步核对 `tasks/*/result.json` 与原列表顺序、真实结果一致。驾车游未加入每日，首通/首领开关未改变。

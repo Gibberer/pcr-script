@@ -16,7 +16,7 @@ from .registry import register
 from .task_home import ToHomePage
 from .task_combat import Combat
 
-@register("luna_tower_clean")
+@register("luna_tower_clean", requires_home=True)
 class LunaTowerClean(ImageTask, TimeLimitTask):
     '''
     露娜塔 回廊扫荡
@@ -49,7 +49,7 @@ class LunaTowerClean(ImageTask, TimeLimitTask):
         self.action_squential(*actions)
 
 
-@register("luna_tower_climbing")
+@register("luna_tower_climbing", requires_home=True)
 class LunaTowerClimbing(ImageTask, TimeLimitTask):
     '''
     爬露娜塔
