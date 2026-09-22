@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Sequence
 from .base import Screenshot, Point, Region, TaskReport
 from .event_strategy import EventParty
-from ..game_ui.screen import EventUI
+from ..game_ui.screen import EventUI, EventScreen
 from dataclasses import asdict
 import json
 import re
@@ -27,8 +27,29 @@ def count_stars(image: Screenshot) -> int | None:
     return stars if 1 <= stars <= 6 else None
 
 
+def skill_title_pattern(title: str) -> str:
+    # Musical decoration is sometimes omitted by OCR. Keep every actual word
+    # and the evolution '+' exact; only the decorative note is optional.
+    return re.escape(normalized(title)).replace('♪', '[♪♫]?')
+
+
 class EventFormation:
+    requires_declared_build = True
     slots = [(96+109*i, 452) for i in range(5)]
+    slot_top = 405
+    search_top = 177
+    defocus = (190, 390)
+
+    def occupied_slots(self, screen: EventScreen) -> list[Point]:
+        top = self.slot_top
+        return [pos for pos in self.slots if float(np.mean(cv.cvtColor(
+            screen.image[top+10:top+89, pos[0]-38:pos[0]+38], cv.COLOR_BGR2HSV)[:, :, 1] > 70)) > .15]
+
+    def search_rectangles(self, image: Screenshot) -> list[Region]:
+        return search_card_rectangles(image, top=self.search_top)
+
+    def resolve_requirement(self, requirement, actual):
+        return requirement
 
     def __init__(self, ui: EventUI) -> None:
         self.ui = ui
@@ -45,10 +66,28 @@ class EventFormation:
         equipment, evidence = self.badges.observe(self.ui, rect) if full and rect else (None, None)
         self.ui.swipe(pos, pos, 900)
         s = self.ui.wait(lambda s: s.find("角色详情", (300, 0, 650, 70)), "角色详情")
+        if s.find('检测到手柄'):
+            # Android's connection toast can temporarily cover the name and
+            # level. Wait for this observed overlay; never infer hidden text.
+            s = self.ui.wait(lambda frame: not frame.find('检测到手柄'), '手柄连接提示消失', timeout=8)
         names = s.all(".+", (488, 65, 750, 97))
+        expected_base = normalized(expected_name or identity or '').split('(')[0]
+        detected_base = normalized(''.join(i.text for i in names)).split('(')[0]
+        if not names or (expected_base and detected_base != expected_base):
+            # The full-frame detector can misread short names beside the blue
+            # ornament. Retry the known name field at 3x; still require skills
+            # to establish the costume instead of trusting the requested name.
+            local = self.ui.read_region(s, (490, 65, 750, 97))
+            local_names = local.all('.+', (488, 65, 750, 97))
+            if local_names:
+                names = local_names
         if not names:
             raise EventUIError("角色全名无法识别")
         displayed = normalized("".join(i.text for i in names))
+        # Verified glyph confusion in the name field (2026-09-22). This only
+        # repairs the base name; the two skill names still prove the costume.
+        if displayed.split('(')[0] == '干爱瑠':
+            displayed = '千爱瑠' + displayed[len('干爱瑠'):]
         candidate = normalized(expected_name or identity or displayed)
         same_base = candidate.split("(")[0] == displayed.split("(")[0]
         name = candidate if same_base else displayed
@@ -72,7 +111,7 @@ class EventFormation:
                 self.ui.save(f"skills_{normalized(name)}_{page}", s)
                 text = normalized(s.text((485, 175, 900, 438)))
                 for value in wanted.values():
-                    if s.find(re.escape(value), (580, 175, 800, 438), exact=True):
+                    if s.find(skill_title_pattern(value), (580, 175, 800, 438), exact=True):
                         found_names.add(value)
                 for label in s.all("等级", (790, 180, 840, 435)):
                     y = label.center[1]
@@ -96,13 +135,23 @@ class EventFormation:
             (self.ui.output / "roster.json").write_text(json.dumps(
                 {k: asdict(v) for k, v in self.observed.items()}, ensure_ascii=False, indent=2), encoding="utf-8")
         self.ui.expect_click("确认", (320, 450, 650, 515), exact=True)
-        self.ui.wait(lambda s: s.find("队伍编组", (300, 0, 650, 70)), "返回编队")
+        close_attempts = 0
+        def close_remaining_dialog(screen):
+            nonlocal close_attempts
+            if close_attempts >= 3 or not screen.find('角色详情', (300, 0, 650, 70), exact=True):
+                return
+            button = screen.find('确认', (320, 450, 650, 515), exact=True)
+            if button:
+                close_attempts += 1
+                self.ui.click(button)
+        self.ui.wait(lambda s: s.find("队伍编组", (300, 0, 650, 70)), "返回编队",
+                     handle=close_remaining_dialog)
         return actual
 
     def inspect_current(self, full: bool = True, expected_names: Sequence[str] = ()) -> list[CharacterStatus]:
         results = []
         for pos in self.slots:
-            rect = (pos[0]-48, 405, 96, 96)
+            rect = (pos[0]-48, self.slot_top, 96, 96)
             actual = self.inspect(pos, full=full, rectangle=rect)
             if not actual.identity_verified:
                 for name in expected_names:
@@ -117,7 +166,8 @@ class EventFormation:
     def select(self, party: EventParty) -> tuple[bool, TaskReport]:
         """Use the game's hidden search bar, then one batch avatar query."""
         unspecified = [{"character": member.name, "reasons": ["攻略尚未明确专武开启状态"]}
-                       for member in party.members if member.unique is None or member.unique2 is None]
+                       for member in party.members if self.requires_declared_build
+                       and (member.unique is None or member.unique2 is None)]
         if unspecified:
             return False, {"unready": unspecified}
         self.ui.wait(lambda s: s.find("队伍编组", (300, 0, 650, 70)), "队伍编组")
@@ -132,8 +182,7 @@ class EventFormation:
             return self._select_by_scrolling(party)
         for _ in range(10):
             s = self.ui.capture(ocr=False)
-            occupied = [pos for pos in self.slots if float(np.mean(cv.cvtColor(
-                s.image[415:494, pos[0]-38:pos[0]+38], cv.COLOR_BGR2HSV)[:, :, 1] > 70)) > .15]
+            occupied = self.occupied_slots(s)
             if not occupied:
                 break
             self.ui.click(occupied[-1], delay=.3)
@@ -142,16 +191,26 @@ class EventFormation:
         failures = []
         for member in party.members:
             print(f"[剧情活动] 搜索并核对 {member.name}", flush=True)
-            self.ui.click((691, 135))  # Reset only the text-search field.
-            self.ui.click((480, 136), delay=.3)
-            self.ui.driver.input(member.name.split("（")[0].split("(")[0])
-            time.sleep(1)  # ldconsole queues input asynchronously.
-            self.ui.click((190, 390), delay=1)
-            s = self.ui.capture()
+            base = normalized(member.name).split('(')[0]
+            for _ in range(3):
+                self.ui.click((691, 135))  # Reset only the text-search field.
+                self.ui.click((480, 136), delay=.3)
+                self.ui.driver.input(base)
+                time.sleep(1)  # ldconsole queues input asynchronously.
+                self.ui.click(self.defocus, delay=1)
+                s = self.ui.capture()
+                if not s.find('队伍编组', (300, 0, 650, 70)):
+                    raise EventUIError('角色搜索后未处于编队页面')
+                entered = normalized(s.text((300, 110, 640, 165))).replace('干爱瑠', '千爱瑠')
+                if base in entered:
+                    break
+            else:
+                self.ui.save('search_input_unconfirmed', s)
+                raise EventUIError('搜索词未确认写入，不能判断缺少角色：'+member.name)
             self.ui.save("search_"+normalized(member.name), s)
             if not s.find("队伍编组", (300, 0, 650, 70)):
                 raise EventUIError("角色搜索后未处于编队页面")
-            rects = search_card_rectangles(s.image)
+            rects = self.search_rectangles(s.image)
             identities = self.avatars.query([face_crop(s.image, rect) for rect in rects])
             wanted = normalized(member.name)
             ranked = sorted(zip(rects, identities), key=lambda pair: pair[1] != wanted)
@@ -165,7 +224,7 @@ class EventFormation:
                 if not actual.identity_verified or normalized(actual.name) != wanted:
                     continue
                 found = True
-                reasons = readiness(member, actual)
+                reasons = readiness(self.resolve_requirement(member, actual), actual)
                 if reasons:
                     failures.append({"character": member.name, "reasons": reasons})
                 else:
@@ -192,12 +251,7 @@ class EventFormation:
         # Empty only visibly occupied slots, starting from the right.
         for _ in range(10):
             s = self.ui.capture()
-            occupied = []
-            for pos in self.slots:
-                x, y = pos
-                hsv = cv.cvtColor(s.image[415:494, x-38:x+38], cv.COLOR_BGR2HSV)
-                if float(np.mean(hsv[:, :, 1] > 70)) > .15:
-                    occupied.append(pos)
+            occupied = self.occupied_slots(s)
             if not occupied:
                 break
             self.ui.click(occupied[-1], delay=.3)

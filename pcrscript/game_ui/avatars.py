@@ -31,16 +31,16 @@ def face_crop(image, rectangle):
     return image[y+round(h*.23):y+round(h*.73), x+round(w*.18):x+round(w*.82)]
 
 
-def search_card_rectangles(image):
+def search_card_rectangles(image, top=177):
     """Search results have a fixed first row. Event bonus arrows can break
     the top outline, so use occupancy inside each slot on this known layout.
     """
     result = []
     for x in (60, 166, 272, 378, 483, 589, 695, 801):
-        patch = image[192:259, x+12:x+88]
+        patch = image[top+15:top+82, x+12:x+88]
         saturation = cv.cvtColor(patch, cv.COLOR_BGR2HSV)[:, :, 1]
         if float(np.mean(saturation > 45)) > .2:
-            result.append((x, 177, 100, 99))
+            result.append((x, top, 100, 99))
     return result
 
 

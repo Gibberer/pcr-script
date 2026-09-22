@@ -276,7 +276,6 @@ class _BilibiliLibrary:
                 play_info = api.getVideoPlay(cid, bvid=bvid, avid=avid)
                 url = play_info['data']['durl'][0]['url']
                 options = {
-                    'cookies':api.headers['Cookie'],
                     'referer':api.headers['Referer'],
                     'user_agent':api.headers['User-Agent'],
                 }

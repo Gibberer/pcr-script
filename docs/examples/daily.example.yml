@@ -73,3 +73,21 @@ Task: #配置执行任务,配置任务名称，如果需要传入参数在下面
     -
       - get_gift # 领取礼物
       - True # 忽略体力收取
+
+# 按需运行 dungeon_first_clear，不加入默认日常列表
+Dungeon:
+  area: 四彩的灵峰
+  teams: cache/game/strategies/dungeon_teams.yml
+  timeout: 3600
+  battle_timeout: 220
+  max_battles: 30
+  allow_local_trials: false
+  preflight: true
+  audit_only: false
+  auto_equip: false
+  review_on_unexpected: true
+
+# 按需运行 upgrade_all_characters，不加入默认日常
+CharacterUpgrade:
+  timeout: 1800
+  max_batches: 40

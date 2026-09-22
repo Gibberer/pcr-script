@@ -45,3 +45,9 @@
 ```
 
 模拟器与游戏须已打开；支持从首页/冒险菜单/驾车游及已识别的中断弹窗继续。任务名 `caravan` 已注册，但不会自动加入 `daily_config.yml` 或完整每日列表。普通投骰强制关闭“同时掷3个”，目标15回合内到检查点；解锁后优先区间跳过，不足15骰子继续单骰。默认1800秒、200批，可用 `--timeout`、`--max-rolls` 调整。数字未知、消费不符或未知弹窗会停止留证；不购买骰子/体力，不花费里程，不重置进度。规则及实测范围见 [驾车游](../docs/game-knowledge/caravan.md)。
+
+## 地下城首通
+
+`./.venv/Scripts/python.exe -X utf8 scripts/daily/task.py dungeon_first_clear`，配置段 `Dungeon`，详细说明见 [地下城首通](../docs/dungeon.md)。按需运行，不自动加入每日任务。
+
+全角色等级与普通装备强化：`./.venv/Scripts/python.exe -X utf8 scripts/daily/task.py upgrade_all_characters`，按需任务，不自动加入日常。GUI 名称「强化所有角色装备和等级到上限」。

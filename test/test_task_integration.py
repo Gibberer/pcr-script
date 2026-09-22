@@ -19,7 +19,7 @@ class TaskIntegrationTests(TestCase):
 
     def test_old_imports_and_all_registered_names_survive(self):
         from pcrscript.tasks import TeamFormation, TeamFormationEx, Combat, Event, EventNews, TimeLimitTask
-        expected = {'adventure_daily','arena','campaign_clean','caravan',
+        expected = {'adventure_daily','arena','campaign_clean','caravan','dungeon_first_clear','upgrade_all_characters',
                     'clear_campaign_first_time','clear_story','common_adventure','free_gacha','get_gift',
                     'get_quest_reward','luna_tower_clean','luna_tower_climbing','normal_gacha',
                     'princess_arena','quick_clean','research','revival_event_once','schedule','shop_buy','tohomepage'}

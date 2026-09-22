@@ -60,14 +60,15 @@ class EventCombat:
     def retreat(self, reason: str) -> BattleResult:
         """The battle-menu retreat only; never the boss-detail run reset."""
         s = self.ui.capture()
-        menu = self.match("btn_menu_text", s)
+        menu = self.match("btn_menu_text", s) or s.find('菜单', (840, 0, 960, 60), exact=True)
         if menu:
             self.ui.click(menu)
         for _ in range(15):
             s = self.ui.capture()
-            if s.find('WIN|战斗胜利|伤害报告') or self.match('btn_next_step', s):
+            if s.find('WIN|战斗胜利|战斗失败|伤害报告') or self.match('btn_next_step', s):
                 return BattleResult('settled', '战斗已结束，取消撤退并核对结果')
-            if s.event_quests or s.find("BOSS详情|关卡详情|队伍编组", (0, 0, 730, 70)):
+            if (s.event_quests or s.find("BOSS详情|关卡详情|队伍编组", (0, 0, 730, 70))
+                    or getattr(self.r, 'combat_return', lambda frame: False)(s)):
                 self.r.log("已退出本次战斗："+reason)
                 return BattleResult("retreated", reason)
             button = self.match("btn_giveup_blue", s) or self.match("btn_giveup", s)
@@ -89,20 +90,34 @@ class EventCombat:
 
     def configure_paused(self, party: EventParty, order: Sequence[str]) -> bool:
         """Pause during setup so animations and stage stories cannot race SET."""
-        for _ in range(30):
+        pause_deadline = time.monotonic()+45
+        stable = 0
+        while time.monotonic() < pause_deadline:
+            self.r.check_deadline()
             s = self.ui.capture()
             if s.find('进行中战斗') and s.find('主菜单'):
-                break
-            if s.find('WIN|战斗胜利|伤害报告'):
+                # The menu is readable while still scaling/fading in. Its
+                # portrait coordinates are valid only at the final position.
+                ready = (s.find('主菜单', (420, 70, 540, 103), exact=True)
+                         and s.find('返回', (285, 415, 385, 460), exact=True))
+                stable = stable+1 if ready else 0
+                if stable >= 2:
+                    break
+                time.sleep(.3)
+                continue
+            stable = 0
+            if s.find('WIN|战斗胜利|战斗失败|TIMEUP|伤害报告'):
                 return False
-            menu = s.find('菜单', (840, 0, 960, 60), exact=True)
+            menu = s.find('菜单', (840, 0, 960, 60), exact=True) or self.match('btn_menu_text', s)
             if menu:
                 self.ui.click(menu, delay=.2)
             elif not self.r.story_dialog(s):
                 time.sleep(.3)
         else:
             raise EventUIError('无法暂停战斗核对SET，停止后续操作')
-        self.ui.save('battle_before_settings', s)
+        tag = getattr(self.r, '_battle_evidence_id', '')
+        suffix = '_'+tag if isinstance(tag, str) and tag else ''
+        self.ui.save('battle_before_settings'+suffix, s)
         if party:
             required = {normalized(m.name): m.instant for m in party.members}
             if not order or len(order) != 5 or set(map(normalized, order)) != set(required):
@@ -110,7 +125,7 @@ class EventCombat:
             for index, name in enumerate(order):
                 s = self.ui.capture()
                 if self.paused_instant(s, index) != required[normalized(name)]:
-                    self.ui.click((round(306+87.5*index), 237), delay=.2)
+                    self.ui.click((round(306+87.5*index), 237), delay=.8)
                     s = self.ui.capture()
                     if self.paused_instant(s, index) != required[normalized(name)]:
                         raise EventUIError('暂停菜单内SET状态核验失败，保留暂停状态')
@@ -118,7 +133,7 @@ class EventCombat:
         if s.find('AUTO关闭', (400, 330, 550, 385)):
             self.ui.click((480, 358))
         s = self.ui.wait(lambda frame: frame.find('AUTO开启', (400, 330, 550, 385)), 'AUTO开启', timeout=5)
-        self.ui.save('battle_after_settings', s)
+        self.ui.save('battle_after_settings'+suffix, s)
         self.ui.expect_click('返回', (260, 405, 410, 465), exact=True)
         return True
 
@@ -137,6 +152,9 @@ class EventCombat:
         while time.monotonic() < deadline:
             self.r.check_deadline()
             s = self.ui.capture()
+            observe = getattr(self.r, 'observe_battle', None)
+            if observe:
+                observe(s)
             if s.find("体力回复|体力恢复|购买体力"):
                 self.ui.expect_click("取消", (200, 300, 800, 510), exact=True)
                 return BattleResult("blocked", "体力不足")
@@ -148,7 +166,10 @@ class EventCombat:
             if in_battle:
                 started = started or time.monotonic()
                 if not configured:
-                    configured = self.configure_paused(party, order)
+                    try:
+                        configured = self.configure_paused(party, order)
+                    except EventUIError as error:
+                        return self.retreat('SET核验中断：'+str(error))
                     continue
                 # Require multiple stable frames; UB flashes alone must not
                 # count as a KO. This uses the existing script's portrait cue.
@@ -173,7 +194,9 @@ class EventCombat:
                     or (started and getattr(self.r, 'combat_return', lambda frame: False)(s))):
                 return result or BattleResult("settled", "已返回关卡，待核对进度")
             if result:
-                button = self.match("btn_next_step", s) or s.find("下一步|确认|确定|关闭", (250, 330, 950, 525), exact=True)
+                button = (getattr(self.r, 'combat_result_button', lambda frame: None)(s)
+                          or self.match("btn_next_step", s)
+                          or s.find("下一步|确认|确定|关闭", (250, 330, 950, 525), exact=True))
                 if button:
                     self.ui.click(button)
             elif not in_battle and (getattr(self.r, 'combat_dialog', lambda frame: False)(s) or self.r.story_dialog(s)):
