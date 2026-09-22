@@ -97,3 +97,10 @@
 - 实机正式恢复任务 `complete`，紧接默认配置重跑 `already_complete`、空history，无再次开战、无扫荡，当前in_flight已清空。证据 `cache/daily/runs/20260922-134646-40832-6e1773/tasks/001-dungeon_first_clear/first_clear_verified.png` 及 `tasks/002-dungeon_first_clear/report.json`。游戏停在已通关地下城选择页，本会话自动化均已结束。
 - 逐场实际成员、培养、SET、前后HP、配装证据与来源保存在忽略的 `cache/daily/dungeon_state/`；可读快照为 `cache/game/strategies/dungeon/measurements.json` 和 `.csv`，路线比较为同目录 `route_comparison.json`。默认方案更新到 `cache/game/strategies/dungeon_teams.yml`，保留原版备份；不把完整账号方案写入仓库。
 - 本次为分批实机诊断，含异常恢复和按阶段调整。已完成实际首通不等于整条路线从空缓存无人干预运行已完成；来源全自动获取按用户要求暂缓，全路线预检默认开启但完整无人干预链路未实机验证。新轮次账本隔离、支援编组/支付仍未实现，备用队未上场则不计入实測成绩。
+
+
+## 来源搜索经验（2026-09-22）
+
+- 实测匿名非WBI搜索接口412、搜索网页HTTP200却是验证码；不能按状态码判断得到攻略。现有匿名WBI综合搜索可用，公开视频详情可使用此前的公共页面兜底，不读取Cookie、不调用UP投稿列表。
+- 搜索EX7会混入其他游戏同名关卡，也有不同服区内容；必须用视频详情确认游戏身份与目标，明确日服不混入国服候选，未标服区仍为unknown。
+- 正式 `dungeon_sources` 已完成独立空缓存搜索与缓存复用；规则/参数/剩余解析边界见 [任务说明](../dungeon.md)。资料时间、版本、证据留在本地catalog，不能从近期标题推断队伍适合账号。

@@ -91,3 +91,12 @@ Dungeon:
 CharacterUpgrade:
   timeout: 1800
   max_batches: 40
+
+# 只搜索候选攻略，不开始战斗；独立入口无需模拟器。
+DungeonSources:
+  area: 四彩的灵峰
+  aliases: [极难7, EX7]
+  max_videos: 8
+  max_age_hours: 24
+  request_timeout: 12
+  cache_dir: cache/game/strategies/sources

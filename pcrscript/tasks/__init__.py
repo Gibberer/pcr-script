@@ -17,3 +17,4 @@ from .task_caravan import Caravan
 from .task_dungeon import DungeonFirstClear
 
 from .task_character_upgrade import UpgradeAllCharacters
+from .task_dungeon_sources import DungeonSources

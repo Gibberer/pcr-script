@@ -51,3 +51,5 @@
 `./.venv/Scripts/python.exe -X utf8 scripts/daily/task.py dungeon_first_clear`，配置段 `Dungeon`，详细说明见 [地下城首通](../docs/dungeon.md)。按需运行，不自动加入每日任务。
 
 全角色等级与普通装备强化：`./.venv/Scripts/python.exe -X utf8 scripts/daily/task.py upgrade_all_characters`，按需任务，不自动加入日常。GUI 名称「强化所有角色装备和等级到上限」。
+
+匿名队伍来源检索：`./.venv/Scripts/python.exe -X utf8 scripts/daily/task.py dungeon_sources`，配置段 `DungeonSources`；可无模拟器运行，正式首通缺方案时复用同一能力。结果仅为候选来源，不直接开战。

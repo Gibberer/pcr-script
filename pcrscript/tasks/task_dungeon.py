@@ -51,6 +51,13 @@ class DungeonFirstClear(BaseTask):
 
     def ensure_plan(self):
         if self.plan is None:
+            plan_path = self.options.get('teams', 'cache/game/strategies/dungeon_teams.yml')
+            if not Path(plan_path).exists() and self.options.get('discover_sources', True):
+                from .dungeon_sources import discover_sources
+                source_options = dict(getattr(self.robot, 'task_config', {}).get('DungeonSources', {}))
+                source_options['area'] = self.area
+                self.report['source_search'] = discover_sources(source_options)
+                self.report['pending'].append('本地队伍方案缺失；已自动检索候选来源，尚需解析队伍，未开战')
             self.plan = load_plan(self.options.get('teams', 'cache/game/strategies/dungeon_teams.yml'), self.area,
                                   allow_local_trials=self.options.get('allow_local_trials', False))
         return self.plan

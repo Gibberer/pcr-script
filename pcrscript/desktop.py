@@ -19,6 +19,7 @@ PROTOCOL = 1
 LABELS = {
     'upgrade_all_characters': '强化所有角色装备和等级到上限',
     'dungeon_first_clear': '地下城 · 首次通关',
+    'dungeon_sources': '地下城 · 搜索队伍来源',
     'caravan': '驾车游 · 清空骰子', 'get_gift': '礼物箱 · 领取邮件与赠礼', 'campaign_clean': '剧情活动日常',
     'revival_event_once': '复刻活动', 'tohomepage': '返回首页', 'free_gacha': '免费十连',
     'normal_gacha': '普通扭蛋', 'arena': '竞技场', 'princess_arena': '公主竞技场',
@@ -37,6 +38,7 @@ PARAMETER_LABELS = {
 }
 DESCRIPTIONS = {
     'upgrade_all_characters': '使用角色页一键强化，分批提升全部可强化角色至最高可用品级，并强化等级、技能和普通装备。使用现有玛那、装备与原矿；不购买资源、不改变星数或专武开关。',
+    'dungeon_sources': '匿名检索地下城攻略视频，核验视频身份并保存分P、来源、时间和地区标记。无需模拟器，不直接生成战斗队伍。',
     'dungeon_first_clear': '按本地路线推进地下城首通。首领战前预检整条路线的角色占用与培养，每场保存实际伤害和配装证据；支持主力、换季、补刀与收尾队。已完成区域跳过，实际方案存于本地 cache/game/strategies/dungeon_teams.yml。',
     'caravan': '从冒险进入驾车游，消耗持有的骰子。未达标时使用单骰争取15回合内到达；已解锁时使用快速通关。不购买骰子，默认不加入每日列表。',
     'get_gift': '从首页礼物箱领取邮件与赠礼，不是任务页面的成就/每日任务领奖。可选择暂不领取体力。特别装备满仓时按配置使用游戏已有自动分解规则释放空间；其他持有上限会停止并报告。',
