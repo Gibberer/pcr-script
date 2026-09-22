@@ -4,73 +4,90 @@
     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
     <DockPanel Margin="0,0,0,20">
       <StackPanel><TextBlock Text="PCR 任务控制台" FontSize="27" FontWeight="SemiBold" Foreground="#172B46"/>
-        <TextBlock Text="配置任务 · 运行 Python 脚本 · 查看执行记录" Margin="0,6,0,0" Foreground="#586578"/></StackPanel>
-      <TextBlock x:Name="EnvironmentLabel" Text="请先选择工程并加载配置" HorizontalAlignment="Right" VerticalAlignment="Center" Foreground="#586578"/>
+        <TextBlock Text="每日工作有顺序，专项清理按需执行" Margin="0,6,0,0" Foreground="#586578"/></StackPanel>
+      <TextBlock x:Name="EnvironmentLabel" Text="本地任务工作台" HorizontalAlignment="Right" VerticalAlignment="Center" Foreground="#586578"/>
     </DockPanel>
     <TabControl Grid.Row="1" x:Name="Tabs" Background="White" BorderBrush="#DDE3EA">
-      <TabItem Header="任务配置">
+      <TabItem Header="每日日常">
         <Grid Margin="18">
           <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
           <StackPanel>
+            <Border Background="#EAF3FF" CornerRadius="8" Padding="16" Margin="0,0,0,14"><DockPanel>
+              <Button DockPanel.Dock="Right" Content="开始今日日常" Click="Daily_Click" Background="#245DAD" Foreground="White" Margin="16,0,0,0"/>
+              <StackPanel><TextBlock Text="每日日常" FontSize="22" FontWeight="SemiBold" Foreground="#183D70"/><TextBlock Text="按已选配置依次执行；活动任务沿用情报与开关判断。" Margin="0,6,0,0" Foreground="#42556F"/></StackPanel>
+            </DockPanel></Border>
             <TextBox x:Name="ConfigBox" Visibility="Collapsed"/>
             <DockPanel Margin="0,0,0,8"><Button DockPanel.Dock="Right" Content="加载所选配置" Click="SelectConfig_Click"/><ComboBox x:Name="ConfigPicker" MinWidth="300" Padding="6" Margin="0,0,10,8"/></DockPanel>
             <WrapPanel><Button Content="打开配置…" Click="OpenConfig_Click"/><Button Content="新建空白配置" Click="NewConfig_Click"/><Button Content="保存" Click="Save_Click"/><Button Content="另存为…" Click="SaveAs_Click"/>
-              <Button Content="执行当前配置" Click="Daily_Click" Background="#DBEAFE"/><Button Content="执行右侧选中任务" Click="Single_Click"/>
+
             </WrapPanel>
           </StackPanel>
           <TextBlock x:Name="CurrentConfigText" Grid.Row="1" Text="请打开配置，或新建空白配置后从可用任务中添加。" Foreground="#586578" Margin="0,2,0,12" TextWrapping="Wrap"/>
           <Grid Grid.Row="2">
             <Grid.ColumnDefinitions><ColumnDefinition Width="3*"/><ColumnDefinition Width="18"/><ColumnDefinition Width="2*"/></Grid.ColumnDefinitions>
             <DockPanel>
+              <TextBlock x:Name="PlanSummaryText" DockPanel.Dock="Top" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,12"/>
               <WrapPanel DockPanel.Dock="Bottom" Margin="0,12,0,0"><Button Content="上移" Click="Up_Click"/><Button Content="下移" Click="Down_Click"/><Button Content="移除" Click="Remove_Click"/></WrapPanel>
               <DataGrid x:Name="PlanGrid" AutoGenerateColumns="False" CanUserAddRows="False" CanUserSortColumns="False" SelectionMode="Single" HeadersVisibility="Column" RowHeight="38" ColumnHeaderHeight="34" GridLinesVisibility="Horizontal" HorizontalGridLinesBrush="#E8EDF3" AlternatingRowBackground="#F8FAFC" SelectionChanged="Plan_SelectionChanged">
                 <DataGrid.Columns><DataGridCheckBoxColumn Header="启用" Binding="{Binding Enabled}" Width="60" MinWidth="60"/>
-                  <DataGridTextColumn Header="任务" Binding="{Binding DisplayName}" IsReadOnly="True" Width="260" MinWidth="220"/>
-                  <DataGridTextColumn Header="参数" Binding="{Binding Args}" IsReadOnly="True" Width="*" MinWidth="160"/>
+                  <DataGridTextColumn Header="任务" Binding="{Binding DisplayName}" IsReadOnly="True" Width="*" MinWidth="165"/>
+                  <DataGridTextColumn Header="用途" Binding="{Binding CategoryLabel}" IsReadOnly="True" Width="115" MinWidth="115"/>
+                  <DataGridTextColumn Header="参数" Binding="{Binding Args}" IsReadOnly="True" Width="95" MinWidth="80"/>
                 </DataGrid.Columns>
               </DataGrid>
             </DockPanel>
             <ScrollViewer Grid.Column="2" VerticalScrollBarVisibility="Auto">
               <StackPanel>
-                <TextBlock Text="任务与参数" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,12"/>
+                <TextBlock Text="编辑日常项目" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,12"/>
                 <ComboBox x:Name="TaskPicker" SelectionChanged="Task_SelectionChanged" Padding="7" Margin="0,0,0,14"/>
                 <TextBlock x:Name="TaskDescription" TextWrapping="Wrap" Foreground="#42556F" Margin="0,0,0,14"/>
                 <StackPanel x:Name="ParameterPanel"/>
                 <TextBlock Text="复杂参数使用 JSON；未填写的参数沿用默认值。" TextWrapping="Wrap" Foreground="#586578" Margin="0,8,0,12"/>
-                <WrapPanel><Button Content="加入当前配置" Click="Add_Click"/><Button Content="更新选中项" Click="Apply_Click"/></WrapPanel>
+                <WrapPanel><Button Content="加入日常列表" Click="Add_Click"/><Button Content="更新选中项" Click="Apply_Click"/><Button Content="单独执行此日常项" Click="DailySingle_Click"/></WrapPanel>
               </StackPanel>
             </ScrollViewer>
           </Grid>
-          <TextBlock Grid.Row="3" Text="单任务使用当前运行选项，无需配置文件，也不自动保存；整组执行使用所选配置。" Foreground="#586578" Margin="0,12,0,0"/>
+          <TextBlock Grid.Row="3" Text="日常按列表顺序运行；剧情清理、地下城首通等耗时工作请前往「按需专项」。" Foreground="#586578" Margin="0,12,0,0"/>
         </Grid>
       </TabItem>
-      <TabItem Header="可用任务">
+      <TabItem Header="按需专项">
         <Grid Margin="18">
           <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-          <WrapPanel><Button Content="刷新任务能力" Click="Catalog_Click"/><TextBlock Text="来自当前 Python 工程；无需导入配置即可查看。" VerticalAlignment="Center" Margin="8,0,0,8"/></WrapPanel>
-          <Grid Grid.Row="1"><Grid.ColumnDefinitions><ColumnDefinition Width="2*"/><ColumnDefinition Width="20"/><ColumnDefinition Width="3*"/></Grid.ColumnDefinitions>
-            <ListBox x:Name="CatalogList" SelectionChanged="Catalog_SelectionChanged" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
-              <ListBox.ItemTemplate><DataTemplate><StackPanel Margin="10,7"><TextBlock Text="{Binding Label}" FontSize="15"/><TextBlock Text="{Binding Name}" Foreground="#6B7B8F" Margin="0,4,0,0"/></StackPanel></DataTemplate></ListBox.ItemTemplate>
+          <Border Background="#FFF3E4" CornerRadius="8" Padding="16" Margin="0,0,0,16"><DockPanel>
+            <Button DockPanel.Dock="Right" Content="刷新专项任务" Click="Catalog_Click" Margin="12,0,0,0"/>
+            <StackPanel><TextBlock Text="集中处理一件事" FontSize="22" FontWeight="SemiBold" Foreground="#79511E"/>
+            <TextBlock Text="适合首通、积累清理与培养等专项工作。按当前游戏条件执行，可能需要较长时间。" TextWrapping="Wrap" Margin="0,6,0,0" Foreground="#755E44"/></StackPanel>
+          </DockPanel></Border>
+          <Grid Grid.Row="1"><Grid.ColumnDefinitions><ColumnDefinition Width="290"/><ColumnDefinition Width="20"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+            <ListBox x:Name="CatalogList" SelectionChanged="Catalog_SelectionChanged" ScrollViewer.HorizontalScrollBarVisibility="Disabled" BorderBrush="#E2E7ED">
+              <ListBox.ItemTemplate><DataTemplate><StackPanel Margin="10,12"><TextBlock Text="{Binding Label}" FontSize="15" TextWrapping="Wrap"/><TextBlock Text="按需执行 · 独立于日常列表" Foreground="#778495" FontSize="12" Margin="0,6,0,0"/></StackPanel></DataTemplate></ListBox.ItemTemplate>
             </ListBox>
-            <StackPanel Grid.Column="2"><TextBlock x:Name="CatalogTitle" Text="选择任务查看说明" FontSize="22" FontWeight="SemiBold" Margin="0,12,0,16"/>
-              <TextBlock x:Name="CatalogDescription" TextWrapping="Wrap" FontSize="15" LineHeight="26" Foreground="#42556F"/>
-              <TextBlock x:Name="CatalogParameters" TextWrapping="Wrap" Margin="0,18,0,18"/>
-              <Button Content="配置 / 运行这个任务" HorizontalAlignment="Left" Click="UseCatalog_Click"/>
-            </StackPanel>
+            <DockPanel Grid.Column="2">
+              <Border DockPanel.Dock="Bottom" BorderBrush="#E3E8EF" BorderThickness="0,1,0,0" Padding="0,14,0,0" Margin="0,12,0,0"><StackPanel>
+                <Button Content="执行本次专项" Click="Single_Click" Background="#9A6324" Foreground="White" HorizontalAlignment="Left" Padding="28,10"/>
+                <TextBlock Text="仅执行所选专项；本次参数与选项不会加入或改写日常配置。" TextWrapping="Wrap" Foreground="#586578"/>
+              </StackPanel></Border>
+              <ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel>
+                <TextBlock x:Name="CatalogTitle" Text="选择要处理的专项" FontSize="22" FontWeight="SemiBold" Margin="0,4,0,16" TextWrapping="Wrap"/>
+                <TextBlock x:Name="CatalogDescription" TextWrapping="Wrap" FontSize="14" LineHeight="24" Foreground="#42556F" Margin="0,0,0,18"/>
+                <StackPanel x:Name="SpecialParameterPanel"/>
+                <Expander Header="本次运行选项" IsExpanded="True" Margin="0,12,0,0"><StackPanel x:Name="SpecialOptionsPanel"/></Expander>
+              </StackPanel></ScrollViewer>
+            </DockPanel>
           </Grid>
         </Grid>
       </TabItem>
-      <TabItem Header="配置选项">
+      <TabItem Header="日常选项">
         <ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel Margin="20">
-          <TextBlock Text="当前配置的公共选项" FontSize="22" FontWeight="SemiBold"/>
-          <TextBlock Text="雷电路径、活动开关、礼物领取与驾车游限制。修改后点击任务配置页的保存。" Foreground="#586578" Margin="0,10,0,18"/>
+          <TextBlock Text="日常配置的运行选项" FontSize="22" FontWeight="SemiBold"/>
+          <TextBlock Text="这些选项随日常配置保存；专项的本次运行选项在「按需专项」中独立调整。" Foreground="#586578" Margin="0,10,0,18"/>
           <StackPanel x:Name="OptionsPanel"/>
         </StackPanel></ScrollViewer>
       </TabItem>
       <TabItem x:Name="RunTab" Header="运行状态">
         <Grid Margin="18">
           <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-          <WrapPanel><Button Content="暂停" Click="Pause_Click"/><Button Content="恢复" Click="Resume_Click"/><Button Content="停止" Click="Stop_Click"/><Button Content="保存现场" Click="Snapshot_Click"/><Button Content="重新检查运行" Click="RefreshRun_Click"/><Button Content="打开运行目录" Click="OpenRun_Click"/></WrapPanel>
+          <StackPanel><TextBlock x:Name="RunScopeText" Text="等待选择日常或专项" FontSize="19" FontWeight="SemiBold" Margin="0,0,0,12"/><WrapPanel><Button Content="暂停" Click="Pause_Click"/><Button Content="恢复" Click="Resume_Click"/><Button Content="停止" Click="Stop_Click"/><Button Content="保存现场" Click="Snapshot_Click"/><Button Content="重新检查运行" Click="RefreshRun_Click"/><Button Content="打开运行目录" Click="OpenRun_Click"/></WrapPanel></StackPanel>
           <Border Grid.Row="1" Background="#EEF4FC" Padding="16" Margin="0,4,0,14"><TextBlock x:Name="StatusText" Text="尚未启动任务" FontSize="15" TextWrapping="Wrap"/></Border>
           <TextBox Grid.Row="2" x:Name="LiveLog" IsReadOnly="True" TextWrapping="NoWrap" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" FontFamily="Consolas" Background="#142034" Foreground="#DFE8F5"/>
         </Grid>
@@ -85,7 +102,7 @@
           </Grid>
         </Grid>
       </TabItem>
-      <TabItem Header="环境与配置">
+      <TabItem Header="环境设置">
         <ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel Margin="20">
           <TextBlock Text="本地 Python 工程" FontSize="18" FontWeight="SemiBold"/>
           <TextBlock Text="工程目录" Margin="0,12,0,0"/><DockPanel><Button Content="选择…" DockPanel.Dock="Right" Click="Browse_Click"/><TextBox x:Name="WorkspaceBox"/></DockPanel>

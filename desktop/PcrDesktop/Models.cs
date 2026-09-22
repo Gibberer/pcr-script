@@ -9,17 +9,14 @@ public sealed class TaskRow
     public bool Enabled { get; set; } = true;
     public string Name { get; set; } = "";
     public string Args { get; set; } = "[]";
-    public string DisplayName => Name switch
-    {
-        "get_quest_reward" => "首页任务 · 领取任务奖励",
-        "get_gift" => "礼物箱 · 领取邮件与赠礼",
-        _ => Name
-    };
+    public string Label { get; set; } = "";
+    public string CategoryLabel { get; set; } = "";
+    public string DisplayName => string.IsNullOrEmpty(Label) ? Name : Label;
 }
 
-public sealed record TaskChoice(string Name, string Label, JsonArray Parameters, string Description)
+public sealed record TaskChoice(string Name, string Label, JsonArray Parameters, string Description, string Category = "special", string? ConfigSection = null, bool RequiresDevice = true)
 {
-    public override string ToString() => $"{Label}  ·  {Name}";
+    public override string ToString() => Label;
 }
 
 public sealed record RunChoice(string Path, string Label)

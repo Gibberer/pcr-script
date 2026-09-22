@@ -46,6 +46,19 @@ public partial class App : Application
                 }
                 if (e.Args.Length >= 4)
                 {
+                    surface.Width = 932; surface.Height = 632;
+                    for (int tab = 0; tab < 2; tab++)
+                    {
+                        window.SelectSmokeTab(tab);
+                        surface.Measure(new Size(932, 632));
+                        surface.Arrange(new Rect(0, 0, 932, 632));
+                        surface.UpdateLayout();
+                        var smallImage = new RenderTargetBitmap(932, 632, 96, 96, PixelFormats.Pbgra32);
+                        smallImage.Render(surface);
+                        using var smallStream = File.Create(e.Args[1] + $".small{tab}.png");
+                        var smallEncoder = new PngBitmapEncoder();
+                        smallEncoder.Frames.Add(BitmapFrame.Create(smallImage)); smallEncoder.Save(smallStream);
+                    }
                     var setupSettings = new Settings { Workspace = e.Args[2], Python = e.Args[3] };
                     if (!SetupWindow.IsProject(e.Args[2]) || SetupWindow.IsReady(setupSettings))
                         throw new InvalidOperationException("首次引导的工程/必需设置检查失败");

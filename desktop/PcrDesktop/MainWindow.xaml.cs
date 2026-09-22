@@ -15,6 +15,7 @@ public partial class MainWindow : Window
 {
     private readonly ObservableCollection<TaskRow> _plan = [];
     private readonly List<(JsonObject Descriptor, FrameworkElement Editor)> _parameters = [];
+    private readonly List<(JsonObject Descriptor, FrameworkElement Editor)> _specialParameters = [];
     private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromSeconds(1) };
     private readonly JsonSerializerOptions _pretty = StatusDisplay.ReadableJson;
     private Settings _settings = new();
@@ -47,6 +48,7 @@ public partial class MainWindow : Window
         DownloadScopeBox.SelectedIndex = _settings.DownloadCoreOnly ? 0 : 1;
         EmulatorLabel.Text = "雷电目录：" + _settings.EmulatorDirectory;
         PlanGrid.ItemsSource = _plan;
+        _plan.CollectionChanged += (_, _) => UpdatePlanLabels();
         RefreshConfigChoices();
         _timer.Tick += (_, _) => Poll();
         _timer.Start();
@@ -54,8 +56,7 @@ public partial class MainWindow : Window
         {
             if (Directory.Exists(WorkspaceBox.Text) && !string.IsNullOrWhiteSpace(PythonBox.Text))
             {
-                await LoadRunOptions();
-                Message($"已发现 {CatalogList.Items.Count} 个可用任务，可直接执行单项，也可选择配置");
+                await LoadPreferredConfig();
             }
         });
     }
@@ -110,6 +111,7 @@ public partial class MainWindow : Window
     {
         var settings = ReadSettings();
         var data = await Backend.Request(settings, "load");
+        _defaultOptions = (await Backend.Request(settings, "new"))["options"]!.AsObject();
         _settings = settings;
         if (saveSettings) _settings.Save();
         _loadedSettings = settings;
@@ -125,6 +127,7 @@ public partial class MainWindow : Window
         Message($"已加载配置 · 任务组 {data["account_group"]} · {_plan.Count} 项");
         CurrentConfigText.Text = "当前配置：" + settings.Config;
         if (saveSettings) RememberConfig(settings);
+        else RefreshConfigChoices();
         // Reattach to a run started by this GUI before it was closed.
         if (!_active && saveSettings)
         {
@@ -172,26 +175,32 @@ public partial class MainWindow : Window
 
     private void BuildParameters(JsonArray? values = null)
     {
-        ParameterPanel.Children.Clear(); _parameters.Clear();
         if (TaskPicker.SelectedItem is not TaskChoice task) return;
         TaskDescription.Text = task.Description;
+        FillParameters(task, ParameterPanel, _parameters, values);
+    }
+
+    private void FillParameters(TaskChoice task, StackPanel panel,
+        List<(JsonObject Descriptor, FrameworkElement Editor)> editors, JsonArray? values = null)
+    {
+        panel.Children.Clear(); editors.Clear();
         int index = 0;
         foreach (var node in task.Parameters)
         {
             var descriptor = node!.AsObject();
             var value = values is not null && index < values.Count ? values[index] : descriptor["default"];
-            ParameterPanel.Children.Add(new TextBlock { Text = (descriptor["label"] ?? descriptor["name"])!.ToString() + (descriptor["required"]!.GetValue<bool>() ? " *" : "") });
+            panel.Children.Add(new TextBlock { Text = (descriptor["label"] ?? descriptor["name"])!.ToString() + (descriptor["required"]!.GetValue<bool>() ? " *" : "") });
             FrameworkElement editor = descriptor["type"]!.ToString() == "boolean"
                 ? new CheckBox { IsChecked = value?.GetValue<bool>() ?? false, Margin = new Thickness(0, 8, 0, 14) }
                 : new TextBox { Text = descriptor["type"]!.ToString() == "string" ? value?.GetValue<string>() ?? "" : value?.ToJsonString() ?? "null" };
-            ParameterPanel.Children.Add(editor); _parameters.Add((descriptor, editor)); index++;
+            panel.Children.Add(editor); editors.Add((descriptor, editor)); index++;
         }
     }
 
-    private JsonArray ParameterValues()
+    private JsonArray ParameterValues(List<(JsonObject Descriptor, FrameworkElement Editor)>? editors = null)
     {
         var result = new JsonArray();
-        foreach (var (descriptor, editor) in _parameters)
+        foreach (var (descriptor, editor) in editors ?? _parameters)
         {
             if (editor is CheckBox check) result.Add(check.IsChecked == true);
             else
@@ -203,15 +212,20 @@ public partial class MainWindow : Window
         return result;
     }
 
-    private async Task StartRun(bool daily)
+    private async Task StartRun(bool daily, bool special = false)
     {
+        if (special && CatalogList.SelectedItem is not TaskChoice) throw new InvalidOperationException("请选择专项任务");
         if (!daily && _loadedSettings is null)
         {
-            var selected = (TaskPicker.SelectedItem as TaskChoice)?.Name ?? throw new InvalidOperationException("请在可用任务中选择任务");
-            var values = ParameterValues();
+            var selected = ((special ? CatalogList.SelectedItem : TaskPicker.SelectedItem) as TaskChoice)?.Name ?? throw new InvalidOperationException("请选择任务");
+            var values = ParameterValues(special ? _specialParameters : _parameters);
             await CreateNewConfig();
-            TaskPicker.SelectedItem = TaskPicker.Items.Cast<TaskChoice>().Single(t => t.Name == selected);
-            BuildParameters(values);
+            if (special)
+            {
+                CatalogList.SelectedItem = CatalogList.Items.Cast<TaskChoice>().Single(t => t.Name == selected);
+                FillParameters((TaskChoice)CatalogList.SelectedItem, SpecialParameterPanel, _specialParameters, values);
+            }
+            else { TaskPicker.SelectedItem = TaskPicker.Items.Cast<TaskChoice>().Single(t => t.Name == selected); BuildParameters(values); }
         }
         RequireLoaded(ignoreConfigPath: !daily);
         await PythonEnvironment.RequireReady(ReadSettings());
@@ -222,13 +236,13 @@ public partial class MainWindow : Window
             await SaveConfig();
             if (_newConfig) return; // Cancelling a batch save must not start it.
         }
-        string task = daily ? "daily" : (TaskPicker.SelectedItem as TaskChoice)?.Name ?? throw new InvalidOperationException("请选择任务");
-        var args = daily ? new JsonArray() : ParameterValues();
+        string task = daily ? "daily" : ((special ? CatalogList.SelectedItem : TaskPicker.SelectedItem) as TaskChoice)?.Name ?? throw new InvalidOperationException("请选择任务");
+        var args = daily ? new JsonArray() : ParameterValues(special ? _specialParameters : _parameters);
         var request = new JsonObject { ["task"] = task, ["args"] = args };
         if (!daily)
         {
-            var options = ReadOptions();
-            if (string.IsNullOrWhiteSpace(options["Extra"]?["dnpath"]?.ToString()))
+            var options = special ? ReadSpecialOptions() : ReadOptions();
+            if ((_choices.FirstOrDefault(t => t.Name == task)?.RequiresDevice ?? true) && string.IsNullOrWhiteSpace(options["Extra"]?["dnpath"]?.ToString()))
                 throw new InvalidOperationException("请先在配置选项页填写雷电安装目录；单任务无需保存配置文件");
             request["options"] = options;
         }
@@ -237,6 +251,7 @@ public partial class MainWindow : Window
         _pendingCommand = null; _pendingAction = null;
         _startedAt = DateTimeOffset.Now;
         _active = true;
+        RunScopeText.Text = daily ? "每日日常 · " + Path.GetFileName(_loadedSettings!.Config) : (special ? "按需专项 · " : "单项日常 · ") + (_choices.FirstOrDefault(t => t.Name == task)?.Label ?? task);
         LiveLog.Clear(); Tabs.SelectedItem = RunTab;
         try
         {
@@ -316,7 +331,8 @@ public partial class MainWindow : Window
     private async void Load_Click(object sender, RoutedEventArgs e) => await Guard(() => LoadConfig());
     private async void Save_Click(object sender, RoutedEventArgs e) => await Guard(SaveConfig);
     private async void Daily_Click(object sender, RoutedEventArgs e) => await Guard(() => StartRun(true));
-    private async void Single_Click(object sender, RoutedEventArgs e) => await Guard(() => StartRun(false));
+    private async void Single_Click(object sender, RoutedEventArgs e) => await Guard(() => StartRun(false, special: true));
+    private async void DailySingle_Click(object sender, RoutedEventArgs e) => await Guard(() => StartRun(false));
     private async void Pause_Click(object sender, RoutedEventArgs e) => await Guard(() => SendControl("pause"));
     private async void Resume_Click(object sender, RoutedEventArgs e) => await Guard(() => SendControl("resume"));
     private async void Stop_Click(object sender, RoutedEventArgs e) => await Guard(() => SendControl("stop"));
@@ -340,14 +356,18 @@ public partial class MainWindow : Window
     }
     private async void Add_Click(object sender, RoutedEventArgs e) => await Guard(() =>
     {
-        if (TaskPicker.SelectedItem is TaskChoice task) _plan.Add(new TaskRow { Name = task.Name, Args = ParameterValues().ToJsonString() });
+        if (TaskPicker.SelectedItem is TaskChoice task)
+        {
+            if (task.Category != "daily") throw new InvalidOperationException("专项请在按需专项页执行，不自动加入日常");
+            _plan.Add(new TaskRow { Name = task.Name, Args = ParameterValues().ToJsonString() });
+        }
         return Task.CompletedTask;
     });
     private async void Apply_Click(object sender, RoutedEventArgs e) => await Guard(() =>
     {
         if (PlanGrid.SelectedItem is TaskRow row && TaskPicker.SelectedItem is TaskChoice task)
         {
-            row.Name = task.Name; row.Args = ParameterValues().ToJsonString(); PlanGrid.Items.Refresh();
+            row.Name = task.Name; row.Args = ParameterValues().ToJsonString(); UpdatePlanLabels();
         }
         return Task.CompletedTask;
     });
@@ -379,7 +399,7 @@ public partial class MainWindow : Window
         if (File.Exists(settings.Python)) await Idle(settings);
         _environmentReady = false;
         PythonBox.Text = await PythonEnvironment.Install(settings.Workspace, settings.BootstrapPython, Log);
-        await LoadRunOptions();
+        await LoadPreferredConfig();
         _environmentReady = true;
         Message("Python 环境已就绪");
     });
@@ -489,6 +509,16 @@ public partial class MainWindow : Window
         if (CatalogList.Items.Cast<TaskChoice>().Any(t => string.IsNullOrWhiteSpace(t.Description)))
             throw new InvalidOperationException("任务能力说明缺失");
         if (_optionEditors.Count == 0 || ReadOptions()["Extra"] is null) throw new InvalidOperationException("公共配置表单失败");
+        if (TaskPicker.Items.Cast<TaskChoice>().Any(t => t.Category != "daily") ||
+            CatalogList.Items.Cast<TaskChoice>().Any(t => t.Category != "special") ||
+            !CatalogList.Items.Cast<TaskChoice>().Any(t => t.Name == "dungeon_first_clear"))
+            throw new InvalidOperationException("日常与专项分类失败");
+        CatalogList.SelectedItem = CatalogList.Items.Cast<TaskChoice>().Single(t => t.Name == "dungeon_first_clear");
+        var dailyBefore = ReadOptions().ToJsonString();
+        var specialToggle = _specialOptionEditors.Select(item => item.Editor).OfType<CheckBox>().First();
+        specialToggle.IsChecked = specialToggle.IsChecked != true;
+        if (ReadOptions().ToJsonString() != dailyBefore || _plan.Count != 0)
+            throw new InvalidOperationException("专项选项污染日常配置");
         // Generate a new configuration using the actual GUI save path, without
         // touching existing user files or GUI preferences. Only sample data.
         await CreateNewConfig();
@@ -498,6 +528,13 @@ public partial class MainWindow : Window
         await SaveToNewPath(generated, remember: false);
         await LoadConfig(saveSettings: false);
         if (_plan.Count != 1 || _plan[0].Name != "get_gift") throw new InvalidOperationException("配置生成/重载失败");
+        var fixture = Path.Combine(workspace, "cache", "desktop", "smoke", Guid.NewGuid().ToString());
+        Directory.CreateDirectory(fixture);
+        if (PreferredConfig(fixture, "absent.yml") is not null) throw new InvalidOperationException("缺失配置检查失败");
+        var fallback = Path.Combine(fixture, "daily_config.yml");
+        File.Copy(generated, fallback);
+        if (PreferredConfig(fixture, "absent.yml") != Path.GetFullPath(fallback) || PreferredConfig(fixture, generated) != Path.GetFullPath(generated))
+            throw new InvalidOperationException("默认配置选择失败");
         TaskPicker.SelectedItem = TaskPicker.Items.Cast<TaskChoice>().Single(t => t.Name == "get_gift");
         _timer.Stop();
         StatusText.Text = "运行中 · 离线界面样例\n当前步骤：" + readable;
@@ -506,6 +543,6 @@ public partial class MainWindow : Window
     public void SelectSmokeTab(int index)
     {
         Tabs.SelectedIndex = index;
-        if (index == 1) CatalogList.SelectedItem = CatalogList.Items.Cast<TaskChoice>().Single(t => t.Name == "caravan");
+        if (index == 1) CatalogList.SelectedItem = CatalogList.Items.Cast<TaskChoice>().Single(t => t.Name == "dungeon_first_clear");
     }
 }

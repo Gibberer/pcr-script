@@ -29,6 +29,9 @@ LABELS = {
     'luna_tower_clean': '露娜塔扫荡', 'luna_tower_climbing': '露娜塔登塔',
     'clear_campaign_first_time': '活动首通',
 }
+SPECIAL_TASKS = {'clear_story', 'dungeon_first_clear', 'dungeon_sources',
+                 'upgrade_all_characters', 'common_adventure', 'caravan', 'tohomepage'}
+
 PARAMETER_LABELS = {
     'multi': '抽取所有可用免费十连', 'exclude_stamina': '暂不领取体力',
     'hard_chapter': '扫荡活动困难关卡', 'exhaust_power': '剩余体力用于普通关卡',
@@ -100,6 +103,9 @@ def catalog() -> list[dict[str, Any]]:
                                    required=p.default is inspect.Parameter.empty))
         result.append(dict(name=name, label=LABELS.get(name, name), description=DESCRIPTIONS.get(name, inspect.getdoc(cls) or '暂无任务说明'), parameters=parameters,
                            config_section=cls.config_section,
+                           category='special' if name in SPECIAL_TASKS else 'daily',
+                           category_label='按需专项' if name in SPECIAL_TASKS else '每日日常',
+                           requires_device=name != 'dungeon_sources',
                            entry='执行前自动返回首页' if cls.requires_home else '需先进入目标冒险地图' if name == 'common_adventure' else '任务自行处理页面导航'))
     return result
 
@@ -263,7 +269,7 @@ def execute(path: Path, request: dict[str, Any], run_id: str) -> None:
     if not isinstance(config, dict):
         raise ValueError('单任务请提供 GUI 运行选项，无需配置文件')
     extra = config.get('Extra')
-    if not isinstance(extra, dict) or not isinstance(extra.get('dnpath'), str) or not extra['dnpath'].strip():
+    if name != 'dungeon_sources' and (not isinstance(extra, dict) or not isinstance(extra.get('dnpath'), str) or not extra['dnpath'].strip()):
         raise ValueError('请先配置雷电路径；GUI 不使用 ADB')
     with RunSession(name, run_id=run_id):
         if name == 'daily':

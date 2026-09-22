@@ -1,5 +1,11 @@
 # GUI 收尾接续（2026-09-21）
 
+## 2026-09-22 日常与专项工作区
+
+新增每日日常/按需专项分类与独立运行表单，启动默认加载有效的上次配置或工程 daily_config.yml；安装依赖后同样恢复当前配置。旧配置中的专项保留并标注，新增日常只能选日常分类。专项仅使用对应配置段与 Extra，表单修改不会保存到日常；来源搜索免模拟器路径检查。活动情报可调度的首通仍属于日常类别。具体操作见 desktop.md。
+
+192 项 Python 离线测试通过，Framework 构建零警告/零错误；隐藏离屏检查验证分类、默认配置回落、专项选项隔离、配置保存重载和进程协议。六页常规尺寸、两个紧凑尺寸及环境引导共九张渲染图，已查看日常/专项布局；证据 artifacts/gui-workspaces-final.png*，日志 cache/build/gui-workspace-tests.log。便携包 artifacts/PcrDesktop-win-x64-workspaces.zip。本轮未操作模拟器、未修改实际账号配置；本版尚未进行真实 GUI 点击启动游戏验收，也未推送或发布。
+
 ## 当前实现
 
 本轮功能开发到此结束。GUI 为 C# WPF / .NET Framework 4.8，复用较新 Windows 10/11 的系统运行时；便携包保留 EXE、DLL 和 .exe.config，全部运行文件约1.5 MB。Python 始终源码执行。

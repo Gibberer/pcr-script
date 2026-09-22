@@ -8,15 +8,52 @@ namespace PcrDesktop;
 
 public partial class MainWindow
 {
+    private List<TaskChoice> _choices = [];
     private void SetCatalog(JsonArray data)
     {
-        var choices = data.Select(item => new TaskChoice(item!["name"]!.GetValue<string>(),
+        var dailySelected = (TaskPicker.SelectedItem as TaskChoice)?.Name;
+        var specialSelected = (CatalogList.SelectedItem as TaskChoice)?.Name;
+        _choices = data.Select(item => new TaskChoice(item!["name"]!.GetValue<string>(),
             item["label"]!.GetValue<string>(), item["parameters"]!.AsArray(),
-            (item["description"]?.GetValue<string>() ?? "暂无任务说明") + "\n\n起始页面：" + (item["entry"]?.ToString() ?? "见任务说明"))).ToList();
-        TaskPicker.ItemsSource = choices;
-        CatalogList.ItemsSource = choices;
-        TaskPicker.SelectedIndex = 0;
-        CatalogList.SelectedIndex = 0;
+            (item["description"]?.GetValue<string>() ?? "暂无任务说明") + "\n\n起始页面：" + (item["entry"]?.ToString() ?? "见任务说明"),
+            item["category"]?.ToString() ?? "special", item["config_section"]?.ToString(),
+            item["requires_device"]?.GetValue<bool>() ?? true)).ToList();
+        TaskPicker.ItemsSource = _choices.Where(t => t.Category == "daily" || _plan.Any(r => r.Name == t.Name)).ToList();
+        CatalogList.ItemsSource = _choices.Where(t => t.Category == "special").ToList();
+        TaskPicker.SelectedItem = TaskPicker.Items.Cast<TaskChoice>().FirstOrDefault(t => t.Name == dailySelected) ?? TaskPicker.Items.Cast<TaskChoice>().FirstOrDefault();
+        CatalogList.SelectedItem = CatalogList.Items.Cast<TaskChoice>().FirstOrDefault(t => t.Name == specialSelected) ?? CatalogList.Items.Cast<TaskChoice>().FirstOrDefault();
+        UpdatePlanLabels();
+    }
+
+    private void UpdatePlanLabels()
+    {
+        foreach (var row in _plan)
+        {
+            var task = _choices.FirstOrDefault(t => t.Name == row.Name);
+            row.Label = task?.Label ?? row.Name;
+            row.CategoryLabel = task?.Category == "daily" ? "日常" : "专项 · 原配置保留";
+        }
+        PlanGrid.Items.Refresh();
+        PlanSummaryText.Text = $"日常执行顺序 · {_plan.Count} 项" + (_plan.Any(r => r.CategoryLabel.StartsWith("专项")) ? "  · 含原配置专项，请按需调整" : "");
+    }
+
+    internal static string? PreferredConfig(string workspace, string current)
+    {
+        if (!string.IsNullOrWhiteSpace(current))
+        {
+            var path = Path.GetFullPath(Path.Combine(workspace, current));
+            if (File.Exists(path)) return path;
+        }
+        var daily = Path.Combine(workspace, "daily_config.yml");
+        return File.Exists(daily) ? Path.GetFullPath(daily) : null;
+    }
+
+    private async Task LoadPreferredConfig()
+    {
+        var selected = PreferredConfig(WorkspaceBox.Text.Trim(), ConfigBox.Text.Trim());
+        if (selected is null) await LoadRunOptions();
+        else { ConfigBox.Text = selected; await LoadConfig(); }
+        RefreshConfigChoices();
     }
 
     private void RefreshConfigChoices()
@@ -31,10 +68,11 @@ public partial class MainWindow
             if (Directory.Exists(profiles)) files.AddRange(Directory.GetFiles(profiles, "*.y*ml"));
         }
         files.AddRange(_settings.RecentConfigs.Where(File.Exists));
-        ConfigPicker.ItemsSource = files.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         var config = ConfigBox.Text.Trim();
-        if (config.Length > 0 && Directory.Exists(workspace))
-            ConfigPicker.SelectedItem = Path.GetFullPath(Path.Combine(Path.GetFullPath(workspace), config));
+        var selectedPath = config.Length > 0 && Directory.Exists(workspace) ? Path.GetFullPath(Path.Combine(workspace, config)) : null;
+        if (selectedPath is not null && File.Exists(selectedPath)) files.Add(selectedPath);
+        ConfigPicker.ItemsSource = files.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        ConfigPicker.SelectedItem = selectedPath;
     }
 
     private void RememberConfig(Settings settings)
@@ -57,15 +95,16 @@ public partial class MainWindow
     {
         var settings = ReadSettings();
         var data = await Backend.Request(settings, "new");
-        SetCatalog(data["catalog"]!.AsArray());
+        _defaultOptions = (JsonObject)data["options"]!.DeepClone();
         _plan.Clear();
+        SetCatalog(data["catalog"]!.AsArray());
         OptionsBox.Text = data["options"]!.ToJsonString(_pretty);
         BuildOptions(data["options"]!.AsObject());
         _revision = "";
         _newConfig = true;
         ConfigBox.Text = "";
         _loadedSettings = ReadSettings();
-        CurrentConfigText.Text = "未保存的配置草稿 · 单任务可直接执行，无需保存；保存后可作为整组方案使用。";
+        CurrentConfigText.Text = "暂无日常配置 · 可新建日常列表，或前往按需专项直接执行。";
         ConfigPicker.SelectedIndex = -1;
         Message("运行选项已就绪；填写雷电路径后可直接运行单任务，整组方案可另行保存");
     }
@@ -82,7 +121,7 @@ public partial class MainWindow
         BootstrapBox.Text = settings.BootstrapPython;
         EmulatorLabel.Text = "雷电目录：" + settings.EmulatorDirectory;
         RefreshConfigChoices();
-        await LoadRunOptions();
+        await LoadPreferredConfig();
     });
 
     private async Task SaveAs()
@@ -158,15 +197,7 @@ public partial class MainWindow
         if (CatalogList.SelectedItem is not TaskChoice task) return;
         CatalogTitle.Text = task.Label;
         CatalogDescription.Text = task.Description;
-        CatalogParameters.Text = task.Parameters.Count == 0 ? "此任务没有位置参数。"
-            : "可配置参数：\n" + string.Join("\n", task.Parameters.Select(p => $"• {p!["label"] ?? p["name"]}（{p["type"]}）"));
+        FillParameters(task, SpecialParameterPanel, _specialParameters);
+        BuildSpecialOptions();
     }
-    private async void UseCatalog_Click(object sender, RoutedEventArgs e) => await Guard(async () =>
-    {
-        if (CatalogList.SelectedItem is not TaskChoice selected) return;
-        if (_loadedSettings is null) await CreateNewConfig();
-        TaskPicker.SelectedItem = TaskPicker.Items.Cast<TaskChoice>().Single(t => t.Name == selected.Name);
-        Tabs.SelectedIndex = 0;
-        Message("可编辑右侧参数后执行选中任务，或加入当前配置");
-    });
 }
