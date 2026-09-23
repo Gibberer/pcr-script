@@ -8,7 +8,6 @@ from ..templates import ImageTemplate
 
 if TYPE_CHECKING:
     from pcrscript import Robot
-    from ..strategist import Member
 
 from .registry import register
 

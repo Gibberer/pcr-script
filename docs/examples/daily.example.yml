@@ -77,6 +77,7 @@ Task: #配置执行任务,配置任务名称，如果需要传入参数在下面
 # 按需运行 dungeon_first_clear，不加入默认日常列表
 Dungeon:
   area: 四彩的灵峰
+  source_urls: [] # 本地下城优先使用的攻略链接
   teams: cache/game/strategies/dungeon_teams.yml
   timeout: 3600
   battle_timeout: 220
@@ -92,11 +93,25 @@ CharacterUpgrade:
   timeout: 1800
   max_batches: 40
 
-# 只搜索候选攻略，不开始战斗；独立入口无需模拟器。
-DungeonSources:
-  area: 四彩的灵峰
-  aliases: [极难7, EX7]
-  max_videos: 8
-  max_age_hours: 24
-  request_timeout: 12
-  cache_dir: cache/game/strategies/sources
+# 按需运行 max_character_bonds；消耗现有礼物，不自动加入日常。
+CharacterBond:
+  timeout: 21600
+  max_characters: 400
+  max_pages: 80
+  max_story_steps_per_character: 200
+  max_gifts_per_character: 2000
+
+# 按需启用，本地试验不自动加入上述日常。
+Abyss:
+  allow_local_trials: false
+  source_urls: [] # 本深域任务优先使用的攻略链接
+  audit_only: false
+  elements: [fire, water, wind, light, dark]
+  max_failures_per_stage: 6
+  max_repeat_failures_per_stage: 2
+  allow_five_star_upgrade: false
+  allow_divine_amulets: false
+  max_battles: 30
+  timeout: 3600
+  battle_timeout: 220
+  discover_sources: true

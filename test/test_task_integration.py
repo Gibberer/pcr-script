@@ -17,11 +17,11 @@ class TaskIntegrationTests(TestCase):
     def robot(self):
         return Robot(Mock(get_screen_size=Mock(return_value=(960, 540))), show_progress=False)
 
-    def test_old_imports_and_all_registered_names_survive(self):
+    def test_shared_imports_and_only_supported_tasks_registered(self):
         from pcrscript.tasks import TeamFormation, TeamFormationEx, Combat, Event, EventNews, TimeLimitTask
-        expected = {'adventure_daily','arena','campaign_clean','caravan','dungeon_first_clear','dungeon_sources','upgrade_all_characters',
+        expected = {'adventure_daily','arena','campaign_clean','caravan','dungeon_first_clear','upgrade_all_characters','max_character_bonds','abyss_push',
                     'clear_campaign_first_time','clear_story','common_adventure','free_gacha','get_gift',
-                    'get_quest_reward','luna_tower_clean','luna_tower_climbing','normal_gacha',
+                    'get_quest_reward','luna_tower_clean','normal_gacha',
                     'princess_arena','quick_clean','research','revival_event_once','schedule','shop_buy','tohomepage'}
         self.assertEqual(set(registered_tasks()), expected)
         for name in expected:

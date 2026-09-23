@@ -1,0 +1,81 @@
+# GUI 新建配置时使用的默认选项；不含账号数据或默认执行任务。
+Accounts: []
+Extra:
+  dnpath: ''
+StoryEvent:
+  teams: cache/game/strategies/event_teams.yml
+  first_clear: false
+  bosses: false
+  stories: true
+  memoirs: true
+  missions: true
+  exchange: true
+  max_boss_attempts: 10
+  battle_timeout: 220
+  timeout: 1800
+RevivalEvent:
+  account_key: default
+  teams: cache/game/strategies/revival_teams.yml
+  timeout: 2400
+  battle_timeout: 220
+Gift:
+  auto_dismantle: true
+  free_slots: 750
+  max_gift_batches: 30
+  timeout: 900
+Caravan:
+  timeout: 1800
+  max_rolls: 200
+Task:
+  1: []
+
+# 按需运行 dungeon_first_clear，不加入默认日常列表
+Dungeon:
+  prepare_only: false
+  area: 四彩的灵峰
+  source_urls: []
+  teams: cache/game/strategies/dungeon_teams.yml
+  timeout: 3600
+  battle_timeout: 220
+  max_battles: 30
+  allow_local_trials: false
+  preflight: true
+  audit_only: false
+  auto_equip: false
+  review_on_unexpected: true
+
+# 按需运行 upgrade_all_characters，不加入默认日常
+CharacterUpgrade:
+  timeout: 1800
+  max_batches: 40
+
+# 按需提升角色好感度并阅读解锁的角色剧情；消耗现有礼物，不加入每日。
+CharacterBond:
+  timeout: 21600
+  max_characters: 400
+  max_pages: 80
+  max_story_steps_per_character: 200
+  max_gifts_per_character: 2000
+
+# 按需深域推进；本地试打须明确启用，不自动加入每日。
+Abyss:
+  prepare_only: false
+  allow_local_trials: false
+  source_urls: []
+  audit_only: false
+  elements: [fire, water, wind, light, dark]
+  max_failures_per_stage: 6
+  max_repeat_failures_per_stage: 2
+  allow_five_star_upgrade: false
+  allow_divine_amulets: false
+  max_battles: 30
+  timeout: 3600
+  battle_timeout: 220
+  discover_sources: true
+  sources:
+    max_videos: 4
+    max_age_hours: 24
+    request_timeout: 12
+    cache_dir: cache/game/strategies/sources
+    browser_session: true
+    browser_channel: msedge

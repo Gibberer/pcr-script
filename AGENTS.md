@@ -25,7 +25,7 @@
 
 ## 目录边界
 
-- GUI 收尾与构建接续见 `docs/desktop-handoff.md`；运行依赖只维护根目录 `requirements.txt`，示例配置在 `docs/examples/daily.example.yml`。GUI 用系统 .NET Framework 4.8，核心下载仅 pcrscript、images 与依赖清单。
+- GUI 收尾与构建接续见 `docs/desktop-handoff.md`；运行依赖只维护根目录 `requirements.txt`，GUI 无账号默认选项在 `desktop/runtime_defaults.yml`，示例配置在 `docs/examples/daily.example.yml`。GUI 用系统 .NET Framework 4.8，核心下载仅 pcrscript、images、依赖清单与该 GUI 默认选项文件。
 - `desktop/PcrDesktop/` 为 C# / WPF 控制台，仅管理配置、源码、进程与记录；实际游戏逻辑保留 Python。GUI 通过 `pcrscript/desktop.py` 的版本化 JSON 接口复用正式任务与 RunSession，不依赖 Agent 入口。二进制构建产物放忽略的 `artifacts/`，说明放 `docs/desktop.md`；GitHub 构建见 `.github/workflows/desktop.yml`。
 
 - 项目目录与任务文件说明集中放在 `docs/project-structure.md`，不在代码目录新增 README。
@@ -47,6 +47,8 @@
 - 新增文件必须遵守以上分类，不把探查脚本和日常入口混放根目录。入口详见 `scripts/README.md`。
 
 ## 更新与验证
+
+- **Agent 接管时复核脚本结果（2026-09-23 用户要求）**：由 Agent 接管执行任务时，对脚本执行结果进行确认，尤其复核视频来源、适用关卡、角色衣装、星数、专武 1/2、SET、培养要求及遗漏的辅助条件；同时核对实际任务结果，不能仅凭成功状态或缓存文件存在判断完成。使用脚本留存的原始帧、OCR、字段证据与报告，对误识别、漏识别、冲突及新布局记录复现路径、验证状态和下一步，并将通用修复纳入正式程序。单次 Agent 修正不能冒充脚本已经支持，也不能作为以后 GUI/CLI 独立运行的前置依赖。没有证据的字段继续保留未知；真实视频/账号素材仅存忽略的 cache，回归测试使用合成数据。详见 `docs/video-strategies.md`。
 
 - 新观察到的界面变化、坐标、弹窗、识别陷阱和游戏规则写入 `docs/game-knowledge/`；记录日期、活动、来源、验证状态、复现路径与证据位置。
 - 对需等待活动/状态的工作，留下具体触发条件和验收步骤，不能用已通关的跳过检查替代首通验证。

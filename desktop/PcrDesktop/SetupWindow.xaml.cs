@@ -32,6 +32,7 @@ public partial class SetupWindow : Window
 
     public static bool IsReady(Settings settings) => settings.SetupCompleted && IsProject(settings.Workspace)
         && File.Exists(Path.Combine(settings.Workspace, "pcrscript", "desktop.py"))
+        && File.Exists(Path.Combine(settings.Workspace, "desktop", "runtime_defaults.yml"))
         && File.Exists(Path.Combine(settings.EmulatorDirectory, "ldconsole.exe")) && File.Exists(settings.Python);
 
     private void InspectProject()
@@ -99,8 +100,9 @@ public partial class SetupWindow : Window
     {
         if (string.IsNullOrWhiteSpace(ProjectPath.Text)) throw new IOException("请选择工程目录");
         var root = Path.GetFullPath(ProjectPath.Text.Trim());
-        if (!IsProject(root) || !File.Exists(Path.Combine(root, "pcrscript", "desktop.py")))
-            throw new IOException("请先选择具备 GUI 接口的工程，或从 GitHub 下载");
+        if (!IsProject(root) || !File.Exists(Path.Combine(root, "pcrscript", "desktop.py")) ||
+            !File.Exists(Path.Combine(root, "desktop", "runtime_defaults.yml")))
+            throw new IOException("工程缺少新版 GUI 运行文件，请先更新源码或重新下载");
         return root;
     }
 

@@ -18,6 +18,8 @@ class DesktopTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
+        (self.root / 'desktop').mkdir()
+        (self.root / 'desktop' / 'runtime_defaults.yml').write_bytes((Path(__file__).parents[1] / 'desktop' / 'runtime_defaults.yml').read_bytes())
         self.root_patch = patch.object(desktop, 'ROOT', self.root)
         self.root_patch.start()
         self.config = self.root / 'daily_config.yml'
@@ -75,17 +77,15 @@ class DesktopTests(unittest.TestCase):
         self.assertEqual(by_name['get_gift']['parameters'][0]['type'], 'boolean')
         self.assertTrue(by_name['get_gift']['parameters'][0]['default'])
 
-    def test_workspace_categories_and_source_device_requirement(self):
+    def test_workspace_categories_and_internal_source_search(self):
         catalog = {item['name']: item for item in desktop.catalog()}
-        for name in ('clear_story', 'dungeon_first_clear', 'upgrade_all_characters', 'dungeon_sources'):
+        for name in ('clear_story', 'dungeon_first_clear', 'upgrade_all_characters', 'max_character_bonds', 'abyss_push'):
             self.assertEqual(catalog[name]['category'], 'special')
         for name in ('get_gift', 'revival_event_once', 'clear_campaign_first_time'):
             self.assertEqual(catalog[name]['category'], 'daily')
-        self.assertFalse(catalog['dungeon_sources']['requires_device'])
-        with patch('pcrscript.run_session.RunSession', return_value=nullcontext()), \
-             patch('pcrscript.runtime.run_task_with_config', return_value={}) as dispatch:
-            desktop.execute(self.config, dict(task='dungeon_sources', options={}), '00000000-0000-0000-0000-000000000003')
-        dispatch.assert_called_once_with({}, 'dungeon_sources')
+        self.assertNotIn('dungeon_sources', catalog)
+        self.assertNotIn('strategy_sources',catalog)
+        self.assertTrue(catalog['abyss_push']['requires_device'])
 
     def test_only_one_registered_gift_task_and_labels_distinguish_reward_pages(self):
         entries = desktop.catalog()
@@ -157,6 +157,7 @@ class DesktopTests(unittest.TestCase):
 
     def test_new_config_starts_empty_and_generates_independent_file(self):
         view = desktop.new_config()
+        self.assertEqual(desktop.runtime_defaults_path(), self.root / 'desktop' / 'runtime_defaults.yml')
         self.assertEqual(view['plan'], [])
         self.assertNotIn('Accounts', view['options'])
         view['plan'] = [dict(enabled=True, name='caravan', args=[])]

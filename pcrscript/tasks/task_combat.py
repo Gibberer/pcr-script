@@ -1,6 +1,6 @@
 from .image import ImageTask
 from pcrscript.run_session import clock as time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 import numpy as np
 import sqlite3
 import os
@@ -11,7 +11,11 @@ from ..templates import ImageTemplate, CharaIconTemplate, BrightnessTemplate
 
 if TYPE_CHECKING:
     from pcrscript import Robot
-    from ..strategist import Member
+
+
+class PartyMember(Protocol):
+    id: int
+    instant: bool
 
 
 class TeamFormation(ImageTask):
@@ -55,7 +59,7 @@ class TeamFormation(ImageTask):
                 return True
             time.sleep(2)
 
-    def _check_current_form(self, form:list['Member'])->tuple[list[int], list[int]]:
+    def _check_current_form(self, form:list['PartyMember'])->tuple[list[int], list[int]]:
         screenshot = self.driver.screenshot()
         h,w,_ = screenshot.shape
         mask = np.zeros((h,w), dtype=np.uint8)
@@ -74,7 +78,7 @@ class TeamFormation(ImageTask):
                         break
         return add_ids, remove_regions
 
-    def run(self, formation:list['Member'])->bool:
+    def run(self, formation:list['PartyMember'])->bool:
         if not formation:
             print("未设置期望编组")
             return
@@ -114,7 +118,7 @@ class TeamFormationEx(TeamFormation):
     多个队伍编队
     '''
 
-    def run(self, formations:list[list['Member']]):
+    def run(self, formations:list[list['PartyMember']]):
         if not formations:
             print("未设置期望编组")
             return
@@ -200,7 +204,7 @@ class Combat(ImageTask):
                 dead_count += 1
         return dead_count
 
-    def run(self, form:list['Member']|list[list['Member']]=None, giveup=1, member_num=5):
+    def run(self, form:list['PartyMember']|list[list['PartyMember']]=None, giveup=1, member_num=5):
         '''
         Args:
             form: 提供队伍组合信息。

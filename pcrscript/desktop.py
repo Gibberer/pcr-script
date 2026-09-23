@@ -15,33 +15,40 @@ import uuid
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+
+def runtime_defaults_path() -> Path:
+    """The GUI owns its blank-config defaults; Python reads them at runtime."""
+    return ROOT / 'desktop' / 'runtime_defaults.yml'
+
 PROTOCOL = 1
 LABELS = {
+    'abyss_push': '深域关卡 · 尽力推进',
     'upgrade_all_characters': '强化所有角色装备和等级到上限',
+    'max_character_bonds': '角色好感度与剧情解锁',
     'dungeon_first_clear': '地下城 · 首次通关',
-    'dungeon_sources': '地下城 · 搜索队伍来源',
     'caravan': '驾车游 · 清空骰子', 'get_gift': '礼物箱 · 领取邮件与赠礼', 'campaign_clean': '剧情活动日常',
     'revival_event_once': '复刻活动', 'tohomepage': '返回首页', 'free_gacha': '免费十连',
     'normal_gacha': '普通扭蛋', 'arena': '竞技场', 'princess_arena': '公主竞技场',
     'research': '圣迹 / 神殿调查', 'schedule': '日程表', 'shop_buy': '商店购买',
     'quick_clean': '快捷扫荡', 'adventure_daily': '冒险日常', 'common_adventure': '普通冒险',
     'clear_story': '阅读剧情', 'get_quest_reward': '首页任务 · 领取任务奖励',
-    'luna_tower_clean': '露娜塔扫荡', 'luna_tower_climbing': '露娜塔登塔',
+    'luna_tower_clean': '露娜塔扫荡',
     'clear_campaign_first_time': '活动首通',
 }
-SPECIAL_TASKS = {'clear_story', 'dungeon_first_clear', 'dungeon_sources',
-                 'upgrade_all_characters', 'common_adventure', 'caravan', 'tohomepage'}
+SPECIAL_TASKS = {'clear_story', 'dungeon_first_clear', 'abyss_push',
+                 'upgrade_all_characters', 'max_character_bonds', 'common_adventure', 'caravan', 'tohomepage'}
 
 PARAMETER_LABELS = {
     'multi': '抽取所有可用免费十连', 'exclude_stamina': '暂不领取体力',
     'hard_chapter': '扫荡活动困难关卡', 'exhaust_power': '剩余体力用于普通关卡',
     'pos': '快捷扫荡预设编号', 'rule': '商店购买规则', 'click_pos': '首页按钮坐标',
     'timeout': '超时时间（秒）', 'character_symbol': '冒险角色模板',
-    'estimate_combat_duration': '预估战斗时长（秒）', 'allow_system_recommend': '允许系统推荐编队',
+    'estimate_combat_duration': '预估战斗时长（秒）',
 }
 DESCRIPTIONS = {
+    'abyss_push': '按五种属性推进深域NEXT关卡。按来源优先选队并核验当前培养，开战前自动装备特别装备；结合伤害、减员和历史失败记录调整阵容与重试次数。可选升5星并用女神秘石兑换所需碎片，默认关闭；不购买体力或重置次数。攻略搜索结果仅为候选来源，尚不能自动解析完整培养要求。',
     'upgrade_all_characters': '使用角色页一键强化，分批提升全部可强化角色至最高可用品级，并强化等级、技能和普通装备。使用现有玛那、装备与原矿；不购买资源、不改变星数或专武开关。',
-    'dungeon_sources': '匿名检索地下城攻略视频，核验视频身份并保存分P、来源、时间和地区标记。无需模拟器，不直接生成战斗队伍。',
+    'max_character_bonds': '按好感度从低到高检查持有角色，使用现有礼物尽量提升至当前上限，逐篇跳过新开放的角色剧情并核对首读及属性奖励。记录每位角色的礼物消耗与未完成原因；不购买礼物。',
     'dungeon_first_clear': '按本地路线推进地下城首通。首领战前预检整条路线的角色占用与培养，每场保存实际伤害和配装证据；支持主力、换季、补刀与收尾队。已完成区域跳过，实际方案存于本地 cache/game/strategies/dungeon_teams.yml。',
     'caravan': '从冒险进入驾车游，消耗持有的骰子。未达标时使用单骰争取15回合内到达；已解锁时使用快速通关。不购买骰子，默认不加入每日列表。',
     'get_gift': '从首页礼物箱领取邮件与赠礼，不是任务页面的成就/每日任务领奖。可选择暂不领取体力。特别装备满仓时按配置使用游戏已有自动分解规则释放空间；其他持有上限会停止并报告。',
@@ -61,7 +68,6 @@ DESCRIPTIONS = {
     'clear_story': '处理剧情页面的可读剧情和跳过流程。任务依赖已有图片模板识别。',
     'get_quest_reward': '进入首页的任务页面领取已完成任务奖励（含体力），不领取礼物箱或活动页奖励。示例日常先领体力供扫荡使用，最后再补领新完成任务的奖励。',
     'luna_tower_clean': '在露娜塔开放且已完成对应进度时扫荡回廊。配置列表会根据活动情报筛选。',
-    'luna_tower_climbing': '执行露娜塔登塔战斗，可选择是否允许系统推荐编队。会进入实际战斗，需确认队伍与当前进度。',
     'clear_campaign_first_time': '保留的活动首通兼容入口，复用剧情活动流程。是否真正推进首通仍取决于 StoryEvent.first_clear；当前默认关闭，首日连续流程仍待实测。',
 }
 
@@ -105,7 +111,7 @@ def catalog() -> list[dict[str, Any]]:
                            config_section=cls.config_section,
                            category='special' if name in SPECIAL_TASKS else 'daily',
                            category_label='按需专项' if name in SPECIAL_TASKS else '每日日常',
-                           requires_device=name != 'dungeon_sources',
+                           requires_device=True,
                            entry='执行前自动返回首页' if cls.requires_home else '需先进入目标冒险地图' if name == 'common_adventure' else '任务自行处理页面导航'))
     return result
 
@@ -137,12 +143,12 @@ def ensure_idle() -> None:
 
 
 def config_view(path: Path) -> dict[str, Any]:
-    config = read_config(path if path.exists() else Path(__file__).with_name('runtime_defaults.yml'))
+    config = read_config(path if path.exists() else runtime_defaults_path())
     return config_data(config, revision(path))
 
 
 def new_config() -> dict[str, Any]:
-    config = read_config(Path(__file__).with_name('runtime_defaults.yml'))
+    config = read_config(runtime_defaults_path())
     config['Accounts'] = []
     config['Task'] = {1: []}
     config.pop('Desktop', None)
@@ -221,7 +227,7 @@ def save_config(path: Path, request: dict[str, Any]) -> dict[str, Any]:
             raise ValueError('新配置目标已存在，请选择新文件')
         config = {'Accounts': [], 'Task': {1: []}}
     else:
-        config = read_config(path if path.exists() else Path(__file__).with_name('runtime_defaults.yml'))
+        config = read_config(path if path.exists() else runtime_defaults_path())
     groups = config.setdefault('Task', {})
     selected = next(iter(groups), 1)
     config.update(options)
@@ -269,7 +275,9 @@ def execute(path: Path, request: dict[str, Any], run_id: str) -> None:
     if not isinstance(config, dict):
         raise ValueError('单任务请提供 GUI 运行选项，无需配置文件')
     extra = config.get('Extra')
-    if name != 'dungeon_sources' and (not isinstance(extra, dict) or not isinstance(extra.get('dnpath'), str) or not extra['dnpath'].strip()):
+    section = {'abyss_push': 'Abyss', 'dungeon_first_clear': 'Dungeon'}.get(name)
+    prepare_only = bool(section and isinstance(config.get(section), dict) and config[section].get('prepare_only') is True)
+    if not prepare_only and (not isinstance(extra, dict) or not isinstance(extra.get('dnpath'), str) or not extra['dnpath'].strip()):
         raise ValueError('请先配置雷电路径；GUI 不使用 ADB')
     with RunSession(name, run_id=run_id):
         if name == 'daily':

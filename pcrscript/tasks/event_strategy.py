@@ -112,3 +112,11 @@ def skill_names(name: str, database: str | Path = "cache/redive_cn.db") -> dict[
                 if value:
                     result[key] = normalized(value[0])
         return result
+
+
+def costume_skills(base: str, database: str | Path = 'cache/redive_cn.db') -> dict[str, dict[str, str]]:
+    """Resolve candidates from the game DB, never from an assumed outfit."""
+    with sqlite3.connect(database) as conn:
+        names = [normalized(row[0]) for row in conn.execute('SELECT unit_name FROM unit_profile')
+                 if normalized(row[0]).split('(')[0] == normalized(base).split('(')[0]]
+    return {name: skill_names(name, database) for name in names}

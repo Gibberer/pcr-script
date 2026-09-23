@@ -52,7 +52,7 @@ class TaskBaseTests(TestCase):
 
     def test_existing_registered_image_tasks_keep_action_capabilities(self):
         ocr_names = {'caravan', 'get_gift', 'campaign_clean',
-                     'clear_campaign_first_time', 'revival_event_once', 'dungeon_first_clear', 'upgrade_all_characters', 'dungeon_sources'}
+                     'clear_campaign_first_time', 'revival_event_once', 'dungeon_first_clear', 'upgrade_all_characters', 'max_character_bonds', 'abyss_push'}
         for name in set(registered_tasks()) - ocr_names:
             self.assertTrue(issubclass(find_taskclass(name), ImageTask), name)
 

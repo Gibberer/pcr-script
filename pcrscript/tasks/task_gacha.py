@@ -6,7 +6,6 @@ from pcrscript.actions import *
 
 if TYPE_CHECKING:
     from pcrscript import Robot
-    from ..strategist import Member
 
 from .base import TimeLimitTask, EventNews
 from .registry import register

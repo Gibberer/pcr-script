@@ -5,7 +5,7 @@
 - `base.py`：与识别方式无关的 BaseTask、TimeLimitTask、活动数据类型、公共配置与接口类型。
 - `image.py`：ImageTask，仅供图片匹配任务使用的动作序列、模板匹配、设计坐标换算与进度能力。
 - `registry.py`：唯一任务注册表。`__init__.py` 负责注册加载和兼容导出。
-- `task_home.py`、`task_gacha.py`、`task_adventure.py`、`task_shop.py`、`task_story.py`、`task_routines.py`、`task_combat.py`、`task_tower.py`：从原文件原样拆出的任务与动作实现。
+- `task_home.py`、`task_gacha.py`、`task_adventure.py`、`task_shop.py`、`task_story.py`、`task_routines.py`、`task_combat.py`、`task_tower.py`：从原文件拆出的任务与动作实现。2026-09-23 删除了不可用的露娜塔登塔旧实现；`task_tower.py` 仅保留回廊扫荡。
 - `task_story_event.py`、`task_revival_event.py`、`task_gifts.py`、`task_caravan.py`：直接实现并注册 Task；活动战斗、配队、扫荡、作业校验及复刻地图等辅助模块同属 tasks 包。
 - `game_ui/` 仍仅放可共享的识别/操作能力；`scripts/agent/` 仅分析；`scripts/daily/` 仅命令适配与原有兼容入口。
 

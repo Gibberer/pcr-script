@@ -23,7 +23,8 @@ class BilibiliApi:
         36, 20, 34, 44, 52
     )
 
-    def __init__(self, timeout: float = 20) -> None:
+    def __init__(self, timeout: float = 20, *, browser_session: bool = False,
+                 browser_cache_dir='cache/game/strategies/bilibili_browser', browser_channel='msedge') -> None:
         self.timeout = timeout
         self.headers = {
             'Referer': 'https://www.bilibili.com/',
@@ -32,6 +33,12 @@ class BilibiliApi:
         # Public metadata/search/playback do not require the user's login.
         # WBI signing is separate from authentication and initialized lazily.
         self._img_key = self._sub_key = None
+        self.browser = None
+        self.browser_searches = 0
+        if browser_session:
+            from .bilibili_browser import BilibiliBrowserSession
+            self.browser = BilibiliBrowserSession(browser_cache_dir, channel=browser_channel, timeout=timeout)
+            self.headers.update(self.browser.headers())
 
     def _initWbiKeys(self):
         resp = requests.get('https://api.bilibili.com/x/web-interface/nav', headers=self.headers, timeout=self.timeout)
@@ -78,7 +85,27 @@ class BilibiliApi:
         '''
         综合搜索
         '''
-        return self._get(SEARCH_API, {'keyword':keyword}).json()
+        try:
+            result = self._get(SEARCH_API, {'keyword':keyword}).json()
+            blocked = result.get('data', {}).get('v_voucher') or result.get('code') in (-412, -352)
+        except requests.HTTPError as error:
+            if not self.browser or error.response is None or error.response.status_code not in (403, 412):
+                raise
+            result, blocked = {'code': error.response.status_code}, True
+        if blocked and self.browser and self.browser_searches < 2:
+            self.browser_searches += 1
+            try:
+                result = self.browser.search(keyword)
+            except Exception as error:
+                from .bilibili_browser import BrowserVerificationRequired
+                if isinstance(error, BrowserVerificationRequired):
+                    raise
+                # Browser errors may echo launch/context arguments. Report
+                # only the type, never potentially sensitive cookie values.
+                raise RuntimeError('浏览器搜索未完成：'+type(error).__name__+'；检查本机浏览器或网络') from None
+            self.headers.pop('Cookie', None)
+            self.headers.update(self.browser.headers())
+        return result
     
     def searchUserVideo(self, mid, order="pubdate"):
         '''
@@ -135,3 +162,9 @@ class BilibiliApi:
         params = {k: v for k, v in params.items() if v is not None}
         params['fnval'] = 0
         return self._get('https://api.bilibili.com/x/player/playurl', params, sign=False).json()
+
+    def getVideoComments(self, avid, page=1):
+        """Public popular comments, including pinned comments and inline replies."""
+        return self._get('https://api.bilibili.com/x/v2/reply',
+                         {'type': 1, 'oid': avid, 'sort': 2, 'pn': page, 'ps': 20},
+                         sign=False).json()

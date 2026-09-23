@@ -70,6 +70,10 @@ class DungeonTests(TestCase):
         from types import SimpleNamespace
         opening=frame(('主菜单',480,114),('进行中战斗',330,150),('返回',350,410))
         ready=frame(('主菜单',480,87),('进行中战斗',315,134),('返回',335,435),('AUTO开启',480,358))
+        for index in range(5):
+            x=round(306+87.5*index)
+            ready.image[200:268,x-33:x+33]=(180,180,180)
+            ready.image[276:283,x-33:x+33]=(75,210,155)
         combat=object.__new__(EventCombat)
         combat.r=SimpleNamespace(check_deadline=Mock(),story_dialog=Mock(return_value=False))
         combat.ui=Mock();combat.ui.capture.side_effect=[opening,ready,ready]+[ready]*6
@@ -82,6 +86,25 @@ class DungeonTests(TestCase):
         self.assertEqual(combat.ui.capture.call_count,9)
         for call in combat.paused_instant.call_args_list:
             self.assertIs(call.args[0],ready)
+
+    def test_pause_menu_death_is_casualty_not_set_failure(self):
+        from types import SimpleNamespace
+        from pcrscript.tasks.event_battle import EarlyCasualty
+        ready=frame(('主菜单',480,87),('进行中战斗',315,134),('返回',335,435))
+        for index in range(5):
+            x=round(306+87.5*index)
+            ready.image[200:268,x-33:x+33]=(180,180,180)
+            ready.image[276:283,x-33:x+33]=(75,210,155)
+        x=round(306+87.5*3)
+        ready.image[200:268,x-33:x+33]=(80,80,80)
+        ready.image[276:283,x-33:x+33]=(50,50,50)
+        combat=object.__new__(EventCombat)
+        combat.r=SimpleNamespace(check_deadline=Mock(),story_dialog=Mock(return_value=False))
+        combat.ui=Mock();combat.ui.capture.side_effect=[ready,ready]
+        members=[SimpleNamespace(name=f'test{i}',instant=True) for i in range(5)]
+        with self.assertRaisesRegex(EarlyCasualty,'减员1人'):
+            combat.configure_paused(SimpleNamespace(members=members,allow_deaths=0),[m.name for m in members])
+        combat.ui.click.assert_not_called()
 
     def test_pause_failure_attempts_battle_retreat_instead_of_leaving_combat_running(self):
         from types import SimpleNamespace

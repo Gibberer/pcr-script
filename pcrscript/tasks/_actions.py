@@ -6,7 +6,6 @@ from ..templates import ImageTemplate
 
 if TYPE_CHECKING:
     from pcrscript import Robot
-    from ..strategist import Member
 
 def _combat_actions(check_auto=False, combat_duration=35, interval=1):
     actions = []

@@ -7,6 +7,7 @@ from ..game_ui.screen import EventUI, EventScreen
 from dataclasses import asdict
 import json
 import re
+from uuid import uuid4
 from pcrscript.run_session import clock as time
 
 import cv2 as cv
@@ -35,6 +36,7 @@ def skill_title_pattern(title: str) -> str:
 
 class EventFormation:
     requires_declared_build = True
+    infer_costume_from_skills = False
     slots = [(96+109*i, 452) for i in range(5)]
     slot_top = 405
     search_top = 177
@@ -57,7 +59,9 @@ class EventFormation:
         self.avatars = AvatarIndex()
         self.badges = EquipmentBadges()
 
-    def inspect(self, pos: Point, full: bool = True, rectangle: Region | None = None, expected_name: str | None = None) -> CharacterStatus:
+    def inspect(self, pos: Point, full: bool = True, rectangle: Region | None = None, expected_name: str | None = None,
+                verify_skills: bool = True) -> CharacterStatus:
+        evidence_suffix = '_'+uuid4().hex[:8] if self.infer_costume_from_skills else ''
         before = self.ui.capture(ocr=False)
         rect = rectangle or next((r for r in card_rectangles(before.image)
                      if r[0] <= pos[0] <= r[0]+r[2] and r[1] <= pos[1] <= r[1]+r[3]), None)
@@ -88,6 +92,8 @@ class EventFormation:
         # repairs the base name; the two skill names still prove the costume.
         if displayed.split('(')[0] == '干爱瑠':
             displayed = '千爱瑠' + displayed[len('干爱瑠'):]
+        if displayed.split('(')[0] == '干歌':
+            displayed = '千歌' + displayed[len('干歌'):]
         candidate = normalized(expected_name or identity or displayed)
         same_base = candidate.split("(")[0] == displayed.split("(")[0]
         name = candidate if same_base else displayed
@@ -96,21 +102,26 @@ class EventFormation:
         actual.identity_verified = bool(identity == name and same_base)
         actual.observed_at = time.time()
         if full and evidence is not None:
-            actual.equipment_evidence = str(self.ui.save("equipment_"+name, evidence))
+            actual.equipment_evidence = str(self.ui.save("equipment_"+name+evidence_suffix, evidence))
         if equipment is not None:
             actual.unique, actual.unique2 = equipment
-        actual.evidence = str(self.ui.save("character_"+normalized(name), s))
-        if full:
+        actual.evidence = str(self.ui.save("character_"+normalized(name)+evidence_suffix, s))
+        if full and (verify_skills or not actual.identity_verified):
             self.ui.click(s.find("技能", (620, 132, 770, 170), exact=True))
+            candidates = None
+            if self.infer_costume_from_skills and expected_name is None:
+                from .event_strategy import costume_skills
+                candidates = costume_skills(displayed)
             wanted = skill_names(name)
+            search_skills = {value for skills in candidates.values() for value in skills.values()} if candidates else set(wanted.values())
             found_names = set()
             levels = {}
             previous = None
             for page in range(8):
                 s = self.ui.capture()
-                self.ui.save(f"skills_{normalized(name)}_{page}", s)
+                self.ui.save(f"skills_{normalized(name)}{evidence_suffix}_{page}", s)
                 text = normalized(s.text((485, 175, 900, 438)))
-                for value in wanted.values():
+                for value in search_skills:
                     if s.find(skill_title_pattern(value), (580, 175, 800, 438), exact=True):
                         found_names.add(value)
                 for label in s.all("等级", (790, 180, 840, 435)):
@@ -126,11 +137,22 @@ class EventFormation:
             actual.skill_level = min(levels.values()) if len(levels) >= 3 else None
             # The UI omits costume suffixes. The two ordinary skill names
             # independently establish the variant, even if OCR only says 怜.
+            if candidates:
+                matches = [candidate for candidate, skills in candidates.items() if all(
+                    any(skills.get(key) in found_names for key in (f'main_skill_{i}', f'main_skill_evolution_{i}'))
+                    for i in (1, 2))]
+                if len(matches) == 1:
+                    name = actual.name = matches[0]
+                    wanted = candidates[name]
+                    same_base = True
+                else:
+                    same_base = False
             skill_identity = all(any(wanted.get(key) in found_names for key in
                                  (f"main_skill_{i}", f"main_skill_evolution_{i}")) for i in (1, 2))
             actual.identity_verified = bool(same_base and skill_identity)
             if actual.identity_verified and face is not None:
                 self.avatars.add(normalized(name), face)
+        if full:
             self.observed[normalized(name)] = actual
             (self.ui.output / "roster.json").write_text(json.dumps(
                 {k: asdict(v) for k, v in self.observed.items()}, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -148,11 +170,11 @@ class EventFormation:
                      handle=close_remaining_dialog)
         return actual
 
-    def inspect_current(self, full: bool = True, expected_names: Sequence[str] = ()) -> list[CharacterStatus]:
+    def inspect_current(self, full: bool = True, expected_names: Sequence[str] = (), *, verify_skills: bool = True) -> list[CharacterStatus]:
         results = []
         for pos in self.slots:
             rect = (pos[0]-48, self.slot_top, 96, 96)
-            actual = self.inspect(pos, full=full, rectangle=rect)
+            actual = self.inspect(pos, full=full, rectangle=rect, verify_skills=verify_skills)
             if not actual.identity_verified:
                 for name in expected_names:
                     if normalized(name).split("(")[0] == normalized(actual.name).split("(")[0]:

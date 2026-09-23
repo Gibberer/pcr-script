@@ -10,7 +10,7 @@
 
 ## 本地方案
 
-默认读取 `cache/game/strategies/dungeon_teams.yml`，实际阵容、来源和账号证据不提交。2026-09-22 已新增正式来源自动搜索；逐队培养/SET解析和全路线自动选择仍待实现，不能把候选视频当作可执行方案。
+默认读取 `cache/game/strategies/dungeon_teams.yml`，实际阵容、来源和账号证据不提交。2026-09-23 缺失方案时正式任务会继续调用视频解析器，保留逐队字段证据；有限自动路线适配只接受同一来源、普通四层齐全、春夏秋冬各一队且无成员冲突的四彩灵峰路线。复杂多刀规划仍未实现，不能把视频候选或零散阵容当作完整路线。仅解析可用 `Dungeon.prepare_only: true`，详见[视频解析与 Agent 复核](video-strategies.md)。
 
 格式为 YAML 映射：`version: 1`、`area`、`parties`。每项队伍有唯一 `id`、`floor`（1–5）、`phase`（第五层必须明确当前阶段文字）、`source`、`members`（五个不同角色）。角色字段与活动共用：`name`（完整衣装）、`level`、`rank`、`stars`、`unique`、`unique2`、`instant`、`skill_level`；三个开关必须明确布尔值。`allow_deaths` 默认0。
 
@@ -48,11 +48,7 @@
 
 ## 自动搜索队伍来源
 
-```powershell
-./.venv/Scripts/python.exe -X utf8 scripts/daily/task.py dungeon_sources
-```
-
-`DungeonSources` 配置目标 `area`、`aliases`、`region`（默认cn，可选jp）、`max_videos`（默认8）、`max_age_hours`（默认24）、`request_timeout`（默认12秒）与 `cache_dir`。独立任务在连接模拟器前完成，支持无设备运行。首通任务缺少方案时也自动调用同一搜索能力，再保留待办；已通关跳过时不做多余搜索。可用 `Dungeon.discover_sources: false` 禁止缺方案检索。
+地下城首通把优先攻略链接放在 `Dungeon.source_urls`，其他检索选项可放在 `Dungeon.sources`；首通任务缺少方案时自动调用内部共享搜索能力，再保留待办，已通关跳过时不做多余搜索。可用 `Dungeon.discover_sources: false` 禁止缺方案检索。来源搜索是地下城任务的内部步骤，没有独立的配置段或可运行任务。
 
 正式程序匿名调用B站WBI综合搜索，按目标名称/别名最多检索3组关键词，不查询UP投稿列表、不读取本地Cookie。合并去重后，核验BV身份、游戏身份、目标地下城和视频明确服区，保存视频标题、描述、分P/cid、发布时间、查询词、获取时间与解析版本。过滤明确不同服区及其他游戏同名关卡；未标服区保持unknown，需进一步核验。接口风控与结构变化保留errors，不以HTTP 200或空结果冒充成功。
 

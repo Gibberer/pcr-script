@@ -9,15 +9,17 @@ $fixture = Join-Path $workspace ('cache/build/runtime-smoke-' + [guid]::NewGuid(
 $source = Join-Path $fixture 'source'
 $target = Join-Path $fixture 'download'
 New-Item -ItemType Directory -Path $source -Force | Out-Null
-foreach ($item in @('pcrscript', 'images', 'requirements.txt')) {
-    Copy-Item -LiteralPath (Join-Path $workspace $item) -Destination $source -Recurse
+foreach ($item in @('pcrscript', 'images', 'requirements.txt', 'desktop/runtime_defaults.yml')) {
+    $destination = Join-Path $source $item
+    New-Item -ItemType Directory -Path (Split-Path $destination) -Force | Out-Null
+    Copy-Item -LiteralPath (Join-Path $workspace $item) -Destination $destination -Recurse
 }
 # Unrelated payload must remain absent from both the checkout and downloaded blobs.
-New-Item -ItemType Directory -Path "$source/scripts", "$source/docs", "$source/desktop" | Out-Null
+New-Item -ItemType Directory -Path "$source/scripts", "$source/docs", "$source/desktop/PcrDesktop" | Out-Null
 $unrelated = 'excluded-content-' + [guid]::NewGuid()
 Set-Content "$source/scripts/agent-only.txt" $unrelated
 Set-Content "$source/docs/notes.txt" 'not needed'
-Set-Content "$source/desktop/gui-source.txt" 'not needed'
+Set-Content "$source/desktop/PcrDesktop/gui-source.txt" 'not needed'
 Set-Content "$source/README.md" 'not needed'
 Set-Content "$source/.gitignore" "__pycache__/`n*.pyc"
 function Git([string]$directory, [string[]]$arguments) {
@@ -42,8 +44,12 @@ if ($process.ExitCode -ne 0) {
     Get-Content ($imagePath + '.error.txt') -ErrorAction SilentlyContinue
     throw 'Runtime GUI smoke failed'
 }
-foreach ($excluded in @('scripts', 'docs', 'desktop', 'README.md', 'docs/examples/daily.example.yml', 'daily_task.py')) {
+foreach ($excluded in @('scripts', 'docs', 'desktop/PcrDesktop', 'README.md', 'docs/examples/daily.example.yml', 'daily_task.py')) {
     if (Test-Path (Join-Path $target $excluded)) { throw "Unexpected download: $excluded" }
+}
+if (-not (Test-Path (Join-Path $target 'desktop/runtime_defaults.yml')) -or
+    (Test-Path (Join-Path $target 'pcrscript/runtime_defaults.yml'))) {
+    throw 'GUI runtime defaults missing or duplicated in the core checkout'
 }
 $objects = Git $target @('rev-list', '--objects', '--all', '--missing=print')
 if ($objects -notcontains ('?' + $missingHash)) { throw 'Unrelated file blob was downloaded' }
@@ -70,7 +76,7 @@ if ($process.ExitCode -ne 0) {
     Get-Content ($fullImage + '.error.txt') -ErrorAction SilentlyContinue
     throw 'Full repository GUI smoke failed'
 }
-foreach ($included in @('scripts/agent-only.txt', 'docs/notes.txt', 'desktop/gui-source.txt', 'README.md')) {
+foreach ($included in @('scripts/agent-only.txt', 'docs/notes.txt', 'desktop/PcrDesktop/gui-source.txt', 'README.md')) {
     if (-not (Test-Path (Join-Path $fullTarget $included))) { throw "Full download missing: $included" }
 }
 Write-Output "Full repository download and GUI verification passed: $fullTarget"

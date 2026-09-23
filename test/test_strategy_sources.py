@@ -4,8 +4,8 @@ from unittest import TestCase
 from unittest.mock import Mock,patch
 import json
 import requests
-from pcrscript.tasks.dungeon_sources import discover_sources,relevant
-from pcrscript.runtime import run_task_with_config
+from pcrscript.tasks.strategy_sources import discover_sources,relevant
+from pcrscript.tasks import find_taskclass
 
 BV='BV1234567890'
 def fake_api():
@@ -15,7 +15,7 @@ def fake_api():
  return a
 
 class SourceTests(TestCase):
- def options(self,folder):return dict(area='测试区域',aliases=[],cache_dir=folder)
+ def options(self,folder):return dict(task_type='dungeon',area='测试区域',aliases=[],cache_dir=folder)
  def test_empty_cache_fetch_then_reuse_and_expiry(self):
   with TemporaryDirectory() as folder:
    api=fake_api();o=self.options(folder)
@@ -46,13 +46,11 @@ class SourceTests(TestCase):
    api=fake_api();one=discover_sources(self.options(folder),api=api)
    two=discover_sources(dict(self.options(folder),aliases=['TEST7']),api=api)
    self.assertNotEqual(one['catalog'],two['catalog'])
- def test_registered_entry_never_connects_emulator(self):
-  with TemporaryDirectory() as folder,patch('pcrscript.tasks.dungeon_sources.BilibiliApi',return_value=fake_api()),patch('pcrscript.runtime.robot_from_config',side_effect=AssertionError('no device')):
-   r=run_task_with_config({'DungeonSources':self.options(folder)},'dungeon_sources')
-   self.assertEqual(r['status'],'complete')
+ def test_search_is_internal_to_dungeon_task(self):
+  self.assertIsNone(find_taskclass('dungeon_sources'))
 
  def test_other_game_and_wrong_region_are_excluded(self):
-  for title in ['其他游戏 测试区域','公主连结 日服 测试区域']:
+  for title in ['其他游戏 测试区域','公主连结 日服 测试区域','公主连结 台服 测试区域']:
    with TemporaryDirectory() as folder:
     api=fake_api();api.getVideoInfo.return_value['data']['title']=title
     r=discover_sources(self.options(folder),api=api)
@@ -61,7 +59,7 @@ class SourceTests(TestCase):
  def test_missing_plan_invokes_formal_search_without_creating_executable_parties(self):
   from types import SimpleNamespace
   from pcrscript.tasks.task_dungeon import DungeonFirstClear
-  with TemporaryDirectory() as folder,patch('pcrscript.tasks.dungeon_sources.discover_sources',return_value={'status':'complete','candidates':[{'readiness':'source_only'}]}) as search:
+  with TemporaryDirectory() as folder,patch('pcrscript.tasks.strategy_video.acquire_strategies',return_value={'status':'partial','parties':[],'pending':['来源培养未明确']}) as search:
    task=object.__new__(DungeonFirstClear);task.plan=None;task.area='测试区域'
    task.options={'teams':str(Path(folder)/'absent.yml')};task.robot=SimpleNamespace(task_config={});task.report={'pending':[]}
    self.assertEqual(task.ensure_plan(),[]);self.assertEqual(task.ensure_plan(),[])

@@ -61,6 +61,8 @@ class AvatarIndex:
                 if int(data["version"]) == 1:
                     self.names = list(data["names"].astype(str))
                     self.matrix = data["features"].astype(np.float32)
+                    if self.matrix.shape != (len(self.names), 24*24*3) or not np.isfinite(self.matrix).all():
+                        raise ValueError('头像索引维度或数值无效')
 
     def add(self, name, picture, persist=True):
         vector = feature(picture)
@@ -73,6 +75,8 @@ class AvatarIndex:
             self.save()
 
     def save(self):
+        if getattr(self, 'read_only', False):
+            return
         temporary = self.path/f"index.{os.getpid()}.npz"
         np.savez_compressed(temporary, version=1,
                             names=np.asarray(self.names), features=self.matrix)

@@ -43,6 +43,10 @@ class BattleResult:
     reason: str = ""
 
 
+class EarlyCasualty(EventUIError):
+    """A member fell before the paused battle settings could be checked."""
+
+
 class EventCombat:
     # Ordered left to right, matching the order displayed in party formation.
     portraits = [(196, 400, 282, 485), (315, 400, 402, 485),
@@ -88,6 +92,16 @@ class EventCombat:
         return bool(np.mean((hsv[:, :, 0] > 80) & (hsv[:, :, 0] < 110) &
                             (hsv[:, :, 1] > 90) & (hsv[:, :, 2] > 160)) > .25)
 
+    @staticmethod
+    def paused_defeated(screen: EventScreen, index: int) -> bool:
+        """Dead portraits have a dark face and no green HP in the pause menu."""
+        x = round(306+87.5*index)
+        face = screen.image[200:268, x-33:x+33]
+        bar = screen.image[276:283, x-33:x+33].astype(np.int16)
+        green = np.mean((bar[:, :, 1] > bar[:, :, 2]+22) &
+                        (bar[:, :, 1] > bar[:, :, 0]+30))
+        return bool(green < .08 and cv.cvtColor(face, cv.COLOR_BGR2HSV)[:, :, 2].mean() < 145)
+
     def configure_paused(self, party: EventParty, order: Sequence[str]) -> bool:
         """Pause during setup so animations and stage stories cannot race SET."""
         pause_deadline = time.monotonic()+45
@@ -122,7 +136,12 @@ class EventCombat:
             required = {normalized(m.name): m.instant for m in party.members}
             if not order or len(order) != 5 or set(map(normalized, order)) != set(required):
                 raise EventUIError('SET对应角色顺序未核验')
+            defeated = [index for index in range(5) if self.paused_defeated(s, index)]
+            if len(defeated) > getattr(party, 'allow_deaths', 0):
+                raise EarlyCasualty(f'暂停菜单确认减员{len(defeated)}人，位置{defeated}')
             for index, name in enumerate(order):
+                if index in defeated:
+                    continue
                 s = self.ui.capture()
                 if self.paused_instant(s, index) != required[normalized(name)]:
                     self.ui.click((round(306+87.5*index), 237), delay=.8)
@@ -155,12 +174,19 @@ class EventCombat:
             observe = getattr(self.r, 'observe_battle', None)
             if observe:
                 observe(s)
+            if getattr(self.r, 'combat_pre_dialog', lambda frame: False)(s):
+                continue
             if s.find("体力回复|体力恢复|购买体力"):
                 self.ui.expect_click("取消", (200, 300, 800, 510), exact=True)
                 return BattleResult("blocked", "体力不足")
             if s.find('进行中战斗') and s.find('主菜单'):
                 started = started or time.monotonic()
-                configured = self.configure_paused(party, order)
+                try:
+                    configured = self.configure_paused(party, order)
+                except EarlyCasualty as error:
+                    return self.retreat(str(error))
+                except EventUIError as error:
+                    return self.retreat('SET核验中断：'+str(error))
                 continue
             in_battle = self.match("btn_menu_text", s) or s.find(r"\d:\d{2}", (750, 0, 850, 55))
             if in_battle:
@@ -168,6 +194,8 @@ class EventCombat:
                 if not configured:
                     try:
                         configured = self.configure_paused(party, order)
+                    except EarlyCasualty as error:
+                        return self.retreat(str(error))
                     except EventUIError as error:
                         return self.retreat('SET核验中断：'+str(error))
                     continue

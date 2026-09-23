@@ -1,43 +1,54 @@
-## 前言
-> 该脚本为自用脚本，主要用于清日常。
+# PCR 任务控制台
 
-实现方式基于Open CV模板匹配，模板图基于960x540的设备, 具体对设备支持情况见[设备支持情况](docs/legacy-features.md#设备支持情况)。
+面向《公主连结》国服的本地自动化工程：用 GUI 配置日常、执行单项任务和查看记录，也保留 Python 命令行入口。工程提供共享识别能力、运行证据与 Agent 协作约定；正式任务由脚本独立执行。
 
-## 使用引导
+## 从 GUI 开始
 
-* 安装Python3环境，访问[Python官网](https://www.python.org/)安装
-* 使用git clone或在网页上下载本项目到电脑中解压缩
-  ```cmd
-  git clone --depth 1 git@github.com:Gibberer/pcr-script.git
-  ```
-* 使用 Python 3.12+ x64，在项目根目录安装统一依赖（包含 OCR）：
-  ```cmd
-  python -m pip install -r requirements.txt
-  ```
-* 设置配置文件：修改[docs/examples/daily.example.yml](docs/examples/daily.example.yml)中的雷电模拟器路径，之后复制到根目录命名为 **daily_config.yml**。
-  * 如果是其他模拟器可以不设置路径，不过需要保证本机ADB命令可用，脚本会尝试使用ADB命令与设备交互，当然还请注意保持模拟器分辨率为960x540。
-* 执行[daily_task.bat](daily_task.bat)或[daily_task.py](daily_task.py)来启动脚本程序。
-  * 运行后会按如下方式进行:启动模拟器->启动游戏->执行脚本任务
----
-* dialy_task仅支持单设备单账号并且处于已登录状态，如果需要多账号多设备可以使用[旧版多账号入口](scripts/legacy/multi_account.py)。不过在该文件中缺少对时限任务的判断，需要注意配置文件中的任务组合方式。
-* 部分任务需要依赖冒险图中的角色形象，默认使用6星佩可莉姆。如果是其他角色可以在游戏内冒险地图界面截取其中角色图像中的一部分（最好是脸部，不要截取到地图背景），将新截取的图片替换掉[images/character.png](images/character.png)这个图片即可。
+**无需提前 clone 仓库。** 下载 GUI 后，按程序内的引导准备工程和运行环境。
 
-## 关于任务内容
+1. 打开 [GitHub Releases](https://github.com/Gibberer/pcr-script/releases)，下载 `PcrDesktop-win-x64.zip`，完整解压并运行 `PcrDesktop.exe`。请保留同目录 DLL 和 `.exe.config`。尚未发布 Release 时，可在 [Windows GUI 构建](https://github.com/Gibberer/pcr-script/actions/workflows/desktop.yml)的成功记录中下载同名 Artifact。
+2. 按引导选择一个空工程目录，点击“从 GitHub 下载项目”。默认只下载运行所需文件；也可以选择已有工程。
+3. 选择雷电安装目录，检测 Python，再点击“创建环境 / 安装依赖”。任务运行需要 Windows x64、Python 3.12+ 和 Git；引导提供 Python 下载与检测入口。雷电使用后台驱动，无需 ADB；游戏需事先登录，当前实机验证尺寸为 **960×540**。
+4. 在“每日日常”点击“＋ 添加任务”，选择任务及参数。选中列表中的项目即可修改参数、启用或调整顺序，点击“保存配置”，再“开始今日日常”。
+5. 地下城、深域、角色培养等工作从“按需专项”执行；进度、暂停、停止和证据在“运行状态 / 运行记录”查看。
 
-新版剧情活动的运行、头像索引、配队检查和验证范围见 [剧情活动说明](docs/story-event.md)。该任务需要 `requirements.txt`，可用 `scripts/daily/story_event.py` 单独执行，雷电窗口模式无需 ADB。
+![日常任务配置](docs/images/gui-daily.png)
 
-定时任务可使用 `scripts/daily/all.bat`（完整日常）或 `scripts/daily/story_event.bat`（仅活动）。Agent 探查工具、共用界面能力与日常代码的目录边界见 [入口分类](scripts/README.md)；后续开发先读 [AGENTS.md](AGENTS.md) 和 [游戏知识目录](docs/game-knowledge/README.md)。
+- [GUI 详细指南](docs/desktop.md)：首次使用、添加与编辑、专项、运行控制及截图。
+- [任务指南](docs/tasks.md)：可配置的日常任务、单项任务用法和复杂任务逻辑。
 
-本条目可以查看[docs/examples/daily.example.yml](docs/examples/daily.example.yml)文件中的任务列表部分，脚本会按其中所列顺序依次执行每个任务条目，具体任务条目的用途可以留意文件中的注释部分。
-任务统一位于 [tasks 包](pcrscript/tasks/)，可用 `scripts/daily/task.py --help` 查看注册任务，或执行 `./.venv/Scripts/python.exe -X utf8 scripts/daily/task.py caravan` 按需运行单项任务。原有任务名和每日列表兼容，组织与配置说明见[任务架构](docs/task-architecture.md)。
+地下城和深域的来源搜索、头像建库与部分视频解析已经接入正式程序，但**任意视频的完整培养要求、操作时序及多队路线规划尚未全部完成**。未知字段会保留证据并阻止把不完整来源当作完整作业；详情见[视频解析范围与交接](docs/video-strategies.md)。本地试打、升星和秘石兑换默认关闭。
 
-### 关于时限任务
+## 命令行使用
 
-时限任务会在[daily_task.py](daily_task.py)中进行判断，如果对应任务的活动当前未开放，则会将配置的任务条目废弃掉不允执行。
+安装 Python 3.12+ x64 和 Git，在终端执行：
 
----
-[其他说明](docs/legacy-features.md)
+```powershell
+git clone https://github.com/Gibberer/pcr-script.git
+cd pcr-script
+python -m venv .venv
+./.venv/Scripts/python.exe -m pip install -r requirements.txt
+Copy-Item docs/examples/daily.example.yml daily_config.yml
+```
 
-项目目录及任务文件对应关系见 [项目目录说明](docs/project-structure.md)。
+编辑 `daily_config.yml` 中的 `Extra.dnpath` 和 `Task` 列表，然后运行完整日常：
 
-Windows 图形控制台使用 C# / WPF，可配置任务、调用 Python 源码执行并查看状态。首次使用与 GitHub Actions EXE 下载方式见 [GUI 说明](docs/desktop.md)。
+```powershell
+./.venv/Scripts/python.exe -X utf8 daily_task.py
+```
+
+按需执行某个注册任务，例如礼物领取：
+
+```powershell
+./.venv/Scripts/python.exe -X utf8 scripts/daily/task.py get_gift
+```
+
+完整日常会启动雷电与游戏；单项任务通常要求模拟器和游戏已经打开。任务参数、来源配置及运行范围见[任务指南](docs/tasks.md)。实际配置、头像、作业与运行证据都保存在本地忽略目录，不应提交到仓库。
+
+## 支持范围与扩展
+
+目前支持 **Windows 上的雷电模拟器，游戏画面使用 960×540 分辨率**。其他模拟器、设备或分辨率尚未验证，需要适配截图、输入、坐标和界面识别，并在目标设备上检查结果。
+
+想支持其他设备或开发新任务，可以在常用的 AI 编程 Agent 中选择本项目目录，直接描述目标。仓库已经整理了[游戏规则、页面坐标和导航路径](docs/game-knowledge/README.md)，也保留了已有任务和[待验证场景](docs/game-knowledge/pending-validation.md)，可以帮助 Agent 接续开发，减少重新摸索页面的工作。例如可以要求它“在当前工程新增一个按需任务，并根据知识库核对页面和执行边界”。新设备和新任务仍需在实际游戏中验证。
+
+开发约定见 [AGENTS.md](AGENTS.md)，代码位置见[项目结构](docs/project-structure.md)。运行问题可查[运行诊断](docs/run-diagnostics.md)；GUI 构建见[发布说明](docs/releases.md)。

@@ -20,7 +20,7 @@ public partial class MainWindow
             item["requires_device"]?.GetValue<bool>() ?? true)).ToList();
         TaskPicker.ItemsSource = _choices.Where(t => t.Category == "daily" || _plan.Any(r => r.Name == t.Name)).ToList();
         CatalogList.ItemsSource = _choices.Where(t => t.Category == "special").ToList();
-        TaskPicker.SelectedItem = TaskPicker.Items.Cast<TaskChoice>().FirstOrDefault(t => t.Name == dailySelected) ?? TaskPicker.Items.Cast<TaskChoice>().FirstOrDefault();
+        TaskPicker.SelectedItem = TaskPicker.Items.Cast<TaskChoice>().FirstOrDefault(t => t.Name == dailySelected);
         CatalogList.SelectedItem = CatalogList.Items.Cast<TaskChoice>().FirstOrDefault(t => t.Name == specialSelected) ?? CatalogList.Items.Cast<TaskChoice>().FirstOrDefault();
         UpdatePlanLabels();
     }
@@ -71,8 +71,9 @@ public partial class MainWindow
         var config = ConfigBox.Text.Trim();
         var selectedPath = config.Length > 0 && Directory.Exists(workspace) ? Path.GetFullPath(Path.Combine(workspace, config)) : null;
         if (selectedPath is not null && File.Exists(selectedPath)) files.Add(selectedPath);
-        ConfigPicker.ItemsSource = files.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-        ConfigPicker.SelectedItem = selectedPath;
+        var choices = files.Distinct(StringComparer.OrdinalIgnoreCase).Select(path => new ConfigChoice(path, Path.GetFileName(path))).ToList();
+        ConfigPicker.ItemsSource = choices;
+        ConfigPicker.SelectedItem = choices.FirstOrDefault(c => string.Equals(c.Path, selectedPath, StringComparison.OrdinalIgnoreCase));
     }
 
     private void RememberConfig(Settings settings)
@@ -96,6 +97,7 @@ public partial class MainWindow
         var settings = ReadSettings();
         var data = await Backend.Request(settings, "new");
         _defaultOptions = (JsonObject)data["options"]!.DeepClone();
+        ResetDailyEditor();
         _plan.Clear();
         SetCatalog(data["catalog"]!.AsArray());
         OptionsBox.Text = data["options"]!.ToJsonString(_pretty);
@@ -105,6 +107,8 @@ public partial class MainWindow
         ConfigBox.Text = "";
         _loadedSettings = ReadSettings();
         CurrentConfigText.Text = "暂无日常配置 · 可新建日常列表，或前往按需专项直接执行。";
+        ResetDailyEditor();
+        MarkConfigSaved();
         ConfigPicker.SelectedIndex = -1;
         Message("运行选项已就绪；填写雷电路径后可直接运行单任务，整组方案可另行保存");
     }
@@ -112,6 +116,7 @@ public partial class MainWindow
     private async void Setup_Click(object sender, RoutedEventArgs e) => await Guard(async () =>
     {
         if (_active || _process is { HasExited: false }) throw new InvalidOperationException("请先停止运行再修改工程或模拟器");
+        if (!await MayReplaceConfig()) return;
         var settings = Settings.Load();
         if (new SetupWindow(settings) { Owner = this, WindowStartupLocation = WindowStartupLocation.CenterOwner }.ShowDialog() != true) return;
         _settings = settings;
@@ -161,17 +166,19 @@ public partial class MainWindow
         _newConfig = false;
         ConfigBox.Text = target.Config;
         CurrentConfigText.Text = "当前配置：" + target.Config;
+        MarkConfigSaved();
         if (remember) RememberConfig(target);
         Message("配置已生成：" + target.Config);
     }
 
-    private async void NewConfig_Click(object sender, RoutedEventArgs e) => await Guard(CreateNewConfig);
+    private async void NewConfig_Click(object sender, RoutedEventArgs e) => await Guard(async () => { if (await MayReplaceConfig()) await CreateNewConfig(); });
     private async void SaveAs_Click(object sender, RoutedEventArgs e) => await Guard(SaveAs);
     private async void OpenConfig_Click(object sender, RoutedEventArgs e) => await Guard(async () =>
     {
         var dialog = new OpenFileDialog { Title = "打开任务配置", Filter = "YAML 配置|*.yml;*.yaml" };
         if (dialog.ShowDialog(this) == true)
         {
+            if (!await MayReplaceConfig()) return;
             var old = ConfigBox.Text;
             ConfigBox.Text = dialog.FileName;
             try { await LoadConfig(); }
@@ -180,7 +187,9 @@ public partial class MainWindow
     });
     private async void SelectConfig_Click(object sender, RoutedEventArgs e) => await Guard(async () =>
     {
-        if (ConfigPicker.SelectedItem is not string selected) throw new InvalidOperationException("请选择配置文件，或点击打开配置");
+        if (ConfigPicker.SelectedItem is not ConfigChoice choice) throw new InvalidOperationException("请选择配置文件，或点击打开配置");
+        var selected = choice.Path;
+        if (!await MayReplaceConfig()) return;
         var old = ConfigBox.Text;
         ConfigBox.Text = selected;
         try { await LoadConfig(); }

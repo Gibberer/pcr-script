@@ -49,6 +49,7 @@ public partial class MainWindow : Window
         EmulatorLabel.Text = "雷电目录：" + _settings.EmulatorDirectory;
         PlanGrid.ItemsSource = _plan;
         _plan.CollectionChanged += (_, _) => UpdatePlanLabels();
+        ResetDailyEditor();
         RefreshConfigChoices();
         _timer.Tick += (_, _) => Poll();
         _timer.Start();
@@ -117,6 +118,7 @@ public partial class MainWindow : Window
         _loadedSettings = settings;
         _newConfig = false;
         _revision = data["revision"]!.GetValue<string>();
+        ResetDailyEditor();
         _plan.Clear();
         foreach (var item in data["plan"]!.AsArray())
             _plan.Add(new TaskRow { Enabled = item!["enabled"]!.GetValue<bool>(), Name = item["name"]!.GetValue<string>(), Args = item["args"]!.ToJsonString() });
@@ -125,7 +127,8 @@ public partial class MainWindow : Window
         BuildOptions(data["options"]!.AsObject());
         EnvironmentLabel.Text = Path.GetFileName(settings.Workspace);
         Message($"已加载配置 · 任务组 {data["account_group"]} · {_plan.Count} 项");
-        CurrentConfigText.Text = "当前配置：" + settings.Config;
+        MarkConfigSaved();
+        if (_plan.Count > 0) PlanGrid.SelectedIndex = 0;
         if (saveSettings) RememberConfig(settings);
         else RefreshConfigChoices();
         // Reattach to a run started by this GUI before it was closed.
@@ -158,11 +161,13 @@ public partial class MainWindow : Window
         await Idle(_loadedSettings!);
         var result = await Backend.Request(_loadedSettings!, "save", ConfigRequest());
         _revision = result["revision"]!.GetValue<string>();
+        MarkConfigSaved();
         Message("配置已保存");
     }
 
     private JsonObject ConfigRequest()
     {
+        ApplyEditor();
         PlanGrid.CommitEdit(DataGridEditingUnit.Cell, true);
         PlanGrid.CommitEdit(DataGridEditingUnit.Row, true);
         var plan = new JsonArray();
@@ -178,42 +183,29 @@ public partial class MainWindow : Window
         if (TaskPicker.SelectedItem is not TaskChoice task) return;
         TaskDescription.Text = task.Description;
         FillParameters(task, ParameterPanel, _parameters, values);
+        foreach (var (_, editor) in _parameters)
+        {
+            if (editor is TextBox text) text.TextChanged += (_, _) => DailyParameterChanged();
+            else if (editor is CheckBox check)
+            {
+                check.Checked += (_, _) => DailyParameterChanged();
+                check.Unchecked += (_, _) => DailyParameterChanged();
+            }
+        }
     }
 
     private void FillParameters(TaskChoice task, StackPanel panel,
         List<(JsonObject Descriptor, FrameworkElement Editor)> editors, JsonArray? values = null)
-    {
-        panel.Children.Clear(); editors.Clear();
-        int index = 0;
-        foreach (var node in task.Parameters)
-        {
-            var descriptor = node!.AsObject();
-            var value = values is not null && index < values.Count ? values[index] : descriptor["default"];
-            panel.Children.Add(new TextBlock { Text = (descriptor["label"] ?? descriptor["name"])!.ToString() + (descriptor["required"]!.GetValue<bool>() ? " *" : "") });
-            FrameworkElement editor = descriptor["type"]!.ToString() == "boolean"
-                ? new CheckBox { IsChecked = value?.GetValue<bool>() ?? false, Margin = new Thickness(0, 8, 0, 14) }
-                : new TextBox { Text = descriptor["type"]!.ToString() == "string" ? value?.GetValue<string>() ?? "" : value?.ToJsonString() ?? "null" };
-            panel.Children.Add(editor); editors.Add((descriptor, editor)); index++;
-        }
-    }
+        => TaskParameters.Fill(task, panel, editors, values);
 
     private JsonArray ParameterValues(List<(JsonObject Descriptor, FrameworkElement Editor)>? editors = null)
-    {
-        var result = new JsonArray();
-        foreach (var (descriptor, editor) in editors ?? _parameters)
-        {
-            if (editor is CheckBox check) result.Add(check.IsChecked == true);
-            else
-            {
-                var text = ((TextBox)editor).Text;
-                result.Add(descriptor["type"]!.ToString() == "string" ? JsonValue.Create(text) : JsonNode.Parse(text));
-            }
-        }
-        return result;
-    }
+        => TaskParameters.Read(editors ?? _parameters);
 
     private async Task StartRun(bool daily, bool special = false)
     {
+        if (!special) ApplyEditor();
+        if (daily && !_plan.Any(row => row.Enabled)) throw new InvalidOperationException("请先添加并启用日常任务");
+        if (!daily && !special && PlanGrid.SelectedItem is not TaskRow) throw new InvalidOperationException("请选择列表中的日常任务");
         if (special && CatalogList.SelectedItem is not TaskChoice) throw new InvalidOperationException("请选择专项任务");
         if (!daily && _loadedSettings is null)
         {
@@ -242,7 +234,9 @@ public partial class MainWindow : Window
         if (!daily)
         {
             var options = special ? ReadSpecialOptions() : ReadOptions();
-            if ((_choices.FirstOrDefault(t => t.Name == task)?.RequiresDevice ?? true) && string.IsNullOrWhiteSpace(options["Extra"]?["dnpath"]?.ToString()))
+            var section = _choices.FirstOrDefault(t => t.Name == task)?.ConfigSection;
+            bool prepareOnly = (task is "abyss_push" or "dungeon_first_clear") && section is not null && options[section]?["prepare_only"]?.GetValueKind() == JsonValueKind.True;
+            if (!prepareOnly && (_choices.FirstOrDefault(t => t.Name == task)?.RequiresDevice ?? true) && string.IsNullOrWhiteSpace(options["Extra"]?["dnpath"]?.ToString()))
                 throw new InvalidOperationException("请先在配置选项页填写雷电安装目录；单任务无需保存配置文件");
             request["options"] = options;
         }
@@ -251,6 +245,7 @@ public partial class MainWindow : Window
         _pendingCommand = null; _pendingAction = null;
         _startedAt = DateTimeOffset.Now;
         _active = true;
+        UpdateRunControls("running");
         RunScopeText.Text = daily ? "每日日常 · " + Path.GetFileName(_loadedSettings!.Config) : (special ? "按需专项 · " : "单项日常 · ") + (_choices.FirstOrDefault(t => t.Name == task)?.Label ?? task);
         LiveLog.Clear(); Tabs.SelectedItem = RunTab;
         try
@@ -263,7 +258,7 @@ public partial class MainWindow : Window
             _ = Observe(process);
             Message("已启动 Python，等待运行状态");
         }
-        catch { _active = false; throw; }
+        catch { _active = false; UpdateRunControls("failed"); throw; }
     }
 
     private async Task Observe(Process process)
@@ -280,7 +275,7 @@ public partial class MainWindow : Window
             if (_active) StatusText.Text += $"\n进程已退出（{process.ExitCode}）；若状态未正常结束，请查看日志。";
         }
         catch (Exception error) { Message(error.Message); }
-        finally { _active = false; _process = null; process.Dispose(); }
+        finally { _active = false; _process = null; process.Dispose(); UpdateRunControls("finished"); }
     }
 
     private string? CurrentRunPath => _runSettings is null || _runId is null ? null : Path.Combine(_runSettings.Workspace, "cache", "daily", "runs", _runId);
@@ -293,6 +288,7 @@ public partial class MainWindow : Window
         {
             var state = Backend.ReadObject(Path.Combine(folder, "status.json"));
             string value = state["state"]!.ToString();
+            UpdateRunControls(value);
             var age = DateTimeOffset.Now.ToUnixTimeSeconds() - state["heartbeat"]!.GetValue<double>();
             var label = value switch { "running" => "运行中", "paused" => "已暂停", "finished" => "已结束", "failed" => "失败", "cancelled" => "已停止", _ => value };
             if (age > 10 && value is "running" or "paused") label = "心跳失联（不能视为已停止）";
@@ -307,6 +303,14 @@ public partial class MainWindow : Window
         }
         catch (FileNotFoundException) { if (_active) StatusText.Text = "正在启动，等待 Python 创建运行记录…"; }
         catch (Exception e) when (e is IOException or JsonException) { Message("读取运行状态暂不可用：" + e.Message); }
+    }
+
+    private void UpdateRunControls(string state)
+    {
+        PauseButton.IsEnabled = _active && state == "running" && _pendingCommand is null;
+        ResumeButton.IsEnabled = _active && state == "paused" && _pendingCommand is null;
+        StopButton.IsEnabled = _active && state is "running" or "paused";
+        SnapshotButton.IsEnabled = _active && state is "running" or "paused";
     }
 
     private async Task SendControl(string action)
@@ -325,6 +329,8 @@ public partial class MainWindow : Window
             e.Cancel = true;
             Message("请先等待当前操作结束；运行中的任务须停止并确认后再关闭窗口。");
         }
+        else if (_configDirty && MessageBox.Show(this, "当前配置有未保存的修改。确定放弃修改并关闭？", "未保存的配置", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No) != MessageBoxResult.Yes)
+            e.Cancel = true;
         else _timer.Stop();
     }
 
@@ -344,36 +350,10 @@ public partial class MainWindow : Window
         await Backend.Request(_runSettings, "idle");
         _active = false;
         _pendingCommand = null;
+        UpdateRunControls("finished");
         StatusText.Text += "\n已检查运行锁：当前工程无活跃任务进程。";
         Message("运行锁已释放，可以重新启动任务或关闭窗口");
     });
-    private void Task_SelectionChanged(object sender, SelectionChangedEventArgs e) => BuildParameters();
-    private void Plan_SelectionChanged(object sender, SelectionChangedEventArgs e)
-    {
-        if (PlanGrid.SelectedItem is not TaskRow row) return;
-        TaskPicker.SelectedItem = TaskPicker.Items.Cast<TaskChoice>().FirstOrDefault(t => t.Name == row.Name);
-        BuildParameters(JsonNode.Parse(row.Args)!.AsArray());
-    }
-    private async void Add_Click(object sender, RoutedEventArgs e) => await Guard(() =>
-    {
-        if (TaskPicker.SelectedItem is TaskChoice task)
-        {
-            if (task.Category != "daily") throw new InvalidOperationException("专项请在按需专项页执行，不自动加入日常");
-            _plan.Add(new TaskRow { Name = task.Name, Args = ParameterValues().ToJsonString() });
-        }
-        return Task.CompletedTask;
-    });
-    private async void Apply_Click(object sender, RoutedEventArgs e) => await Guard(() =>
-    {
-        if (PlanGrid.SelectedItem is TaskRow row && TaskPicker.SelectedItem is TaskChoice task)
-        {
-            row.Name = task.Name; row.Args = ParameterValues().ToJsonString(); UpdatePlanLabels();
-        }
-        return Task.CompletedTask;
-    });
-    private void Up_Click(object sender, RoutedEventArgs e) { var i = PlanGrid.SelectedIndex; if (i > 0) _plan.Move(i, i - 1); }
-    private void Down_Click(object sender, RoutedEventArgs e) { var i = PlanGrid.SelectedIndex; if (i >= 0 && i < _plan.Count - 1) _plan.Move(i, i + 1); }
-    private void Remove_Click(object sender, RoutedEventArgs e) { if (PlanGrid.SelectedItem is TaskRow row) _plan.Remove(row); }
     private void Browse_Click(object sender, RoutedEventArgs e)
     {
         var dialog = new OpenFolderDialog { Title = "选择 Python 工程目录" };
@@ -394,6 +374,7 @@ public partial class MainWindow : Window
 
     private async void Install_Click(object sender, RoutedEventArgs e) => await Guard(async () =>
     {
+        if (!await MayReplaceConfig()) return;
         var settings = ReadSettings();
         if (_active) throw new InvalidOperationException("请先停止任务");
         if (File.Exists(settings.Python)) await Idle(settings);
@@ -407,6 +388,7 @@ public partial class MainWindow : Window
     private async void Clone_Click(object sender, RoutedEventArgs e) => await Guard(async () =>
     {
         if (_active) throw new InvalidOperationException("请先停止任务");
+        if (!await MayReplaceConfig()) return;
         var dialog = new OpenFolderDialog { Title = "选择下载位置（将在其中新建 pcr-script 文件夹）" };
         if (dialog.ShowDialog(this) != true) return;
         var target = Path.Combine(dialog.FolderName, "pcr-script");
@@ -428,6 +410,7 @@ public partial class MainWindow : Window
         var settings = ReadSettings(); await Idle(settings);
         if ((await Git(settings, "status", "--porcelain")).Length > 0) throw new IOException("存在本地源码改动，更新已取消；请先处理改动");
         if (await Git(settings, "branch", "--show-current") != settings.Branch) throw new IOException("当前分支与设置不一致，更新已取消");
+        await RuntimeSource.IncludeRootDefaultsForUpdate(settings.Workspace);
         await Backend.Command("git", ["fetch", "origin", settings.Branch], settings.Workspace, log: Log, timeoutSeconds: 600);
         await Idle(settings);
         await Git(settings, "merge", "--ff-only", "FETCH_HEAD");
@@ -504,8 +487,7 @@ public partial class MainWindow : Window
         if (!timedOut) throw new InvalidOperationException("辅助进程超时终止校验失败");
         await CreateNewConfig();
         if (_plan.Count != 0 || TaskPicker.Items.Count < 1) throw new InvalidOperationException("任务绑定失败");
-        TaskPicker.SelectedItem = TaskPicker.Items.Cast<TaskChoice>().Single(t => t.Name == "campaign_clean");
-        if (_parameters.Count != 2 || ParameterValues().Count != 2) throw new InvalidOperationException("动态参数表单失败");
+        VerifyDailyEditor();
         if (CatalogList.Items.Cast<TaskChoice>().Any(t => string.IsNullOrWhiteSpace(t.Description)))
             throw new InvalidOperationException("任务能力说明缺失");
         if (_optionEditors.Count == 0 || ReadOptions()["Extra"] is null) throw new InvalidOperationException("公共配置表单失败");
@@ -535,9 +517,30 @@ public partial class MainWindow : Window
         File.Copy(generated, fallback);
         if (PreferredConfig(fixture, "absent.yml") != Path.GetFullPath(fallback) || PreferredConfig(fixture, generated) != Path.GetFullPath(generated))
             throw new InvalidOperationException("默认配置选择失败");
-        TaskPicker.SelectedItem = TaskPicker.Items.Cast<TaskChoice>().Single(t => t.Name == "get_gift");
         _timer.Stop();
+        _plan.Insert(0, new TaskRow { Name = "schedule" });
+        _plan.Insert(1, new TaskRow { Name = "quick_clean", Args = "[2]" });
+        _plan.Insert(2, new TaskRow { Name = "get_quest_reward" });
+        PlanGrid.SelectedItem = null;
+        PlanGrid.SelectedItem = _plan.Last();
+        ConfigPicker.ItemsSource = new[] { new ConfigChoice("每日示例.yml", "每日示例.yml") };
+        ConfigPicker.SelectedIndex = 0;
+        CurrentConfigText.Text = "当前配置：每日示例.yml · 已保存";
+        EnvironmentLabel.Text = "本地工作目录 · 离线界面示例";
+        WorkspaceBox.Text = @"C:\PCR\pcr-script";
+        PythonBox.Text = @"C:\PCR\pcr-script\.venv\Scripts\python.exe";
+        Message("离线界面示例 · 未连接模拟器");
+        RunScopeText.Text = "单项日常 · 礼物箱 · 离线运行样例";
         StatusText.Text = "运行中 · 离线界面样例\n当前步骤：" + readable;
+        _active = true;
+        UpdateRunControls("paused");
+        if (PauseButton.IsEnabled || !ResumeButton.IsEnabled || !StopButton.IsEnabled)
+            throw new InvalidOperationException("暂停后的控制按钮状态错误");
+        UpdateRunControls("running");
+        if (!PauseButton.IsEnabled || ResumeButton.IsEnabled || !SnapshotButton.IsEnabled)
+            throw new InvalidOperationException("运行中的控制按钮状态错误");
+        _active = false; // Render the synthetic running state; no process has been launched.
+        LiveLog.Text = "[示例] 已启动任务：get_gift\n[示例] 正在核对礼物领取界面\n\n此处仅展示日志格式，未运行游戏任务。";
     }
 
     public void SelectSmokeTab(int index)

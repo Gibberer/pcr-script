@@ -22,6 +22,18 @@ from ..run_session import clock as time, emit
 class DungeonFirstClear(BaseTask):
     config_section = 'Dungeon'
 
+    @classmethod
+    def prepare(cls, config, *args, **kwargs):
+        if args or kwargs:
+            raise ValueError('dungeon_first_clear使用Dungeon配置')
+        options = config.get(cls.config_section, {})
+        if type(options.get('prepare_only', False)) is not bool:
+            raise ValueError('Dungeon.prepare_only必须为布尔值')
+        if options.get('prepare_only'):
+            from .strategy_video import acquire_strategies, task_source_options
+            return (), {}, acquire_strategies(task_source_options('dungeon', options))
+        return (), {}, None
+
     def __init__(self, robot, options: TaskOptions | None = None) -> None:
         super().__init__(robot)
         self.options = self.task_options() if options is None else dict(options)
@@ -53,11 +65,17 @@ class DungeonFirstClear(BaseTask):
         if self.plan is None:
             plan_path = self.options.get('teams', 'cache/game/strategies/dungeon_teams.yml')
             if not Path(plan_path).exists() and self.options.get('discover_sources', True):
-                from .dungeon_sources import discover_sources
-                source_options = dict(getattr(self.robot, 'task_config', {}).get('DungeonSources', {}))
-                source_options['area'] = self.area
-                self.report['source_search'] = discover_sources(source_options)
-                self.report['pending'].append('本地队伍方案缺失；已自动检索候选来源，尚需解析队伍，未开战')
+                from .strategy_video import acquire_strategies, task_source_options
+                from .strategy_document import dungeon_plan
+                report = acquire_strategies(task_source_options('dungeon', self.options), check=self.check_deadline)
+                self.report['source_search'] = report
+                self.plan = dungeon_plan(report, self.area)
+                if not self.plan:
+                    self.report['pending'].append('自动解析尚未得到完整且不冲突的来源路线；见source_search字段证据，未开战')
+                else:
+                    from ..game_ui.avatar_assets import ensure_avatar_index
+                    self.formation.avatars, _ = ensure_avatar_index(self.options.get('sources', {}).get('avatars'))
+                return self.plan
             self.plan = load_plan(self.options.get('teams', 'cache/game/strategies/dungeon_teams.yml'), self.area,
                                   allow_local_trials=self.options.get('allow_local_trials', False))
         return self.plan

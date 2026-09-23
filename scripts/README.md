@@ -12,6 +12,8 @@
 | `scripts/daily/caravan.py` / `.bat` | 按需清空驾车游持有骰子；独立任务，不加入完整每日列表 | 按需启用 |
 | `scripts/agent/game.py` | 截图、OCR、后台点击/输入、配队审查 | 否 |
 | `scripts/agent/update_avatars.py` | 维护日服头像索引 | 否，按需更新 |
+| `scripts/agent/benchmark_avatars.py` | 只读本地头像库，比较循环/矩阵匹配与建库耗时；不操作模拟器 | 否 |
+| `scripts/agent/probe_avatar_video.py` | 对本地视频按显式头像框采样，记录候选、分差、多帧一致性和耗时；不自动定位或生成作业 | 否 |
 | `scripts/_game.py` | 共用启动配置，无任务动作 | 不是运行入口 |
 
 共享界面能力在 `pcrscript/game_ui/`；活动流程在 `pcrscript/tasks/`；真实作业为本地运行数据，存 `cache/game/strategies/`，不提交；Agent 知识在 `docs/game-knowledge/`。Agent 工具仅用于分析，正式入口不得依赖先运行它们。当前头像与队伍方案的正式自动获取链路仍待实现，不能将已有缓存下的成功当作端到端完成。
@@ -52,4 +54,8 @@
 
 全角色等级与普通装备强化：`./.venv/Scripts/python.exe -X utf8 scripts/daily/task.py upgrade_all_characters`，按需任务，不自动加入日常。GUI 名称「强化所有角色装备和等级到上限」。
 
-匿名队伍来源检索：`./.venv/Scripts/python.exe -X utf8 scripts/daily/task.py dungeon_sources`，配置段 `DungeonSources`；可无模拟器运行，正式首通缺方案时复用同一能力。结果仅为候选来源，不直接开战。
+好感度与角色剧情：`./.venv/Scripts/python.exe -X utf8 scripts/daily/task.py max_character_bonds`，配置段 `CharacterBond`，使用现有礼物并核对逐篇首读奖励；按需运行，不自动加入每日。
+
+地下城攻略链接放在 `Dungeon.source_urls`。缺少可执行方案时，`dungeon_first_clear` 在任务内部检索候选来源；搜索本身不是独立任务。
+
+深域按需推进：`./.venv/Scripts/python.exe -X utf8 scripts/daily/task.py abyss_push`，使用 `Abyss` 配置；本地试打须明确启用，攻略链接放在 `Abyss.source_urls`，详见 [深域任务](../docs/abyss.md)。通用来源检索是任务内部共享模块，不作为独立任务。
