@@ -1,4 +1,4 @@
-Brotli==1.1.0
+Brotli==1.2.0
 numpy==2.3.0
 opencv_python==4.11.0.86
 pywin32==310
