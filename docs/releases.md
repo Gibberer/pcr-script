@@ -28,4 +28,4 @@ dotnet build desktop/PcrDesktop/PcrDesktop.csproj -c Release -o artifacts/gui -p
 
 不打包账号、实际配置、游戏数据库、头像、视频、作业或运行证据。源码更新为显式快进更新，GUI EXE 更新仍通过下载新 Release 包完成。暂未提供自动回滚或版本隔离的 Python 依赖环境。
 
-GUI 历史构建与实测记录见 [desktop-handoff.md](desktop-handoff.md)。新的 Release job 需要首次合并后的标签运行验证，不能用本地构建通过声称 GitHub 已发布。
+Release job 仍须在首次合并后的标签运行验证；本地构建通过不代表已在 GitHub 发布。

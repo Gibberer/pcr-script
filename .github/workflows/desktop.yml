@@ -12,11 +12,9 @@ on:
       - 'requirements*.txt'
       - 'daily_task.py'
       - 'runtime_defaults.yml'
-      - 'docs/examples/daily.example.yml'
+      - 'docs/guides/**'
       - '.github/workflows/desktop.yml'
-      - 'docs/desktop.md'
       - 'docs/releases.md'
-      - 'docs/images/gui-*.png'
     tags: ['gui-v*']
   pull_request:
     paths:
@@ -27,11 +25,9 @@ on:
       - 'requirements*.txt'
       - 'daily_task.py'
       - 'runtime_defaults.yml'
-      - 'docs/examples/daily.example.yml'
+      - 'docs/guides/**'
       - '.github/workflows/desktop.yml'
-      - 'docs/desktop.md'
       - 'docs/releases.md'
-      - 'docs/images/gui-*.png'
 
 permissions:
   contents: read
@@ -79,8 +75,8 @@ jobs:
           雷电填写安装目录；ADB 连接 Android 设备时留空，并提前安装 Android Platform Tools、完成设备授权。
           不需要提前 clone 仓库；下载/更新需要 Git，执行任务推荐 Python 3.12 x64。
 
-          图文指南：https://github.com/Gibberer/pcr-script/blob/master/docs/desktop.md
-          任务指南：https://github.com/Gibberer/pcr-script/blob/master/docs/tasks.md
+          图文指南：https://github.com/Gibberer/pcr-script/blob/master/docs/guides/desktop.md
+          任务指南：https://github.com/Gibberer/pcr-script/blob/master/docs/guides/tasks.md
           新版下载：https://github.com/Gibberer/pcr-script/releases
           '@ | Set-Content artifacts/gui/使用说明.txt -Encoding utf8
           Compress-Archive -Path artifacts/gui/* -DestinationPath artifacts/PcrDesktop-win-x64.zip

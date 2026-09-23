@@ -33,7 +33,7 @@
 
 ## 礼物满仓恢复
 
-`scripts/daily/gifts.py` 为独立礼物日常入口，完整日常仍使用配置中的 `get_gift`。它在持有上限阻塞后使用游戏已保存的自动分解规则腾出特别装备空间，再继续分批领取。配置见 `docs/examples/daily.example.yml` 的 `Gift`；默认排除体力、目标空位 750，不修改游戏分解设置。实测导航与约束见 [礼物知识](../docs/game-knowledge/gifts.md)。
+`scripts/daily/gifts.py` 为独立礼物日常入口，完整日常仍使用配置中的 `get_gift`。它在持有上限阻塞后使用游戏已保存的自动分解规则腾出特别装备空间，再继续分批领取。配置见 `docs/guides/examples/daily.example.yml` 的 `Gift`；默认排除体力、目标空位 750，不修改游戏分解设置。实测导航与约束见 [礼物知识](../docs/game-knowledge/gifts.md)。
 
 每日入口自动保存运行日志与异常现场；中途暂停/恢复、证据格式及排查流程见 [运行诊断](../docs/run-diagnostics.md)。控制入口为 scripts/agent/run_control.py。
 
@@ -50,7 +50,7 @@
 
 ## 地下城首通
 
-`./.venv/Scripts/python.exe -X utf8 scripts/daily/task.py dungeon_first_clear`，配置段 `Dungeon`，详细说明见 [地下城首通](../docs/dungeon.md)。按需运行，不自动加入每日任务。
+`./.venv/Scripts/python.exe -X utf8 scripts/daily/task.py dungeon_first_clear`，配置段 `Dungeon`，详细说明见 [地下城首通](../docs/guides/dungeon.md)。按需运行，不自动加入每日任务。
 
 全角色等级与普通装备强化：`./.venv/Scripts/python.exe -X utf8 scripts/daily/task.py upgrade_all_characters`，按需任务，不自动加入日常。GUI 名称「强化所有角色装备和等级到上限」。
 
@@ -58,4 +58,4 @@
 
 地下城攻略链接放在 `Dungeon.source_urls`。缺少可执行方案时，`dungeon_first_clear` 在任务内部检索候选来源；搜索本身不是独立任务。
 
-深域按需推进：`./.venv/Scripts/python.exe -X utf8 scripts/daily/task.py abyss_push`，使用 `Abyss` 配置；本地试打须明确启用，攻略链接放在 `Abyss.source_urls`，详见 [深域任务](../docs/abyss.md)。通用来源检索是任务内部共享模块，不作为独立任务。
+深域按需推进：`./.venv/Scripts/python.exe -X utf8 scripts/daily/task.py abyss_push`，使用 `Abyss` 配置；本地试打须明确启用，攻略链接放在 `Abyss.source_urls`，详见 [深域任务](../docs/guides/abyss.md)。通用来源检索是任务内部共享模块，不作为独立任务。

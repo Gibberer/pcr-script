@@ -13,7 +13,7 @@ from pcrscript.run_session import RunSession
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--config', default='daily_config.yml')
+    parser.add_argument('--config', default='daily_config.yml' if Path('daily_config.yml').exists() else 'runtime_defaults.yml')
     parser.add_argument('--timeout', type=int)
     parser.add_argument('--max-rolls', type=int)
     args = parser.parse_args()

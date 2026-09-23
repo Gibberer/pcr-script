@@ -1,54 +1,50 @@
-# PCR 任务控制台
+# PCR 日常脚本
 
-面向《公主连结》国服的本地自动化工程：用 GUI 配置日常、执行单项任务和查看记录，也保留 Python 命令行入口。工程提供共享识别能力、运行证据与 Agent 协作约定；正式任务由脚本独立执行。
+这是一个用于《公主连结》国服的本地自动化项目。打开 Windows GUI，完成工程、Python 和设备连接的基础设置后，就能运行预设的日常任务；也可以按需单独执行地下城、深域等专项。喜欢命令行的话，同一套任务也能从终端运行。
 
-## 从 GUI 开始
+## 用 GUI 跑日常
 
-**无需提前 clone 仓库。** 下载 GUI 后，按程序内的引导准备工程和运行环境。
+1. 从 [GitHub Releases](https://github.com/Gibberer/pcr-script/releases) 下载 `PcrDesktop-win-x64.zip`，完整解压后打开 `PcrDesktop.exe`。如果尚无 Release，可从 [Windows GUI 构建记录](https://github.com/Gibberer/pcr-script/actions/workflows/desktop.yml)的成功构建中下载同名 Artifact。
+2. 跟随首次引导选择工程目录、下载运行文件、配置设备连接，并准备 Git、Python 和依赖。使用雷电时填写安装目录；使用 ADB 时留空雷电目录，并先让 Android 设备完成授权。游戏需要事先登录。
+3. 进入“每日日常”，点击“开始今日日常”。运行进度和结果可在“运行状态 / 运行记录”查看。
 
-1. 打开 [GitHub Releases](https://github.com/Gibberer/pcr-script/releases)，下载 `PcrDesktop-win-x64.zip`，完整解压并运行 `PcrDesktop.exe`。请保留同目录 DLL 和 `.exe.config`。尚未发布 Release 时，可在 [Windows GUI 构建](https://github.com/Gibberer/pcr-script/actions/workflows/desktop.yml)的成功记录中下载同名 Artifact。
-2. 按引导选择一个空工程目录，点击“从 GitHub 下载项目”。默认只下载运行所需文件；也可以选择已有工程。
-3. 选择雷电安装目录，检测 Python，再点击“创建环境 / 安装依赖”。任务运行需要 Windows x64、Python 3.12+ 和 Git；引导提供 Python 下载与检测入口。雷电使用后台驱动，无需 ADB；游戏需事先登录，当前实机验证尺寸为 **960×540**。
-4. 在“每日日常”点击“＋ 添加任务”，选择任务及参数。选中列表中的项目即可修改参数、启用或调整顺序，点击“保存配置”，再“开始今日日常”。
-5. 地下城、深域、角色培养等工作从“按需专项”执行；进度、暂停、停止和证据在“运行状态 / 运行记录”查看。
+![每日日常界面（示例配置）](docs/guides/images/gui-daily.png)
 
-![日常任务配置](docs/images/gui-daily.png)
+默认列表包含日程、竞技场、调查、活动日常、快捷扫荡、商店和领奖等任务。它会使用游戏里已有的日程安排和扫荡预设，其中快捷扫荡默认使用预设 2；想调整执行内容或顺序时，再到“每日日常”编辑。已有的 `daily_config.yml` 或上次选过的配置会继续优先加载，不会被默认列表覆盖。
 
-- [GUI 详细指南](docs/desktop.md)：首次使用、添加与编辑、专项、运行控制及截图。
-- [任务指南](docs/tasks.md)：可配置的日常任务、单项任务用法和复杂任务逻辑。
+地下城首通、深域推进和角色培养在“按需专项”中运行。首次设置和配置编辑的细节见 [GUI 指南](docs/guides/desktop.md)，各任务的执行范围见 [任务指南](docs/guides/tasks.md)。
 
-地下城和深域的来源搜索、头像建库与部分视频解析已经接入正式程序，但**任意视频的完整培养要求、操作时序及多队路线规划尚未全部完成**。未知字段会保留证据并阻止把不完整来源当作完整作业；详情见[视频解析范围与交接](docs/video-strategies.md)。本地试打、升星和秘石兑换默认关闭。
+## 命令行
 
-## 命令行使用
-
-安装 Python 3.12+ x64 和 Git，在终端执行：
+安装 Windows x64 Python 3.12+ 和 Git 后，在终端准备环境：
 
 ```powershell
-git clone https://github.com/Gibberer/pcr-script.git
+git clone --depth 1 https://github.com/Gibberer/pcr-script.git
 cd pcr-script
 python -m venv .venv
 ./.venv/Scripts/python.exe -m pip install -r requirements.txt
-Copy-Item docs/examples/daily.example.yml daily_config.yml
 ```
 
-编辑 `daily_config.yml` 中的 `Extra.dnpath` 和 `Task` 列表，然后运行完整日常：
+命令行与 GUI 共用根目录的 `runtime_defaults.yml`。先在其中配置 `Extra.dnpath`（雷电），或留空并连接已授权的 ADB 设备；连接多个 ADB 设备时填写 `Extra.adb_serial`。然后运行日常：
 
 ```powershell
 ./.venv/Scripts/python.exe -X utf8 daily_task.py
 ```
 
-按需执行某个注册任务，例如礼物领取：
+如果已有 `daily_config.yml`，程序会优先使用它。也可以用 `--config <文件>` 指定自己的配置；[示例配置](docs/guides/examples/daily.example.yml)适合用来了解参数。
+
+单独运行已注册的任务，例如领取礼物：
 
 ```powershell
 ./.venv/Scripts/python.exe -X utf8 scripts/daily/task.py get_gift
 ```
 
-完整日常会启动雷电与游戏；单项任务通常要求模拟器和游戏已经打开。任务参数、来源配置及运行范围见[任务指南](docs/tasks.md)。实际配置、头像、作业与运行证据都保存在本地忽略目录，不应提交到仓库。
+## 运行范围
 
-## 支持范围与扩展
+目前游戏任务在 **Windows 雷电、960×540 画面**下有实机验证。项目也支持 ADB 连接，但其他 Android 设备、分辨率和界面布局仍需要逐项验证。地下城与深域的攻略搜索和部分视频解析已接入正式程序；遇到无法确认的角色、培养或路线时，任务会留下证据并停止不确定的战斗。[任务指南中的适用范围](docs/guides/tasks.md#地下城与深域的来源处理)记录了当前边界。
 
-目前支持 **Windows 上的雷电模拟器，游戏画面使用 960×540 分辨率**。其他模拟器、设备或分辨率尚未验证，需要适配截图、输入、坐标和界面识别，并在目标设备上检查结果。
+账号配置、头像、攻略和运行证据留在本地，不要提交到仓库。
 
-想支持其他设备或开发新任务，可以在常用的 AI 编程 Agent 中选择本项目目录，直接描述目标。仓库已经整理了[游戏规则、页面坐标和导航路径](docs/game-knowledge/README.md)，也保留了已有任务和[待验证场景](docs/game-knowledge/pending-validation.md)，可以帮助 Agent 接续开发，减少重新摸索页面的工作。例如可以要求它“在当前工程新增一个按需任务，并根据知识库核对页面和执行边界”。新设备和新任务仍需在实际游戏中验证。
+## 开发
 
-开发约定见 [AGENTS.md](AGENTS.md)，代码位置见[项目结构](docs/project-structure.md)。运行问题可查[运行诊断](docs/run-diagnostics.md)；GUI 构建见[发布说明](docs/releases.md)。
+本项目对 AI Agent 友好。把常用 AI Agent 的工作目录设为本项目目录，直接描述要开发的新任务或需要适配的设备即可；仓库已整理游戏知识和工程约定，供 Agent 接续工作。使用 GUI 下载项目时选择“完整仓库”，即可在同一目录中边开发边使用 GUI。

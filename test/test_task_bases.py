@@ -9,7 +9,8 @@ from pcrscript import Robot
 from pcrscript.actions import ClickAction
 from pcrscript.tasks import (
     BaseTask, ImageTask, TimeLimitTask, Caravan, GetGift, CampaignClean,
-    RevivalEventOnce, DungeonFirstClear, UpgradeAllCharacters, Event, EventNews, FreeGacha, find_taskclass,
+    RevivalEventOnce, DungeonFirstClear, UpgradeAllCharacters, ShopBuy, GetQuestReward,
+    Event, EventNews, FreeGacha, find_taskclass,
 )
 from pcrscript.tasks.registry import registered_tasks
 
@@ -43,7 +44,8 @@ class TaskBaseTests(TestCase):
     def test_ocr_tasks_do_not_acquire_image_capabilities(self):
         robot = self.robot()
         with patch('pcrscript.tasks.image.ImageTask.__init__', side_effect=AssertionError('image base used')):
-            for cls in (Caravan, GetGift, CampaignClean, RevivalEventOnce, DungeonFirstClear, UpgradeAllCharacters):
+            for cls in (Caravan, GetGift, CampaignClean, RevivalEventOnce, DungeonFirstClear,
+                        UpgradeAllCharacters, ShopBuy, GetQuestReward):
                 task = cls(robot)
                 self.assertIsInstance(task, BaseTask)
                 self.assertNotIsInstance(task, ImageTask)
@@ -52,7 +54,9 @@ class TaskBaseTests(TestCase):
 
     def test_existing_registered_image_tasks_keep_action_capabilities(self):
         ocr_names = {'caravan', 'get_gift', 'campaign_clean',
-                     'clear_campaign_first_time', 'revival_event_once', 'dungeon_first_clear', 'upgrade_all_characters', 'max_character_bonds', 'abyss_push'}
+                     'clear_campaign_first_time', 'revival_event_once', 'dungeon_first_clear',
+                     'upgrade_all_characters', 'max_character_bonds', 'abyss_push',
+                     'shop_buy', 'get_quest_reward'}
         for name in set(registered_tasks()) - ocr_names:
             self.assertTrue(issubclass(find_taskclass(name), ImageTask), name)
 

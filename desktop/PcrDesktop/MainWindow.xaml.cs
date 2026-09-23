@@ -247,6 +247,7 @@ public partial class MainWindow : Window
         _pendingCommand = null; _pendingAction = null;
         _startedAt = DateTimeOffset.Now;
         _active = true;
+        ProgressPanel.Visibility = Visibility.Collapsed;
         UpdateRunControls("running");
         RunScopeText.Text = daily ? "每日日常 · " + Path.GetFileName(_loadedSettings!.Config) : (special ? "按需专项 · " : "单项日常 · ") + (_choices.FirstOrDefault(t => t.Name == task)?.Label ?? task);
         LiveLog.Clear(); Tabs.SelectedItem = RunTab;
@@ -300,11 +301,48 @@ public partial class MainWindow : Window
                 if (ack == _pendingCommand) { _pendingCommand = null; Message("控制请求已确认"); }
                 else label += $" · 等待{_pendingAction}确认" + (DateTimeOffset.Now - _requestedAt > TimeSpan.FromSeconds(10) ? "（已超时，尚未确认）" : "");
             }
-            StatusText.Text = $"{state["name"]} · {label} · 耗时 {(DateTimeOffset.Now - _startedAt):hh\\:mm\\:ss}\n错误数：{state["errors"]}   最近操作：{StatusDisplay.Format(state["last_operation"])}\n当前步骤：{StatusDisplay.FormatStep(state["current_step"])}";
-            if (value is "finished" or "failed" or "cancelled") _active = false;
+            var terminal = value is "finished" or "failed" or "cancelled";
+            var endedAt = terminal
+                ? DateTimeOffset.FromUnixTimeMilliseconds((long)(state["heartbeat"]!.GetValue<double>() * 1000))
+                : DateTimeOffset.Now;
+            var elapsed = endedAt - _startedAt;
+            if (elapsed < TimeSpan.Zero) elapsed = TimeSpan.Zero;
+            var hasProgress = state["progress"]?["task"] is not null || state["progress"]?["action"] is not null;
+            var step = hasProgress ? "" : $"\n当前步骤：{StatusDisplay.FormatStep(state["current_step"])}";
+            StatusText.Text = $"{state["name"]} · {label} · 耗时 {elapsed:hh\\:mm\\:ss}\n错误数：{state["errors"]}   最近操作：{StatusDisplay.Format(state["last_operation"])}{step}";
+            ShowProgress(state["progress"], value == "running");
+            if (terminal) _active = false;
         }
         catch (FileNotFoundException) { if (_active) StatusText.Text = "正在启动，等待 Python 创建运行记录…"; }
         catch (Exception e) when (e is IOException or JsonException) { Message("读取运行状态暂不可用：" + e.Message); }
+    }
+
+    private void ShowProgress(JsonNode? progress, bool running)
+    {
+        var task = progress?["task"] as JsonObject;
+        var action = progress?["action"] as JsonObject;
+        ProgressPanel.Visibility = task is null && action is null ? Visibility.Collapsed : Visibility.Visible;
+        TaskProgressText.Visibility = TaskProgressBar.Visibility = task is null ? Visibility.Collapsed : Visibility.Visible;
+        ActionProgressText.Visibility = ActionProgressBar.Visibility = action is null ? Visibility.Collapsed : Visibility.Visible;
+        if (task is not null)
+        {
+            var name = task["name"]?.ToString() ?? "任务";
+            var title = _choices.FirstOrDefault(choice => choice.Name == name)?.Label ?? name;
+            var total = Math.Max(1, task["total"]?.GetValue<int>() ?? 1);
+            var current = Math.Max(0, Math.Min(total, task["current"]?.GetValue<int>() ?? 0));
+            TaskProgressText.Text = $"日常任务 {current}/{total} · {title}";
+            TaskProgressBar.Maximum = total;
+            TaskProgressBar.Value = current;
+        }
+        if (action is not null)
+        {
+            var total = Math.Max(1, action["total"]?.GetValue<int>() ?? 1);
+            var current = Math.Max(0, Math.Min(total, action["current"]?.GetValue<int>() ?? 0));
+            ActionProgressText.Text = $"{action["label"]} · 操作 {current}/{total}";
+            ActionProgressBar.IsIndeterminate = running && total == 1 && current == 0;
+            ActionProgressBar.Maximum = total;
+            ActionProgressBar.Value = current;
+        }
     }
 
     private void UpdateRunControls(string state)
@@ -532,8 +570,16 @@ public partial class MainWindow : Window
         WorkspaceBox.Text = @"C:\PCR\pcr-script";
         PythonBox.Text = @"C:\PCR\pcr-script\.venv\Scripts\python.exe";
         Message("离线界面示例 · 未连接模拟器");
-        RunScopeText.Text = "单项日常 · 礼物箱 · 离线运行样例";
-        StatusText.Text = "运行中 · 离线界面样例\n当前步骤：" + readable;
+        RunScopeText.Text = "每日日常 · 离线运行样例";
+        StatusText.Text = "运行中 · 离线界面样例\n错误数：0   最近操作：截图";
+        ShowProgress(new JsonObject
+        {
+            ["task"] = new JsonObject { ["current"] = 1, ["total"] = 3, ["name"] = "get_gift" },
+            ["action"] = new JsonObject { ["current"] = 2, ["total"] = 5, ["label"] = "领取礼物" }
+        }, running: true);
+        if (TaskProgressBar.Value != 1 || TaskProgressBar.Maximum != 3 ||
+            ActionProgressBar.Value != 2 || ActionProgressBar.Maximum != 5)
+            throw new InvalidOperationException("运行进度展示未正确绑定结构化状态");
         _active = true;
         UpdateRunControls("paused");
         if (PauseButton.IsEnabled || !ResumeButton.IsEnabled || !StopButton.IsEnabled)

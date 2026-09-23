@@ -1,6 +1,7 @@
 import functools
 import random
 import copy
+import sys
 from typing import Any
 from pathlib import Path
 from .run_session import clock as time, wrap_driver, emit, failure, task_directory, task_result, RunCancelled
@@ -65,6 +66,15 @@ class Robot:
         if logpath:
             with open(logpath, 'a') as f:
                 f.write("{}:{}\n".format(self._name, account))
+        if not account:
+            # Daily runs keep the current account. A game that is already open
+            # may start on any page, so navigate home instead of logging out.
+            screenshot = self.driver.screenshot()
+            if self.__find_match_pos(screenshot, 'welcome_main_menu'):
+                self.__action_squential(ClickAction(pos=(30, 200)))
+            else:
+                ToHomePage(self).run(timeout=60)
+            return
         while True:
             screenshot = self.driver.screenshot()
             dialog = None
@@ -166,8 +176,10 @@ class Robot:
         self._first_enter_check()
         self._log("======:已进入游戏首页:======")
         if tasklist:
-            for funcname, *args in tasklist:
+            for index, (funcname, *args) in enumerate(tasklist, 1):
+                emit('progress', scope='task', current=index - 1, total=len(tasklist), name=funcname)
                 self._run_task(funcname, args)
+                emit('progress', scope='task', current=index, total=len(tasklist), name=funcname)
         return self.task_results
 
     def configure(self, config: dict[str, Any]) -> None:
@@ -223,7 +235,10 @@ class Robot:
         print("{}: {}".format(self._name, msg))
 
     def action_squential(self, *actions: Action, delay=0.2, net_error_check=True, show_progress=False, progress_index=None, total_step=1, title=None):
-        if self.show_progress and show_progress:
+        label = title or (f'步骤 {progress_index}/{total_step}' if progress_index is not None else '界面操作')
+        action_total = len(actions)
+        emit('progress', scope='action', current=0, total=action_total, label=label)
+        if self.show_progress and show_progress and getattr(sys.stderr, 'isatty', lambda: False)():
             progress = tqdm(actions, unit="a", bar_format='{desc}|{bar}| {n_fmt}/{total_fmt} [{elapsed}, {rate_fmt}{postfix}]')
             if title:
                 progress.set_description(f"{self._name} {title}")
@@ -232,7 +247,7 @@ class Robot:
             else:
                 progress.set_description(f"{self._name}")
             actions = progress
-        for action in actions:
+        for index, action in enumerate(actions, 1):
             emit("action", action=type(action).__name__, template=str(getattr(action, "template", "")))
             action_start_time = time.monotonic()
             while not action.done():
@@ -249,6 +264,7 @@ class Robot:
                     if net_error:
                         self.driver.click(*net_error)
                         raise NetError()
+            emit('progress', scope='action', current=index, total=action_total, label=label)
 
     def __tohomepage(self, click_pos=(90, 500), timeout=0):
         ToHomePage(self).run(click_pos=click_pos, timeout=timeout)

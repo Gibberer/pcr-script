@@ -61,12 +61,12 @@ DESCRIPTIONS = {
     'princess_arena': '进入公主竞技场进行一次挑战，使用游戏中已有编队。会消耗可用挑战次数。',
     'research': '执行圣迹与神殿调查的日常扫荡，使用可用次数和体力。',
     'schedule': '执行游戏内日程表，按游戏已保存的日程设置领取和安排任务。',
-    'shop_buy': '按购买规则进入对应商店购买物品，消耗相应货币。复杂规则用 JSON 编辑，例如 {"1":[-1]} 表示普通商店全选。',
+    'shop_buy': '按购买规则进入对应商店购买物品，消耗相应货币。{"1":[-1]} 表示通常商店“全部”分类全选；目前不支持自动刷新及首屏外的单品。',
     'quick_clean': '执行游戏已保存的快捷扫荡预设（1～7）。配置列表执行时，仅困难掉落活动开放会切换到预设3；请先在游戏内确认预设内容。',
     'adventure_daily': '处理探险归来、再次出发及探险地图事件。沿用游戏内已有探险编队。',
     'common_adventure': '在当前冒险地图根据角色模板定位关卡并循环战斗。需事先进入对应地图；这是持续推进任务，需要手动停止，不适合无条件加入日常。',
     'clear_story': '处理剧情页面的可读剧情和跳过流程。任务依赖已有图片模板识别。',
-    'get_quest_reward': '进入首页的任务页面领取已完成任务奖励（含体力），不领取礼物箱或活动页奖励。示例日常先领体力供扫荡使用，最后再补领新完成任务的奖励。',
+    'get_quest_reward': '依次检查首页任务页面的每日、普通、称号标签并领取已完成任务奖励（含体力）。示例日常先领体力供扫荡使用，最后再补领新完成任务的奖励。',
     'luna_tower_clean': '在露娜塔开放且已完成对应进度时扫荡回廊。配置列表会根据活动情报筛选。',
     'clear_campaign_first_time': '保留的活动首通兼容入口，复用剧情活动流程。是否真正推进首通仍取决于 StoryEvent.first_clear；当前默认关闭，首日连续流程仍待实测。',
 }
@@ -144,7 +144,7 @@ def ensure_idle() -> None:
 
 def config_view(path: Path) -> dict[str, Any]:
     config = read_config(path if path.exists() else runtime_defaults_path())
-    return config_data(config, revision(path))
+    return config_data(config, revision(path), path if path.exists() else None)
 
 
 def new_config() -> dict[str, Any]:
@@ -155,18 +155,54 @@ def new_config() -> dict[str, Any]:
     return config_data(config, '')
 
 
-def config_data(config: dict[str, Any], digest: str) -> dict[str, Any]:
+def task_signature(tasks: list) -> str:
+    import yaml
+    data = yaml.safe_dump(tasks, allow_unicode=True, sort_keys=False)
+    return hashlib.sha256(data.encode('utf-8')).hexdigest()
+
+
+def desktop_state_dir() -> Path:
+    local = os.environ.get('LOCALAPPDATA')
+    return (Path(local) if local else Path.home() / '.local' / 'share') / 'PcrDesktop'
+
+
+def plan_state_path(path: Path) -> Path:
+    key = hashlib.sha256(str(path.resolve()).casefold().encode('utf-8')).hexdigest()
+    return desktop_state_dir() / 'plans' / f'{key}.json'
+
+
+def task_plan(tasks: list, path: Path | None = None) -> list[dict[str, Any]]:
+    active = [dict(enabled=True, name=row[0], args=row[1:]) for row in tasks]
+    if path is None:
+        return active
+    try:
+        state = json.loads(plan_state_path(path).read_text(encoding='utf-8'))
+    except (FileNotFoundError, OSError, ValueError):
+        return active
+    if not isinstance(state, dict) or state.get('task_hash') != task_signature(tasks):
+        return active
+    disabled = state.get('disabled')
+    if not isinstance(disabled, list):
+        return active
+    if not all(isinstance(row, dict) and type(row.get('index')) is int
+               and isinstance(row.get('name'), str) and isinstance(row.get('args'), list)
+               for row in disabled):
+        return active
+    plan = active[:]
+    for entry in sorted(disabled, key=lambda row: row['index']):
+        if not 0 <= entry['index'] <= len(plan):
+            return active
+        plan.insert(entry['index'], dict(enabled=False, name=entry['name'], args=entry['args']))
+    return plan
+
+
+def config_data(config: dict[str, Any], digest: str, path: Path | None = None) -> dict[str, Any]:
     task_groups = config.get('Task', {})
     if not isinstance(task_groups, dict):
         raise ValueError('Task 必须是账号到任务列表的映射')
     selected = next(iter(task_groups), 1)
     tasks = task_groups.get(selected, [])
-    saved = config.get('Desktop', {}).get('plan')
-    # External YAML edits take precedence over the saved disabled-row view.
-    if not isinstance(saved, list) or [[r['name'], *r['args']] for r in saved if r.get('enabled')] != tasks:
-        saved = [dict(enabled=True, name=row[0], args=row[1:]) for row in tasks]
-    # Remove only old, parameterless navigation separators from the GUI plan.
-    # Explicit custom-coordinate/timeout tasks remain editable and executable.
+    saved = task_plan(tasks, path)
     saved = [r for r in saved if r['name'] != 'tohomepage' or r['args']]
     options = {k: v for k, v in config.items() if k not in ('Accounts', 'Task', 'Desktop')}
     return dict(protocol=PROTOCOL, revision=digest, plan=saved, options=options,
@@ -235,7 +271,9 @@ def save_config(path: Path, request: dict[str, Any]) -> dict[str, Any]:
     selected = next(iter(groups), 1)
     config.update(options)
     groups[selected] = [[row['name'], *row['args']] for row in plan if row['enabled']]
-    config.setdefault('Desktop', {})['plan'] = plan
+    config.pop('Desktop', None)
+    disabled = [dict(index=index, name=row['name'], args=row['args'])
+                for index, row in enumerate(plan) if not row['enabled']]
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.exists():
         path.with_suffix(path.suffix + '.bak').write_bytes(path.read_bytes())
@@ -245,6 +283,18 @@ def save_config(path: Path, request: dict[str, Any]) -> dict[str, Any]:
         os.replace(temp, path)
     finally:
         temp.unlink(missing_ok=True)
+    state_path = plan_state_path(path)
+    if disabled:
+        state_path.parent.mkdir(parents=True, exist_ok=True)
+        state_temp = state_path.with_name(state_path.name + '.' + uuid.uuid4().hex + '.tmp')
+        try:
+            state_temp.write_text(json.dumps(dict(task_hash=task_signature(groups[selected]), disabled=disabled),
+                                             ensure_ascii=False), encoding='utf-8')
+            os.replace(state_temp, state_path)
+        finally:
+            state_temp.unlink(missing_ok=True)
+    else:
+        state_path.unlink(missing_ok=True)
     return config_view(path)
 
 

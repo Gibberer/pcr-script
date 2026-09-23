@@ -28,6 +28,26 @@ class Driver:
 
 
 class RunSessionTests(unittest.TestCase):
+    def test_structured_progress_reaches_status_without_terminal_output(self):
+        from unittest.mock import Mock
+        from pcrscript import Robot
+        from pcrscript.actions import Action
+        with tempfile.TemporaryDirectory() as root:
+            with RunSession('progress-test', root) as run:
+                driver = Mock(get_screen_size=Mock(return_value=(960, 540)))
+                driver.screenshot.return_value = np.zeros((8, 8, 3), dtype=np.uint8)
+                robot = Robot(driver, show_progress=False)
+                robot.action_squential(Action(), Action(), delay=0, net_error_check=False)
+                run.status()
+                status = json.loads((run.path / 'status.json').read_text(encoding='utf-8'))
+                self.assertEqual(status['progress']['action'],
+                                 {'current': 2, 'total': 2, 'label': '界面操作'})
+                run.event('progress', scope='task', current=1, total=3, name='get_gift')
+                run.status()
+                progress = json.loads((run.path / 'status.json').read_text(encoding='utf-8'))['progress']
+                self.assertEqual(progress['task'], {'current': 1, 'total': 3, 'name': 'get_gift'})
+                self.assertIsNone(progress['action'])
+
     def test_retained_console_stream_after_log_closes(self):
         console, log = io.StringIO(), io.StringIO()
         stream = _Tee(console, log)

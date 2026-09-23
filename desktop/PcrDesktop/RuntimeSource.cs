@@ -18,7 +18,7 @@ public static class RuntimeSource
         await Backend.Command("git", ["check-ref-format", "--branch", branch], parent);
         if (!coreOnly)
         {
-            await Backend.Command("git", ["clone", "--branch", branch, "--", repository, target],
+            await Backend.Command("git", ["clone", "--depth=1", "--single-branch", "--branch", branch, "--", repository, target],
                 parent, log: log, timeoutSeconds: 600);
             Validate(target);
             return;

@@ -44,7 +44,7 @@ if ($process.ExitCode -ne 0) {
     Get-Content ($imagePath + '.error.txt') -ErrorAction SilentlyContinue
     throw 'Runtime GUI smoke failed'
 }
-foreach ($excluded in @('scripts', 'docs', 'desktop/PcrDesktop', 'README.md', 'docs/examples/daily.example.yml', 'daily_task.py')) {
+foreach ($excluded in @('scripts', 'docs', 'desktop/PcrDesktop', 'README.md', 'docs/guides/examples/daily.example.yml', 'daily_task.py')) {
     if (Test-Path (Join-Path $target $excluded)) { throw "Unexpected download: $excluded" }
 }
 if (-not (Test-Path (Join-Path $target 'runtime_defaults.yml')) -or
@@ -56,6 +56,9 @@ $objects = Git $target @('rev-list', '--objects', '--all', '--missing=print')
 if ($objects -notcontains ('?' + $missingHash)) { throw 'Unrelated file blob was downloaded' }
 if ((Git $target @('status', '--porcelain') | Out-String).Trim()) { throw 'Generated runtime data is not ignored' }
 if (-not (Test-Path $imagePath)) { throw 'Missing GUI render' }
+if ((Git $target @('rev-parse', '--is-shallow-repository')).Trim() -ne 'true') {
+    throw 'Core download fetched full repository history'
+}
 # Normal fast-forward updates must retain the sparse checkout and skip new tool files.
 Set-Content "$source/pcrscript/runtime-update.txt" 'synthetic update'
 Set-Content "$source/scripts/new-agent-tool.txt" 'excluded update'
@@ -79,5 +82,8 @@ if ($process.ExitCode -ne 0) {
 }
 foreach ($included in @('scripts/agent-only.txt', 'docs/notes.txt', 'desktop/PcrDesktop/gui-source.txt', 'README.md')) {
     if (-not (Test-Path (Join-Path $fullTarget $included))) { throw "Full download missing: $included" }
+}
+if ((Git $fullTarget @('rev-parse', '--is-shallow-repository')).Trim() -ne 'true') {
+    throw 'Full download fetched full repository history'
 }
 Write-Output "Full repository download and GUI verification passed: $fullTarget"

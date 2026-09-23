@@ -121,6 +121,7 @@ class RunSession:
         self.command_id = None
         self.snapshot_id = None
         self.step = None
+        self.progress = {'task': None, 'action': None}
         self.step_since = _time.monotonic()
         self.lock = threading.RLock()
         self.stop = threading.Event()
@@ -129,6 +130,11 @@ class RunSession:
 
     def event(self, kind, **data):
         with self.lock:
+            if kind == 'progress' and data.get('scope') in self.progress:
+                scope = data['scope']
+                self.progress[scope] = {key: value for key, value in data.items() if key != 'scope'}
+                if scope == 'task':
+                    self.progress['action'] = None
             if kind in ('task', 'action', 'wait'):
                 step = (kind, json.dumps(data, ensure_ascii=False, default=str, sort_keys=True))
                 if step != self.step:
@@ -140,7 +146,7 @@ class RunSession:
             atomic_json(self.path / 'status.json', dict(pid=os.getpid(), name=self.name, state=self.state,
                 heartbeat=_time.time(), last_operation=self.last_operation, frame_time=self.frame_time,
                 errors=self.errors, command_id=self.command_id, snapshot_id=self.snapshot_id,
-                current_step=self.step, paused_seconds=self.paused_seconds))
+                current_step=self.step, progress=self.progress, paused_seconds=self.paused_seconds))
 
     def frame(self, image):
         with self.lock:

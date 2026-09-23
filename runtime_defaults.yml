@@ -1,4 +1,4 @@
-# GUI 与命令行共用的默认配置；可直接编辑或另存为独立配置。
+# GUI 与命令行共用的默认配置。首次完成环境设置后即可运行下面的日常列表。
 Accounts: []
 Extra:
   dnpath: ''
@@ -35,7 +35,21 @@ Caravan:
   timeout: 1800
   max_rolls: 200
 Task:
-  1: []
+  1:
+    - [free_gacha, false]
+    - [schedule]
+    - [arena]
+    - [princess_arena]
+    - [research]
+    - [adventure_daily]
+    - [get_quest_reward]
+    - [revival_event_once]
+    - [campaign_clean, true, false]
+    - [quick_clean, 2]
+    - [luna_tower_clean]
+    - [shop_buy, {1: [-1], 9: [-1]}]
+    - [get_quest_reward]
+    - [get_gift, true]
 
 # 按需运行 dungeon_first_clear，不加入默认日常列表
 Dungeon:

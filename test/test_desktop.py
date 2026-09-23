@@ -21,6 +21,8 @@ class DesktopTests(unittest.TestCase):
         (self.root / 'runtime_defaults.yml').write_bytes((Path(__file__).parents[1] / 'runtime_defaults.yml').read_bytes())
         self.root_patch = patch.object(desktop, 'ROOT', self.root)
         self.root_patch.start()
+        self.state_patch = patch.object(desktop, 'desktop_state_dir', return_value=self.root / 'gui-state')
+        self.state_patch.start()
         self.config = self.root / 'daily_config.yml'
         self.original = {
             'Accounts': [{'account': 'synthetic', 'password': 'synthetic-only'}],
@@ -30,6 +32,7 @@ class DesktopTests(unittest.TestCase):
         self.config.write_text(yaml.safe_dump(self.original), encoding='utf-8')
 
     def tearDown(self):
+        self.state_patch.stop()
         self.root_patch.stop()
         self.temp.cleanup()
 
@@ -43,8 +46,53 @@ class DesktopTests(unittest.TestCase):
         self.assertEqual(saved['Task'][2], self.original['Task'][2])
         self.assertEqual(saved['Task'][1][0][1], self.original['Task'][1][1][1])
         self.assertEqual(saved['Unrecognized'], self.original['Unrecognized'])
+        self.assertNotIn('Desktop', saved)
+        state = json.loads(desktop.plan_state_path(self.config).read_text(encoding='utf-8'))
+        self.assertEqual(state['disabled'], [{'index': 0, 'name': 'get_gift', 'args': [True]}])
         self.assertFalse(result['plan'][0]['enabled'])
         self.assertEqual(desktop.read_config(self.config.with_suffix('.yml.bak')), self.original)
+
+    def test_disabled_rows_keep_order_without_copying_active_plan(self):
+        view = desktop.config_view(self.config)
+        view['plan'].insert(1, dict(enabled=False, name='schedule', args=[]))
+        view['plan'].append(dict(enabled=False, name='get_gift', args=[False]))
+        desktop.save_config(self.config, view)
+        saved = desktop.read_config(self.config)
+        self.assertEqual(saved['Task'][1], self.original['Task'][1])
+        self.assertNotIn('Desktop', saved)
+        state = json.loads(desktop.plan_state_path(self.config).read_text(encoding='utf-8'))
+        self.assertEqual(state['disabled'], [
+            {'index': 1, 'name': 'schedule', 'args': []},
+            {'index': 3, 'name': 'get_gift', 'args': [False]},
+        ])
+        self.assertEqual(desktop.config_view(self.config)['plan'], view['plan'])
+
+    def test_embedded_desktop_plan_is_ignored_and_removed_on_save(self):
+        original = desktop.read_config(self.config)
+        original['Desktop'] = {'plan': [
+            dict(enabled=False, name='schedule', args=[]),
+            dict(enabled=True, name='get_gift', args=[True]),
+            dict(enabled=True, name='shop_buy', args=[{1: [-1], '1_settings': {'time': 1}}]),
+        ]}
+        self.config.write_text(yaml.safe_dump(original, allow_unicode=True), encoding='utf-8')
+        view = desktop.config_view(self.config)
+        self.assertEqual([row['name'] for row in view['plan']], ['get_gift', 'shop_buy'])
+        desktop.save_config(self.config, view)
+        saved = desktop.read_config(self.config)
+        self.assertNotIn('Desktop', saved)
+        self.assertFalse(desktop.plan_state_path(self.config).exists())
+        self.assertEqual(desktop.config_view(self.config)['plan'], view['plan'])
+
+    def test_no_desktop_section_when_all_tasks_enabled(self):
+        view = desktop.config_view(self.config)
+        view['plan'][0]['enabled'] = False
+        desktop.save_config(self.config, view)
+        self.assertTrue(desktop.plan_state_path(self.config).exists())
+        view = desktop.config_view(self.config)
+        view['plan'][0]['enabled'] = True
+        desktop.save_config(self.config, view)
+        self.assertNotIn('Desktop', desktop.read_config(self.config))
+        self.assertFalse(desktop.plan_state_path(self.config).exists())
 
     def test_conflict_does_not_overwrite_external_edits(self):
         view = desktop.config_view(self.config)
@@ -145,6 +193,21 @@ class DesktopTests(unittest.TestCase):
         start.assert_called_once_with('C:/synthetic')
         run.assert_called_once_with(self.original)
 
+    def test_gui_daily_adb_uses_selected_serial_without_leidian_start(self):
+        config = {'Extra': {'dnpath': '', 'adb_serial': 'phone-1'}, 'Task': {1: [['get_gift']]}}
+        self.config.write_text(yaml.safe_dump(config), encoding='utf-8')
+        from pcrscript.driver import ADBDriver
+        with (patch('pcrscript.run_session.RunSession', return_value=nullcontext()),
+              patch('pcrscript.runtime.open_leidian_emulator') as start,
+              patch('pcrscript.runtime.select_driver', return_value=ADBDriver('phone-1')),
+              patch('subprocess.run') as adb,
+              patch('pcrscript.run_session.clock.sleep'),
+              patch('pcrscript.runtime.run_script') as run):
+            desktop.execute(self.config, dict(task='daily'), '00000000-0000-0000-0000-000000000001')
+        start.assert_not_called()
+        adb.assert_called_once_with(['adb', '-s', 'phone-1', 'shell', 'monkey', '-p', 'com.bilibili.priconne', '1'], check=True)
+        run.assert_called_once_with(config)
+
     def test_memory_dispatch_keeps_callers_options_unchanged(self):
         from pcrscript.runtime import run_task_with_config
         options = {'Extra': {'dnpath': 'C:/synthetic'}, 'Caravan': {'timeout': 10}}
@@ -166,6 +229,18 @@ class DesktopTests(unittest.TestCase):
         self.assertEqual(desktop.read_config(destination)['Task'], {1: [['caravan']]})
         self.assertEqual(desktop.read_config(destination)['Accounts'], [])
         self.assertEqual(desktop.read_config(self.config), self.original)
+
+    def test_fresh_workspace_loads_runnable_daily_plan(self):
+        defaults = self.root / 'runtime_defaults.yml'
+        view = desktop.config_view(defaults)
+        enabled = [row for row in view['plan'] if row['enabled']]
+        self.assertTrue(enabled)
+        desktop.validate_plan(enabled)
+        categories = {task['name']: task['category'] for task in view['catalog']}
+        self.assertTrue(all(categories[row['name']] == 'daily' for row in enabled))
+        self.assertEqual(desktop.read_config(defaults)['Accounts'], [])
+        saved = desktop.save_config(defaults, view)
+        self.assertEqual([row['name'] for row in saved['plan']], [row['name'] for row in enabled])
 
     def test_save_as_copies_private_fields_without_modifying_source(self):
         request = desktop.config_view(self.config)
@@ -205,6 +280,44 @@ class DesktopTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, 'timed out'):
                 robot.run_task('schedule')
             self.assertEqual(task.call_count, 1)
+
+    def test_daily_start_preserves_open_game_and_enters_from_welcome(self):
+        from pcrscript import Robot
+        driver = Mock(get_screen_size=Mock(return_value=(960, 540)))
+        robot = Robot(driver, show_progress=False)
+        with patch.object(robot, '_Robot__find_match_pos', return_value=None), \
+             patch('pcrscript.robot.ToHomePage.run') as home:
+            robot.changeaccount()
+        home.assert_called_once_with(timeout=60)
+        driver.click.assert_not_called()
+
+        with patch.object(robot, '_Robot__find_match_pos', return_value=(100, 100)), \
+             patch.object(robot, '_Robot__action_squential') as enter, \
+             patch('pcrscript.robot.ToHomePage.run') as home:
+            robot.changeaccount()
+        enter.assert_called_once()
+        home.assert_not_called()
+
+    def test_progress_bar_only_uses_interactive_terminal(self):
+        from pcrscript import Robot
+        from pcrscript.actions import Action
+        robot = Robot(Mock(get_screen_size=Mock(return_value=(960, 540))), show_progress=True)
+
+        class Progress:
+            def __init__(self, actions):
+                self.actions = actions
+            def set_description(self, _description):
+                pass
+            def __iter__(self):
+                return iter(self.actions)
+
+        with patch('pcrscript.robot.sys') as system, patch('pcrscript.robot.tqdm', side_effect=lambda actions, **_: Progress(actions)) as bar:
+            system.stderr.isatty.return_value = False
+            robot.action_squential(Action(), show_progress=True, delay=0, net_error_check=False)
+            bar.assert_not_called()
+            system.stderr.isatty.return_value = True
+            robot.action_squential(Action(), show_progress=True, delay=0, net_error_check=False)
+            bar.assert_called_once()
 
     def test_dispatch_preserves_current_map_and_ocr_navigation(self):
         from pcrscript import Robot

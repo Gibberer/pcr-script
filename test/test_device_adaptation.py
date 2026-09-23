@@ -3,6 +3,7 @@ from tempfile import TemporaryDirectory
 from unittest import TestCase
 from unittest.mock import Mock, patch
 
+import cv2 as cv
 import numpy as np
 
 from pcrscript.actions import ClickAction, SwipeAction
@@ -14,6 +15,29 @@ from pcrscript.simulator import GeneralSimulator
 
 
 class DeviceAdaptationTests(TestCase):
+    def test_transport_selection_is_explicit_and_rejects_ambiguous_adb(self):
+        with patch('pcrscript.runtime.GeneralSimulator.get_devices', return_value=['phone-1', 'phone-2']):
+            with self.assertRaisesRegex(RuntimeError, '多个 ADB'):
+                select_driver({'Extra': {'dnpath': ''}})
+            self.assertEqual(select_driver({'Extra': {'dnpath': '', 'adb_serial': 'phone-2'}}).device_name, 'phone-2')
+            with self.assertRaisesRegex(RuntimeError, '未连接'):
+                select_driver({'Extra': {'adb_serial': 'missing'}})
+        driver = ADBDriver('phone-1')
+        with patch('pcrscript.runtime.DNSimulator') as leiden:
+            leiden.return_value.get_dirvers.return_value = [driver]
+            self.assertIs(select_driver({'Extra': {'dnpath': 'C:/synthetic'}}), driver)
+            leiden.assert_called_once_with('C:/synthetic', useADB=False)
+
+    def test_adb_driver_reads_screenshot_and_size_without_temp_file(self):
+        driver = ADBDriver('127.0.0.1:5555')
+        sample = np.zeros((4, 6, 3), dtype=np.uint8)
+        sample[0, 0] = (12, 34, 56)
+        png = cv.imencode('.png', sample)[1].tobytes()
+        with patch('pcrscript.driver.subprocess.run', side_effect=[Mock(stdout=b'Physical size: 960x540\n'), Mock(stdout=png)]) as adb:
+            self.assertEqual(driver.get_screen_size(), (960, 540))
+            self.assertEqual(tuple(driver.screenshot()[0, 0]), (12, 34, 56))
+        self.assertEqual(adb.call_args_list[1].args[0], ['adb', '-s', '127.0.0.1:5555', 'exec-out', 'screencap', '-p'])
+
     def test_event_ui_uses_captured_frame_for_ocr_and_coordinates(self):
         driver = Mock()
         driver.get_screen_size.side_effect = AssertionError('stale device metadata')

@@ -1,66 +1,12 @@
-# 本工程工作约定
+# Project instructions
 
-`CLAUDE.md` 通过 Claude Code 的 `@AGENTS.md` 导入本文件，共用唯一规则来源。当前 Windows 无非管理员软链接权限，采用其官方支持的导入方式；不要复制维护两份约定。
+Keep detailed game rules and procedures in `docs/`, not here. Use `docs/README.md` to locate the canonical page for a topic.
 
-每个新会话开始任务前，必须先阅读 `docs/game-knowledge/README.md`、`characters.md` 和 `pending-validation.md`，再阅读涉及页面的专项记录。先复用已有游戏规则、页面坐标和导航路径；只对未知页面或已变化状态重新截图分析，避免每次从零探索。说明分为已实测、用户提供、推断待验证；不得把推断描述为已经验证。
-
-每个会话都负责维护这个共享知识库：发现新的游戏知识、UI 规律、识别方法或旧记录错误时及时写入；任务结束前核对新增知识与验证状态已更新。知识不能只留在聊天历史、临时脚本或账号截图中，其他 session 应能直接接续开发。
-
-## 操作约束
-
-- 使用项目现有雷电 `DNDriver` 后台截图、窗口消息点击/滑动和 `ldconsole action call.input`。雷电不需要 ADB；禁止在后台驱动失败时回退到 ADB。
-- 默认不使用 Computer Use。所需截图、识别、点击、滑动、输入和页面导航能力由工程自身实现；优先复用或扩展这些能力，不使用系统鼠标键盘、激活窗口等会打断用户前台工作的方式。
-- 同一模拟器同一时间只运行一个自动化进程。探查页面前先确认其他测试已结束。
-- 可以执行用户授权的日常消耗、领取与兑换；活动脚本不自动购买体力、重置次数、重置整场首领进度或强化角色。
-- 保留工作区中用户原有改动。不要提交账号截图、配置、游戏数据库和头像缓存；它们位于被忽略的 `cache/`、`daily_config.yml` 等路径。
-
-## 战斗与识别
-
-- 困难首领使用对应活动、难度、模式且有来源的作业。未知活动不可套用旧作业。
-- 六星、专武 1、专武 2 的开启状态必须与作业完全一致；未知不能视为未开启或达标。专武仅检查开关，不要求等级，不自动投入资源。
-- 编队长按弹窗可读名字、等级、Rank、星数和技能，但不能直接进入角色专武培养界面；名字可能省略衣装。不得仅凭基础名字判断角色版本。
-- 头像左下角会轮播星数与专武信息。剑徽表示专武 1，混色剑徽表示专武 1＋2；要等到信息帧再判断“没有剑徽”。此规则由用户说明并在当前账号截图中观察到。
-- 优先使用游戏内搜索、批量头像索引和实时剑徽。无法确认时保留未知并记录证据，必要时到人物页核验。缓存必须记录时间与证据，开战前校验当前状态，不能永远信任旧建库结果。
-- 战斗减员、失败、无进展和超时均须有边界；只从战斗菜单撤退，不点击首领详情中会重置整场进度的“放弃”。
-
-## 目录边界
-
-- GUI 收尾与构建接续见 `docs/desktop-handoff.md`；运行依赖只维护根目录 `requirements.txt`，GUI 无账号默认选项在 `desktop/runtime_defaults.yml`，示例配置在 `docs/examples/daily.example.yml`。GUI 用系统 .NET Framework 4.8，核心下载仅 pcrscript、images、依赖清单与该 GUI 默认选项文件。
-- `desktop/PcrDesktop/` 为 C# / WPF 控制台，仅管理配置、源码、进程与记录；实际游戏逻辑保留 Python。GUI 通过 `pcrscript/desktop.py` 的版本化 JSON 接口复用正式任务与 RunSession，不依赖 Agent 入口。二进制构建产物放忽略的 `artifacts/`，说明放 `docs/desktop.md`；GitHub 构建见 `.github/workflows/desktop.yml`。
-
-- 项目目录与任务文件说明集中放在 `docs/project-structure.md`，不在代码目录新增 README。
-
-- 具体任务实现统一命名为 `pcrscript/tasks/task_<功能>.py`，基类、注册表和辅助模块不加 `task_` 前缀；新增任务时同步维护 `docs/project-structure.md` 的注册名索引，明确未独立注册的复用子任务。
-
-- **任务基类按能力划分（2026-09-21 用户纠正）**：`BaseTask` 只定义公共上下文、配置与执行契约；图片动作任务继承 `ImageTask`，OCR 任务组合共享 UI 能力，不强制继承图片匹配方法。限时规则由 `TimeLimitTask` 独立提供，两类任务共用注册与调度。
-
-- **正式自动化必须独立于 Agent 操作（2026-09-19 用户明确纠正）**：Agent 的搜索、截图、审查、校准和试打仅用于分析与验证，不能成为日常入口的人工前置步骤。头像获取/增量更新/建索引，以及当期队伍来源获取/解析/生成/校验必须由正式程序自动完成，不能要求 Agent 每期搜攻略、手填 YAML 或先运行探查工具后才可执行。
-- 头像、实际队伍方案、账号配置均属本地运行数据，不上传、不提交。实际方案及来源、获取时间、解析版本、证据存入忽略的 `cache/game/strategies/`；头像存入 `cache/game/avatars/`。仓库只保留通用实现、数据格式说明和不含真实活动/账号数据的最小示例与测试。不得将真实作业换名为测试样本继续提交。
-- 缓存缺失或过期时应自动获取/更新并校验；来源无法确认则保留待办，不猜测角色和培养要求。手动分析成功、已有缓存可运行、某期实战成功均不等于从空缓存开始的端到端自动化已完成。未实现的获取环节必须明确记入待办，不能称为“仅等待新活动验证”。
-
-- `pcrscript/game_ui/`：共享的观察/操作/识别能力，Agent 和日常均可复用，不绑定每日任务顺序。
-- `pcrscript/tasks/`：所有正式任务的唯一实现目录，含原有任务、活动、礼物和按需驾车游；`base.py` 为基类，`registry.py` 为唯一注册表，按功能拆分模块。不得另建 `pcrscript/daily/` 或绕过 Task 新建平行 Runner 框架（2026-09-21 用户明确纠正）。新接口尽量标明输入、返回值和状态类型。
-- `scripts/daily/`：用户可用于定时任务的命令入口。原有完整日常 `daily_task.py` 保持兼容。
-- `scripts/agent/`：Agent 分析、探查、审查和校准工具；可调用共享能力，但正式运行不能依赖先运行这些工具。
-- 不再使用 `config/` 目录，也不为它添加忽略规则；实际活动队伍数据存已忽略的 `cache/game/strategies/`。`docs/game-knowledge/`：跨 session 的分析知识和待验证记录。
-- `cache/daily/`、`cache/agent/`、`cache/game/`：分别存日常结果、Agent 证据、共享识别数据；均不提交。
-- 新增文件必须遵守以上分类，不把探查脚本和日常入口混放根目录。入口详见 `scripts/README.md`。
-
-## 更新与验证
-
-- **Agent 接管时复核脚本结果（2026-09-23 用户要求）**：由 Agent 接管执行任务时，对脚本执行结果进行确认，尤其复核视频来源、适用关卡、角色衣装、星数、专武 1/2、SET、培养要求及遗漏的辅助条件；同时核对实际任务结果，不能仅凭成功状态或缓存文件存在判断完成。使用脚本留存的原始帧、OCR、字段证据与报告，对误识别、漏识别、冲突及新布局记录复现路径、验证状态和下一步，并将通用修复纳入正式程序。单次 Agent 修正不能冒充脚本已经支持，也不能作为以后 GUI/CLI 独立运行的前置依赖。没有证据的字段继续保留未知；真实视频/账号素材仅存忽略的 cache，回归测试使用合成数据。详见 `docs/video-strategies.md`。
-
-- 新观察到的界面变化、坐标、弹窗、识别陷阱和游戏规则写入 `docs/game-knowledge/`；记录日期、活动、来源、验证状态、复现路径与证据位置。
-- 对需等待活动/状态的工作，留下具体触发条件和验收步骤，不能用已通关的跳过检查替代首通验证。
-- 暂缓工作必须记入 `docs/game-knowledge/pending-validation.md`：给出触发时间/游戏状态、前置条件、重现命令、验收标准、证据路径、当前开关与下一步。以后会话先查这些待办；用户提供了触发状态后继续实测并更新代码及记录。等待条件不等于失败，也不应自动创建定时提醒。当前活动首通/首领开战默认关闭，等待用户在新活动首日交付验证。
-- 新 UI 逻辑以 960×540 为设计坐标，截图先归一化，点击和滑动按实际截图宽高分别换算。当前仅 960×540 实机验证；其他尺寸与非 16:9 布局不可宣称已支持实测。
-- 礼物满仓可按游戏已有自动分解规则释放 500～1000 格特别装备空间；不改变自动分解设置、不手选装备。逐批检查库存并限制总量，无法确认库存或遇到未知弹窗则停止；只凭“持有上限”不能推断一定是特别装备满仓。
-- 重复日活动直接打开系统扫荡，多选三个困难关卡一键扫荡；不要每天遍历关卡确认首通。剧情、追忆和任务先看首页未领取标记，无标记就跳过，不进页面逐项空查。首页券余额明确为零时跳过兑换，未知则到兑换页核实。
-- 体力数字不能作为活动日常继续执行的硬性条件。困难批量扫荡按剩余次数勾选，以游戏体力不足提示/按钮状态停止并继续领奖；不逐关重试。可选普通扫荡仅用体力数字优化次数，读不到时尝试一次。不要为了精确体力反复 OCR 或中断主流程。扫荡次数、消费确认和兑换券余额仍需核验。
-- 活动离线检查：`./.venv/Scripts/python.exe -X utf8 -m unittest discover -s test -p test_event.py -v`。
-- 礼物与坐标换算离线检查：`./.venv/Scripts/python.exe -X utf8 -m unittest discover -s test -p test_gifts.py -v`。库存检查用截图和计数回归，不为验证而制造满仓或修改分解设置。
-- 独立活动入口：`scripts/daily/story_event.py`。审查使用 `scripts/agent/game.py --audit`，不开始战斗。运行方式及配置见 `docs/story-event.md`。
-
-## 运行中诊断
-
-每日入口自动留存 cache/daily/runs。排查先读 docs/run-diagnostics.md，使用 scripts/agent/run_control.py 查询、暂停、保存现场和继续。必须收到 state=paused 的确认才能探查同一模拟器；请求超时不算暂停。恢复前结束探查进程，页面变化造成旧操作停止时重新从任务入口运行。Agent 只用于分析，不能成为正式运行日志/控制功能的前置依赖。
+- Before working, read `docs/game-knowledge/README.md`, `docs/game-knowledge/characters.md`, and `docs/game-knowledge/pending-validation.md`, then relevant topic notes. Reuse known navigation and distinguish verified facts from supplied information and unverified inferences. Update the knowledge base with new evidence and validation state.
+- Use the project's capture and input code; avoid Computer Use and foreground mouse or keyboard control. Run only one automation process per device. `Extra.dnpath` selects LeiDian's background driver when nonempty; otherwise use ADB and specify `Extra.adb_serial` if needed. Never silently fall back between drivers. Only LeiDian at 960×540 has been tested in game; other devices and layouts need validation.
+- Respect authorized resource limits. Do not automatically buy stamina, reset attempts or boss progress, or train unique equipment. Unknown identity, equipment, or strategy requirements must block unsafe battles. See the relevant `docs/game-knowledge/` notes for combat and recognition rules.
+- Production GUI and CLI tasks must not require Agent preparation. Source search, avatar acquisition, parsing, validation, and cache refresh belong in the program. A warm-cache or Agent-assisted run does not prove cold-cache automation; record gaps in `docs/pending-validation.md`.
+- Keep production tasks in `pcrscript/tasks/`, shared UI code in `pcrscript/game_ui/`, CLI entries in `scripts/daily/`, and analysis tools in `scripts/agent/`. Do not add a parallel runner. GUI and CLI share root `runtime_defaults.yml`; dependencies live in root `requirements.txt`. See `docs/task-architecture.md`, `docs/project-structure.md`, and `docs/guides/desktop.md`.
+- Preserve workspace changes. Never commit or upload account data, screenshots, avatars, real strategies, or run evidence; keep them in ignored local paths. Use synthetic test fixtures.
+- When an Agent takes over, verify script evidence and the actual outcome; put reusable fixes in production code. Record implementation validation in `docs/pending-validation.md`. For running tasks, follow `docs/run-diagnostics.md` and inspect a device only after `state=paused` is acknowledged.
+- Keep human-facing installation and usage documentation, screenshots, and examples in `docs/guides/`. Keep `docs/game-knowledge/` independent of implementation: only game navigation, visible states, character systems, and rules with server/version and evidence status. Put naturally pending game states in its pending list; put implementation validation in `docs/pending-validation.md`. Update the canonical topic and conflicting links; remove completed pending entries. Never append conversation history, implementation diaries, test counts, or PR status. Keep temporary notes in ignored `cache/agent/work-notes/<task>/` and delete them after completion. Keep raw evidence and build logs in ignored directories. Link any new durable page from `docs/README.md`.

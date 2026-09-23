@@ -1,4 +1,5 @@
 from .image import ImageTask
+from .base import BaseTask
 from pcrscript.run_session import clock as time
 from typing import TYPE_CHECKING
 
@@ -10,6 +11,7 @@ if TYPE_CHECKING:
     from pcrscript import Robot
 
 from .registry import register
+from ..game_ui.screen import EventUI, EventUIError
 
 @register("clear_story", requires_home=True)
 class ClearStory(ImageTask):
@@ -134,21 +136,64 @@ class ClearStory(ImageTask):
 
 
 @register("get_quest_reward", requires_home=True)
-class GetQuestReward(ImageTask):
-    '''
-    领取任务奖励
-    '''
+class GetQuestReward(BaseTask):
+    """Claim completed rewards on every home quest tab."""
+
+    TABS = ("每日", "普通", "称号")
+
+    def __init__(self, robot):
+        super().__init__(robot)
+        output = getattr(robot, "_task_output", None) or "cache/daily/quests"
+        self.ui = EventUI(robot.driver, output)
+
+    @staticmethod
+    def active_tab(screen, item):
+        x, y = item.center
+        blue, green, red = map(int, screen.image[min(539, y + 8), x])
+        return blue - red > 75 and blue - green > 45
+
+    def quest(self):
+        return self.ui.wait(lambda s: s.find("任务", (45, 0, 150, 58), exact=True)
+                            and all(s.find(name, (300, 7, 800, 46), exact=True)
+                                    for name in self.TABS), "任务页面")
 
     def run(self):
-        self.action_squential(
-            SleepAction(1),
-            MatchAction(template='quest', matched_actions=[ClickAction()], unmatch_actions=[ClickAction(pos=(15, 200))]),
-            SleepAction(3),
-            MatchAction('btn_all_rec', matched_actions=[
-                        ClickAction()], timeout=5),
-            MatchAction('btn_close', matched_actions=[
-                        ClickAction()], timeout=5),
-            MatchAction('btn_ok', matched_actions=[ClickAction()], timeout=3),
-            MatchAction('btn_cancel', matched_actions=[
-                        ClickAction()], timeout=3)
-        )
+        home = self.ui.wait(lambda s: s.find("任务", (790, 390, 890, 470), exact=True), "首页任务入口")
+        self.ui.click(home.find("任务", (790, 390, 890, 470), exact=True))
+        self.quest()
+        report = {"claimed_tabs": [], "empty_tabs": []}
+        for name in self.TABS:
+            s = self.quest()
+            tab = s.find(name, (300, 7, 800, 46), exact=True)
+            if not self.active_tab(s, tab):
+                self.ui.click(tab)
+                s = self.ui.wait(lambda s: (item := s.find(name, (300, 7, 800, 46), exact=True))
+                                 is not None and self.active_tab(s, item), f"切换到{name}任务")
+            for attempt in range(3):
+                button = s.find("全部收取", (730, 405, 950, 468), exact=True)
+                if button is None:
+                    raise EventUIError(f"{name}任务页缺少全部收取按钮")
+                if not s.blue_button(button):
+                    if attempt == 0:
+                        report["empty_tabs"].append(name)
+                    break
+                self.ui.save(f"quest_{name}_before_claim", s)
+                self.ui.click(button)
+                result = self.ui.wait(lambda s: s.find("收取报酬|收取完成|持有上限", (230, 15, 730, 170)),
+                                      f"{name}任务领奖结果", timeout=25)
+                if result.find("持有上限", (230, 15, 730, 170)):
+                    raise EventUIError(f"{name}任务奖励遇到持有上限，未继续领取")
+                close = result.find("关闭|确认", (350, 435, 605, 515), exact=True)
+                if close is None:
+                    raise EventUIError(f"{name}任务奖励弹窗无法关闭")
+                self.ui.click(close)
+                time.sleep(1)
+                s = self.quest()
+                if name not in report["claimed_tabs"]:
+                    report["claimed_tabs"].append(name)
+            else:
+                s = self.quest()
+                button = s.find("全部收取", (730, 405, 950, 468), exact=True)
+                if button is None or s.blue_button(button):
+                    raise EventUIError(f"{name}任务连续三次领奖后仍有可领项")
+        return report

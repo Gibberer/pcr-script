@@ -7,14 +7,14 @@
 | `daily_task.py` | 完整每日任务兼容入口 |
 | `desktop/PcrDesktop/` | C# / WPF 图形控制台源码，发布为独立 EXE |
 | `pcrscript/runtime.py` | GUI 与兼容命令入口共用的配置、每日流程及任务执行逻辑 |
-| `desktop/runtime_defaults.yml` | GUI 新建配置使用的默认选项，无账号和默认执行任务 |
+| `runtime_defaults.yml` | GUI 与命令行共用的默认配置；无账号，预置日常任务列表 |
 | `pcrscript/desktop.py` | GUI 使用的版本化 JSON 配置、控制和运行入口 |
 | `.github/workflows/desktop.yml` | Windows GUI 构建、离线测试与产物上传；已合并版本标签创建 Release |
 | `pcrscript/tasks/` | 统一任务实现、基类、注册表及任务辅助逻辑 |
 | `pcrscript/game_ui/` | 可共享的观察、识别与操作能力；`dungeon.py` 读取进度，`character_equipment.py` 只读核验未开放专武 |
 | `scripts/daily/` | 正式自动化命令入口，可供定时任务调用 |
 | `scripts/legacy/multi_account.py` | 旧版多账号入口，从根目录运行；不属于 GUI 核心下载 |
-| `docs/examples/daily.example.yml` | 可复制到根目录的日常示例配置 |
+| `docs/guides/examples/daily.example.yml` | 可复制到根目录的日常示例配置 |
 | `requirements.txt` | 唯一 Python 依赖清单，包含 OCR |
 | `scripts/agent/` | 分析、探查、审查与校准工具 |
 | `test/` | 离线回归测试与最小测试样本 |
@@ -24,9 +24,9 @@
 | `cache/agent/` | Agent 分析证据，本地数据不提交 |
 | `cache/game/` | 共享识别数据及实际队伍方案，本地数据不提交 |
 
-GUI 下载可选择仅核心运行目录（`pcrscript/`、`images/`、根目录 `requirements.txt` 与 `desktop/runtime_defaults.yml`）或完整仓库。精简运行目录无需 `scripts/` 和根目录 Python 入口。
+GUI 下载可选择仅核心运行目录（`pcrscript/`、`images/`、根目录 `requirements.txt` 与 `runtime_defaults.yml`）或完整仓库。精简运行目录无需 `scripts/` 和根目录 Python 入口。
 
-GUI 使用见 [图文指南](desktop.md)，日常与专项见 [任务指南](tasks.md)，构建与发布见 [发布指南](releases.md)。`docs/images/gui-*.png` 是离线示例界面，无账号数据。
+GUI 使用见 [图文指南](guides/desktop.md)，日常与专项见 [任务指南](guides/tasks.md)，构建与发布见 [发布指南](releases.md)。`docs/guides/images/gui-*.png` 是离线示例界面，无账号数据。
 
 GUI 的 `MainWindow.DailyEditor.cs` 管理选中项编辑、顺序和未保存状态；`AddTaskWindow` 隔离新增草稿；`TaskParameters.cs` 为日常、专项和添加窗口共用的参数表单与校验。游戏逻辑仍只在 Python 中实现。
 
@@ -60,9 +60,9 @@ GUI 的 `MainWindow.DailyEditor.cs` 管理选中项编辑、顺序和未保存�
 
 新增具体任务使用 `task_<功能>.py`，需要独立调度时使用 `@register(...)` 并在 `__init__.py` 导入，同时更新本表。对外优先从 `pcrscript.tasks` 导入任务类；文件改名不改变类名、注册名和脚本命令。
 
-地下城识别位于 `game_ui/dungeon.py`，方案校验、跨队冲突与编队布局位于 `tasks/dungeon_party.py`，候选头像盘点位于 `game_ui/roster.py`，均非独立任务。运行与本地方案格式见 [地下城首通](dungeon.md)。
+地下城识别位于 `game_ui/dungeon.py`，方案校验、跨队冲突与编队布局位于 `tasks/dungeon_party.py`，候选头像盘点位于 `game_ui/roster.py`，均非独立任务。运行与本地方案格式见 [地下城首通](guides/dungeon.md)。
 
-`tasks/strategy_sources.py` 为内部共享的匿名来源搜索/身份核验/缓存能力，不注册为独立任务。深域与地下城首通按各自任务配置调用搜索，攻略链接分别配置于 `Abyss.source_urls`、`Dungeon.source_urls`。候选来源不是战斗方案。`tasks/abyss_party.py` 为本地试打编队检查，`game_ui/abyss.py` 为深域地图识别，均非独立任务。使用方式见 [深域推进](abyss.md)。
+`tasks/strategy_sources.py` 为内部共享的匿名来源搜索/身份核验/缓存能力，不注册为独立任务。深域与地下城首通按各自任务配置调用搜索，攻略链接分别配置于 `Abyss.source_urls`、`Dungeon.source_urls`。候选来源不是战斗方案。`tasks/abyss_party.py` 为本地试打编队检查，`game_ui/abyss.py` 为深域地图识别，均非独立任务。使用方式见 [深域推进](guides/abyss.md)。
 
 深域辅助模块：`pcrscript/tasks/abyss_history.py` 保存按账号/关卡隔离的尝试历史；`abyss_retry.py` 根据战斗证据决定重试价值；`party_variants.py` 按数据库技能描述生成本地替代组合，均不独立注册任务。
 
