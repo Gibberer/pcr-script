@@ -14,7 +14,7 @@
 
 本地方案保存在忽略的 `cache/game/strategies/dungeon_teams.yml`，不随仓库分发。YAML 包含 `version: 1`、`area` 和 `parties`；每支队伍需唯一 `id`、楼层 `floor`、第五层阶段 `phase`、`source` 与五名完整衣装的 `members`，并明确相关培养和 SET 要求。默认开战前核对整条首领路线的队伍可用性及跨队占用；`audit_only: true` 只检查，不开战。预检通过不保证伤害足以首通。
 
-`allow_local_trials` 默认关闭。开启后可用当前账号已核验状态进行有限试验，结果标为本地试打，不当作原攻略要求。可选 `auto_equip: true` 调配现有特别装备，可能改变其他角色配装；不购买或强化装备。
+`allow_local_trials` 默认关闭。开启后可用当前账号已核验状态进行有限试验，结果标为本地试打，不当作原攻略要求。来源要求中的 Rank 与星数默认精确匹配；本地 YAML 明确允许更高数值时可分别设置 `exact_rank: false`、`exact_stars: false`。可选 `auto_equip: true` 调配现有特别装备，可能改变其他角色配装；不购买或强化装备。
 
 ## 进度与结果
 

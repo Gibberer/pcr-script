@@ -20,6 +20,8 @@ class MemberRequirement:
     instant: bool = True
     skill_level: int = 1
     equipment: int = 0
+    exact_rank: bool = True
+    exact_stars: bool = True
 
 
 @dataclass
@@ -48,8 +50,10 @@ def readiness(requirement: MemberRequirement, actual: CharacterStatus) -> list[s
     for key, label in (("level", "等级"), ("rank", "装备Rank"), ("stars", "星级"),
                        ("skill_level", "技能等级"), ("equipment", "装备件数")):
         need, have = getattr(requirement, key), getattr(actual, key)
-        if need and (have is None or have < need):
-            reasons.append(f"{label} {have if have is not None else '未知'} / 需要 {need}")
+        exact = (key == "rank" and requirement.exact_rank) or (key == "stars" and requirement.exact_stars)
+        if need and (have is None or (have != need if exact else have < need)):
+            relation = '必须为' if exact else '至少'
+            reasons.append(f"{label} {have if have is not None else '未知'} / {relation} {need}")
     if actual.stars is not None and (actual.stars == 6) != (requirement.stars == 6):
         reasons.append("六星开启状态与攻略不一致")
     for key, label in (("unique", "专武1"), ("unique2", "专武2")):

@@ -61,7 +61,7 @@ Dungeon:
   timeout: 3600
   battle_timeout: 220
   max_battles: 30
-  allow_local_trials: true
+  allow_local_trials: false
   preflight: true
   audit_only: false
   auto_equip: false

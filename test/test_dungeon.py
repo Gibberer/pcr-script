@@ -208,6 +208,13 @@ class DungeonTests(TestCase):
             lookup.assert_called_once()
         self.assertEqual(task.formation.select.call_count, 2)
 
+    def test_current_build_trial_is_disabled_without_explicit_option(self):
+        from types import SimpleNamespace
+        task = object.__new__(DungeonFirstClear)
+        task.options = {}
+        with self.assertRaisesRegex(EventUIError, '试打未获本次启用'):
+            task.select_party(SimpleNamespace(members=[]), True)
+
     def test_current_build_trial_needs_authorization_and_known_live_values(self):
         data=synthetic_plan();entry=data['parties'][0]
         entry.update(build_basis='local_trial',use_current_build=True)

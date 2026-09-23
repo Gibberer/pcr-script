@@ -290,6 +290,14 @@ class StrategyTests(TestCase):
                 changed = CharacterStatus(**{**vars(actual), key: value})
                 self.assertTrue(readiness(need, changed))
 
+    def test_source_rank_and_stars_are_exact_unless_marked_as_minimum(self):
+        need = MemberRequirement("角色", 100, 30, 3)
+        actual = CharacterStatus("角色", 110, 38, 5, False, False, 110, identity_verified=True)
+        self.assertEqual(readiness(need, actual), ["装备Rank 38 / 必须为 30", "星级 5 / 必须为 3"])
+        need.exact_rank = False
+        need.exact_stars = False
+        self.assertEqual(readiness(need, actual), [])
+
     def test_variant_is_not_interchangeable(self):
         self.assertTrue(readiness(MemberRequirement("怜（新年）", 1, 1, 1), CharacterStatus("怜", 352, 38, 6)))
 

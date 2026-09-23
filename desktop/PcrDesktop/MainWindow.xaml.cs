@@ -163,6 +163,13 @@ public partial class MainWindow : Window
         RequireLoaded();
         if (_newConfig) { await SaveAs(); return; }
         await Idle(_loadedSettings!);
+        var defaults = Path.GetFullPath(Path.Combine(_loadedSettings!.Workspace, "runtime_defaults.yml"));
+        var selected = Path.GetFullPath(Path.Combine(_loadedSettings.Workspace, _loadedSettings.Config));
+        if (string.Equals(selected, defaults, StringComparison.OrdinalIgnoreCase))
+        {
+            await SaveToNewPath(Path.Combine(_loadedSettings.Workspace, "daily_config.yml"));
+            return;
+        }
         var result = await Backend.Request(_loadedSettings!, "save", ConfigRequest());
         _revision = result["revision"]!.GetValue<string>();
         MarkConfigSaved();

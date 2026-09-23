@@ -70,13 +70,13 @@ class DungeonFirstClear(BaseTask):
                 report = acquire_strategies(task_source_options('dungeon', self.options), check=self.check_deadline)
                 self.report['source_search'] = report
                 self.plan = dungeon_plan(report, self.area,
-                                         allow_local_trials=self.options.get('allow_local_trials', True))
+                                         allow_local_trials=self.options.get('allow_local_trials', False))
                 if self.plan:
                     from ..game_ui.avatar_assets import ensure_avatar_index
                     self.formation.avatars, _ = ensure_avatar_index(self.options.get('sources', {}).get('avatars'))
             if not self.plan and self.options.get('use_local_teams', False):
                 self.plan = load_plan(self.options.get('teams', 'cache/game/strategies/dungeon_teams.yml'), self.area,
-                                      allow_local_trials=self.options.get('allow_local_trials', True))
+                                      allow_local_trials=self.options.get('allow_local_trials', False))
             if not self.plan:
                 self.report['pending'].append('自动解析尚未得到完整且不冲突的来源路线；见source_search字段证据，未开战')
         return self.plan
@@ -190,7 +190,7 @@ class DungeonFirstClear(BaseTask):
         return None
 
     def select_party(self, party, use_current_build=False, checked=None):
-        if use_current_build and not self.options.get('allow_local_trials', True):
+        if use_current_build and not self.options.get('allow_local_trials', False):
             raise EventUIError('按账号状态试打未获本次启用')
         self.formation.use_current_build = use_current_build
         checked = set() if checked is None else checked
