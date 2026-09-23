@@ -4,7 +4,7 @@
 
 ## 用 GUI 跑日常
 
-1. 从 [GitHub Releases](https://github.com/Gibberer/pcr-script/releases) 下载 `PcrDesktop-win-x64.zip`，完整解压后打开 `PcrDesktop.exe`。如果尚无 Release，可从 [Windows GUI 构建记录](https://github.com/Gibberer/pcr-script/actions/workflows/desktop.yml)的成功构建中下载同名 Artifact。
+1. 从 [GitHub Releases](https://github.com/Gibberer/pcr-script/releases) 下载 `PcrDesktop-win-x64.zip`，完整解压后打开 `PcrDesktop.exe`。
 2. 跟随首次引导选择工程目录、下载运行文件、配置设备连接，并准备 Git、Python 和依赖。使用雷电时填写安装目录；使用 ADB 时留空雷电目录，并先让 Android 设备完成授权。游戏需要事先登录。
 3. 进入“每日日常”，点击“开始今日日常”。运行进度和结果可在“运行状态 / 运行记录”查看。
 
