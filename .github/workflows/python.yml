@@ -1,0 +1,47 @@
+name: Python regression
+
+on:
+  push:
+    branches: ['**']
+    paths:
+      - 'pcrscript/**'
+      - '!pcrscript/desktop.py'
+      - 'scripts/**'
+      - 'test/**'
+      - '!test/verify_desktop_runtime.ps1'
+      - 'requirements*.txt'
+      - 'daily_task.py'
+      - 'runtime_defaults.yml'
+      - '.github/workflows/python.yml'
+  pull_request:
+    paths:
+      - 'pcrscript/**'
+      - '!pcrscript/desktop.py'
+      - 'scripts/**'
+      - 'test/**'
+      - '!test/verify_desktop_runtime.ps1'
+      - 'requirements*.txt'
+      - 'daily_task.py'
+      - 'runtime_defaults.yml'
+      - '.github/workflows/python.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    env:
+      PYTHONUTF8: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - name: Install Python dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Offline Python regression tests
+        run: python -X utf8 -m unittest discover -s test -p 'test_*.py'

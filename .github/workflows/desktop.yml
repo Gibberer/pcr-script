@@ -6,34 +6,45 @@ on:
     branches: ['**']
     paths:
       - 'desktop/**'
-      - 'pcrscript/**'
-      - 'scripts/**'
-      - 'test/**'
-      - 'requirements*.txt'
-      - 'daily_task.py'
-      - 'runtime_defaults.yml'
-      - 'docs/guides/**'
-      - '.github/workflows/desktop.yml'
-      - 'docs/releases.md'
+      - 'pcrscript/desktop.py'
+      - 'test/verify_desktop_runtime.ps1'
     tags: ['gui-v*']
-  pull_request:
-    paths:
-      - 'desktop/**'
-      - 'pcrscript/**'
-      - 'scripts/**'
-      - 'test/**'
-      - 'requirements*.txt'
-      - 'daily_task.py'
-      - 'runtime_defaults.yml'
-      - 'docs/guides/**'
-      - '.github/workflows/desktop.yml'
-      - 'docs/releases.md'
+  pull_request: {}
 
 permissions:
   contents: read
+  pull-requests: read
 
 jobs:
+  scope:
+    runs-on: ubuntu-latest
+    outputs:
+      gui: ${{ steps.detect.outputs.gui }}
+    steps:
+      - name: Check whether this PR changes GUI files
+        id: detect
+        uses: actions/github-script@v7
+        with:
+          script: |
+            if (context.eventName !== 'pull_request') {
+              core.setOutput('gui', 'true');
+              return;
+            }
+            const files = await github.paginate(github.rest.pulls.listFiles, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number,
+              per_page: 100,
+            });
+            const isGuiFile = path => path?.startsWith('desktop/') ||
+              path === 'pcrscript/desktop.py' ||
+              path === 'test/verify_desktop_runtime.ps1';
+            core.setOutput('gui', String(files.some(file =>
+              isGuiFile(file.filename) || isGuiFile(file.previous_filename))));
+
   build:
+    needs: scope
+    if: needs.scope.outputs.gui == 'true'
     runs-on: windows-latest
     timeout-minutes: 25
     env:

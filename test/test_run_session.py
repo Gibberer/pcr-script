@@ -207,9 +207,10 @@ with RunSession('child', sys.argv[1]) as run:
         with tempfile.TemporaryDirectory() as root:
             with RunSession('test', root, stall_seconds=.05) as run:
                 deadline = time.monotonic()+3
-                while not list(run.path.glob('incident-*')) and time.monotonic()<deadline:
+                while not list(run.path.glob('incident-*/details.json')) and time.monotonic()<deadline:
                     time.sleep(.05)
-                details = next(run.path.glob('incident-*/details.json'))
+                details = next(run.path.glob('incident-*/details.json'), None)
+                self.assertIsNotNone(details)
                 data = json.loads(details.read_text())
                 self.assertIn('test_watchdog', data['owner_stack'])
                 self.assertIsNone(data['frame_time'])
