@@ -6,28 +6,14 @@ on:
     branches: ['**']
     paths:
       - 'desktop/**'
-      - 'pcrscript/**'
-      - 'scripts/**'
-      - 'test/**'
-      - 'requirements*.txt'
-      - 'daily_task.py'
-      - 'runtime_defaults.yml'
-      - 'docs/guides/**'
-      - '.github/workflows/desktop.yml'
-      - 'docs/releases.md'
+      - 'pcrscript/desktop.py'
+      - 'test/verify_desktop_runtime.ps1'
     tags: ['gui-v*']
   pull_request:
     paths:
       - 'desktop/**'
-      - 'pcrscript/**'
-      - 'scripts/**'
-      - 'test/**'
-      - 'requirements*.txt'
-      - 'daily_task.py'
-      - 'runtime_defaults.yml'
-      - 'docs/guides/**'
-      - '.github/workflows/desktop.yml'
-      - 'docs/releases.md'
+      - 'pcrscript/desktop.py'
+      - 'test/verify_desktop_runtime.ps1'
 
 permissions:
   contents: read

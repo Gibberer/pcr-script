@@ -10,6 +10,7 @@
 | `runtime_defaults.yml` | GUI 与命令行共用的默认配置；无账号，预置日常任务列表 |
 | `pcrscript/desktop.py` | GUI 使用的版本化 JSON 配置、控制和运行入口 |
 | `.github/workflows/desktop.yml` | Windows GUI 构建、离线测试与产物上传；已合并版本标签创建 Release |
+| `.github/workflows/python.yml` | 普通 Python 代码、依赖与默认配置变更的离线回归 |
 | `pcrscript/tasks/` | 统一任务实现、基类、注册表及任务辅助逻辑 |
 | `pcrscript/game_ui/` | 可共享的观察、识别与操作能力；`dungeon.py` 读取进度，`character_equipment.py` 只读核验未开放专武 |
 | `scripts/daily/` | 正式自动化命令入口，可供定时任务调用 |

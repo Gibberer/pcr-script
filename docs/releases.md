@@ -1,6 +1,6 @@
 # GUI 构建与发布
 
-主分支为 `master`。PR 和普通分支提交执行测试、构建与 Artifact 上传；发布仅由 `gui-v*` 标签触发，标签提交必须已经包含在 `origin/master` 中。当前改动只准备工作流，不会因合并 PR 自动发布未指定版本。
+主分支为 `master`。GUI 源码、GUI Python 接口或 GUI 烟测脚本变更时，PR 和分支提交执行 Windows GUI 构建并上传 Artifact；其他 Python、任务、依赖和默认配置变更只运行 Python 回归。发布仅由 `gui-v*` 标签触发，标签提交必须已经包含在 `origin/master` 中；标签发布始终重新构建 GUI。
 
 ## 本地验证
 
@@ -28,4 +28,4 @@ dotnet build desktop/PcrDesktop/PcrDesktop.csproj -c Release -o artifacts/gui -p
 
 不打包账号、实际配置、游戏数据库、头像、视频、作业或运行证据。源码更新为显式快进更新，GUI EXE 更新仍通过下载新 Release 包完成。暂未提供自动回滚或版本隔离的 Python 依赖环境。
 
-Release job 仍须在首次合并后的标签运行验证；本地构建通过不代表已在 GitHub 发布。
+本地构建通过不代表已在 GitHub 发布；以标签工作流的发布结果与 Release 附件为准。
