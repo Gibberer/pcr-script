@@ -1,7 +1,7 @@
 import requests
 import brotli
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 import os
 import yaml
 
@@ -80,6 +80,24 @@ def _query_hatsune_event(conn: sqlite3.Connection):
     return _query_event_duration(conn, 'hatsune_schedule', select='start_time,end_time,original_event_id', event_producer=gen_result)
 
 
+def _query_revival_event(conn: sqlite3.Connection):
+    """Query revivals independently: another active event must not hide one."""
+    cn_timezone = timezone(timedelta(hours=8))
+    now = datetime.now(cn_timezone).replace(tzinfo=None).isoformat(' ', 'seconds')
+    row = conn.execute(
+        'SELECT event_id, original_event_id, start_time, end_time FROM hatsune_schedule '
+        'WHERE original_event_id > 0 AND ISO(start_time) <= ? AND ISO(end_time) > ? '
+        'ORDER BY start_time DESC, event_id DESC LIMIT 1', (now, now)).fetchone()
+    if row is None:
+        return None
+    event_id, original_id, start, end = row
+    title = conn.execute('SELECT title FROM event_story_data WHERE value=?', (event_id,)).fetchone()
+    return Event(datetime.strptime(start, _time_format).replace(tzinfo=cn_timezone).timestamp(),
+                 datetime.strptime(end, _time_format).replace(tzinfo=cn_timezone).timestamp(),
+                 title[0].replace('\\n', ' ') if title else '剧情活动（复刻）',
+                 {'event_id': event_id, 'original_event_id': original_id})
+
+
 def _query_tower_event(conn: sqlite3.Connection):
     return _query_event_duration(conn, 'tower_schedule', desc='露娜塔')
 
@@ -120,12 +138,13 @@ def _build_event_news(cache_path, db_file):
             conn.create_function('ISO', 1, _iso_datetime)
             free_gacha = _query_free_gacha_event(conn)
             hatsune = _query_hatsune_event(conn)
+            revival = _query_revival_event(conn)
             tower = _query_tower_event(conn)
             drop_normal = _query_drop_normal_event(conn)
             drop_hard = _query_drop_hard_event(conn)
             secret_dungeon = _query_secret_dungeon(conn)
     return EventNews(freeGacha=free_gacha, hatsune=hatsune, tower=tower, dropItemNormal=drop_normal, 
-                         dropItemHard=drop_hard, secretDungeon=secret_dungeon)
+                         dropItemHard=drop_hard, secretDungeon=secret_dungeon, revival=revival)
 
 def fetch_event_news() -> EventNews:
     # 从redive.estertion.win抓国服信息
@@ -169,4 +188,3 @@ def try_repair_db(cache_path, db_file):
                 for chunk in r.iter_content(chunk_size=8192):
                     f.write(chunk)
     os.system(f".\{repair_tools} -n {target_file} -r {meta_file} -g {target_file}")
-    

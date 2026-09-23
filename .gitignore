@@ -7,3 +7,8 @@ daily_config.yml
 autobattle/gui
 plugins/battleline_extractor/output.yaml
 cache/
+.venv/
+desktop/**/bin/
+desktop/**/obj/
+artifacts/
+daily_config.yml.bak

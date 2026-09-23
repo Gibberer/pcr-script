@@ -1,0 +1,40 @@
+<Window x:Class="PcrDesktop.SetupWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Style="{StaticResource AppWindow}" Title="PCR · 首次使用设置" Width="760" Height="730" ResizeMode="NoResize" WindowStartupLocation="CenterScreen" Background="#F3F5F8" Closing="Setup_Closing">
+  <Grid Margin="26">
+    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+    <StackPanel Margin="0,0,0,18"><TextBlock Text="准备运行环境" FontSize="26" FontWeight="SemiBold" Foreground="#172B46"/>
+      <TextBlock Text="选择 Python 工程与设备连接方式，即可浏览并执行任务。此处不需要配置文件。" TextWrapping="Wrap" Margin="0,10,0,0" Foreground="#586578"/></StackPanel>
+    <ScrollViewer x:Name="SetupFields" Grid.Row="1" VerticalScrollBarVisibility="Auto"><StackPanel>
+      <TextBlock Text="1  项目工程目录" FontSize="18" FontWeight="SemiBold"/>
+      <DockPanel Margin="0,8,0,0"><Button DockPanel.Dock="Right" Content="选择目录…" Click="ProjectBrowse_Click"/><TextBox x:Name="ProjectPath" TextChanged="Project_Changed"/></DockPanel>
+      <TextBlock x:Name="ProjectStatus" TextWrapping="Wrap" Foreground="#42556F" Margin="0,0,0,10"/>
+      <StackPanel x:Name="DownloadPanel" Visibility="Collapsed">
+        <TextBlock Text="没有项目时，可下载到这个空目录；已有文件不会被覆盖。" TextWrapping="Wrap"/>
+        <TextBox x:Name="Repository" ToolTip="Git 仓库地址"/>
+        <ComboBox x:Name="DownloadScope" SelectedIndex="0" Margin="0,5,0,8">
+          <ComboBoxItem Content="仅核心运行文件（默认）：Python 核心、图片、默认选项和依赖清单"/>
+          <ComboBoxItem Content="完整仓库：包含脚本工具、文档、测试和 GUI 源码"/>
+        </ComboBox>
+        <DockPanel><Button DockPanel.Dock="Right" x:Name="DownloadButton" Content="从 GitHub 下载项目" Click="Download_Click"/><TextBox x:Name="Branch" ToolTip="分支"/></DockPanel>
+      </StackPanel>
+      <TextBlock Text="2  设备连接" FontSize="18" FontWeight="SemiBold" Margin="0,16,0,0"/>
+      <DockPanel Margin="0,8,0,0"><Button DockPanel.Dock="Right" Content="选择目录…" Click="EmulatorBrowse_Click"/><TextBox x:Name="EmulatorPath"/></DockPanel>
+      <TextBlock Text="使用雷电后台驱动时选择包含 ldconsole.exe 的目录；留空时使用 ADB。" TextWrapping="Wrap" Foreground="#586578"/>
+      <TextBlock Text="ADB 程序（不使用雷电时必需）" Margin="0,10,0,0"/>
+      <DockPanel><Button DockPanel.Dock="Right" Content="选择 adb.exe…" Click="AdbBrowse_Click"/><TextBox x:Name="AdbPath" ToolTip="填 adb 使用系统 PATH，或选择 Android Platform Tools 中的 adb.exe"/></DockPanel>
+      <TextBlock Text="ADB 设备序列号（连接多个设备时必填）" Margin="0,8,0,0"/>
+      <TextBox x:Name="AdbSerial" ToolTip="填写 adb devices 列出的目标序列号；只有一个已授权设备时可留空"/>
+      <TextBlock Text="留空雷电目录会走 ADB。可填 adb 使用系统 PATH；连接多个设备时必须指定序列号。" TextWrapping="Wrap" Foreground="#586578"/>
+      <TextBlock Text="3  Python 运行环境" FontSize="18" FontWeight="SemiBold" Margin="0,20,0,0"/>
+      <TextBlock Text="自动使用项目中的 .venv；也可选择已有 Python 环境。" Foreground="#586578" Margin="0,8,0,0"/>
+      <DockPanel><Button DockPanel.Dock="Right" Content="选择 Python…" Click="PythonBrowse_Click"/><TextBox x:Name="PythonPath"/></DockPanel>
+      <TextBlock Text="未创建环境时，用已安装的 Python 3.12+ 创建并安装依赖：" TextWrapping="Wrap"/>
+      <DockPanel><Button DockPanel.Dock="Right" Content="创建环境 / 安装依赖" Click="Install_Click"/><TextBox x:Name="Bootstrap" Text="python"/></DockPanel>
+      <WrapPanel><Button Content="下载 Python（官网）" Click="PythonDownload_Click"/><Button Content="检测 Python" Click="DetectPython_Click"/></WrapPanel>
+      <TextBlock Text="没有 Python？先从官网安装（建议 3.12 x64，勾选 Add python.exe to PATH），再检测并创建环境。依赖下载需要联网，失败可重试。" TextWrapping="Wrap" Foreground="#586578"/>
+      <TextBlock x:Name="ProgressText" TextWrapping="Wrap" Foreground="#42556F" Margin="0,10,0,0"/>
+    </StackPanel></ScrollViewer>
+    <DockPanel Grid.Row="2" Margin="0,18,0,0"><Button DockPanel.Dock="Right" x:Name="FinishButton" Content="完成并进入任务控制台" Click="Finish_Click" Background="#DBEAFE"/>
+      <TextBlock Text="配置方案可稍后在任务执行页新建或选择。" VerticalAlignment="Center" Foreground="#586578"/></DockPanel>
+  </Grid>
+</Window>

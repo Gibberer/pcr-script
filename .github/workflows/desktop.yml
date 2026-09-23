@@ -1,0 +1,139 @@
+name: Windows GUI
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ['**']
+    paths:
+      - 'desktop/**'
+      - 'pcrscript/**'
+      - 'scripts/**'
+      - 'test/**'
+      - 'requirements*.txt'
+      - 'daily_task.py'
+      - 'runtime_defaults.yml'
+      - 'docs/guides/**'
+      - '.github/workflows/desktop.yml'
+      - 'docs/releases.md'
+    tags: ['gui-v*']
+  pull_request:
+    paths:
+      - 'desktop/**'
+      - 'pcrscript/**'
+      - 'scripts/**'
+      - 'test/**'
+      - 'requirements*.txt'
+      - 'daily_task.py'
+      - 'runtime_defaults.yml'
+      - 'docs/guides/**'
+      - '.github/workflows/desktop.yml'
+      - 'docs/releases.md'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    env:
+      PYTHONUTF8: '1'
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+      - name: Install Python dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Offline Python regression tests
+        run: python -X utf8 -m unittest discover -s test -p 'test_*.py'
+      - name: Build lightweight .NET Framework GUI
+        run: dotnet build desktop/PcrDesktop/PcrDesktop.csproj -c Release -o artifacts/gui -p:DebugType=None -p:DebugSymbols=false
+      - name: Runtime-only download and headless GUI verification
+        shell: pwsh
+        run: ./test/verify_desktop_runtime.ps1
+      - name: Check portable package size
+        shell: pwsh
+        run: |
+          $size = (Get-ChildItem artifacts/gui -File -Recurse | Measure-Object Length -Sum).Sum
+          if ($size -gt 5MB) { throw "GUI files exceed 5 MB; check for bundled runtime: $size" }
+      - name: Package binary and usage notes
+        shell: pwsh
+        run: |
+          @'
+          PCR GUI 使用说明
+
+          完整解压后运行 PcrDesktop.exe，保留旁边的 DLL 和 .exe.config 文件。
+          首次引导中选择工程目录、设备连接方式与 Python，下载核心文件并安装依赖。
+          雷电填写安装目录；ADB 连接 Android 设备时留空，并提前安装 Android Platform Tools、完成设备授权。
+          不需要提前 clone 仓库；下载/更新需要 Git，执行任务推荐 Python 3.12 x64。
+
+          图文指南：https://github.com/Gibberer/pcr-script/blob/master/docs/guides/desktop.md
+          任务指南：https://github.com/Gibberer/pcr-script/blob/master/docs/guides/tasks.md
+          新版下载：https://github.com/Gibberer/pcr-script/releases
+          '@ | Set-Content artifacts/gui/使用说明.txt -Encoding utf8
+          Compress-Archive -Path artifacts/gui/* -DestinationPath artifacts/PcrDesktop-win-x64.zip
+          (Get-FileHash artifacts/PcrDesktop-win-x64.zip -Algorithm SHA256).Hash + '  PcrDesktop-win-x64.zip' | Set-Content artifacts/SHA256SUMS.txt
+      - name: Upload GUI binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: PcrDesktop-win-x64
+          path: |
+            artifacts/PcrDesktop-win-x64.zip
+            artifacts/SHA256SUMS.txt
+          if-no-files-found: error
+      - name: Upload GUI verification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: GUI-smoke-evidence
+          path: artifacts/gui-smoke.png*
+          if-no-files-found: ignore
+
+  release:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/gui-v')
+    needs: build
+    runs-on: windows-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      actions: read
+    concurrency:
+      group: gui-release-${{ github.ref }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Require a merged commit
+        shell: pwsh
+        run: |
+          git merge-base --is-ancestor $env:GITHUB_SHA origin/master
+          if ($LASTEXITCODE -ne 0) { throw 'GUI releases must point to a commit already merged into master.' }
+      - uses: actions/download-artifact@v4
+        with:
+          name: PcrDesktop-win-x64
+          path: artifacts/release
+      - name: Publish verified GUI package
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          $package = 'artifacts/release/PcrDesktop-win-x64.zip'
+          $checksum = 'artifacts/release/SHA256SUMS.txt'
+          $expected = ((Get-Content $checksum -Raw).Trim() -split '\s+')[0]
+          if ((Get-FileHash $package -Algorithm SHA256).Hash -ne $expected) { throw 'Package checksum mismatch.' }
+          gh release view $env:RELEASE_TAG --json tagName *> $null
+          if ($LASTEXITCODE -eq 0) {
+            throw 'This release already exists. Published assets are not overwritten; use a new version tag.'
+          }
+          gh release create $env:RELEASE_TAG $package $checksum --verify-tag --generate-notes --title "PCR GUI $env:RELEASE_TAG"
+          if ($LASTEXITCODE -ne 0) { throw 'GitHub Release creation failed.' }

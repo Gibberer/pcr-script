@@ -14,23 +14,28 @@ class GeneralSimulator():
     通用模拟器
     '''
 
+    def __init__(self, adb_path="adb"):
+        self.adb_path = adb_path
+
     def get_devices(self) -> List[str]:
-        lines = os.popen("adb devices").readlines()
-        if not lines or len(lines) < 2:
-            print("没有设备信息：{}".format(lines[0] if lines else "None"))
-            return None
+        try:
+            result = subprocess.run([self.adb_path, "devices"], capture_output=True,
+                                    text=True, check=True, timeout=15)
+        except FileNotFoundError as error:
+            raise RuntimeError("未找到 ADB 程序；请在环境设置中选择 adb.exe 或将其加入 PATH") from error
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
+            raise RuntimeError("ADB 设备列表读取失败；请检查 adb.exe 和设备连接") from error
         devices = []
-        for line in lines:
-            if '\t' in line:
-                name, status = line.split('\t')
-                if 'device' in status:
-                    devices.append(name)
+        for line in result.stdout.splitlines():
+            parts = line.split()
+            if len(parts) >= 2 and parts[1] == "device":
+                devices.append(parts[0])
         return devices
 
     def get_dirvers(self) -> List[Driver]:
         devices = self.get_devices()
         if devices:
-            return [ADBDriver(device) for device in devices]
+            return [ADBDriver(device, self.adb_path) for device in devices]
 
 
 class DNSimulator(GeneralSimulator):
@@ -98,7 +103,9 @@ class DNSimulator(GeneralSimulator):
 
     def online(self)->bool:
         if self.path:
-            command_result = os.popen(f"{self.path}\ldconsole.exe list2").read()
+            command_result = subprocess.check_output(
+                [os.path.join(self.path, 'ldconsole.exe'), 'list2'],
+                encoding='mbcs', errors='replace', timeout=15)
             if command_result:
                 infos = list(map(lambda x: x.split(","), command_result.split("\n")))
                 if infos and int(infos[0][2]) > 0 and int(infos[0][4]) == 1:
@@ -111,18 +118,21 @@ class DNSimulator(GeneralSimulator):
             return super().get_devices()
         else:
             try:
-                output = os.popen(f"{self.path}\ldconsole.exe list2").read()
+                output = subprocess.check_output(
+                    [os.path.join(self.path, 'ldconsole.exe'), 'list2'],
+                    encoding='mbcs', errors='replace', timeout=15)
                 if output:
                     infos = list(map(lambda x : x.split(','), output.split('\n')))
-                    return [info[0] for info in infos if len(info) > 1 and int(info[2]) > 0]
+                    return [info[0] for info in infos if len(info) >= 9 and int(info[2]) > 0 and int(info[4]) == 1]
             except Exception as e:
                 print(e)
-                return super().get_devices()
+                return None  # useADB=False must never fall back to ADB discovery
 
     def get_dirvers(self) -> List[Driver]:
         devices = self.get_devices()
         if devices:
-            return [DNDriver(device, self.path, i, click_by_mouse=self.fastclick) for i, device in enumerate(devices)]
+            return [DNDriver(device, self.path, i if self.useADB else int(device), click_by_mouse=self.fastclick)
+                    for i, device in enumerate(devices)]
         
     
     def move_to_screen(self, index):

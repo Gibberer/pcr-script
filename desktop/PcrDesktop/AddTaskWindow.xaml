@@ -1,0 +1,23 @@
+<Window x:Class="PcrDesktop.AddTaskWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Style="{StaticResource AppWindow}" Title="添加日常任务" Width="590" Height="660" MinWidth="480" MinHeight="480" WindowStartupLocation="CenterOwner" ShowInTaskbar="False" Background="#F3F5F8">
+  <Grid Margin="24">
+    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+    <StackPanel Margin="0,0,0,18"><TextBlock Text="添加日常任务" FontSize="23" FontWeight="SemiBold" Foreground="#172B46"/>
+      <TextBlock Text="选择任务并设置参数，确认后追加到日常列表末尾。" TextWrapping="Wrap" Foreground="#586578" Margin="0,8,0,0"/>
+    </StackPanel>
+    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto"><StackPanel>
+      <TextBlock Text="任务类型"/>
+      <ComboBox x:Name="Picker" SelectionChanged="SelectionChanged" Padding="8" Margin="0,7,0,14"/>
+      <TextBlock x:Name="Description" TextWrapping="Wrap" LineHeight="22" Foreground="#42556F" Margin="0,0,0,12"/>
+      <StackPanel x:Name="Parameters"/>
+      <TextBlock Text="复杂参数按字段说明填写 JSON。" TextWrapping="Wrap" Foreground="#586578" Margin="0,12,0,0"/>
+    </StackPanel></ScrollViewer>
+    <StackPanel Grid.Row="2" Margin="0,16,0,0">
+      <TextBlock x:Name="ErrorText" Foreground="#B42318" TextWrapping="Wrap" Margin="0,0,0,10"/>
+      <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+        <Button Content="取消" IsCancel="True" MinWidth="90"/>
+        <Button x:Name="AddButton" Content="添加到日常列表" Click="Add_Click" IsDefault="True" Background="#245DAD" Foreground="White"/>
+      </StackPanel>
+    </StackPanel>
+  </Grid>
+</Window>

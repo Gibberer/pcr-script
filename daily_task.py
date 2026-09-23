@@ -1,92 +1,34 @@
-import yaml
-import os
-import time
-from pcrscript import DNSimulator, Robot, GeneralSimulator
-from pcrscript.tasks import EventNews, TimeLimitTask, find_taskclass
-from pcrscript.news import fetch_event_news
-from typing import Type
+import argparse
+from pathlib import Path
+import subprocess
+from pcrscript.run_session import clock as time
+from pcrscript.runtime import load_config, modify_task_list, open_leidian_emulator, run_script, select_driver
 
-def open_leidian_emulator(dnpath):
-    # 开启雷电模拟器
-    # 检查当前运行的程序有没有雷电模拟器
-    simulator = DNSimulator(dnpath, useADB=False)
-    simulator.start()
-    retry_count = 0
-    while retry_count < 10:
-        if simulator.online():
-            # simulator.move_to_screen(1)
-            print("the emulator is ready.")
-            break
-        else:
-            print("no emulator detected, wait for 20 seconds")
-            time.sleep(20)
-            retry_count += 1
-    if retry_count >= 10:
-        print("exit cannot found device")
-        return -1
-    else:
-        print("try start princess connect application")
-        exit_code = simulator.open_app("com.bilibili.priconne")
-        time.sleep(30)
-        return exit_code
-
-def modify_task_list(news: EventNews, task_list: list):
-    for i in range(len(task_list) - 1, -1, -1):
-        task_class = find_taskclass(task_list[i][0])
-        if not issubclass(task_class, TimeLimitTask):
-            continue
-        valid_class,args = None,None
-        task_class:Type[TimeLimitTask] = task_class
-        ret = task_class.valid(news, task_list[i][1:])
-        if ret:
-            valid_class = ret[0]
-            if len(ret) > 1:
-                args = ret[1]
-        if not valid_class:
-            task_list.pop(i)
-        else:
-            task_list.pop(i)
-            if args:
-                task_list.insert(i, [valid_class.name, *args])
-            else:
-                task_list.insert(i, [valid_class.name])
-
-
-def run_script(config, use_adb):
-    drivers = DNSimulator(config["Extra"]["dnpath"], useADB=use_adb).get_dirvers()
-    if not drivers:
-        print("Device not found.")
-        return
-    # 使用第一个设备
-    robot = Robot(drivers[0])
-    news = fetch_event_news()
-    print("当前进行的活动:")
-    for value in news.__dict__.values():
-        if value:
-            print(value)
-    task_list: list = next(iter(config["Task"].values()))  # 这里设置一个全量的任务列表
-    # 根据当前进行的活动修改原始任务
-    modify_task_list(news, task_list)
-    # 对于日常脚本不需要切换账号（提供账号），只是返回游戏欢迎页面
-    robot.changeaccount()
-    robot.work(task_list)
-
-if __name__ == "__main__":
-    with open("daily_config.yml", encoding="utf-8") as f:
-        config = yaml.load(f, Loader=yaml.FullLoader)
-    dnpath = config["Extra"]["dnpath"]
+def main():
+    parser = argparse.ArgumentParser(description="运行当前配置中的完整日常")
+    parser.add_argument("--config", default="daily_config.yml" if Path("daily_config.yml").exists() else "runtime_defaults.yml")
+    args = parser.parse_args()
+    config = load_config(args.config)
+    if not any(config.get("Task", {}).values()):
+        raise ValueError(f"配置 {args.config} 未启用日常任务；请先编辑 Task 或指定其他配置")
+    dnpath = str(config.get("Extra", {}).get("dnpath") or "").strip()
     if dnpath:
         return_code = open_leidian_emulator(dnpath)
         if return_code < 0:
-            print("open leidian emulator failed")
+            raise RuntimeError("雷电启动失败")
         else:
             print("leidian emulator install path is configured, use leidian console.")
-            run_script(config, False)
+            run_script(config)
     else:
-        print("leidian emulator install path not found, use ADB command.")
-        os.system(
-                f'adb -s {GeneralSimulator().get_devices()[0]} shell monkey -p com.bilibili.priconne 1'
-            )
+        driver = select_driver(config)
+        print(f"使用 ADB 设备 {driver.device_name}")
+        subprocess.run([driver.adb_path, "-s", driver.device_name, "shell", "monkey", "-p", "com.bilibili.priconne", "1"], check=True)
         time.sleep(30)
-        run_script(config, True)
+        run_script(config)
         
+
+
+if __name__ == "__main__":
+    from pcrscript.run_session import RunSession
+    with RunSession("daily"):
+        main()
