@@ -17,7 +17,7 @@ public partial class MainWindow
         ["max_failures_per_stage"] = "首次探索失败上限", ["max_repeat_failures_per_stage"] = "历史失败关卡补试上限", ["source_urls"] = "优先攻略链接（B站或攻略网页）", ["history_dir"] = "深域尝试历史目录", ["allow_five_star_upgrade"] = "危险操作：允许拟上场角色升至5星", ["allow_divine_amulets"] = "危险操作：允许消耗女神秘石兑换碎片", ["discover_sources"] = "检索对应关卡攻略",
         ["sources"] = "攻略搜索选项", ["task_type"] = "玩法标识", ["stage"] = "目标关卡", ["category_terms"] = "玩法关键词",
         ["browser_session"] = "使用隔离浏览器会话", ["browser_channel"] = "浏览器通道", ["browser_cache_dir"] = "浏览器会话缓存目录",
-        ["area"] = "目标区域", ["allow_local_trials"] = "允许按账号培养试打", ["auto_equip"] = "分配现有特别装备",
+        ["area"] = "目标区域", ["allow_local_trials"] = "允许按账号培养试打", ["use_local_teams"] = "使用旧本地队伍文件", ["auto_equip"] = "分配现有特别装备",
         ["preflight"] = "开战前核验整条路线", ["audit_only"] = "只核验，不开战", ["max_battles"] = "本次战斗次数上限",
         ["review_on_unexpected"] = "异常时保留现场并停止接续", ["max_batches"] = "最大强化批数",
         ["max_characters"] = "本轮最多检查角色数", ["max_pages"] = "角色列表最大翻页数", ["max_story_steps_per_character"] = "单角色剧情步骤上限", ["max_gifts_per_character"] = "单角色礼物消耗上限",
@@ -45,6 +45,7 @@ public partial class MainWindow
             var fieldsPanel = new StackPanel { Margin = new Thickness(4, 12, 4, 4) };
             OptionsPanel.Children.Add(new Expander { Header = OptionLabels.GetValueOrDefault(section, section),
                 IsExpanded = section == "Extra", Content = fieldsPanel });
+            if (NeedsStrategyHint(section)) fieldsPanel.Children.Add(CreateStrategyHint());
             if (value is JsonObject fields)
                 foreach (var (key, node) in fields) AddOption(section, key, node, fieldsPanel, _optionEditors);
             else AddOption(section, null, value, fieldsPanel, _optionEditors);
@@ -92,10 +93,23 @@ public partial class MainWindow
             if (value is null) continue;
             _specialTemplate[section!] = value.DeepClone();
             if (section == "Extra") continue; // Emulator is managed in environment settings.
+            if (NeedsStrategyHint(section!)) SpecialOptionsPanel.Children.Add(CreateStrategyHint());
             if (value is JsonObject fields)
                 foreach (var (key, node) in fields) AddOption(section!, key, node, SpecialOptionsPanel, _specialOptionEditors);
         }
     }
+
+    private static bool NeedsStrategyHint(string section) =>
+        section is "Abyss" or "Dungeon" or "StoryEvent" or "RevivalEvent";
+
+    private static TextBlock CreateStrategyHint() => new()
+    {
+        Text = "自动搜索与解析队伍可能失败；遇到无法配队或进度停滞，可启动 Agent，针对这个任务单独执行并复核报告。",
+        TextWrapping = TextWrapping.Wrap,
+        Foreground = System.Windows.Media.Brushes.DarkGoldenrod,
+        Margin = new Thickness(0, 0, 0, 10),
+        MaxWidth = 880
+    };
 
     private JsonObject ReadOptions() => ReadOptionValues(_optionTemplate, _optionEditors);
     private JsonObject ReadSpecialOptions() => ReadOptionValues(_specialTemplate, _specialOptionEditors);

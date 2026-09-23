@@ -8,8 +8,8 @@ import numpy as np
 from ..game_ui.event_layout import event_layout, map_dialogue, legacy_hub
 from ..game_ui.screen import EventUIError, normalized
 from .event_battle import EventCombat
-from .event_formation import EventFormation
-from .event_strategy import load_parties
+from .strategy_trial import TrialFormation
+from .strategy_party_pool import boss_parties, next_boss_party
 from ..templates import ImageTemplate
 
 
@@ -17,6 +17,7 @@ class RevivalMap:
     def __init__(self, runner):
         self.r = runner
         self.ui = runner.ui
+        self.formation = TrialFormation(self.ui)
         runner.combat_return = lambda s: event_layout(s) == 'map'
         runner.combat_dialog = self.dialog
 
@@ -441,7 +442,11 @@ class RevivalMap:
         raise EventUIError('无法返回复刻活动首页')
 
     def sourced_boss(self, label, difficulty):
-        for attempt in range(self.r.options.get('max_boss_attempts', 6)):
+        attempts = {}
+        source_pools = {}
+        battles = 0
+        while battles < self.r.options.get('max_boss_attempts', 6):
+            self.r.check_deadline()
             if difficulty == 'special':
                 if self.special_complete():
                     self.r.log('特别首领已通过，表演赛已解锁')
@@ -459,29 +464,51 @@ class RevivalMap:
             if difficulty == 'special' and not mode_box:
                 raise EventUIError('特别战斗模式未知，不能套用作业')
             before_hp = detail.find(r'\d+/\d+', (250, 265, 720, 315))
-            parties = load_parties(self.r.options.get('teams', 'cache/game/strategies/revival_teams.yml'), self.r.event.name, difficulty, mode)
-            if not parties:
+            key = (difficulty, mode)
+            if key not in source_pools:
+                found, search = boss_parties(self.r.options, kind='revival', area=self.r.event.name,
+                    difficulty=difficulty, mode=mode,
+                    default_path='cache/game/strategies/revival_teams.yml',
+                    check=self.r.check_deadline)
+                source_pools[key] = found
+                if search:
+                    self.r.report.setdefault('source_searches', []).append(search)
+                    if search.get('avatar_assets'):
+                        from ..game_ui.avatar_assets import ensure_avatar_index
+                        self.formation.avatars, _ = ensure_avatar_index(
+                            self.r.options.get('sources', {}).get('avatars'), check=self.r.check_deadline)
+            party = next_boss_party(source_pools[key], attempts, mode)
+            if party is None:
                 self.r.report['pending'].append(f'{label}模式{mode}没有对应作业')
                 return self.home()
             challenge = detail.find('挑战', (720, 420, 950, 525), exact=True)
             if not detail.blue_button(challenge):
                 self.r.report['pending'].append(label+'挑战不可用，未购买或追加消费')
                 return self.home()
-            if attempt >= parties[0].max_attempts:
-                self.r.report['pending'].append(label+'作业达到尝试上限')
-                return self.home()
             self.ui.expect_click('挑战', (720, 420, 950, 525), exact=True)
             self.ui.wait(lambda s: s.find('队伍编组'), '首领编队')
-            party = parties[0]
-            ready, selection = EventFormation(self.ui).select(party)
+            ready, selection = self.formation.select(party)
             if not ready:
-                self.r.report['pending'].append(f'{label}作业不达标：{selection}')
-                return self.home()
+                attempts[(mode, party.name)] = party.max_attempts
+                self.r.report['battles'].append({'boss': difficulty, 'mode': mode,
+                    'party': party.name, 'source': party.source, 'build_basis': party.build_basis,
+                    'assumptions': party.assumptions, 'unready': selection})
+                self.home()
+                continue
+            attempts[(mode, party.name)] = attempts.get((mode, party.name), 0)+1
             result = EventCombat(self.r).run(party, selection['order'])
-            self.r.report['battles'].append({'boss': difficulty, 'mode': mode, 'source': party.source, **vars(result)})
+            battles += 1
+            self.r.report['battles'].append({'boss': difficulty, 'mode': mode, 'party': party.name,
+                'source': party.source, 'build_basis': party.build_basis,
+                'assumptions': party.assumptions, **vars(result)})
             if result.outcome != 'settled':
                 self.r.report['pending'].append(label+'未成功：'+result.reason)
-                return self.home()
+                if result.outcome == 'blocked':
+                    return self.home()
+                if result.outcome in ('retreated', 'failed'):
+                    attempts[(mode, party.name)] = party.max_attempts
+                self.home()
+                continue
             self.home()
             if difficulty == 'very_hard':
                 # VH locks its entry immediately after success. Verify the
@@ -495,8 +522,13 @@ class RevivalMap:
                     return self.hub()
                 after = self.boss_detail(label)
                 after_hp = after.find(r'\d+/\d+', (250, 265, 720, 315))
-                if not before_hp or not after_hp or before_hp.text == after_hp.text:
+                if not before_hp or not after_hp:
                     self.r.report['pending'].append(label+'血量进度未确认，停止重试')
                     return self.home()
+                if before_hp.text == after_hp.text:
+                    attempts[(mode, party.name)] = party.max_attempts
+                    self.r.report['battles'][-1]['progressed'] = False
+                    self.home()
+                    continue
                 self.home()
         self.r.report['pending'].append(label+'达到尝试上限')

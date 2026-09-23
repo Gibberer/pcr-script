@@ -26,7 +26,9 @@ ELEMENTS = {'火': 'fire', '水': 'water', '风': 'wind', '光': 'light', '暗':
             '红焰': 'fire', '苍波': 'water', '翠岚': 'wind', '珀天': 'light', '紫冥': 'dark'}
 
 
-def task_source_options(kind: str, options: dict, *, stage=None) -> dict:
+def task_source_options(kind: str, options: dict, *, stage=None,
+                        area: str | None = None, difficulty: str | None = None,
+                        mode: int | None = None) -> dict:
     from ..game_ui.abyss import AREAS
     result = dict(options.get('sources', {}))
     result.update(task_type=kind, region='cn')
@@ -41,9 +43,19 @@ def task_source_options(kind: str, options: dict, *, stage=None) -> dict:
                       aliases=['深域 '+AREAS[element][1][0], AREAS[element][1][0]])
         if not result.get('stage'):
             raise ValueError('仅解析攻略时请在sources.stage指定目标关卡，如4-1')
-    else:
+    elif kind == 'dungeon':
         result['area'] = options.get('area', '四彩的灵峰')
         result.setdefault('aliases', ['极难7', 'EX7'] if result['area'] == '四彩的灵峰' else [])
+        result.setdefault('max_pages_per_video', 12)
+    elif kind in ('event', 'revival'):
+        if not area or difficulty not in ('special', 'special_plus', 'very_hard') or mode not in (1, 2, 3):
+            raise ValueError('活动攻略必须明确活动名称、首领难度与模式')
+        result.pop('stage', None)
+        result.pop('element', None)
+        result.update(area=area, difficulty=difficulty, mode=mode,
+                      category_terms=[], aliases=[])
+    else:
+        raise ValueError('未知攻略任务类型')
     return result
 
 
@@ -54,6 +66,23 @@ def page_scope(page: dict, kind: str) -> dict:
         if match:
             return dict(element=ELEMENTS[match[1]], stage=f'{int(match[2])}-{int(match[3])}',
                         chapters=[int(match[2]), int(match[2])])
+    if kind == 'dungeon':
+        floor = re.search(r'(?:第|现在的阶数)?\s*([1-5])(?:/5)?\s*(?:层|阶层)', title)
+        phase = re.search(r'四色妖狐[·・]?([春夏秋冬][^\s\n]{0,2})', title)
+        if floor:
+            value = int(floor[1])
+            if value < 5 or phase:
+                return dict(floor=value, phase=phase[0] if phase else '')
+        if phase:
+            return dict(floor=5, phase=phase[0])
+    if kind in ('event', 'revival'):
+        difficulty = ('special_plus' if re.search(r'特别战斗\s*[＋+]|SP\s*\+', title, re.I)
+                      else 'special' if re.search(r'特别战斗|(?:^|\W)SP(?:\W|$)', title, re.I)
+                      else 'very_hard' if re.search(r'高难|VERY\s*HARD|(?:^|\W)VH(?:\W|$)', title, re.I)
+                      else None)
+        phase = re.search(r'(?:模式|MODE|阶段)\s*([123])', title, re.I)
+        if difficulty and phase:
+            return dict(difficulty=difficulty, mode=int(phase[1]))
     return {}
 
 
@@ -70,6 +99,15 @@ def choose_pages(source: dict, options: dict) -> list[dict]:
             # Single-part uploads often put the stage in the main title.
             scope = page_scope({'part': source['title']}, kind)
             targets = [dict(pages[0], part=source['title'])] if scope.get('stage') == stage and (not element or scope.get('element') == element) else []
+    elif kind in ('event', 'revival'):
+        wanted = {'difficulty': options.get('difficulty'), 'mode': options.get('mode')}
+        targets = [p for p in pages if (scope := page_scope(p, kind)) == wanted]
+        if not targets and len(pages) == 1 and page_scope({'part': source.get('title', '')}, kind) == wanted:
+            targets = [dict(pages[0], part=source['title'])]
+        # An unlabeled page can still prove its scope from visible battle text.
+        chosen_cids = {p.get('cid') for p in targets}
+        targets += [p for p in pages if p not in requirements and p.get('cid') not in chosen_cids
+                    and not page_scope(p, kind)]
     else:
         targets = [p for p in pages if p not in requirements]
     limit = options.get('max_pages_per_video', 4)
@@ -100,9 +138,26 @@ def observed_scope(texts, page: dict, kind: str) -> tuple[dict, bool]:
         floor = re.search(r'(?:现在的阶数|第?)\s*([1-5])(?:/5)?[阶层]', text)
         phase = re.search(r'四色妖狐[·・]?([春夏秋冬][^\s\n]{0,2})', text)
         if floor:
-            return dict(floor=int(floor[1]), phase=phase[0] if phase else ''), int(floor[1]) < 5 or bool(phase)
+            if int(floor[1]) == 5 and not phase and metadata.get('floor') == 5:
+                return metadata, True
+            scope = dict(floor=int(floor[1]), phase=phase[0] if phase else '')
+            if metadata and scope != metadata:
+                return {'conflict': True}, False
+            return scope, int(floor[1]) < 5 or bool(phase)
         if phase:
-            return dict(floor=5, phase=phase[0]), True
+            scope = dict(floor=5, phase=phase[0])
+            return ({'conflict': True}, False) if metadata and scope != metadata else (scope, True)
+        if metadata:
+            return metadata, True
+    if kind in ('event', 'revival'):
+        scopes = [page_scope({'part': t.text}, kind) for t in texts if t.score >= .94]
+        scopes.append(page_scope({'part': '\n'.join(t.text for t in texts if t.score >= .94)}, kind))
+        scopes = [s for s in scopes if s]
+        if metadata and any(s != metadata for s in scopes):
+            return {'conflict': True}, False
+        if scopes and any(s != scopes[0] for s in scopes):
+            return {'conflict': True}, False
+        return (scopes[0], True) if scopes else (metadata, bool(metadata))
     return {}, False
 
 
@@ -142,7 +197,7 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
     root.mkdir(parents=True, exist_ok=True)
     pages = choose_pages(source, options)
     fingerprint = sha256(json.dumps(dict(version=PARSER_VERSION, source=source, pages=pages,
-                         scope={k: options.get(k) for k in ('task_type', 'stage', 'element', 'area', 'region', 'max_frames_per_page', 'max_video_seconds')},
+                         scope={k: options.get(k) for k in ('task_type', 'stage', 'element', 'area', 'difficulty', 'mode', 'region', 'max_frames_per_page', 'max_video_seconds')},
                          index=sha256(index.matrix.tobytes()+json.dumps(index.names, ensure_ascii=False).encode()).hexdigest()), ensure_ascii=False, sort_keys=True).encode()).hexdigest()
     cache = root/(fingerprint[:24]+'.json')
     saved = read_json(cache)
@@ -231,6 +286,11 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
                     area_verified = bool(area) and area in description
                     scope = dict(scope, area=area) if scope else {}
                     verified = verified and area_verified
+                elif options['task_type'] in ('event', 'revival'):
+                    area = options.get('area', '')
+                    description = source.get('title', '')+' '+source.get('description', '')+' '+page_name
+                    verified = verified and bool(area) and area in description
+                    scope = dict(scope, area=area) if scope else {}
                 # Full-name text rows and formation badges also occur outside battle.
                 field_scope = scope if verified else {'chapters': requirement_scope(texts)}
                 for t in texts:
@@ -361,8 +421,8 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
 def acquire_strategies(options: dict, *, api=None, index=None, ocr=None, check=lambda: None) -> dict:
     """The shared GUI/CLI task path from public sources to evidence-backed files."""
     options = dict(options)
-    if options.get('task_type') not in ('abyss', 'dungeon'):
-        raise ValueError('视频解析task_type必须为abyss或dungeon')
+    if options.get('task_type') not in ('abyss', 'dungeon', 'event', 'revival'):
+        raise ValueError('视频解析task_type必须为abyss、dungeon、event或revival')
     for key, default, upper in [('max_videos', 4, 30), ('max_frames_per_page', 50, 300),
                                 ('max_video_seconds', 180, 3600), ('parse_timeout', 900, 7200)]:
         value = options.setdefault(key, default)
@@ -371,7 +431,7 @@ def acquire_strategies(options: dict, *, api=None, index=None, ocr=None, check=l
     api = api or BilibiliApi(timeout=options.get('request_timeout', 20), browser_session=options.get('browser_session', True))
     report = dict(status='running', parties=[], parsed_sources=[], pending=[], errors=[])
     directory = Path(options.get('parsed_dir', 'cache/game/strategies/parsed'))
-    scope = {k: options.get(k) for k in ('task_type', 'area', 'stage', 'element', 'region', 'source_urls')}
+    scope = {k: options.get(k) for k in ('task_type', 'area', 'stage', 'element', 'difficulty', 'mode', 'region', 'source_urls')}
     output = directory/('catalog-'+sha256(json.dumps(scope, sort_keys=True).encode()).hexdigest()[:20]+'.json')
     started = time.monotonic()
     max_seconds = options.get('parse_timeout', 900)

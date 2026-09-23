@@ -71,6 +71,8 @@ class EventParty:
     modes: list[int] = field(default_factory=lambda: [1, 2, 3])
     max_attempts: int = 3
     allow_deaths: int = 0
+    build_basis: str = 'source'
+    assumptions: list[str] = field(default_factory=list)
 
 
 def load_parties(path: str | Path, event_title: str, difficulty: str, mode: int) -> list[EventParty]:

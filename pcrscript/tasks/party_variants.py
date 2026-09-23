@@ -1,13 +1,14 @@
 """Explainable local substitutions from game-data descriptions, not guides."""
 import re
 import sqlite3
+from contextlib import closing
 from ..game_ui.screen import normalized
 from .abyss_history import team_key
 
 
 def character_roles(database='cache/redive_cn.db'):
     result = {}
-    with sqlite3.connect(database) as conn:
+    with closing(sqlite3.connect(database)) as conn:
         roles=dict(conn.execute('SELECT unit_id,unit_role_id FROM unit_role_data'))
         rows = conn.execute('SELECT u.unit_id,u.unit_name,u.atk_type,u.search_area_width,s.union_burst,s.main_skill_1,s.main_skill_2 '
                             'FROM unit_data u JOIN unit_skill_data s ON s.unit_id=u.unit_id')

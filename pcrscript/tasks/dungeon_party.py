@@ -35,6 +35,16 @@ class DungeonFormation(EventFormation):
             max(actual.rank or 1, 1), actual.stars or 1, actual.unique, actual.unique2,
             requirement.instant, max(actual.skill_level or 1, 1))
 
+    def member_readiness(self, requirement, actual):
+        if not self.use_current_build:
+            return super().member_readiness(requirement, actual)
+        reasons = []
+        if not actual.identity_verified:
+            reasons.append('试打角色版本未确认')
+        if normalized(requirement.name) != normalized(actual.name):
+            reasons.append('试打角色身份与候选不符')
+        return reasons
+
     def inspect(self, *args, **kwargs):
         actual = super().inspect(*args, **kwargs)
         proof = self.unreleased.get(normalized(actual.name))
@@ -129,7 +139,8 @@ def load_plan(path: str | Path, area: str, *, allow_local_trials: bool = False) 
             if value is not None and (type(value) is not int or value < 0):
                 raise ValueError(f'{field} 必须为非负整数')
         result.append(DungeonParty(key, floor, normalized(phase),
-                      EventParty(key, source, members, max_attempts=1, allow_deaths=deaths), current,
+                      EventParty(key, source, members, max_attempts=1,
+                                 allow_deaths=deaths, build_basis=basis), current,
                       role, entry.get('source_damage'), entry.get('max_hp')))
     return result
 

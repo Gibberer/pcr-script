@@ -53,6 +53,9 @@ class EventFormation:
     def resolve_requirement(self, requirement, actual):
         return requirement
 
+    def member_readiness(self, requirement, actual):
+        return readiness(self.resolve_requirement(requirement, actual), actual)
+
     def __init__(self, ui: EventUI) -> None:
         self.ui = ui
         self.observed = {}
@@ -97,6 +100,9 @@ class EventFormation:
         candidate = normalized(expected_name or identity or displayed)
         same_base = candidate.split("(")[0] == displayed.split("(")[0]
         name = candidate if same_base else displayed
+        prior = self.observed.get(normalized(name))
+        reusable_skill = (prior is not None and prior.identity_verified and prior.skill_level is not None
+                          and prior.observed_at is not None and 0 <= time.time()-prior.observed_at < 3600)
         actual = CharacterStatus(name=name, level=s.number((535, 100, 585, 130)),
                                  rank=s.number((775, 100, 810, 130)), stars=count_stars(s.image))
         actual.identity_verified = bool(identity == name and same_base)
@@ -106,7 +112,8 @@ class EventFormation:
         if equipment is not None:
             actual.unique, actual.unique2 = equipment
         actual.evidence = str(self.ui.save("character_"+normalized(name)+evidence_suffix, s))
-        if full and (verify_skills or not actual.identity_verified):
+        if full and (verify_skills or not actual.identity_verified
+                     or (not reusable_skill and not self.infer_costume_from_skills)):
             self.ui.click(s.find("技能", (620, 132, 770, 170), exact=True))
             candidates = None
             if self.infer_costume_from_skills and expected_name is None:
@@ -152,6 +159,8 @@ class EventFormation:
             actual.identity_verified = bool(same_base and skill_identity)
             if actual.identity_verified and face is not None:
                 self.avatars.add(normalized(name), face)
+        elif full and reusable_skill:
+            actual.skill_level = prior.skill_level
         if full:
             self.observed[normalized(name)] = actual
             (self.ui.output / "roster.json").write_text(json.dumps(
@@ -242,11 +251,14 @@ class EventFormation:
                     continue
                 x, y, w, h = rect
                 pos = (x+w//2, y+h//2)
-                actual = self.inspect(pos, rectangle=rect, expected_name=member.name)
+                # A matching public avatar already proves the full costume.
+                # Unknown or ambiguous matches still enter the skill page.
+                actual = self.inspect(pos, rectangle=rect, expected_name=member.name,
+                                      verify_skills=False)
                 if not actual.identity_verified or normalized(actual.name) != wanted:
                     continue
                 found = True
-                reasons = readiness(self.resolve_requirement(member, actual), actual)
+                reasons = self.member_readiness(member, actual)
                 if reasons:
                     failures.append({"character": member.name, "reasons": reasons})
                 else:

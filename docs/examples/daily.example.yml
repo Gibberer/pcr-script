@@ -9,7 +9,10 @@ Accounts: #多账号相关：存账号信息
 Extra:
   dnpath: '' #雷电模拟器路径，例如：F:\leidian\LDPlayer9
 StoryEvent:
-  teams: cache/game/strategies/event_teams.yml # 每期活动按标题匹配作业；未知活动不复用旧队伍
+  source_urls: [] # 本活动优先攻略链接；未填写时自动搜索
+  discover_sources: true
+  allow_local_trials: true # 解析缺培养时按账号状态有限试打，记录假设与尝试
+  use_local_teams: false # 旧 YAML 方案的过渡兼容；默认不依赖本地作业
   first_clear: false # 首日验证待办，日常不执行首通
   bosses: false # 未通关首领留待活动首日实测
   stories: true
@@ -21,7 +24,10 @@ StoryEvent:
   timeout: 1800
 RevivalEvent:
   account_key: default # 同一账号保持不变；切换账号时使用不同值
-  teams: cache/game/strategies/revival_teams.yml
+  source_urls: [] # 本复刻活动优先攻略链接
+  discover_sources: true
+  allow_local_trials: true
+  use_local_teams: false
   timeout: 2400
   battle_timeout: 220
 Gift:
@@ -78,11 +84,12 @@ Task: #配置执行任务,配置任务名称，如果需要传入参数在下面
 Dungeon:
   area: 四彩的灵峰
   source_urls: [] # 本地下城优先使用的攻略链接
-  teams: cache/game/strategies/dungeon_teams.yml
+  discover_sources: true
+  use_local_teams: false # 旧 YAML 方案的过渡兼容
   timeout: 3600
   battle_timeout: 220
   max_battles: 30
-  allow_local_trials: false
+  allow_local_trials: true # 目标与五人身份明确但培养不全时按账号现状有限试打
   preflight: true
   audit_only: false
   auto_equip: false

@@ -117,7 +117,50 @@ def abyss_candidate(party: dict) -> dict:
                 document=party, notes=party.get('notes', ''), pending=party['pending'])
 
 
-def dungeon_plan(report: dict, area: str):
+def event_parties(report: dict, area: str, difficulty: str, mode: int) -> list[EventParty]:
+    """Use only complete parties for the exact live boss scope."""
+    result = []
+    seen = set()
+    for party in report.get('parties', []):
+        scope = party.get('scope', {})
+        if (scope.get('area') != area or scope.get('difficulty') != difficulty
+                or scope.get('mode') != mode or missing_fields(party)):
+            continue
+        converted = to_event_party(party)
+        if converted.name not in seen:
+            seen.add(converted.name)
+            result.append(converted)
+    return result
+
+
+def event_trial_parties(report: dict, area: str, difficulty: str, mode: int) -> list[EventParty]:
+    """Keep incomplete guide builds as clearly marked account-trial seeds."""
+    result = []
+    for party in report.get('parties', []):
+        scope = party.get('scope', {})
+        members = party.get('members', [])
+        names = [m.get('name') for m in members]
+        if (scope.get('area') != area or scope.get('difficulty') != difficulty
+                or scope.get('mode') != mode or not party.get('scope_verified')
+                or party.get('region') not in ('cn', 'unknown')
+                or len(names) != 5 or len(set(names)) != 5
+                or any(not isinstance(n, str) or not n.strip() or n.startswith('unit:') for n in names)):
+            continue
+        assumptions = list(party.get('pending', []))
+        requirements = []
+        for member in members:
+            instant = member.get('instant', {}).get('value')
+            if type(instant) is not bool:
+                instant = True
+                assumptions.append(member['name']+'.SET未知，试打暂按开启')
+            requirements.append(MemberRequirement(member['name'], 1, 1, 1,
+                None, None, instant, 1))
+        result.append(EventParty(party['id']+'-trial', party['source'], requirements,
+            max_attempts=1, build_basis='local_trial', assumptions=assumptions))
+    return result
+
+
+def dungeon_plan(report: dict, area: str, *, allow_local_trials: bool = False):
     """Choose one source's complete, non-overlapping route; never merge guides."""
     from .dungeon_party import DungeonParty, route_conflicts
     candidates = {}
@@ -133,6 +176,41 @@ def dungeon_plan(report: dict, area: str):
     for route in candidates.values():
         # Multiple teams for one phase need route ordering/HP reasoning, not an
         # arbitrary choice. This first adapter supports one team per phase only.
+        phases = [p.phase for p in route if p.floor == 5]
+        if (area == '四彩的灵峰' and {p.floor for p in route} == set(range(1, 6))
+                and len(phases) == 4 and len(set(phases)) == 4
+                and all(any(season in phase for phase in phases) for season in '春夏秋冬')
+                and not route_conflicts(route)):
+            return route
+    if not allow_local_trials:
+        return []
+    trial_routes = {}
+    for party in report.get('parties', []):
+        scope = party.get('scope', {})
+        floor, phase = scope.get('floor'), scope.get('phase', '')
+        members = party.get('members', [])
+        names = [m.get('name') for m in members]
+        if (scope.get('area') != area or not party.get('scope_verified')
+                or party.get('region') not in ('cn', 'unknown')
+                or type(floor) is not int or floor not in range(1, 6)
+                or floor == 5 and not phase
+                or len(names) != 5 or len(set(names)) != 5
+                or any(not isinstance(n, str) or not n.strip() or n.startswith('unit:') for n in names)):
+            continue
+        requirements = []
+        assumptions = list(party.get('pending', []))
+        for member in members:
+            instant = member.get('instant', {}).get('value')
+            if type(instant) is not bool:
+                instant = True
+                assumptions.append(member['name']+'.SET未知，试打暂按开启')
+            requirements.append(MemberRequirement(member['name'], 1, 1, 1,
+                None, None, instant, 1))
+        key = party['id']+'-trial'
+        trial_routes.setdefault(party['source'], []).append(DungeonParty(key, floor, phase,
+            EventParty(key, party['source'], requirements, max_attempts=1,
+                build_basis='local_trial', assumptions=assumptions), use_current_build=True))
+    for route in trial_routes.values():
         phases = [p.phase for p in route if p.floor == 5]
         if (area == '四彩的灵峰' and {p.floor for p in route} == set(range(1, 6))
                 and len(phases) == 4 and len(set(phases)) == 4

@@ -69,4 +69,4 @@ GUI 的 `MainWindow.DailyEditor.cs` 管理选中项编辑、顺序和未保存�
 
 深域与来源共享辅助模块：`tasks/strategy_inputs.py` 统一用户链接及UP评论引用；`tasks/strategy_tables.py` 解析简单通用头像表；两者均非独立任务。`game_ui/character_stars.py` 为默认关闭的五星培养/兑换与回执能力，供深域任务组合使用，非独立注册入口。
 
-视频解析辅助模块：`tasks/strategy_video.py` 负责来源到字段证据的获取/关联，`tasks/strategy_document.py` 保留未知与冲突并适配正式任务，`extras/guide_media.py` 下载/校验视频，`game_ui/avatar_assets.py` 自动准备公共头像与国服身份，`game_ui/guide_vision.py` 提供视频布局识别。均不独立注册任务，由 `abyss_push` / `dungeon_first_clear` 共用；两任务支持 `prepare_only`，详见 [视频解析与复核](video-strategies.md)。
+视频解析辅助模块：`tasks/strategy_video.py` 负责来源到字段证据的获取/关联，`tasks/strategy_document.py` 保留未知与冲突并适配正式任务，`tasks/strategy_party_pool.py` 整理活动首领的自动来源、有限试打和职责替补候选，`tasks/strategy_trial.py` 以账号实时观察核验试打编队；`extras/guide_media.py` 下载/校验视频，`game_ui/avatar_assets.py` 自动准备公共头像与国服身份，`game_ui/guide_vision.py` 提供视频布局识别。均不独立注册任务，由深域、地下城首通、剧情活动及复刻活动复用；深域和地下城支持 `prepare_only`，详见 [视频解析与复核](video-strategies.md)。

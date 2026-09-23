@@ -15,8 +15,8 @@ import cv2 as cv
 import numpy as np
 
 from ..game_ui.screen import EventUIError, normalized
-from .event_formation import EventFormation
-from .event_strategy import load_parties
+from .strategy_trial import TrialFormation
+from .strategy_party_pool import boss_parties, next_boss_party
 from ..templates import ImageTemplate
 
 
@@ -239,8 +239,9 @@ class EventBattles:
     def __init__(self, runner: CampaignClean) -> None:
         self.r = runner
         self.ui = runner.ui
-        self.formation = EventFormation(self.ui)
+        self.formation = TrialFormation(self.ui)
         self.combat = EventCombat(runner)
+        self.source_pools = {}
 
     def quest_catalog(self):
         self.r.quests()
@@ -300,11 +301,14 @@ class EventBattles:
     def bosses(self) -> None:
         title = self.r.home().text((0, 160, 940, 460))
         self.r.report["event"] = title
+        source_area = None
+        source_identity_checked = False
         for difficulty, label in (("scenario", "剧本模式"), ("special", "特别"), ("special_plus", "特别战斗\\+")):
             attempts = defaultdict(int)
             total = 0
             previous = None
             while total < self.r.options.get("max_boss_attempts", 10):
+                getattr(self.r, 'check_deadline', lambda: None)()
                 s = self.r.quests(bosses=True)
                 row = s.find(label, (740, 200, 930, 400), exact=True)
                 if not row:
@@ -330,13 +334,37 @@ class EventBattles:
                 else:
                     if mode is None:
                         raise EventUIError("未能确认特别战斗当前模式")
-                    parties = load_parties(self.r.options.get("teams", "cache/game/strategies/event_teams.yml"), title, difficulty, mode)
-                    available = [p for p in parties if attempts[(mode, p.name)] < p.max_attempts]
-                    if not available:
+                    if not source_identity_checked:
+                        source_identity_checked = True
+                        try:
+                            from ..news import fetch_event_news
+                            current = fetch_event_news().hatsune
+                            if current and normalized(current.name) in normalized(title):
+                                source_area = current.name
+                        except (OSError, ValueError, KeyError, TypeError, AttributeError) as error:
+                            self.r.report.setdefault('source_errors', []).append('活动名称核验失败：'+str(error)[:160])
+                    if source_area is None:
+                        self.r.report['pending'].append('当前活动名称未与活动情报核对，不能据此搜索首领作业')
+                        self.r.home()
+                        break
+                    key = (source_area, difficulty, mode)
+                    if key not in self.source_pools:
+                        found, search = boss_parties(self.r.options, kind='event', area=source_area,
+                            difficulty=difficulty, mode=mode,
+                            default_path='cache/game/strategies/event_teams.yml',
+                            check=self.r.check_deadline)
+                        self.source_pools[key] = found
+                        if search:
+                            self.r.report.setdefault('source_searches', []).append(search)
+                            if search.get('avatar_assets'):
+                                from ..game_ui.avatar_assets import ensure_avatar_index
+                                self.formation.avatars, _ = ensure_avatar_index(
+                                    self.r.options.get('sources', {}).get('avatars'), check=self.r.check_deadline)
+                    party = next_boss_party(self.source_pools[key], attempts, mode)
+                    if party is None:
                         self.r.report["pending"].append(f"{difficulty} 模式{mode} 无可用达标队伍；请查看 roster.json/作业配置")
                         self.r.home()
                         break
-                    party = available[0]
                 state = normalized(detail.text((40, 65, 930, 440)))
                 if previous == (mode, party.name if party else None, state) and total > 0 and party:
                     attempts[(mode, party.name)] = party.max_attempts
@@ -350,7 +378,8 @@ class EventBattles:
                     ready, selection = self.formation.select(party)
                     if not ready:
                         attempts[(mode, party.name)] = party.max_attempts
-                        self.r.report["battles"].append({"boss": difficulty, "mode": mode, "party": party.name, "unready": selection})
+                        self.r.report["battles"].append({"boss": difficulty, "mode": mode, "party": party.name,
+                            "build_basis": party.build_basis, "assumptions": party.assumptions, "unready": selection})
                         self.r.home()
                         continue
                     attempts[(mode, party.name)] += 1
@@ -358,6 +387,8 @@ class EventBattles:
                 total += 1
                 self.r.report["battles"].append({"boss": difficulty, "mode": mode,
                     "party": party.name if party else "当前队伍/固定支援", "source": party.source if party else "游戏固定支援",
+                    "build_basis": party.build_basis if party else 'fixed_support',
+                    "assumptions": party.assumptions if party else [],
                     **vars(result)})
                 if result.outcome in ("retreated", "failed", "blocked") and party:
                     attempts[(mode, party.name)] = party.max_attempts
