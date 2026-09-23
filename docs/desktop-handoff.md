@@ -51,7 +51,7 @@ dotnet build desktop/PcrDesktop/PcrDesktop.csproj -c Release -o artifacts/gui -p
 
 ## 2026-09-22 深域与通用攻略搜索
 
-Python目录新增 `abyss_push` 按需专项；通用攻略搜索现为内部共享模块，任务链接分别放在 `Abyss.source_urls`、`Dungeon.source_urls`，GUI不列出来源搜索任务。WPF补充属性、失败上限和隔离浏览器会话选项中文标签。正式来源搜索新增根requirements中的Playwright，使用系统Edge headless，不要求用户额外安装Node。深域实战与待验证边界见game-knowledge/abyss.md。先前的本地Framework编译记录早于本次配置调整，需下次有SDK环境时再构建。
+Python目录新增 `abyss_push` 按需专项；通用攻略搜索现为内部共享模块，任务链接分别放在 `Abyss.source_urls`、`Dungeon.source_urls`，GUI不列出来源搜索任务。WPF补充属性、失败上限和隔离浏览器会话选项中文标签。正式来源搜索新增根requirements中的Playwright，使用系统Edge headless，不要求用户额外安装Node。深域实战与待验证边界见game-knowledge/abyss.md。提交 `d250b84` 后使用忽略目录中的本地 .NET 10 SDK 重新构建，Framework GUI 零警告、零错误；后续工作区目录调整仍需重新验证。
 
 
 ## 2026-09-23 PR 准备与 GUI 交互收尾
