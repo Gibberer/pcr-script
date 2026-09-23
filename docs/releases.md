@@ -1,6 +1,6 @@
 # GUI 构建与发布
 
-主分支为 `master`。GUI 源码、GUI Python 接口或 GUI 烟测脚本变更时，PR 和分支提交执行 Windows GUI 构建并上传 Artifact；其他 Python、任务、依赖和默认配置变更只运行 Python 回归。发布仅由 `gui-v*` 标签触发，标签提交必须已经包含在 `origin/master` 中；标签发布始终重新构建 GUI。
+主分支为 `master`。每个 PR 都执行轻量 GUI 范围检查；只有 GUI 源码、GUI Python 接口或 GUI 烟测脚本变更时才执行 Windows GUI 构建并上传 Artifact，无 GUI 改动时 `build` 检查明确跳过。普通分支提交也仅在这些文件变更时触发 GUI 构建；其他 Python、任务、依赖和默认配置变更只运行 Python 回归。发布仅由 `gui-v*` 标签触发，标签提交必须已经包含在 `origin/master` 中；标签发布始终重新构建 GUI。
 
 ## 本地验证
 
