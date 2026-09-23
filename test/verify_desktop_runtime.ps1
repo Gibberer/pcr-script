@@ -9,7 +9,7 @@ $fixture = Join-Path $workspace ('cache/build/runtime-smoke-' + [guid]::NewGuid(
 $source = Join-Path $fixture 'source'
 $target = Join-Path $fixture 'download'
 New-Item -ItemType Directory -Path $source -Force | Out-Null
-foreach ($item in @('pcrscript', 'images', 'requirements.txt', 'desktop/runtime_defaults.yml')) {
+foreach ($item in @('pcrscript', 'images', 'requirements.txt', 'runtime_defaults.yml')) {
     $destination = Join-Path $source $item
     New-Item -ItemType Directory -Path (Split-Path $destination) -Force | Out-Null
     Copy-Item -LiteralPath (Join-Path $workspace $item) -Destination $destination -Recurse
@@ -47,7 +47,8 @@ if ($process.ExitCode -ne 0) {
 foreach ($excluded in @('scripts', 'docs', 'desktop/PcrDesktop', 'README.md', 'docs/examples/daily.example.yml', 'daily_task.py')) {
     if (Test-Path (Join-Path $target $excluded)) { throw "Unexpected download: $excluded" }
 }
-if (-not (Test-Path (Join-Path $target 'desktop/runtime_defaults.yml')) -or
+if (-not (Test-Path (Join-Path $target 'runtime_defaults.yml')) -or
+    (Test-Path (Join-Path $target 'desktop/runtime_defaults.yml')) -or
     (Test-Path (Join-Path $target 'pcrscript/runtime_defaults.yml'))) {
     throw 'GUI runtime defaults missing or duplicated in the core checkout'
 }

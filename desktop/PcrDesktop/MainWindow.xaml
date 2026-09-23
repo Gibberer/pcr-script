@@ -114,8 +114,8 @@
           <TextBlock Text="本地 Python 工程" FontSize="18" FontWeight="SemiBold"/>
           <TextBlock Text="工程目录" Margin="0,12,0,0"/><DockPanel><Button Content="选择…" DockPanel.Dock="Right" Click="Browse_Click"/><TextBox x:Name="WorkspaceBox"/></DockPanel>
           <TextBlock Text="运行用 Python（例如 工程\.venv\Scripts\python.exe）"/><TextBox x:Name="PythonBox"/>
-          <TextBlock x:Name="EmulatorLabel" Text="雷电目录：尚未设置" Margin="0,8,0,10"/>
-          <Button Content="重新配置工程 / 模拟器…" Click="Setup_Click" HorizontalAlignment="Left"/>
+          <TextBlock x:Name="EmulatorLabel" Text="设备连接：ADB" Margin="0,8,0,10"/>
+          <Button Content="重新配置工程 / 设备…" Click="Setup_Click" HorizontalAlignment="Left"/>
           <TextBlock Text="创建环境使用的 Python 3.12+ 路径或命令"/><TextBox x:Name="BootstrapBox"/>
           <WrapPanel><Button Content="下载 Python（官网）" Click="PythonDownload_Click"/><Button Content="检测 Python" Click="DetectPython_Click"/></WrapPanel>
           <TextBlock Text="没有 Python 时先从官网安装（建议 3.12 x64，勾选 PATH），然后检测并安装依赖。依赖下载需要联网。" TextWrapping="Wrap"/>

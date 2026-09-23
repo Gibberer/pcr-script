@@ -18,7 +18,7 @@ from pcrscript.tasks.registry import registered_tasks
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('task', choices=registered_tasks())
-    parser.add_argument('--config', default='daily_config.yml')
+    parser.add_argument('--config', default='daily_config.yml' if Path('daily_config.yml').exists() else 'runtime_defaults.yml')
     parser.add_argument('--args', default='[]', help='Task positional arguments as a JSON list')
     args = parser.parse_args()
     try:

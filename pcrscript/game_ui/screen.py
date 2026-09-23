@@ -95,7 +95,9 @@ class EventScreen:
 class EventUI:
     def __init__(self, driver, output="cache/agent/ui", timeout=45):
         self.driver = driver
-        self.width, self.height = driver.get_screen_size()
+        # The captured frame, rather than wm size or emulator metadata, is
+        # authoritative for design-coordinate conversion.
+        self.width, self.height = 0, 0
         self.output = Path(output)
         self.output.mkdir(parents=True, exist_ok=True)
         self.timeout = timeout
@@ -144,6 +146,8 @@ class EventUI:
         return self.output / f"{name}.png"
 
     def click(self, pos, delay=.8):
+        if not self.width or not self.height:
+            self.capture(ocr=False)
         if isinstance(pos, TextBox):
             pos = pos.center
         x, y = pos
@@ -181,6 +185,8 @@ class EventUI:
         return EventScreen(screen.image, items)
 
     def swipe(self, start, end, duration=450):
+        if not self.width or not self.height:
+            self.capture(ocr=False)
         conv = lambda p: (round(p[0]*self.width/960), round(p[1]*self.height/540))
         self.driver.swipe(conv(start), conv(end), duration)
         time.sleep(.8)

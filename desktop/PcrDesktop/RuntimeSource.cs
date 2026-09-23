@@ -5,7 +5,7 @@ namespace PcrDesktop;
 /// <summary>Download only the files needed by the Python runtime.</summary>
 public static class RuntimeSource
 {
-    private const string Patterns = "/pcrscript/\n/images/\n/requirements.txt\n/desktop/runtime_defaults.yml\n";
+    private const string Patterns = "/pcrscript/\n/images/\n/requirements.txt\n/runtime_defaults.yml\n";
 
     public static async Task Download(string repository, string branch, string target, Action<string>? log = null,
         bool coreOnly = true)
@@ -38,13 +38,13 @@ public static class RuntimeSource
     {
         var sparse = (await Backend.Command("git", ["config", "--bool", "--default=false", "core.sparseCheckout"], target)).Trim();
         if (sparse == "true")
-            await Backend.Command("git", ["sparse-checkout", "add", "/desktop/runtime_defaults.yml"], target);
+            await Backend.Command("git", ["sparse-checkout", "add", "/runtime_defaults.yml"], target);
     }
 
     private static void Validate(string target)
     {
         if (!SetupWindow.IsProject(target) || !File.Exists(Path.Combine(target, "pcrscript", "desktop.py")) ||
-            !File.Exists(Path.Combine(target, "desktop", "runtime_defaults.yml")))
+            !File.Exists(Path.Combine(target, "runtime_defaults.yml")))
             throw new IOException("下载的分支缺少新版 GUI 运行接口，请选择包含该接口的分支");
     }
 }

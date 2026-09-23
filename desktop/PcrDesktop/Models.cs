@@ -34,6 +34,8 @@ public sealed class Settings
     public string Workspace { get; set; } = "";
     public string Python { get; set; } = "";
     public string EmulatorDirectory { get; set; } = "";
+    public string AdbExecutable { get; set; } = "adb";
+    public string AdbSerial { get; set; } = "";
     public bool SetupCompleted { get; set; }
     public string BootstrapPython { get; set; } = "python";
     public string Config { get; set; } = "daily_config.yml";

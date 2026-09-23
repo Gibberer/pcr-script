@@ -18,8 +18,7 @@ class DesktopTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
-        (self.root / 'desktop').mkdir()
-        (self.root / 'desktop' / 'runtime_defaults.yml').write_bytes((Path(__file__).parents[1] / 'desktop' / 'runtime_defaults.yml').read_bytes())
+        (self.root / 'runtime_defaults.yml').write_bytes((Path(__file__).parents[1] / 'runtime_defaults.yml').read_bytes())
         self.root_patch = patch.object(desktop, 'ROOT', self.root)
         self.root_patch.start()
         self.config = self.root / 'daily_config.yml'
@@ -134,7 +133,7 @@ class DesktopTests(unittest.TestCase):
 
     def test_single_task_without_runtime_path_stops_before_device_connection(self):
         with patch('pcrscript.runtime.robot_from_config') as connect, patch.object(desktop, 'read_config', side_effect=AssertionError('must not read YAML')):
-            with self.assertRaisesRegex(ValueError, '雷电路径'):
+            with self.assertRaisesRegex(ValueError, 'Extra'):
                 desktop.execute(self.root / 'absent.yml', dict(task='caravan', options={}), '00000000-0000-0000-0000-000000000001')
             connect.assert_not_called()
 
@@ -144,7 +143,7 @@ class DesktopTests(unittest.TestCase):
              patch('pcrscript.runtime.run_script') as run):
             desktop.execute(self.config, dict(task='daily'), '00000000-0000-0000-0000-000000000001')
         start.assert_called_once_with('C:/synthetic')
-        run.assert_called_once_with(self.original, False)
+        run.assert_called_once_with(self.original)
 
     def test_memory_dispatch_keeps_callers_options_unchanged(self):
         from pcrscript.runtime import run_task_with_config
@@ -157,7 +156,7 @@ class DesktopTests(unittest.TestCase):
 
     def test_new_config_starts_empty_and_generates_independent_file(self):
         view = desktop.new_config()
-        self.assertEqual(desktop.runtime_defaults_path(), self.root / 'desktop' / 'runtime_defaults.yml')
+        self.assertEqual(desktop.runtime_defaults_path(), self.root / 'runtime_defaults.yml')
         self.assertEqual(view['plan'], [])
         self.assertNotIn('Accounts', view['options'])
         view['plan'] = [dict(enabled=True, name='caravan', args=[])]

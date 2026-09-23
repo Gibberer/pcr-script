@@ -17,8 +17,8 @@ sys.path.insert(0, str(ROOT))
 
 
 def runtime_defaults_path() -> Path:
-    """The GUI owns its blank-config defaults; Python reads them at runtime."""
-    return ROOT / 'desktop' / 'runtime_defaults.yml'
+    """Shared default configuration for GUI and command-line entry points."""
+    return ROOT / 'runtime_defaults.yml'
 
 PROTOCOL = 1
 LABELS = {
@@ -212,8 +212,11 @@ def save_config(path: Path, request: dict[str, Any]) -> dict[str, Any]:
     options = request['options']
     if not isinstance(options, dict) or any(k in options for k in ('Accounts', 'Task', 'Desktop')):
         raise ValueError('公共配置必须是对象，不可覆盖账号和任务列表')
-    if not isinstance(options.get('Extra'), dict) or not isinstance(options['Extra'].get('dnpath'), str):
-        raise ValueError('Extra.dnpath 必须是雷电路径字符串')
+    if not isinstance(options.get('Extra'), dict) or not isinstance(options['Extra'].get('dnpath', ''), str):
+        raise ValueError('Extra.dnpath 必须是字符串')
+    for key in ('adb_path', 'adb_serial'):
+        if not isinstance(options['Extra'].get(key, ''), str):
+            raise ValueError(f'Extra.{key} 必须是字符串')
     source = request.get('source')
     if source is not None:
         if path.exists():
@@ -277,18 +280,26 @@ def execute(path: Path, request: dict[str, Any], run_id: str) -> None:
     extra = config.get('Extra')
     section = {'abyss_push': 'Abyss', 'dungeon_first_clear': 'Dungeon'}.get(name)
     prepare_only = bool(section and isinstance(config.get(section), dict) and config[section].get('prepare_only') is True)
-    if not prepare_only and (not isinstance(extra, dict) or not isinstance(extra.get('dnpath'), str) or not extra['dnpath'].strip()):
-        raise ValueError('请先配置雷电路径；GUI 不使用 ADB')
+    if not prepare_only and not isinstance(extra, dict):
+        raise ValueError('请先配置 Extra 运行环境')
     with RunSession(name, run_id=run_id):
         if name == 'daily':
-            from pcrscript.runtime import open_leidian_emulator, run_script
+            from pcrscript.runtime import open_leidian_emulator, run_script, select_driver
             tasks = next(iter(config.get('Task', {}).values()), [])
             validate_plan([dict(enabled=True, name=t[0], args=t[1:]) for t in tasks])
             if not tasks:
                 raise ValueError('没有启用的每日任务')
-            if open_leidian_emulator(config['Extra']['dnpath']) != 0:
-                raise RuntimeError('雷电启动失败')
-            run_script(config, False)
+            dnpath = str(config['Extra'].get('dnpath') or '').strip()
+            if dnpath:
+                if open_leidian_emulator(dnpath) != 0:
+                    raise RuntimeError('雷电启动失败')
+            else:
+                import subprocess
+                from pcrscript.run_session import clock
+                driver = select_driver(config)
+                subprocess.run([driver.adb_path, '-s', driver.device_name, 'shell', 'monkey', '-p', 'com.bilibili.priconne', '1'], check=True)
+                clock.sleep(30)
+            run_script(config)
         else:
             args = request.get('args', [])
             validate_plan([dict(enabled=True, name=name, args=args)])

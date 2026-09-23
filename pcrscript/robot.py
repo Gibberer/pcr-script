@@ -51,6 +51,15 @@ class Robot:
             num += 1
         self._name = name
 
+    def update_screenshot_size(self, screenshot):
+        """Keep legacy image actions aligned with the current captured frame."""
+        shape = getattr(screenshot, 'shape', None)
+        if not isinstance(shape, tuple):
+            return  # Test doubles without pixels keep the driver's reported size.
+        if len(shape) < 2 or shape[0] <= 0 or shape[1] <= 0:
+            raise RuntimeError('设备截图为空，不能换算点击坐标')
+        self.deviceheight, self.devicewidth = shape[:2]
+
     @trace
     def changeaccount(self, account=None, password=None, logpath=None):
         if logpath:
@@ -228,6 +237,7 @@ class Robot:
             action_start_time = time.monotonic()
             while not action.done():
                 screenshot = self.driver.screenshot()
+                self.update_screenshot_size(screenshot)
                 action.do(screenshot, self)
                 if delay > 0:
                     time.sleep(delay)

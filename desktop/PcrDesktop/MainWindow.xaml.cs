@@ -46,7 +46,7 @@ public partial class MainWindow : Window
         RepositoryBox.Text = _settings.Repository;
         BranchBox.Text = _settings.Branch;
         DownloadScopeBox.SelectedIndex = _settings.DownloadCoreOnly ? 0 : 1;
-        EmulatorLabel.Text = "雷电目录：" + _settings.EmulatorDirectory;
+        EmulatorLabel.Text = DeviceLabel(_settings);
         PlanGrid.ItemsSource = _plan;
         _plan.CollectionChanged += (_, _) => UpdatePlanLabels();
         ResetDailyEditor();
@@ -63,6 +63,9 @@ public partial class MainWindow : Window
     }
 
     private void Message(string text) => MessageText.Text = text;
+    private static string DeviceLabel(Settings settings) => string.IsNullOrWhiteSpace(settings.EmulatorDirectory)
+        ? "设备连接：ADB" + (string.IsNullOrWhiteSpace(settings.AdbSerial) ? "（自动选择唯一设备）" : " · " + settings.AdbSerial)
+        : "雷电目录：" + settings.EmulatorDirectory;
     private void Log(string text) => Dispatcher.Invoke(() =>
     {
         // Bound UI memory while the complete log remains in the run directory.
@@ -89,7 +92,8 @@ public partial class MainWindow : Window
             Workspace = workspace, Python = PythonBox.Text.Trim(), Config = ConfigBox.Text.Trim(),
             BootstrapPython = BootstrapBox.Text.Trim(), Repository = RepositoryBox.Text.Trim(), Branch = BranchBox.Text.Trim(),
             RecentConfigs = [.. _settings.RecentConfigs],
-            EmulatorDirectory = _settings.EmulatorDirectory, SetupCompleted = _settings.SetupCompleted,
+            EmulatorDirectory = _settings.EmulatorDirectory, AdbExecutable = _settings.AdbExecutable,
+            AdbSerial = _settings.AdbSerial, SetupCompleted = _settings.SetupCompleted,
             DownloadCoreOnly = DownloadScopeBox.SelectedIndex == 0
         };
     }
@@ -236,8 +240,6 @@ public partial class MainWindow : Window
             var options = special ? ReadSpecialOptions() : ReadOptions();
             var section = _choices.FirstOrDefault(t => t.Name == task)?.ConfigSection;
             bool prepareOnly = (task is "abyss_push" or "dungeon_first_clear") && section is not null && options[section]?["prepare_only"]?.GetValueKind() == JsonValueKind.True;
-            if (!prepareOnly && (_choices.FirstOrDefault(t => t.Name == task)?.RequiresDevice ?? true) && string.IsNullOrWhiteSpace(options["Extra"]?["dnpath"]?.ToString()))
-                throw new InvalidOperationException("请先在配置选项页填写雷电安装目录；单任务无需保存配置文件");
             request["options"] = options;
         }
         _runSettings = _loadedSettings;

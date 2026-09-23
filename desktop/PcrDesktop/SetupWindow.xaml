@@ -3,7 +3,7 @@
   <Grid Margin="26">
     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
     <StackPanel Margin="0,0,0,18"><TextBlock Text="准备运行环境" FontSize="26" FontWeight="SemiBold" Foreground="#172B46"/>
-      <TextBlock Text="选择 Python 工程和雷电目录，即可浏览并执行任务。此处不需要配置文件。" TextWrapping="Wrap" Margin="0,10,0,0" Foreground="#586578"/></StackPanel>
+      <TextBlock Text="选择 Python 工程与设备连接方式，即可浏览并执行任务。此处不需要配置文件。" TextWrapping="Wrap" Margin="0,10,0,0" Foreground="#586578"/></StackPanel>
     <ScrollViewer x:Name="SetupFields" Grid.Row="1" VerticalScrollBarVisibility="Auto"><StackPanel>
       <TextBlock Text="1  项目工程目录" FontSize="18" FontWeight="SemiBold"/>
       <DockPanel Margin="0,8,0,0"><Button DockPanel.Dock="Right" Content="选择目录…" Click="ProjectBrowse_Click"/><TextBox x:Name="ProjectPath" TextChanged="Project_Changed"/></DockPanel>
@@ -17,9 +17,14 @@
         </ComboBox>
         <DockPanel><Button DockPanel.Dock="Right" x:Name="DownloadButton" Content="从 GitHub 下载项目" Click="Download_Click"/><TextBox x:Name="Branch" ToolTip="分支"/></DockPanel>
       </StackPanel>
-      <TextBlock Text="2  目标雷电模拟器目录" FontSize="18" FontWeight="SemiBold" Margin="0,16,0,0"/>
+      <TextBlock Text="2  设备连接" FontSize="18" FontWeight="SemiBold" Margin="0,16,0,0"/>
       <DockPanel Margin="0,8,0,0"><Button DockPanel.Dock="Right" Content="选择目录…" Click="EmulatorBrowse_Click"/><TextBox x:Name="EmulatorPath"/></DockPanel>
-      <TextBlock Text="选择包含 ldconsole.exe 的雷电安装目录。不会启动或操作模拟器。" TextWrapping="Wrap" Foreground="#586578"/>
+      <TextBlock Text="使用雷电后台驱动时选择包含 ldconsole.exe 的目录；留空时使用 ADB。" TextWrapping="Wrap" Foreground="#586578"/>
+      <TextBlock Text="ADB 程序（不使用雷电时必需）" Margin="0,10,0,0"/>
+      <DockPanel><Button DockPanel.Dock="Right" Content="选择 adb.exe…" Click="AdbBrowse_Click"/><TextBox x:Name="AdbPath" ToolTip="填 adb 使用系统 PATH，或选择 Android Platform Tools 中的 adb.exe"/></DockPanel>
+      <TextBlock Text="ADB 设备序列号（连接多个设备时必填）" Margin="0,8,0,0"/>
+      <TextBox x:Name="AdbSerial" ToolTip="填写 adb devices 列出的目标序列号；只有一个已授权设备时可留空"/>
+      <TextBlock Text="留空雷电目录会走 ADB。可填 adb 使用系统 PATH；连接多个设备时必须指定序列号。" TextWrapping="Wrap" Foreground="#586578"/>
       <TextBlock Text="3  Python 运行环境" FontSize="18" FontWeight="SemiBold" Margin="0,20,0,0"/>
       <TextBlock Text="自动使用项目中的 .venv；也可选择已有 Python 环境。" Foreground="#586578" Margin="0,8,0,0"/>
       <DockPanel><Button DockPanel.Dock="Right" Content="选择 Python…" Click="PythonBrowse_Click"/><TextBox x:Name="PythonPath"/></DockPanel>

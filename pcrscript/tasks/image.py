@@ -37,7 +37,9 @@ class ImageTask(BaseTask):
 
     def action_once(self, action: Action) -> bool:
         action.bindTask(self)
-        action.do(self.robot.driver.screenshot(), self.robot)
+        screenshot = self.robot.driver.screenshot()
+        self.robot.update_screenshot_size(screenshot)
+        action.do(screenshot, self.robot)
         return action.done()
 
     def template_match(self, screenshot: Screenshot, template: Template) -> Point | None:

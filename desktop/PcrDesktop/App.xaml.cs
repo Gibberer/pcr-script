@@ -78,10 +78,10 @@ public partial class App : Application
                         // rules did not include the relocated root defaults.
                         await Backend.Command("git", ["sparse-checkout", "set", "--no-cone", "--stdin"], e.Args[2],
                             "/pcrscript/\n/images/\n/requirements.txt\n");
-                        if (File.Exists(Path.Combine(e.Args[2], "desktop", "runtime_defaults.yml")))
+                        if (File.Exists(Path.Combine(e.Args[2], "runtime_defaults.yml")))
                             throw new InvalidOperationException("旧版核心下载范围未被模拟");
                         await RuntimeSource.IncludeRootDefaultsForUpdate(e.Args[2]);
-                        if (!File.Exists(Path.Combine(e.Args[2], "desktop", "runtime_defaults.yml")))
+                        if (!File.Exists(Path.Combine(e.Args[2], "runtime_defaults.yml")))
                             throw new InvalidOperationException("源码更新未恢复根目录默认选项");
                     }
                 }

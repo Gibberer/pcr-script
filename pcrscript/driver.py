@@ -11,6 +11,7 @@ import subprocess
 import os
 import time
 import enum
+import re
 
 class WHType(enum.Enum):
     Image = 1
@@ -48,53 +49,56 @@ class Driver(metaclass=ABCMeta):
 class ADBDriver(Driver):
     png = True
 
-    def __init__(self, device_name):
+    def __init__(self, device_name, adb_path="adb"):
         super().__init__()
         self.device_name = device_name
+        self.adb_path = adb_path
         self.device_width = 0
         self.device_height = 0
 
     def click(self, x, y):
-        self._shell("input tap {} {}".format(x, y))
+        self._run("shell", "input", "tap", str(x), str(y))
 
     def input(self, text):
-        self._shell("input text {}".format(text))
+        self._run("shell", "input", "text", text)
 
     def screenshot(self, output="screen_shot.png"):
         self._assert_adb_allowed()
-        if ADBDriver.png:
-            self._shell("screencap -p /sdcard/opsd.png")
-            output = "{}-{}".format(self.device_name, output)
-            self._cmd("pull /sdcard/opsd.png {}".format(output))
-            return cv.imread(output)
-        else:
-            # 该方式没有生成解析png和额外文件的读写过程，相对于-p方式会更快些。
-            p = subprocess.Popen(f"adb -s {self.device_name} exec-out screencap", shell = True, stdout = subprocess.PIPE)
-            #去掉前16个字符是由于多出来的部分，大概是记录元数据的例如头部是：FF FE
-            image_buffer = p.stdout.read()[16:]
-            image = np.frombuffer(image_buffer, np.uint8)
-            width, height = self.get_screen_size()
-            image.shape = (height, width, 4)
-            return image[:,:,[2,1,0]]
+        result = self._run("exec-out", "screencap", "-p")
+        image = cv.imdecode(np.frombuffer(result.stdout, dtype=np.uint8), cv.IMREAD_COLOR)
+        if image is None:
+            raise RuntimeError(f"ADB 设备 {self.device_name} 截图无效")
+        self.device_height, self.device_width = image.shape[:2]
+        return image
 
     def get_screen_size(self) -> Tuple[int, int]:
         if self.device_width and self.device_height:
             return self.device_width, self.device_height
-        self.device_width, self.device_height = map(lambda x: int(x), self._shell("wm size", True).split(":")[-1].split("x"))
+        try:
+            response = self._run("shell", "wm", "size").stdout.decode("utf-8", errors="replace")
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+            response = ""
+        matches = re.findall(r"(\d+)x(\d+)", response)
+        if not matches:
+            image = self.screenshot()
+            return image.shape[1], image.shape[0]
+        self.device_width, self.device_height = map(int, matches[-1])
         return self.device_width, self.device_height
     
 
     def swipe(self, start, end=None, duration=500):
         if not end:
             end = start
-        self._shell("input swipe {} {} {} {} {}".format(
-            *start, *end, duration))
+        self._run("shell", "input", "swipe", *map(str, (*start, *end, duration)))
+
+    def _run(self, *args):
+        return subprocess.run([self.adb_path, "-s", self.device_name, *args], capture_output=True, check=True, timeout=30)
 
     def _shell(self, cmd, ret=False):
         return self._cmd("shell {}".format(cmd))
 
     def _cmd(self, cmd, ret=False):
-        cmd = "adb -s {} {}".format(self.device_name, cmd)
+        cmd = '"{}" -s {} {}'.format(self.adb_path, self.device_name, cmd)
         if ret:
             os.system(cmd)
         else:

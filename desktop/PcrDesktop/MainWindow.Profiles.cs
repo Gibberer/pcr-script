@@ -45,7 +45,9 @@ public partial class MainWindow
             if (File.Exists(path)) return path;
         }
         var daily = Path.Combine(workspace, "daily_config.yml");
-        return File.Exists(daily) ? Path.GetFullPath(daily) : null;
+        if (File.Exists(daily)) return Path.GetFullPath(daily);
+        var defaults = Path.Combine(workspace, "runtime_defaults.yml");
+        return File.Exists(defaults) ? Path.GetFullPath(defaults) : null;
     }
 
     private async Task LoadPreferredConfig()
@@ -64,6 +66,8 @@ public partial class MainWindow
         {
             var defaultFile = Path.Combine(workspace, "daily_config.yml");
             if (File.Exists(defaultFile)) files.Add(Path.GetFullPath(defaultFile));
+            var sharedDefaults = Path.Combine(workspace, "runtime_defaults.yml");
+            if (File.Exists(sharedDefaults)) files.Add(Path.GetFullPath(sharedDefaults));
             var profiles = Path.Combine(workspace, "cache", "desktop", "profiles");
             if (Directory.Exists(profiles)) files.AddRange(Directory.GetFiles(profiles, "*.y*ml"));
         }
@@ -110,7 +114,7 @@ public partial class MainWindow
         ResetDailyEditor();
         MarkConfigSaved();
         ConfigPicker.SelectedIndex = -1;
-        Message("运行选项已就绪；填写雷电路径后可直接运行单任务，整组方案可另行保存");
+        Message("运行选项已就绪；设置雷电目录或连接 ADB 设备后可运行单任务，整组方案可另行保存");
     }
 
     private async void Setup_Click(object sender, RoutedEventArgs e) => await Guard(async () =>
@@ -124,7 +128,7 @@ public partial class MainWindow
         RepositoryBox.Text = settings.Repository; BranchBox.Text = settings.Branch;
         DownloadScopeBox.SelectedIndex = settings.DownloadCoreOnly ? 0 : 1;
         BootstrapBox.Text = settings.BootstrapPython;
-        EmulatorLabel.Text = "雷电目录：" + settings.EmulatorDirectory;
+        EmulatorLabel.Text = DeviceLabel(settings);
         RefreshConfigChoices();
         await LoadPreferredConfig();
     });

@@ -97,7 +97,7 @@ class RevivalTests(unittest.TestCase):
         flow.special_complete = Mock(return_value=False)
         flow.boss_detail = Mock(return_value=frame(('特别难度/阶段1',320,45)))
         flow.home = Mock()
-        with patch('pcrscript.tasks.revival_map.load_parties',return_value=[]):
+        with patch('pcrscript.tasks.revival_map.boss_parties', return_value=([], None)):
             flow.sourced_boss('特别','special')
         ui.number.assert_not_called()
         self.assertTrue(flow.r.report['pending'])

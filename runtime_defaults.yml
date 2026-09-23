@@ -1,9 +1,14 @@
-# GUI 新建配置时使用的默认选项；不含账号数据或默认执行任务。
+# GUI 与命令行共用的默认配置；可直接编辑或另存为独立配置。
 Accounts: []
 Extra:
   dnpath: ''
+  adb_path: adb
+  adb_serial: ''
 StoryEvent:
-  teams: cache/game/strategies/event_teams.yml
+  source_urls: []
+  discover_sources: true
+  allow_local_trials: true
+  use_local_teams: false
   first_clear: false
   bosses: false
   stories: true
@@ -15,7 +20,10 @@ StoryEvent:
   timeout: 1800
 RevivalEvent:
   account_key: default
-  teams: cache/game/strategies/revival_teams.yml
+  source_urls: []
+  discover_sources: true
+  allow_local_trials: true
+  use_local_teams: false
   timeout: 2400
   battle_timeout: 220
 Gift:
@@ -34,11 +42,12 @@ Dungeon:
   prepare_only: false
   area: 四彩的灵峰
   source_urls: []
-  teams: cache/game/strategies/dungeon_teams.yml
+  discover_sources: true
+  use_local_teams: false
   timeout: 3600
   battle_timeout: 220
   max_battles: 30
-  allow_local_trials: false
+  allow_local_trials: true
   preflight: true
   audit_only: false
   auto_equip: false

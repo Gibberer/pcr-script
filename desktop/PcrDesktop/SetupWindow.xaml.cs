@@ -20,6 +20,8 @@ public partial class SetupWindow : Window
         DownloadScope.SelectedIndex = settings.DownloadCoreOnly ? 0 : 1;
         ProjectPath.Text = settings.Workspace;
         EmulatorPath.Text = settings.EmulatorDirectory;
+        AdbPath.Text = settings.AdbExecutable;
+        AdbSerial.Text = settings.AdbSerial;
         PythonPath.Text = string.IsNullOrWhiteSpace(settings.Python) && Directory.Exists(settings.Workspace)
             ? Path.Combine(settings.Workspace, ".venv", "Scripts", "python.exe") : settings.Python;
         Bootstrap.Text = settings.BootstrapPython;
@@ -32,8 +34,9 @@ public partial class SetupWindow : Window
 
     public static bool IsReady(Settings settings) => settings.SetupCompleted && IsProject(settings.Workspace)
         && File.Exists(Path.Combine(settings.Workspace, "pcrscript", "desktop.py"))
-        && File.Exists(Path.Combine(settings.Workspace, "desktop", "runtime_defaults.yml"))
-        && File.Exists(Path.Combine(settings.EmulatorDirectory, "ldconsole.exe")) && File.Exists(settings.Python);
+        && File.Exists(Path.Combine(settings.Workspace, "runtime_defaults.yml"))
+        && (string.IsNullOrWhiteSpace(settings.EmulatorDirectory) || File.Exists(Path.Combine(settings.EmulatorDirectory, "ldconsole.exe")))
+        && File.Exists(settings.Python);
 
     private void InspectProject()
     {
@@ -77,6 +80,12 @@ public partial class SetupWindow : Window
         if (dialog.ShowDialog(this) == true) EmulatorPath.Text = dialog.FolderName;
     }
 
+    private void AdbBrowse_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new OpenFileDialog { Title = "选择 Android Platform Tools 中的 adb.exe", Filter = "ADB 程序|adb.exe|程序|*.exe" };
+        if (dialog.ShowDialog(this) == true) AdbPath.Text = dialog.FileName;
+    }
+
     private void PythonBrowse_Click(object sender, RoutedEventArgs e)
     {
         var dialog = new OpenFileDialog { Title = "选择运行工程的 Python", Filter = "Python 解释器|python.exe|程序|*.exe" };
@@ -101,7 +110,7 @@ public partial class SetupWindow : Window
         if (string.IsNullOrWhiteSpace(ProjectPath.Text)) throw new IOException("请选择工程目录");
         var root = Path.GetFullPath(ProjectPath.Text.Trim());
         if (!IsProject(root) || !File.Exists(Path.Combine(root, "pcrscript", "desktop.py")) ||
-            !File.Exists(Path.Combine(root, "desktop", "runtime_defaults.yml")))
+            !File.Exists(Path.Combine(root, "runtime_defaults.yml")))
             throw new IOException("工程缺少新版 GUI 运行文件，请先更新源码或重新下载");
         return root;
     }
@@ -142,14 +151,27 @@ public partial class SetupWindow : Window
         await Guard(async () =>
         {
             var project = Project();
-            var emulator = Path.GetFullPath(EmulatorPath.Text.Trim());
-            if (!File.Exists(Path.Combine(emulator, "ldconsole.exe"))) throw new IOException("雷电目录中没有 ldconsole.exe，请重新选择");
+            var emulator = EmulatorPath.Text.Trim();
+            if (emulator.Length > 0)
+            {
+                emulator = Path.GetFullPath(emulator);
+                if (!File.Exists(Path.Combine(emulator, "ldconsole.exe"))) throw new IOException("雷电目录中没有 ldconsole.exe，请重新选择；使用 ADB 时留空");
+            }
+            var adb = AdbPath.Text.Trim();
+            if (emulator.Length == 0)
+            {
+                if (adb.Length == 0) throw new IOException("未配置雷电目录时，请填写 adb 或选择 adb.exe");
+                try { await Backend.Command(adb, ["version"], project, timeoutSeconds: 15); }
+                catch (Exception error) when (error is IOException or System.ComponentModel.Win32Exception or TimeoutException)
+                { throw new IOException("ADB 程序不可用；请安装 Android Platform Tools 并选择 adb.exe，或将 adb 加入 PATH", error); }
+            }
             var python = Path.GetFullPath(PythonPath.Text.Trim());
             if (!File.Exists(python)) throw new IOException(PythonEnvironment.InstallHint);
             var candidate = new Settings { Workspace = project, Python = python };
             await Backend.Request(candidate, "catalog");
             _settings.Workspace = project; _settings.Python = python;
-            _settings.EmulatorDirectory = emulator; _settings.SetupCompleted = true;
+            _settings.EmulatorDirectory = emulator; _settings.AdbExecutable = adb;
+            _settings.AdbSerial = AdbSerial.Text.Trim(); _settings.SetupCompleted = true;
             _settings.BootstrapPython = Bootstrap.Text.Trim();
             _settings.Repository = Repository.Text.Trim(); _settings.Branch = Branch.Text.Trim();
             _settings.DownloadCoreOnly = DownloadScope.SelectedIndex == 0;

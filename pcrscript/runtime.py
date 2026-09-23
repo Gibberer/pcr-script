@@ -5,7 +5,8 @@ import copy
 import json
 import yaml
 
-from pcrscript import DNSimulator, Robot
+from pcrscript import DNSimulator, GeneralSimulator, Robot
+from pcrscript.driver import ADBDriver, Driver
 from pcrscript.tasks import EventNews, TimeLimitTask, find_taskclass
 from pcrscript.news import fetch_event_news
 from pcrscript.run_session import clock as time
@@ -19,14 +20,35 @@ def load_config(path: str | Path) -> dict[str, Any]:
     return config
 
 
+def select_driver(config: dict[str, Any]) -> Driver:
+    """Use LeiDian's background driver when configured; otherwise use ADB."""
+    extra = config.get("Extra", {})
+    if not isinstance(extra, dict):
+        raise ValueError("Extra 必须是配置对象")
+    if any(not isinstance(extra.get(key, ""), str) for key in ("dnpath", "adb_path", "adb_serial")):
+        raise ValueError("Extra.dnpath、adb_path 和 adb_serial 必须是字符串")
+    dnpath = str(extra.get("dnpath") or "").strip()
+    if dnpath:
+        drivers = DNSimulator(dnpath, useADB=False).get_dirvers() or []
+        if not drivers:
+            raise RuntimeError("未发现雷电窗口，请在与模拟器相同的 Windows 会话运行")
+        return drivers[0]
+    adb_path = str(extra.get("adb_path") or "adb").strip()
+    devices = GeneralSimulator(adb_path).get_devices() or []
+    serial = str(extra.get("adb_serial") or "").strip()
+    if serial:
+        if serial not in devices:
+            raise RuntimeError(f"ADB 设备 {serial} 未连接或未授权")
+        return ADBDriver(serial, adb_path)
+    if not devices:
+        raise RuntimeError("未找到已连接且授权的 ADB 设备；请检查 adb devices")
+    if len(devices) != 1:
+        raise RuntimeError("存在多个 ADB 设备，请在 Extra.adb_serial 指定目标序列号")
+    return ADBDriver(devices[0], adb_path)
+
+
 def robot_from_config(config: dict[str, Any]) -> Robot:
-    dnpath = config.get("Extra", {}).get("dnpath")
-    if not dnpath:
-        raise SystemExit("请在 Extra.dnpath 设置雷电路径；此入口不使用 ADB")
-    drivers = DNSimulator(dnpath, useADB=False).get_dirvers()
-    if not drivers:
-        raise SystemExit("未发现雷电窗口，请在与模拟器相同的 Windows 会话运行")
-    robot = Robot(drivers[0], show_progress=False)
+    robot = Robot(select_driver(config), show_progress=False)
     robot.configure(config)
     return robot
 
@@ -88,7 +110,6 @@ def open_leidian_emulator(dnpath: str) -> int:
         print("try start princess connect application")
         time.sleep(10)
         exit_code = simulator.open_app("com.bilibili.priconne")
-        time.sleep(30)
         return exit_code
 
 def modify_task_list(news: EventNews, task_list: list[list[Any]]) -> None:
@@ -114,11 +135,8 @@ def modify_task_list(news: EventNews, task_list: list[list[Any]]) -> None:
 
 
 def run_script(config: dict[str, Any], use_adb: bool = False) -> None:
-    drivers = DNSimulator(config["Extra"]["dnpath"], useADB=use_adb).get_dirvers()
-    if not drivers:
-        raise RuntimeError("Device not found.")
-    # 使用第一个设备
-    robot = Robot(drivers[0])
+    # Keep the legacy argument for callers; the configured transport selects the driver.
+    robot = Robot(select_driver(config))
     robot.configure(config)
     news = fetch_event_news()
     print("当前进行的活动:")
@@ -128,6 +146,6 @@ def run_script(config: dict[str, Any], use_adb: bool = False) -> None:
     task_list: list = next(iter(config["Task"].values()))  # 这里设置一个全量的任务列表
     # 根据当前进行的活动修改原始任务
     modify_task_list(news, task_list)
-    # 对于日常脚本不需要切换账号（提供账号），只是返回游戏欢迎页面
+    # 日常沿用当前账号；从欢迎页进入，或从已打开的游戏页面返回首页。
     robot.changeaccount()
     robot.work(task_list)

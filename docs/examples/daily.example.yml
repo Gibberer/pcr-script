@@ -8,6 +8,8 @@ Accounts: #多账号相关：存账号信息
   #   password: '密码'
 Extra:
   dnpath: '' #雷电模拟器路径，例如：F:\leidian\LDPlayer9
+  adb_path: adb #雷电路径留空时使用；可填 platform-tools/adb.exe 的绝对路径
+  adb_serial: '' #留空且未设 dnpath 时使用唯一 ADB 设备；多个设备时填写 adb devices 中的序列号
 StoryEvent:
   source_urls: [] # 本活动优先攻略链接；未填写时自动搜索
   discover_sources: true

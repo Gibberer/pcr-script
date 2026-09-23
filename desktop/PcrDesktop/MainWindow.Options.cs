@@ -22,7 +22,7 @@ public partial class MainWindow
         ["max_characters"] = "本轮最多检查角色数", ["max_pages"] = "角色列表最大翻页数", ["max_story_steps_per_character"] = "单角色剧情步骤上限", ["max_gifts_per_character"] = "单角色礼物消耗上限",
         ["aliases"] = "搜索别名", ["region"] = "目标服区", ["max_videos"] = "候选视频数量", ["max_age_hours"] = "缓存有效小时数",
         ["request_timeout"] = "网络请求超时（秒）", ["cache_dir"] = "来源缓存目录", ["Extra"] = "运行环境", ["StoryEvent"] = "剧情活动", ["RevivalEvent"] = "复刻活动",
-        ["Gift"] = "礼物领取", ["Caravan"] = "驾车游", ["dnpath"] = "雷电安装目录",
+        ["Gift"] = "礼物领取", ["Caravan"] = "驾车游", ["dnpath"] = "雷电安装目录", ["adb_path"] = "ADB 程序", ["adb_serial"] = "ADB 设备序列号（多个设备时填写）",
         ["teams"] = "队伍方案文件", ["first_clear"] = "推进首次通关（待实机验证）", ["bosses"] = "挑战首领",
         ["stories"] = "处理剧情", ["memoirs"] = "处理追忆", ["missions"] = "领取任务奖励", ["exchange"] = "兑换奖励",
         ["max_boss_attempts"] = "首领最大尝试次数", ["battle_timeout"] = "战斗超时（秒）", ["timeout"] = "任务超时（秒）",
@@ -33,11 +33,10 @@ public partial class MainWindow
     private void BuildOptions(JsonObject options)
     {
         _optionTemplate = (JsonObject)options.DeepClone();
-        if (!string.IsNullOrWhiteSpace(_settings.EmulatorDirectory))
-        {
-            _optionTemplate["Extra"] ??= new JsonObject();
-            _optionTemplate["Extra"]!["dnpath"] = _settings.EmulatorDirectory;
-        }
+        _optionTemplate["Extra"] ??= new JsonObject();
+        _optionTemplate["Extra"]!["dnpath"] = _settings.EmulatorDirectory;
+        _optionTemplate["Extra"]!["adb_path"] = _settings.AdbExecutable;
+        _optionTemplate["Extra"]!["adb_serial"] = _settings.AdbSerial;
         _optionEditors.Clear(); OptionsPanel.Children.Clear();
         foreach (var (section, value) in _optionTemplate)
         {
@@ -66,7 +65,7 @@ public partial class MainWindow
             editor = new CheckBox { IsChecked = value!.GetValue<bool>(), VerticalAlignment = VerticalAlignment.Center };
         else editor = new TextBox { MinWidth = 120, TextWrapping = TextWrapping.Wrap, Text = kind == JsonValueKind.String ? value!.GetValue<string>() : value?.ToJsonString() ?? "null",
             IsReadOnly = section == "Extra" && key == "dnpath" && _settings.SetupCompleted,
-            ToolTip = section == "Extra" && key == "dnpath" ? "目标模拟器在环境设置中修改" : null };
+            ToolTip = section == "Extra" && key == "dnpath" ? "留空使用 ADB；在环境设置中修改" : null };
         row.Children.Add(editor); target.Children.Add(row);
         editors.Add((section, key, kind, editor));
         if (editors == _optionEditors)
