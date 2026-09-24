@@ -144,7 +144,7 @@ class DesktopTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, '已并入'):
             desktop.validate_plan([dict(enabled=True, name='campaign_reward_exchange', args=[])])
 
-    def test_dependency_check_reports_missing_and_wrong_versions(self):
+    def test_dependency_check_allows_installed_version_differences(self):
         import importlib.metadata
         (self.root / 'requirements.txt').write_text('present==1.0\nmissing==2.0\nwrong==3.0\n', encoding='utf-8')
         def version(name):
@@ -154,7 +154,12 @@ class DesktopTests(unittest.TestCase):
         with patch('importlib.metadata.version', side_effect=version):
             report = desktop.environment_report()
         self.assertFalse(report['ready'])
-        self.assertEqual(report['missing'], ['missing==2.0', 'wrong==3.0'])
+        self.assertEqual(report['missing'], ['missing==2.0'])
+        (self.root / 'requirements.txt').write_text('present==1.0\nwrong==3.0\n', encoding='utf-8')
+        with patch('importlib.metadata.version', side_effect=version):
+            report = desktop.environment_report()
+        self.assertTrue(report['ready'])
+        self.assertEqual(report['missing'], [])
 
     def test_action_status_preserves_chinese_text(self):
         with RunSession('unicode-test', root=self.root / 'cache/daily/runs') as session:

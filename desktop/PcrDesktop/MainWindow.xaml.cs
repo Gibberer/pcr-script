@@ -214,6 +214,7 @@ public partial class MainWindow : Window
 
     private async Task StartRun(bool daily, bool special = false)
     {
+        await PythonEnvironment.RequireReady(ReadSettings());
         if (!special) ApplyEditor();
         if (daily && !_plan.Any(row => row.Enabled)) throw new InvalidOperationException("请先添加并启用日常任务");
         if (!daily && !special && PlanGrid.SelectedItem is not TaskRow) throw new InvalidOperationException("请选择列表中的日常任务");
@@ -231,7 +232,6 @@ public partial class MainWindow : Window
             else { TaskPicker.SelectedItem = TaskPicker.Items.Cast<TaskChoice>().Single(t => t.Name == selected); BuildParameters(values); }
         }
         RequireLoaded(ignoreConfigPath: !daily);
-        await PythonEnvironment.RequireReady(ReadSettings());
         if (!_environmentReady) throw new InvalidOperationException("源码已更新，请先成功安装依赖");
         await Idle(_loadedSettings!);
         if (daily)

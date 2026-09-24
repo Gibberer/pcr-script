@@ -33,6 +33,7 @@ LABELS = {
     'quick_clean': '快捷扫荡', 'adventure_daily': '冒险日常', 'common_adventure': '普通冒险',
     'clear_story': '阅读剧情', 'get_quest_reward': '首页任务 · 领取任务奖励',
     'luna_tower_clean': '露娜塔扫荡',
+    'team_battle': '团队战',
     'clear_campaign_first_time': '活动首通',
 }
 SPECIAL_TASKS = {'clear_story', 'dungeon_first_clear', 'abyss_push',
@@ -68,6 +69,7 @@ DESCRIPTIONS = {
     'clear_story': '处理剧情页面的可读剧情和跳过流程。任务依赖已有图片模板识别。',
     'get_quest_reward': '依次检查首页任务页面的每日、普通、称号标签并领取已完成任务奖励（含体力）。示例日常先领体力供扫荡使用，最后再补领新完成任务的奖励。',
     'luna_tower_clean': '在露娜塔开放且已完成对应进度时扫荡回廊。配置列表会根据活动情报筛选。',
+    'team_battle': '团队战开放期间，在扫荡后使用现有挑战次数。优先选择满血且可连续击杀的首领；高级推荐队伍必须五人齐全并装备特别装备，每次实战前先通过模拟战。不会购买体力或重置次数。',
     'clear_campaign_first_time': '保留的活动首通兼容入口，复用剧情活动流程。是否真正推进首通仍取决于 StoryEvent.first_clear；当前默认关闭，首日连续流程仍待实测。',
 }
 
@@ -81,12 +83,10 @@ def environment_report() -> dict[str, Any]:
         requirement = requirement.strip()
         if not requirement or requirement.startswith('#'):
             continue
-        name, expected = requirement.split('==', 1)
+        name = requirement.split('==', 1)[0]
         try:
-            actual = importlib.metadata.version(name)
+            importlib.metadata.version(name)
         except importlib.metadata.PackageNotFoundError:
-            actual = None
-        if actual != expected:
             missing.append(requirement)
     compatible = sys.version_info >= (3, 12) and struct.calcsize('P') == 8
     return dict(protocol=PROTOCOL, compatible=compatible, ready=compatible and not missing,
