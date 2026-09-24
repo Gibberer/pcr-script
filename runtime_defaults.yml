@@ -34,6 +34,11 @@ Gift:
 Caravan:
   timeout: 1800
   max_rolls: 200
+TeamBattle:
+  timeout: 1800
+  battle_timeout: 220
+  max_real_attacks: 3
+  max_simulations: 12
 Task:
   1:
     - [free_gacha, false]
@@ -46,6 +51,7 @@ Task:
     - [revival_event_once]
     - [campaign_clean, true, false]
     - [quick_clean, 2]
+    - [team_battle]
     - [luna_tower_clean]
     - [shop_buy, {1: [-1], 9: [-1]}]
     - [get_quest_reward]

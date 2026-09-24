@@ -14,6 +14,7 @@ from .task_gifts import GetGift
 from .task_story_event import CampaignClean, ClearCampaignFirstTime
 from .task_revival_event import RevivalEventOnce
 from .task_caravan import Caravan
+from .task_team_battle import TeamBattle
 from .task_dungeon import DungeonFirstClear
 
 from .task_character_upgrade import UpgradeAllCharacters

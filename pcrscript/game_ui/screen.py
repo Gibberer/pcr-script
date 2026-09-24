@@ -161,17 +161,19 @@ class EventUI:
         # Full-frame detection sometimes omits an isolated 0. Retry only the
         # known numeric field at higher resolution, never treat missing as zero.
         x1, y1, x2, y2 = roi
-        patch = cv.resize(screen.image[y1:y2, x1:x2], None, fx=4, fy=4)
-        result = self._ocr(patch, use_det=True, use_cls=True, use_rec=True)
-        # The detector can drop a thin "1" even at 4x. Only when no text was
-        # detected, send the already-localized field straight to recognition.
-        # Keep detection for "0": it removes padding that lowers confidence.
-        if result.txts is None or len(result.txts) == 0:
-            result = self._ocr(patch, use_det=False, use_cls=False)
-        raw_texts = result.txts if result.txts is not None else []
-        raw_scores = result.scores if result.scores is not None else []
-        texts = [normalized(t) for t, score in zip(raw_texts, raw_scores) if score >= .95]
-        return int(texts[0]) if len(texts) == 1 and texts[0].isdigit() else None
+        # A thin "1" can disappear at 4x and be read reliably at 3x. Require
+        # high confidence for either scale; an uncertain field must stay unknown.
+        for scale in (4, 3):
+            patch = cv.resize(screen.image[y1:y2, x1:x2], None, fx=scale, fy=scale)
+            result = self._ocr(patch, use_det=True, use_cls=True, use_rec=True)
+            if result.txts is None or len(result.txts) == 0:
+                result = self._ocr(patch, use_det=False, use_cls=False)
+            raw_texts = result.txts if result.txts is not None else []
+            raw_scores = result.scores if result.scores is not None else []
+            texts = [normalized(t) for t, score in zip(raw_texts, raw_scores) if score >= .95]
+            if len(texts) == 1 and texts[0].isdigit():
+                return int(texts[0])
+        return None
 
     def read_region(self, screen, roi):
         """Retry small missed labels at 3x, retaining baseline coordinates."""

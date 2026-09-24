@@ -12,6 +12,12 @@ SPECIAL_COLUMNS = (158, 337, 516, 694, 873)
 SPECIAL_ROWS = (218, 291, 365)
 
 
+def formation_entry_visible(screen) -> bool:
+    """OCR may split the two vertical words and return them in either order."""
+    words = normalized(screen.text((582,416,646,485)))
+    return '特别' in words and '装备' in words
+
+
 def occupied_slots(image) -> list[list[bool | None]]:
     """Colored item art is distinct from the monochrome empty-slot icon."""
     result=[]
@@ -41,7 +47,16 @@ def preview_slots(before_image, preview_image, before):
     selected=occupied_slots(preview_image)
     for i,x in enumerate(SPECIAL_COLUMNS):
         for j,y in enumerate(SPECIAL_ROWS):
-            if selected[i][j] is not None:
+            if selected[i][j] is True:
+                continue
+            # Borrowed items are previewed as dim character portraits. Their
+            # saturation can resemble an empty EX slot, but the portrait has
+            # much denser edges than the monochrome empty icon.
+            gray=cv.cvtColor(preview_image[y-24:y+24,x-24:x+24],cv.COLOR_BGR2GRAY)
+            if float(np.mean(cv.Canny(gray,80,160)>0))>.27:
+                selected[i][j]=True
+                continue
+            if selected[i][j] is False:
                 continue
             first=before_image[y-30:y+30,x-30:x+30].astype(np.int16)
             second=preview_image[y-30:y+30,x-30:x+30].astype(np.int16)
@@ -58,7 +73,7 @@ def inspect_special_equipment(ui: EventUI, order: list[str]) -> dict:
     screen=ui.capture()
     if not screen.find('队伍编组',(300,0,650,70),exact=True):
         raise EventUIError('特别装备检查起点不是编队')
-    if '特别装备' not in normalized(screen.text((582,416,646,485))):
+    if not formation_entry_visible(screen):
         raise EventUIError('编队特别装备入口未确认')
     ui.click((615,454))
     panel=ui.wait(lambda s:s.find('特别装备设定',(320,15,650,65),exact=True),'特别装备设定')
@@ -76,7 +91,7 @@ def auto_equip_special(ui: EventUI, order: list[str]) -> dict:
     tag=uuid4().hex[:8]
     if not screen.find('队伍编组',(300,0,650,70),exact=True):
         raise EventUIError('特别装备自动装备起点不是编队')
-    if '特别装备' not in normalized(screen.text((582,416,646,485))):
+    if not formation_entry_visible(screen):
         raise EventUIError('编队特别装备入口未确认')
     before_power=screen.number((505,375,590,402))
     ui.click((615,454))
