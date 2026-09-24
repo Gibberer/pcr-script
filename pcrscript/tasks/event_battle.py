@@ -75,6 +75,8 @@ class EventCombat:
                     or getattr(self.r, 'combat_return', lambda frame: False)(s)):
                 self.r.log("已退出本次战斗："+reason)
                 return BattleResult("retreated", reason)
+            if self.r.story_dialog(s):
+                continue
             button = self.match("btn_giveup_blue", s) or self.match("btn_giveup", s)
             if not button and s.find("战斗菜单|放弃这场|放弃战斗|退出战斗"):
                 button = s.find("放弃|退出", (200, 150, 900, 510), exact=True)
@@ -227,6 +229,8 @@ class EventCombat:
                           or s.find("下一步|确认|确定|关闭", (250, 330, 950, 525), exact=True))
                 if button:
                     self.ui.click(button)
+                else:
+                    self.r.story_dialog(s)
             elif not in_battle and (getattr(self.r, 'combat_dialog', lambda frame: False)(s) or self.r.story_dialog(s)):
                 continue
             elif s.find("战斗设定", (250, 0, 720, 100)):

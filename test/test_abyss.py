@@ -9,10 +9,10 @@ import cv2 as cv
 
 from pcrscript.game_ui.screen import EventScreen, TextBox, EventUIError
 from pcrscript.game_ui.abyss import AbyssStage, next_stage, detail_stage, remaining, advanced
-from pcrscript.tasks.task_abyss import AbyssPush, validate_options, equipment_retrial, source_for_stage, recent_unreleased
+from pcrscript.tasks.task_abyss import AbyssPush, validate_options, equipment_retrial, source_for_stage, recent_unreleased, recent_previous_win
 from pcrscript.tasks.event_battle import BattleResult
 from pcrscript.tasks.strategy_sources import discover_sources
-from pcrscript.tasks.event_strategy import EventParty
+from pcrscript.tasks.event_strategy import EventParty, MemberRequirement
 from pcrscript.tasks.abyss_party import AbyssFormation, archive_observations
 from pcrscript.tasks.abyss_history import AbyssHistory
 from test_strategy_sources import fake_api
@@ -29,12 +29,101 @@ def map_screen(number=1):
 
 
 class AbyssTests(TestCase):
+    def test_deep_area_story_requires_portrait_text_and_skip_control(self):
+        task=object.__new__(AbyssPush);task.ui=Mock()
+        icon=cv.imread('images/btn_skip.png')
+        image=np.zeros((540,960,3),np.uint8)
+        image[19:19+icon.shape[0],865:865+icon.shape[1]]=icon
+        story=screen(('前辈您完全不会用奇怪的眼神看待',470,430))
+        story.image=image
+        self.assertTrue(task.story_dialog(story))
+        self.assertEqual(task.ui.click.call_args.args[0],(898.5,42.0))
+        task.ui.reset_mock()
+        self.assertFalse(task.story_dialog(EventScreen(image,[])))
+        task.ui.click.assert_not_called()
+
+    def test_enter_recovers_from_verified_deep_area_story(self):
+        task=object.__new__(AbyssPush);task.deadline=float('inf');task.ui=Mock()
+        story=screen(('剧情梗概',480,135),('跳过',580,430))
+        task.ui.capture.side_effect=[story,map_screen()]
+        task.ui.wait.return_value=map_screen()
+        self.assertEqual(next_stage(task.enter('fire'))[0],AbyssStage('fire',3,1))
+        self.assertEqual(task.ui.click.call_args.args[0].text,'跳过')
+
+    def test_enter_cancels_stale_shard_purchase_before_replanning(self):
+        task=object.__new__(AbyssPush);task.deadline=float('inf');task.ui=Mock()
+        task.ui.capture.side_effect=[screen(('购买确认',480,42),('取消',370,479)),map_screen()]
+        task.ui.wait.return_value=map_screen()
+        self.assertEqual(next_stage(task.enter('fire'))[0],AbyssStage('fire',3,1))
+        task.ui.expect_click.assert_called_once_with('取消',(250,440,490,515),exact=True)
+
+    def test_enter_dismisses_post_win_clan_battle_cp_notice(self):
+        task=object.__new__(AbyssPush);task.deadline=float('inf');task.ui=Mock()
+        notice=screen(('挑战团队战吧',480,90),('团队战的挑战次数增加了1次',480,285),
+                      ('取消',370,435),('前往团队战',585,435))
+        task.ui.capture.side_effect=[notice,map_screen()]
+        task.ui.wait.return_value=map_screen()
+        self.assertEqual(next_stage(task.enter('fire'))[0],AbyssStage('fire',3,1))
+        task.ui.expect_click.assert_called_once_with('取消',(260,400,490,475),exact=True)
+
+    def test_enter_cancels_uncommitted_special_equipment_preview(self):
+        task=object.__new__(AbyssPush);task.deadline=float('inf');task.ui=Mock()
+        task.ui.capture.side_effect=[screen(('特别装备设定',480,42),('取消',145,479)),map_screen()]
+        task.ui.wait.return_value=map_screen()
+        self.assertEqual(next_stage(task.enter('fire'))[0],AbyssStage('fire',3,1))
+        task.ui.expect_click.assert_called_once_with('取消',(35,445,265,520),exact=True)
+
+    def test_failure_budget_counts_prior_runs_and_interrupted_trials(self):
+        with TemporaryDirectory() as folder:
+            stage=AbyssStage('fire',5,6)
+            history=AbyssHistory(folder,'synthetic')
+            self.assertEqual(history.budget(stage,6,2),6)
+            history.data['stages'][history.key(stage)]=[{'progressed':False} for _ in range(4)] + [{}]
+            history.save()
+            resumed=AbyssHistory(folder,'synthetic')
+            self.assertEqual(resumed.budget(stage,6,2),1)
+            resumed.data['stages'][resumed.key(stage)].append({'progressed':False})
+            self.assertEqual(resumed.budget(stage,6,2),0)
+
+    def test_interrupted_win_reconciles_only_with_next_and_spent_attempt(self):
+        import json
+        import time
+        with TemporaryDirectory() as folder:
+            history=AbyssHistory(folder,'synthetic')
+            prior=AbyssStage('fire',3,5)
+            report=Path(folder)/'prior-report.json'
+            trial=history.start(prior,{'order':['a','b','c','d','e']},report)
+            report.write_text(json.dumps({'battles':[dict(history_id=trial['id'],
+                stage={'element':'fire','chapter':3,'number':5},
+                outcome='settled',before_remaining=2)]}),encoding='utf-8')
+            current=AbyssStage('fire',3,6)
+            self.assertIsNone(history.reconcile_previous_win(current,2))
+            evidence=history.reconcile_previous_win(current,1)
+            self.assertEqual(evidence['next'],'3-6')
+            self.assertTrue(history.trials(prior)[-1]['progressed'])
+            self.assertEqual(recent_previous_win(history,current,time.time()),['a','b','c','d','e'])
+
     def test_same_run_reuses_owned_attribute_candidates_after_loss(self):
         formation=object.__new__(AbyssFormation)
         formation._owned_candidates={'fire':['candidate-a','candidate-b']}
         formation.ui=Mock()
         self.assertEqual(formation.owned_candidates('fire'),['candidate-a','candidate-b'])
         formation.ui.assert_not_called()
+
+    def test_alternative_does_not_reaudit_same_unready_incoming_member(self):
+        formation=object.__new__(AbyssFormation)
+        formation.owned_candidates=lambda element:['替补']
+        formation.select=Mock(return_value=(False,{'unready':[
+            {'character':'替补','reasons':['专武状态未知']}]}))
+        choices=[dict(order=['原角1','替补'],incoming='替补',outgoing=outgoing)
+                 for outgoing in ('原角2','原角3')]
+        with patch('pcrscript.tasks.abyss_party.character_roles',return_value={}), \
+             patch('pcrscript.tasks.abyss_party.alternatives',return_value=choices):
+            party,audit=formation.alternative_trial(AbyssStage('fire',5,6),
+                                                     {'order':['原角1','原角2','原角3']},set())
+        self.assertIsNone(party)
+        self.assertEqual(formation.select.call_count,1)
+        self.assertEqual(len(audit['rejected']),2)
 
     def test_stable_map_allows_small_ocr_box_jitter(self):
         task=object.__new__(AbyssPush);task.deadline=float('inf');task.ui=Mock()
@@ -59,6 +148,70 @@ class AbyssTests(TestCase):
             return frames[-1]
         task.ui.wait.side_effect=wait
         self.assertEqual(next_stage(task.enter('fire'))[0],AbyssStage('fire',3,1))
+
+    def test_enter_returns_from_verified_character_detail(self):
+        task=object.__new__(AbyssPush);task.deadline=float('inf');task.ui=Mock()
+        task.ui.capture.side_effect=[screen(('角色详情',480,40),('确认',478,480)),map_screen()]
+        task.ui.wait.return_value=map_screen()
+        self.assertEqual(next_stage(task.enter('fire'))[0],AbyssStage('fire',3,1))
+        task.ui.expect_click.assert_called_once_with('确认',(350,440,620,510),exact=True)
+
+    def test_enter_closes_finished_star_animation_and_character_pages(self):
+        task=object.__new__(AbyssPush);task.deadline=float('inf');task.ui=Mock()
+        task.ui.capture.side_effect=[screen(('开花完成',480,400)),
+                                     screen(('角色强化',100,40)),
+                                     screen(('角色一览',100,40),('冒险',532,520)),map_screen()]
+        task.ui.wait.return_value=map_screen()
+        self.assertEqual(next_stage(task.enter('fire'))[0],AbyssStage('fire',3,1))
+        clicks=[call.args[0] for call in task.ui.click.call_args_list]
+        self.assertEqual(clicks[:2],[(480,420),(30,30)])
+        self.assertEqual(clicks[2].text,'冒险')
+        task.ui.expect_click.assert_not_called()
+
+    def test_enter_character_list_uses_labeled_home_when_adventure_ocr_missing(self):
+        task=object.__new__(AbyssPush);task.deadline=float('inf');task.ui=Mock()
+        task.ui.capture.side_effect=[screen(('角色一览',100,40),('我的主页',80,522)),map_screen()]
+        task.ui.wait.return_value=map_screen()
+        self.assertEqual(next_stage(task.enter('fire'))[0],AbyssStage('fire',3,1))
+        self.assertEqual(task.ui.click.call_args.args[0].text,'我的主页')
+
+    def test_enter_cancels_stale_star_confirmation(self):
+        task=object.__new__(AbyssPush);task.deadline=float('inf');task.ui=Mock()
+        task.ui.capture.side_effect=[screen(('才能开花确认',480,42),('取消',370,480)),map_screen()]
+        task.ui.wait.return_value=map_screen()
+        self.assertEqual(next_stage(task.enter('fire'))[0],AbyssStage('fire',3,1))
+        task.ui.expect_click.assert_called_once_with('取消',(250,440,490,515),exact=True)
+
+    def test_enter_closes_verified_star_receipt(self):
+        task=object.__new__(AbyssPush);task.deadline=float('inf');task.ui=Mock()
+        task.ui.capture.side_effect=[screen(('才能开花完毕',480,42),('确认',480,480)),map_screen()]
+        task.ui.wait.return_value=map_screen()
+        self.assertEqual(next_stage(task.enter('fire'))[0],AbyssStage('fire',3,1))
+        task.ui.expect_click.assert_called_once_with('确认',(350,440,620,510),exact=True)
+
+    def test_enter_closes_stale_shard_source_list(self):
+        task=object.__new__(AbyssPush);task.deadline=float('inf');task.ui=Mock()
+        task.ui.capture.side_effect=[screen(('记忆碎片获取方法',480,42),('关闭',480,480)),map_screen()]
+        task.ui.wait.return_value=map_screen()
+        self.assertEqual(next_stage(task.enter('fire'))[0],AbyssStage('fire',3,1))
+        task.ui.expect_click.assert_called_once_with('关闭',(350,440,620,510),exact=True)
+
+    def test_enter_dismisses_completed_shard_purchase(self):
+        task=object.__new__(AbyssPush);task.deadline=float('inf');task.ui=Mock()
+        task.ui.capture.side_effect=[screen(('购买完毕',480,145),('确认',480,370)),map_screen()]
+        task.ui.wait.return_value=map_screen()
+        self.assertEqual(next_stage(task.enter('fire'))[0],AbyssStage('fire',3,1))
+        task.ui.expect_click.assert_called_once_with('确认',(370,340,585,410),exact=True)
+
+    def test_enter_closes_verified_shop_price_notice(self):
+        task=object.__new__(AbyssPush);task.deadline=float('inf');task.ui=Mock()
+        notice=screen(('确认所需的女神的秘石个数',480,145),
+                      ('未奏希(夏日)的',480,240),('记忆碎片的已购数量变为20。',480,260),
+                      ('1个对象道具的单价2个了。',480,280),('确认',480,370))
+        task.ui.capture.side_effect=[notice,map_screen()]
+        task.ui.wait.return_value=map_screen()
+        self.assertEqual(next_stage(task.enter('fire'))[0],AbyssStage('fire',3,1))
+        self.assertEqual(task.ui.click.call_args.args[0].text,'确认')
 
     def test_boss_label_below_taller_artwork(self):
         s=screen(('深域关卡',110,30),('苍波深域',110,65),('NEXT',475,173),
@@ -230,6 +383,19 @@ class AbyssTests(TestCase):
             self.assertEqual(task.search.call_count,1)
             self.assertTrue(all(not b['progressed'] for b in task.report['battles']))
 
+    def test_same_run_reuses_failed_audit_before_verifying_replacement(self):
+        with TemporaryDirectory() as folder,patch('pcrscript.tasks.task_abyss.remaining',return_value=10):
+            task=self.task(folder,[map_screen()]*4)
+            task.options['max_battles']=2
+            names=['a','b','c','d','e']
+            task.formation.current_trial.return_value=(EventParty('synthetic','local',[]),
+                {'order':names,'observed':[{'name':n,'level':100,'rank':20} for n in names]})
+            task.push_area('fire')
+            self.assertEqual(task.total_battles,2)
+            task.formation.current_trial.assert_called_once()
+            task.formation.alternative_trial.assert_called_once()
+            self.assertEqual(task.report['battles'][1]['formation']['order'],['a','b','c','d','f'])
+
     def test_resource_block_does_not_retry(self):
         with TemporaryDirectory() as folder,patch('pcrscript.tasks.task_abyss.remaining',return_value=10):
             task=self.task(folder,[map_screen()]*2)
@@ -244,6 +410,74 @@ class AbyssTests(TestCase):
             task.push_area('fire')
             self.assertEqual(task.report['areas']['fire']['cleared'],['3-1'])
             self.assertEqual(task.total_battles,1)
+
+    def test_recent_previous_win_reuses_only_matching_live_roster(self):
+        import time
+        for current_order, should_search in ((['a','b','c','d','e'],False),
+                                             (['a','b','c','d','f'],True)):
+            with TemporaryDirectory() as folder,patch('pcrscript.tasks.task_abyss.remaining',return_value=10):
+                task=self.task(folder,[map_screen(2),map_screen(3)])
+                task.options['max_battles']=1
+                task.open_stage.return_value=(AbyssStage('fire',3,2),Mock(blue_button=Mock(return_value=True)))
+                task.history.data['stages']['fire/3-1']=[dict(
+                    progressed=True,outcome='settled',finished_at=time.time(),
+                    order=['a','b','c','d','e'])]
+                task.formation.current_trial.return_value=(EventParty('synthetic','local',[]),
+                                                            {'order':current_order})
+                task.push_area('fire')
+                self.assertEqual(task.search.called,should_search)
+                self.assertEqual(task.combat.run.called,not should_search)
+                self.assertEqual(recent_previous_win(task.history,AbyssStage('fire',3,2),time.time()),
+                                 ['a','b','c','d','e'])
+
+    def test_incomplete_exact_video_roster_uses_authorized_trial_branch(self):
+        from pcrscript.tasks.strategy_document import abyss_candidate, empty_member, finalize
+        with TemporaryDirectory() as folder,patch('pcrscript.tasks.task_abyss.remaining',return_value=10):
+            task=self.task(folder,[map_screen(1),map_screen(2)])
+            task.options['max_battles']=1
+            document=finalize(dict(source='https://example.com/synthetic',
+                scope=dict(element='fire',stage='3-1',chapters=[3,3]),
+                scope_verified=True,region='cn',target_region='cn',
+                members=[empty_member(name) for name in ['a','b','c','d','e']],
+                identity_evidence=[dict(name=name,cid=1,seconds=second)
+                                   for name in ['a','b','c','d','e'] for second in (1.0,2.0)],
+                auto=dict(value=None,evidence=[],conflicts=[]),
+                manual_actions=[],global_requirements=[]))
+            task.source_parties=[abyss_candidate(document)]
+            task.formation.source_trial.return_value=(EventParty('synthetic','local',[]),
+                {'order':['a','b','c','d','e'],'build_basis':'local_trial_source_roster'})
+            task.push_area('fire')
+            task.formation.source_trial.assert_called_once()
+            task.formation.current_trial.assert_not_called()
+            self.assertEqual(task.report['battles'][0]['formation']['build_basis'],
+                             'local_trial_source_roster')
+
+    def test_source_selection_reaudits_replaced_saved_team(self):
+        stage=AbyssStage('fire',5,4)
+        source_names=['碧(工作服)','静流(情人节)','克莉丝提娜','矛依未','纯']
+        saved_names=['涅妃=涅菈','凤凰','秋乃&咲恋','艾拉','纯']
+        def trial(names):
+            return (EventParty('synthetic','local',
+                    [MemberRequirement(n,1,1,5,None,None,True,0) for n in names]),
+                    {'order':names,'observed':[{'name':n,'stars':5} for n in names]})
+        formation=object.__new__(AbyssFormation)
+        formation.ui=Mock()
+        formation.ui.capture.return_value=SimpleNamespace(image=np.zeros((540,960,3),np.uint8))
+        formation.avatars=Mock()
+        formation.avatars.query.return_value=[None]*5
+        formation.occupied_slots=Mock(return_value=list(range(5)))
+        formation.select=Mock(return_value=(True,{}))
+        formation.current_trial=Mock(side_effect=[trial(saved_names),trial(source_names)])
+        source=dict(source='synthetic',names=source_names,instant=[True]*5,required_stars=[None]*5)
+        party,audit=formation.source_trial(stage,source)
+        self.assertEqual(formation.current_trial.call_count,2)
+        self.assertEqual(audit['order'],source_names)
+        self.assertEqual([m.name for m in party.members],source_names)
+
+        formation.current_trial=Mock(side_effect=[trial(saved_names),trial(saved_names)])
+        party,audit=formation.source_trial(stage,source)
+        self.assertIsNone(party)
+        self.assertIn('选队后的五人身份与来源不一致，未开战',audit['unready'])
 
     def test_unready_or_disabled_trials_never_start(self):
         for enabled in (True,False):

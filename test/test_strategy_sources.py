@@ -29,6 +29,18 @@ class SourceTests(TestCase):
    api=fake_api();api.getVideoInfo.return_value['data']['bvid']='BV0000000000'
    r=discover_sources(self.options(folder),api=api)
    self.assertEqual(r['status'],'blocked');self.assertEqual(r['candidates'],[])
+ def test_recent_candidate_survives_search_reorder_after_parser_update(self):
+  with TemporaryDirectory() as folder:
+   api=fake_api();o=self.options(folder)
+   first=discover_sources(o,api=api)
+   path=Path(first['catalog']);saved=json.loads(path.read_text(encoding='utf-8'))
+   saved['parser_version']-=1
+   path.write_text(json.dumps(saved),encoding='utf-8')
+   api.search.return_value={'code':0,'data':{'result':[]}}
+   refreshed=discover_sources(o,api=api)
+   self.assertEqual([c['bvid'] for c in refreshed['candidates']],[BV])
+   self.assertFalse(refreshed['cache_hit'])
+   self.assertEqual(api.getVideoInfo.call_count,2)
  def test_refresh_failure_preserves_last_good_but_is_not_success(self):
   with TemporaryDirectory() as folder:
    api=fake_api();o=self.options(folder);discover_sources(o,api=api)
@@ -39,6 +51,49 @@ class SourceTests(TestCase):
   with TemporaryDirectory() as folder:
    api=fake_api();o=self.options(folder);o['aliases']=['TEST7']
    r=discover_sources(o,api=api);self.assertEqual(len(r['candidates']),1);api.getVideoInfo.assert_called_once()
+ def test_automatic_abyss_uses_candidate_after_manual_and_long_parts(self):
+  with TemporaryDirectory() as folder:
+   api=fake_api()
+   ids=['BV0000000001','BV0000000002','BV0000000003']
+   api.search.return_value={'code':0,'data':{'result':[{'result_type':'video','data':[
+    {'bvid':bvid,'title':'公主连结 测试区域 深域 2-10'} for bvid in ids]}]}}
+   parts=['2-10（半自动）','深域2-1至2-10合集','2-10']
+   durations=[120,1183,100]
+   def info(*,bvid):
+    i=ids.index(bvid)
+    return {'code':0,'data':{'bvid':bvid,'title':'公主连结 国服 测试区域 深域 2-10',
+     'owner':{'name':'synthetic'},'pages':[{'cid':i+1,'page':1,'part':parts[i],
+                                           'duration':durations[i]}]}}
+   api.getVideoInfo.side_effect=info
+   result=discover_sources(dict(task_type='abyss',area='测试区域',stage='2-10',
+    category_terms=['深域'],max_videos=1,max_video_seconds=240,skip_manual_media=True,
+    skip_long_media=True,cache_dir=folder),api=api)
+   self.assertEqual([c['bvid'] for c in result['candidates']],[ids[2]])
+   self.assertEqual([e['bvid'] for e in result['excluded']],ids[:2])
+   self.assertEqual(api.getVideoInfo.call_count,3)
+ def test_automatic_abyss_checks_element_before_other_stage_parts(self):
+  with TemporaryDirectory() as folder:
+   api=fake_api()
+   api.search.return_value['data']['result'][0]['data'][0]['title']='公主连结 深域 风2-10'
+   api.getVideoInfo.return_value['data'].update(title='公主连结 国服 深域 全属性合集',
+    pages=[{'cid':1,'page':1,'part':'风2-10（简易1押）','duration':145},
+           {'cid':2,'page':2,'part':'暗2-10（全SET）','duration':98}])
+   result=discover_sources(dict(task_type='abyss',area='深域',aliases=['风'],element='wind',
+    stage='2-10',category_terms=['深域'],max_videos=1,max_video_seconds=240,
+    skip_manual_media=True,skip_long_media=True,cache_dir=folder),api=api)
+   self.assertEqual(result['candidates'],[])
+   self.assertIn('手动操作',result['excluded'][0]['reason'])
+ def test_automatic_abyss_excludes_tp_requirement_in_description(self):
+  with TemporaryDirectory() as folder:
+   api=fake_api()
+   api.search.return_value['data']['result'][0]['data'][0]['title']='公主连结 深域 风2-10'
+   api.getVideoInfo.return_value['data'].update(title='公主连结 国服 深域 风2-10',
+    desc='风2-10刚需TP+2大师点',pages=[{'cid':1,'page':1,'part':'风2-10','duration':120}])
+   result=discover_sources(dict(task_type='abyss',area='深域',aliases=['风'],element='wind',
+    stage='2-10',category_terms=['深域'],max_videos=1,max_video_seconds=240,
+    skip_manual_media=True,skip_long_media=True,cache_dir=folder),api=api)
+   self.assertEqual(result['candidates'],[])
+   self.assertIn('TP+2',result['excluded'][0]['reason'])
  def test_exact_ascii_difficulty_and_changed_scope(self):
   self.assertFalse(relevant('攻略 EX70',['EX7']))
   self.assertTrue(relevant('地下城EX7攻略',['EX7']))

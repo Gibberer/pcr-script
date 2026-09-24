@@ -72,6 +72,12 @@ class _Clock:
 clock = _Clock()
 
 
+def checkpoint():
+    """Honor cooperative control during work that has no driver boundary."""
+    if _current is not None and threading.get_ident() == _current.owner:
+        _current.checkpoint()
+
+
 class ResumeUnsafe(BaseException):
     """Must escape legacy catch-and-continue handlers before any stale click."""
 

@@ -11,7 +11,38 @@ from ..extras.bilibili_api import BilibiliApi
 from ..run_session import clock as time
 from .strategy_inputs import preferred_sources,validate_urls
 
-PARSER_VERSION = 5
+PARSER_VERSION = 10
+
+MANUAL_PART = re.compile(r'半自动|手动|目押|卡轴|(?:\d+|[一二三四五六七八九十])押|改星|调星|切星|降星|星级变更|TP\s*\+\s*2|大师点', re.I)
+UNVERIFIED_SETTING = re.compile(r'TP\s*\+\s*2|大师点', re.I)
+ABYSS_ELEMENT_LABELS = {'fire': '火', 'water': '水', 'wind': '风', 'light': '光', 'dark': '暗'}
+
+
+def unusable_abyss_media(pages: list[dict], stage: str, options: dict) -> str | None:
+    """Reject a source only when metadata proves every target part unusable."""
+    if not pages or not (options.get('skip_manual_media') or options.get('skip_long_media')):
+        return None
+    target = re.compile(r'(?<!\d)'+re.escape(stage)+r'(?!\d)')
+    exact = [page for page in pages if target.search(page['title'])]
+    element = options.get('element')
+    if exact and element in ABYSS_ELEMENT_LABELS:
+        matched = [page for page in exact if ABYSS_ELEMENT_LABELS[element] in page['title']]
+        unlabeled = [page for page in exact if not any(
+            label in page['title'] for label in ABYSS_ELEMENT_LABELS.values())]
+        if not matched and not unlabeled:
+            return '视频分P只有其他属性的目标关卡'
+        selected = matched or unlabeled
+    else:
+        selected = exact or pages
+    limit = float(options.get('max_video_seconds', 180))
+    for page in selected:
+        if options.get('skip_manual_media') and MANUAL_PART.search(page['title']):
+            continue
+        duration = page.get('duration')
+        if options.get('skip_long_media') and duration is not None and float(duration) > limit:
+            continue
+        return None
+    return '目标分P均明确要求手动操作或超出自动解析时长上限'
 
 def clean(value: Any) -> str:
     return html.unescape(re.sub(r'<[^>]*>', '', str(value or ''))).strip()
@@ -53,7 +84,10 @@ def discover_sources(options: dict, *, api=None) -> dict:
         # their part list. A bounded broad query allows metadata to prove it.
         queries.append('公主连结 '+terms[min(1, len(terms)-1)]+' 攻略')
     scope = dict(task_type=kind,area=area,stage=stage,category_terms=categories,
-                 terms=terms,region=region,max_videos=limit,queries=queries,source_urls=urls)
+                 terms=terms,region=region,max_videos=limit,queries=queries,source_urls=urls,
+                 element=options.get('element'),skip_manual_media=bool(options.get('skip_manual_media')),
+                 skip_long_media=bool(options.get('skip_long_media')),
+                 max_video_seconds=options.get('max_video_seconds', 180))
     key = hashlib.sha256(json.dumps(scope,sort_keys=True,ensure_ascii=False).encode()).hexdigest()[:24]
     path = Path(options.get('cache_dir','cache/game/strategies/sources'))/(key+'.json')
     now = time.time()
@@ -73,6 +107,19 @@ def discover_sources(options: dict, *, api=None) -> dict:
                            browser_cache_dir=options.get('browser_cache_dir', 'cache/game/strategies/bilibili_browser'),
                            browser_channel=options.get('browser_channel', 'msedge'))
     found = {}
+    # A parser update or a reordered public search must not discard a recent
+    # candidate that was already identified for this exact scope. Re-fetch its
+    # metadata below and apply the current filters before using it again.
+    if (isinstance(cached, dict) and cached.get('scope') == scope
+            and type(cached.get('fetched_at')) in (int, float)
+            and 0 <= now-cached['fetched_at'] < ttl*3600):
+        prior = cached.get('candidates', [])
+        if isinstance(prior, list):
+            for rank, item in enumerate(prior):
+                bvid = item.get('bvid') if isinstance(item, dict) else None
+                if isinstance(bvid, str) and re.fullmatch(r'BV[0-9A-Za-z]{10}', bvid):
+                    found[bvid] = dict(bvid=bvid, queries=['recent_verified_catalog'],
+                                       search_rank=rank-len(prior))
     errors = []
     preferred,preferred_errors=preferred_sources(urls,api,timeout=timeout)
     errors.extend(dict(stage='preferred_source',**e) for e in preferred_errors)
@@ -103,7 +150,7 @@ def discover_sources(options: dict, *, api=None) -> dict:
     # Preserve search relevance: sorting only by date buries older collections
     # for an early stage behind videos for newly released endgame stages.
     items = sorted(found.items(), key=lambda pair: pair[1]['search_rank'])
-    for bvid,item in items[:max(12, limit*2)]:
+    for bvid,item in items[:max(24, limit*4)]:
         if len(candidates) >= limit: break
         try:
             response = api.getVideoInfo(bvid=bvid)
@@ -123,11 +170,19 @@ def discover_sources(options: dict, *, api=None) -> dict:
             if stage and not re.search(r'(?<!\d)'+re.escape(stage)+r'(?!\d)', detail_text):
                 excluded.append(dict(bvid=bvid,reason='视频详情未明确目标关卡'))
                 continue
+            if kind == 'abyss' and stage:
+                reason = unusable_abyss_media(pages, stage, options)
+                if reason:
+                    excluded.append(dict(bvid=bvid, reason=reason))
+                    continue
             declared = [code for code, pattern in [('cn', '国服|國服'), ('jp', '日服'), ('tw', '台服|臺服')]
                         if re.search(pattern, title+' '+description)]
             actual_region = declared[0] if len(declared) == 1 else 'unknown'
             if actual_region not in (region,'unknown'):
                 excluded.append(dict(bvid=bvid,reason='视频明确服区与目标不符',region=actual_region))
+                continue
+            if kind == 'abyss' and options.get('skip_manual_media') and UNVERIFIED_SETTING.search(description):
+                excluded.append(dict(bvid=bvid,reason='视频简介含未核实的TP+2大师点条件'))
                 continue
             candidates.append(dict(bvid=bvid,url=f'https://www.bilibili.com/video/{bvid}/',title=title,
                 description=description,author=clean(data.get('owner',{}).get('name')),published_at=data.get('pubdate'),

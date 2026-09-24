@@ -36,6 +36,23 @@ def equipment_changed(before, selected) -> bool:
     return False
 
 
+def preview_slots(before_image, preview_image, before):
+    """Resolve dimmed borrowed-item art against the same empty slot before auto-select."""
+    selected=occupied_slots(preview_image)
+    for i,x in enumerate(SPECIAL_COLUMNS):
+        for j,y in enumerate(SPECIAL_ROWS):
+            if selected[i][j] is not None:
+                continue
+            first=before_image[y-30:y+30,x-30:x+30].astype(np.int16)
+            second=preview_image[y-30:y+30,x-30:x+30].astype(np.int16)
+            difference=float(np.mean(np.abs(first[12:48,12:48]-second[12:48,12:48])))
+            if before[i][j] is False and difference>30:
+                selected[i][j]=True
+            elif before[i][j] is True and difference<5:
+                selected[i][j]=True
+    return selected
+
+
 def inspect_special_equipment(ui: EventUI, order: list[str]) -> dict:
     """Open and cancel the read-only panel; never equip or auto-equip."""
     screen=ui.capture()
@@ -72,7 +89,7 @@ def auto_equip_special(ui: EventUI, order: list[str]) -> dict:
     ui.expect_click('确认',(480,447,705,515),exact=True)
     preview=ui.wait(lambda s:s.find('特别装备设定',(320,15,650,65),exact=True)
                     and not s.find('自动特别装备设定',(320,15,650,65),exact=True),'自动装备预览')
-    selected=occupied_slots(preview.image)
+    selected=preview_slots(panel.image,preview.image,before)
     selected_evidence=str(ui.save('abyss_special_selected_'+tag,preview))
     if any(v is None for col in selected for v in col):
         raise EventUIError('特别装备自动选择后槽位无法识别，未提交')

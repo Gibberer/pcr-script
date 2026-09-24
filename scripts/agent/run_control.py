@@ -1,4 +1,4 @@
-"""Inspect, pause, resume or preserve evidence of a daily run (no emulator calls)."""
+"""Inspect or cooperatively control a daily run (no emulator calls)."""
 import argparse
 import json
 import os
@@ -14,7 +14,7 @@ from pcrscript.run_session import atomic_json
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action', choices=['status', 'pause', 'resume', 'snapshot'])
+    parser.add_argument('action', choices=['status', 'pause', 'resume', 'snapshot', 'stop'])
     parser.add_argument('--run', help='运行目录；省略时仅允许唯一的活跃运行')
     parser.add_argument('--wait', type=float, default=10)
     args = parser.parse_args()
@@ -57,12 +57,12 @@ def main():
         while time.monotonic() < deadline:
             state = status()
             key = 'snapshot_id' if args.action == 'snapshot' else 'command_id'
-            if state.get(key) == command['id']:
+            if state.get(key) == command['id'] or (args.action == 'stop' and state['state'] == 'cancelled'):
                 break
             time.sleep(.1)
         else:
             print(json.dumps(state, ensure_ascii=False, indent=2))
-            raise SystemExit('控制请求尚未确认；不可视为已暂停。可用 snapshot 保存当前线程栈和最近截图')
+            raise SystemExit('控制请求尚未确认；请检查 status。暂停请求未确认时不可检查设备现场')
     print(json.dumps(dict(run=str(run), **state), ensure_ascii=False, indent=2))
 
 

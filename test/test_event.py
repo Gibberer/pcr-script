@@ -11,7 +11,7 @@ import numpy as np
 
 from pcrscript.game_ui.screen import EventScreen, TextBox, EventUIError, EventUI
 from pcrscript.tasks.event_battle import boss_cleared, boss_mode, quest_stars, EventBattles, EventCombat
-from pcrscript.tasks.event_formation import count_stars
+from pcrscript.tasks.event_formation import EventFormation, count_stars
 from pcrscript.tasks.event_strategy import MemberRequirement, CharacterStatus, readiness, load_parties
 from pcrscript.tasks.task_story_event import CampaignClean
 from pcrscript.tasks.event_sweep import HardSweep
@@ -324,6 +324,14 @@ class StrategyTests(TestCase):
 
 
 class AvatarTests(TestCase):
+    def test_search_card_name_recovers_from_wrong_avatar_match(self):
+        card = (60, 177, 100, 99)
+        screen = frame(('双人角色', 94, 189), ('别的角色', 420, 189))
+        self.assertTrue(EventFormation.search_identity_candidate(
+            screen, card, '错误头像标签', '双人角色'))
+        self.assertFalse(EventFormation.search_identity_candidate(
+            screen, card, '错误头像标签', '别的角色'))
+
     def test_event_bonus_arrows_do_not_hide_cards(self):
         for number, count in ((0, 1), (2, 6)):
             image = np.zeros((540, 960, 3), np.uint8)
@@ -410,7 +418,7 @@ class WorkflowTests(TestCase):
                        frame(("btn_giveup_blue", 590, 390)), fixture("boss_plus")])
         combat = EventCombat.__new__(EventCombat)
         combat.ui = ui
-        combat.r = SimpleNamespace(log=Mock())
+        combat.r = SimpleNamespace(log=Mock(), story_dialog=Mock(return_value=False))
         combat.match = lambda key, screen: key if screen.find(key) else None
         result = combat.retreat("测试减员")
         self.assertEqual(result.outcome, "retreated")

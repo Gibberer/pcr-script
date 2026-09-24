@@ -16,14 +16,80 @@ import requests
 from ..extras.bilibili_api import BilibiliApi
 from ..extras.guide_media import fetch_video
 from ..game_ui.avatar_assets import ensure_avatar_index, atomic_json, read_json
-from ..game_ui.guide_vision import combat_team, combat_set, combat_auto, read_text, requirement_cells, labeled_fields, formation_fields
+from ..game_ui.guide_vision import GuideText, combat_team, formation_team, wide_special_equipment_team, combat_set, combat_auto, battle_rectangles, match_portrait, read_text, requirement_cells, labeled_fields, formation_fields
 from .strategy_document import Evidence, Fact, empty_member, finalize, export_document
-from .strategy_sources import discover_sources
+from .strategy_sources import MANUAL_PART, UNVERIFIED_SETTING, discover_sources
 from .strategy_inputs import preferred_sources
 
-PARSER_VERSION = 4
+PARSER_VERSION = 24
+FRAME_OCR_VERSION = 1
 ELEMENTS = {'火': 'fire', '水': 'water', '风': 'wind', '光': 'light', '暗': 'dark',
             '红焰': 'fire', '苍波': 'water', '翠岚': 'wind', '珀天': 'light', '紫冥': 'dark'}
+
+
+def texts_in_view(texts, raw_width: int, crop_left: int, crop_width: int):
+    """Project OCR on the saved 1280x720 frame into the 960x540 combat view."""
+    left = crop_left * 1280 / raw_width
+    xscale = 960 * raw_width / (1280 * crop_width)
+    result = []
+    for item in texts:
+        x, y, width, height = item.rectangle
+        rectangle = (round((x-left)*xscale), round(y*.75),
+                     round(width*xscale), round(height*.75))
+        if 0 <= rectangle[0]+rectangle[2]/2 <= 960:
+            result.append(type(item)(item.text, item.score, rectangle))
+    return result
+
+
+def sample_seconds(duration: float, maximum: int, *, wide: bool = False) -> list[float]:
+    """Include short-lived opening formation/equipment screens in wide videos."""
+    early = [s for s in ([.5, 1.5, 2.0, 3.5] if wide else [.5, 1.5]) if s < duration]
+    regular_count = max(0, maximum-len(early))
+    step = max(1, (duration-3)/max(1, regular_count))
+    regular = list(np.arange(3, duration, step))[:regular_count]
+    return sorted(set(early+regular))
+
+
+def frame_texts(frame: np.ndarray, image_path: Path, ocr) -> list[GuideText]:
+    """Reuse OCR only for an identical decoded frame and OCR rule version."""
+    digest = sha256(frame.tobytes()).hexdigest()
+    text_path = image_path.with_suffix('.json')
+    cached = read_json(text_path)
+    if (image_path.is_file() and cached.get('frame_sha256') == digest
+            and cached.get('ocr_version') == FRAME_OCR_VERSION
+            and isinstance(cached.get('texts'), list)):
+        try:
+            if any(not isinstance(row, dict) or len(row['rectangle']) != 4
+                   for row in cached['texts']):
+                raise ValueError('OCR cache row shape changed')
+            return [GuideText(str(row['text']), float(row['score']), tuple(row['rectangle']))
+                    for row in cached['texts']]
+        except (KeyError, TypeError, ValueError):
+            pass
+    texts = read_text(frame, ocr)
+    cv.imencode('.jpg', frame, [cv.IMWRITE_JPEG_QUALITY, 95])[1].tofile(image_path)
+    atomic_json(text_path, dict(frame_sha256=digest, ocr_version=FRAME_OCR_VERSION,
+                                texts=[asdict(t) for t in texts]))
+    return texts
+
+
+def declared_abyss_element(title: str) -> str | None:
+    matches = {ELEMENTS[m] for m in re.findall(r'(红焰|苍波|翠岚|珀天|紫冥|火|水|风|光|暗)(?:属性)?(?:深域|\s*\d+\s*[-－])', title)}
+    return next(iter(matches)) if len(matches) == 1 else None
+
+
+def matches_abyss_request(party: dict, element: str, stage: str) -> bool:
+    scope = party['scope']
+    if scope.get('element') != element:
+        return False
+    if scope.get('stage'):
+        return scope['stage'] == stage
+    chapters = scope.get('chapters')
+    if chapters:
+        chapter = int(stage.split('-')[0])
+        return chapters[0] <= chapter <= chapters[1]
+    # Retain an unscoped table for review, never as an executable source.
+    return not party.get('scope_verified')
 
 
 def task_source_options(kind: str, options: dict, *, stage=None,
@@ -34,6 +100,8 @@ def task_source_options(kind: str, options: dict, *, stage=None,
     result.update(task_type=kind, region='cn')
     result['source_urls'] = options.get('source_urls') or result.get('source_urls', [])
     if kind == 'abyss':
+        result['skip_manual_media'] = not options.get('prepare_only', False)
+        result['skip_long_media'] = not options.get('prepare_only', False)
         if stage is not None:
             result.update(element=stage.element, stage=stage.key)
         element = result.get('element', options.get('elements', ['fire'])[0])
@@ -62,7 +130,7 @@ def task_source_options(kind: str, options: dict, *, stage=None,
 def page_scope(page: dict, kind: str) -> dict:
     title = page.get('part', page.get('title', ''))
     if kind == 'abyss':
-        match = re.search(r'(红焰|苍波|翠岚|珀天|紫冥|火|水|风|光|暗)(?:深域)?\s*(\d+)\s*[-－]\s*(\d+)(?!\d)', title)
+        match = re.search(r'(红焰|苍波|翠岚|珀天|紫冥|火|水|风|光|暗)(?:深域)?\s*(\d+)\s*[-－]\s*(\d+)(?!\d|图)', title)
         if match:
             return dict(element=ELEMENTS[match[1]], stage=f'{int(match[2])}-{int(match[3])}',
                         chapters=[int(match[2]), int(match[2])])
@@ -93,12 +161,44 @@ def choose_pages(source: dict, options: dict) -> list[dict]:
     pages = source.get('pages', [])
     requirements = [p for p in pages if re.search(r'练度|培养|角色需求|配置要求', p.get('part', p.get('title', '')))]
     if kind == 'abyss' and stage:
+        source_element = declared_abyss_element(source.get('title', ''))
+        if source_element and element and source_element != element:
+            return []
         targets = [p for p in pages if (scope := page_scope(p, kind)).get('stage') == stage
                    and (not element or scope.get('element') == element)]
-        if not targets and len(pages) == 1:
+        # In a title such as "水深域1-7图", parts "1-5"/"6-7" divide
+        # chapters. They are not exact stages 1-5 and 6-7. Only parse the
+        # range containing the requested chapter; visible frames still have
+        # to prove the exact stage before any roster is applicable.
+        chapter_title = re.search(r'(\d+)\s*[-－]\s*(\d+)图',source.get('title',''))
+        combat_pages = [p for p in pages if p not in requirements]
+        chapter_parts = [(p,re.fullmatch(r'(\d+)\s*[-－]\s*(\d+)(?:图)?',
+                                         p.get('part',p.get('title','')).strip())) for p in combat_pages]
+        range_collection = bool(chapter_title and chapter_parts and
+                                all(match and int(chapter_title[1]) <= int(match[1]) <= int(match[2]) <= int(chapter_title[2])
+                                    for _,match in chapter_parts))
+        if range_collection:
+            chapter=int(stage.split('-')[0])
+            targets=[p for p,match in chapter_parts if int(match[1])<=chapter<=int(match[2])]
+            if not targets:
+                return []
+        if not targets and not range_collection and element and source_element == element:
+            # A single-element collection often calls each part only "5-1".
+            # The source title supplies the element and the part supplies the
+            # stage; retain both original labels as metadata evidence.
+            target_label = {'fire':'火','water':'水','wind':'风','light':'光','dark':'暗'}[element]
+            targets = [dict(p, original_part=p.get('part', p.get('title', '')), part=target_label+stage)
+                       for p in pages if re.fullmatch(re.escape(stage)+r'(?:[（(][^）)]*[）)]?)?',
+                                                        p.get('part', p.get('title', '')).strip())]
+        if not targets and not range_collection and len(pages) == 1:
             # Single-part uploads often put the stage in the main title.
             scope = page_scope({'part': source['title']}, kind)
             targets = [dict(pages[0], part=source['title'])] if scope.get('stage') == stage and (not element or scope.get('element') == element) else []
+        if not targets and not range_collection:
+            # A compilation may label only its chapter range. Inspect its
+            # frames, but never infer the requested stage from that label.
+            targets = [p for p in pages if not page_scope(p, kind)
+                       and (not element or declared_abyss_element(p.get('part', p.get('title', ''))) in (None, element))]
     elif kind in ('event', 'revival'):
         wanted = {'difficulty': options.get('difficulty'), 'mode': options.get('mode')}
         targets = [p for p in pages if (scope := page_scope(p, kind)) == wanted]
@@ -182,7 +282,7 @@ def text_constraints(texts, proof: Evidence) -> tuple[list[dict], list[dict]]:
         if re.search(r'属性等级|属性技能|公主骑士|\bMP\d|突破', t.text, re.I):
             row['advisory'] = bool(re.search(r'建议|推荐|可选', t.text))
             global_requirements.append(row)
-        if re.search(r'手动|目押|卡[秒帧]|连点|关闭自动|关AUTO|轴[:：]|\d[:：]\d{2}.*(?:开|关|点|放)', t.text, re.I):
+        if re.search(r'手动|目押|卡[秒帧]|连点|关闭自动|关AUTO|轴[:：]|改星|调星|切星|降星|星级变更|\d[:：]\d{2}.*(?:开|关|点|放)', t.text, re.I):
             manual.append(row)
     return global_requirements, manual
 
@@ -197,7 +297,7 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
     root.mkdir(parents=True, exist_ok=True)
     pages = choose_pages(source, options)
     fingerprint = sha256(json.dumps(dict(version=PARSER_VERSION, source=source, pages=pages,
-                         scope={k: options.get(k) for k in ('task_type', 'stage', 'element', 'area', 'difficulty', 'mode', 'region', 'max_frames_per_page', 'max_video_seconds')},
+                         scope={k: options.get(k) for k in ('task_type', 'stage', 'element', 'area', 'difficulty', 'mode', 'region', 'max_frames_per_page', 'max_video_seconds', 'skip_manual_media', 'skip_long_media')},
                          index=sha256(index.matrix.tobytes()+json.dumps(index.names, ensure_ascii=False).encode()).hexdigest()), ensure_ascii=False, sort_keys=True).encode()).hexdigest()
     cache = root/(fingerprint[:24]+'.json')
     saved = read_json(cache)
@@ -216,10 +316,37 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
     errors, pages_report = [], []
     source_region = declared_region(source.get('title', '')+' '+source.get('description', ''))
     text_source = '\n'.join([source.get('description', '')]+[r.get('text', '') for r in source.get('author_comments', [])])
+    source_setting = UNVERIFIED_SETTING.search(source.get('description') or '')
+    if source_setting:
+        description = source.get('description') or ''
+        manual.append(dict(text=description[:240], evidence=asdict(Evidence(
+            source['url'], int(pages[0]['cid']) if pages else 0,
+            method='source_description', text=description[:240]))))
     for page in pages:
         check()
         page_name = page.get('part', page.get('title', ''))
         requirements_page = bool(re.search(r'练度|培养|角色需求|配置要求', page_name))
+        original_part = page.get('original_part', page_name)
+        manual_part = bool(MANUAL_PART.search(original_part))
+        if manual_part:
+            manual.append(dict(text=original_part, evidence=asdict(Evidence(
+                source['url'], int(page['cid']), method='part_title', text=original_part))))
+            if options.get('skip_manual_media'):
+                pages_report.append(dict(cid=page['cid'], title=page_name,
+                                         skipped='标题要求手动操作或未核实TP+2，自动任务不下载此分P'))
+                continue
+        if source_setting and options.get('skip_manual_media'):
+            pages_report.append(dict(cid=page['cid'], title=page_name,
+                                     skipped='简介含未核实TP+2大师点条件，自动任务不下载此分P'))
+            continue
+        page_duration = float(page.get('duration') or 0)
+        if (options.get('skip_long_media') and page_duration > 0
+                and page_duration > float(options.get('max_video_seconds', 180))):
+            pages_report.append(dict(cid=page['cid'], title=page_name,
+                                     skipped='分P时长超出自动解析上限，未下载',
+                                     duration=page_duration,
+                                     max_video_seconds=float(options.get('max_video_seconds', 180))))
+            continue
         try:
             video, media = media_fetcher(api, source['bvid'], page,
                                        Path(options.get('media_dir', 'cache/game/strategies/media')),
@@ -231,8 +358,8 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
         page_record = dict(cid=page['cid'], title=page_name, media=media, frames=0, recognized_teams=0)
         pages_report.append(page_record)
         duration = min(float(page.get('duration') or media['duration']), float(options.get('max_video_seconds', 180)))
-        step = max(1, duration/max(1, options.get('max_frames_per_page', 50)-1))
-        seconds_list = sorted(set([.5, 1.5]+list(np.arange(3, duration, step))))
+        wide = media.get('height', 0) > 0 and 1.9 < media.get('width', 0)/media['height'] <= 2.4
+        seconds_list = sample_seconds(duration, options.get('max_frames_per_page', 50), wide=wide)
         previous = None
         last_scope = ({}, False)
         try:
@@ -242,30 +369,35 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
                 ok, raw = capture.read()
                 if not ok:
                     continue
-                if not 1.6 <= raw.shape[1]/raw.shape[0] <= 1.9:
+                aspect = raw.shape[1]/raw.shape[0]
+                wide_crop = 1.9 < aspect <= 2.4
+                if not 1.6 <= aspect <= 1.9 and not wide_crop:
                     page_record['unsupported_aspect'] = True
                     continue
                 # OCR retains 720p detail; combat recognition uses the shared 960x540 design space.
                 frame = cv.resize(raw, (1280, 720))
-                small = cv.resize(raw, (960, 540))
+                if wide_crop:
+                    crop_width = round(raw.shape[0]*16/9)
+                    crop_left = (raw.shape[1]-crop_width)//2
+                    small = cv.resize(raw[:,crop_left:crop_left+crop_width], (960, 540))
+                else:
+                    small = cv.resize(raw, (960, 540))
                 digest = sha256(cv.resize(frame, (160, 90)).tobytes()).hexdigest()
                 # Still sample static pages twice to confirm numeric OCR.
                 if previous == (digest, 2):
                     continue
                 previous = (digest, previous[1]+1) if previous and previous[0] == digest else (digest, 1)
-                texts = read_text(frame, ocr)
-                page_record['frames'] += 1
                 image_path = root/f'{page["cid"]}_{seconds:.3f}.jpg'
-                cv.imencode('.jpg', frame, [cv.IMWRITE_JPEG_QUALITY, 95])[1].tofile(image_path)
+                texts = frame_texts(frame, image_path, ocr)
+                page_record['frames'] += 1
                 proof = Evidence(source['url'], int(page['cid']), float(seconds), str(image_path), method='video_ocr')
-                atomic_json(image_path.with_suffix('.json'), dict(texts=[asdict(t) for t in texts]))
                 detected_region = declared_region('\n'.join(t.text for t in texts if t.score >= .95))
                 if detected_region != 'unknown':
                     source_region = detected_region if source_region == 'unknown' else source_region if source_region == detected_region else 'conflict'
                 global_rows, manual_rows = text_constraints(texts, proof)
                 globals_.extend(global_rows)
                 manual.extend(manual_rows)
-                if requirements_page or any('角色需求' in t.text or '练度' in t.text for t in texts):
+                if not wide_crop and (requirements_page or any('角色需求' in t.text or '练度' in t.text for t in texts)):
                     chapter_scope = requirement_scope(texts)
                     for row in requirement_cells(frame, texts, index):
                         evidence = Evidence(**{**asdict(proof), 'text': row['text'], 'rectangle': row['rectangle'],
@@ -278,7 +410,7 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
                     continue
                 if verified:
                     last_scope = scope, verified
-                else:
+                elif options['task_type'] != 'abyss' or page_scope(page, options['task_type']):
                     scope, verified = last_scope
                 if options['task_type'] == 'dungeon':
                     area = options.get('area', '')
@@ -286,6 +418,10 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
                     area_verified = bool(area) and area in description
                     scope = dict(scope, area=area) if scope else {}
                     verified = verified and area_verified
+                elif options['task_type'] == 'abyss' and scope and options.get('stage'):
+                    if (scope.get('element') != options.get('element')
+                            or scope.get('stage') not in (None, options['stage'])):
+                        continue
                 elif options['task_type'] in ('event', 'revival'):
                     area = options.get('area', '')
                     description = source.get('title', '')+' '+source.get('description', '')+' '+page_name
@@ -301,12 +437,26 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
                         for field, value in labeled_fields(t.text[len(name):]).items():
                             evidence = Evidence(**{**asdict(proof), 'text': t.text, 'rectangle': list(t.rectangle), 'method': 'named_field', 'confidence': t.score})
                             character_facts[name].append((field, value, evidence, field_scope))
-                for row in formation_fields(frame, texts, index, badges):
+                for row in (formation_fields(frame, texts, index, badges) if not wide_crop else []):
                     evidence = Evidence(**{**asdict(proof), 'text': row['text'], 'rectangle': row['rectangle'], 'method': 'formation_badge', 'confidence': row['confidence']})
                     character_facts[row['name']].append((row['field'], row['value'], evidence, field_scope))
-                found = combat_team(small, index)
+                found = combat_team(small, index, relaxed=wide_crop)
+                formation_found = False
+                if not found:
+                    found = formation_team(small, texts, index)
+                    formation_found = bool(found)
+                if not found and wide_crop:
+                    found = wide_special_equipment_team(small, texts, index)
+                    formation_found = bool(found)
+                if not found and wide_crop and len(page_record.get('partial_card_rows', [])) < 2:
+                    boxes = battle_rectangles(small, relaxed=True)
+                    if len(boxes) == 5:
+                        observed = [match_portrait(small, box, index) for box in boxes]
+                        page_record.setdefault('partial_card_rows', []).append(dict(
+                            image=str(image_path), slots=[dict(name=m['name'], score=m['score']) if m else None
+                                                         for m in observed]))
                 row = None
-                if not found and requirements_page:
+                if not found and not wide_crop and (requirements_page or any('一队通用' in t.text or '前三章' in t.text for t in texts)):
                     # Reuse the supported universal-table layout without calling OCR a second time.
                     from types import SimpleNamespace
                     result = SimpleNamespace(txts=[t.text for t in texts], scores=[t.score for t in texts],
@@ -325,22 +475,36 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
                                       members=[empty_member(m['name']) for m in found], frames=[], observations=defaultdict(list),
                                       identity_evidence=[],
                                       auto=Fact(), auto_observations=[],
-                                      notes=text_source, global_requirements=[], manual_actions=[])
+                                      notes=text_source, excluded_stages=[],
+                                      global_requirements=[], manual_actions=[])
                 team = teams[key]
+                if row:
+                    team['notes'] = '\n'.join(filter(None,(text_source,row.get('notes',''))))
+                    team['excluded_stages'] = sorted(set(team['excluded_stages']) | set(row.get('excluded_stages',[])))
                 team['frames'].append(asdict(proof))
-                scaled_texts = [type(t)(t.text, t.score, tuple(round(v*.75) for v in t.rectangle)) for t in texts]
+                scaled_texts = texts_in_view(texts, raw.shape[1],
+                                             crop_left if wide_crop else 0,
+                                             crop_width if wide_crop else raw.shape[1])
                 if not row:
-                    team['auto_observations'].append((combat_auto(small, scaled_texts),
+                    # The wide video's combat cards need a central 16:9 crop,
+                    # but its AUTO button remains visible on the uncropped edge.
+                    team['auto_observations'].append((combat_auto(frame, texts) if wide_crop
+                                                      else combat_auto(small, scaled_texts),
                         Evidence(**{**asdict(proof), 'method':'combat_auto_button'})))
                 for member, match in zip(team['members'], found):
                     rect = match['rectangle']
-                    p = Evidence(**{**asdict(proof), 'rectangle': [round(v*4/3) for v in rect], 'method': 'avatar_feature', 'confidence': match['score']})
+                    rectangle = ([round((crop_left+rect[0]*crop_width/960)*1280/raw.shape[1]), round(rect[1]*4/3),
+                                  round(rect[2]*crop_width/960*1280/raw.shape[1]), round(rect[3]*4/3)] if wide_crop
+                                 else [round(v*4/3) for v in rect])
+                    p = Evidence(**{**asdict(proof), 'rectangle': rectangle,
+                                    'method': 'avatar_feature_formation' if formation_found else 'avatar_feature',
+                                    'confidence': match['score']})
                     team['identity_evidence'].append(dict(name=member['name'], **asdict(p)))
                     observations = team['observations'][member['name']]
                     if row:
                         i = row['names'].index(member['name'])
                         observations.extend([('instant', row['instant'][i], p), ('stars', row['required_stars'][i], p)])
-                    else:
+                    elif not formation_found:
                         # Combat cards do not use the formation page's alternating
                         # sword/orb layout. Never infer UE absence from this view.
                         observations.append(('instant', combat_set(small, match, scaled_texts),
@@ -354,6 +518,9 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
     parties = []
     for team in teams.values():
         if len({(p['cid'], p['seconds']) for p in team['frames']}) < 2:
+            continue
+        if any(not any(row['name'] == member['name'] and row['confidence'] >= .92
+                       for row in team['identity_evidence']) for member in team['members']):
             continue
         chapter = team['scope'].get('chapters')
         auto_proofs = defaultdict(list)
@@ -444,24 +611,27 @@ def acquire_strategies(options: dict, *, api=None, index=None, ocr=None, check=l
             index, assets = ensure_avatar_index(options.get('avatars'), check=bounded_check)
             report['avatar_assets'] = {k: v for k, v in assets.items() if k != 'assets'}
         candidates = []
+        preferred = []
         if options.get('source_urls'):
             preferred, errors = preferred_sources(options['source_urls'], api,
                         directory=options.get('source_cache_dir', 'cache/game/strategies/user_sources'),
                         timeout=options.get('request_timeout', 20))
-            candidates.extend(preferred)
+            candidates.extend(p for p in preferred if p.get('user_provided', True))
             report['errors'].extend(errors)
         if options.get('search', True):
             catalog = discover_sources(options, api=api)
             report['search'] = catalog
-            candidates.extend(catalog.get('preferred_sources', []))
             candidates.extend(catalog.get('candidates', []))
+            candidates.extend(p for p in preferred if not p.get('user_provided', True))
+            candidates.extend(catalog.get('preferred_sources', []))
         seen = set()
+        parsed_count = 0
         for candidate in candidates:
             bounded_check()
             bvid = candidate.get('bvid')
             if not bvid or bvid in seen:
                 continue
-            if len(seen) >= options.get('max_videos', 4):
+            if parsed_count >= options.get('max_videos', 4):
                 break
             seen.add(bvid)
             try:
@@ -476,9 +646,17 @@ def acquire_strategies(options: dict, *, api=None, index=None, ocr=None, check=l
                 source = dict(provider='bilibili', bvid=bvid, url=f'https://www.bilibili.com/video/{bvid}/',
                               title=title, description=description, pages=data.get('pages', []),
                               published_at=data.get('pubdate'), author_comments=candidate.get('author_comments', []))
+                if not choose_pages(source, options):
+                    report.setdefault('skipped_sources', []).append(dict(bvid=bvid, reason='没有目标关卡候选分P'))
+                    continue
+                parsed_count += 1
                 parsed = parse_video_source(source, options, index, api=api, ocr=ocr, check=bounded_check)
                 report['parsed_sources'].append(parsed)
-                report['parties'].extend(parsed['parties'])
+                if options['task_type'] == 'abyss' and options.get('stage'):
+                    report['parties'].extend(p for p in parsed['parties']
+                        if matches_abyss_request(p, options.get('element'), options['stage']))
+                else:
+                    report['parties'].extend(parsed['parties'])
                 report['errors'].extend(parsed['errors'])
             except (requests.RequestException, RuntimeError, ValueError, OSError) as error:
                 report['errors'].append(dict(bvid=bvid, error=str(error)))
