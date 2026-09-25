@@ -19,8 +19,9 @@ from ..game_ui.character_equipment import inspect_unreleased_equipment
 from ..game_ui.special_equipment import inspect_special_equipment, auto_equip_special
 from ..game_ui.abyss import AREAS, AbyssStage, map_element, next_stage, detail_stage, remaining, advanced
 from ..game_ui.screen import EventScreen, EventUI, EventUIError
+from ..game_ui.guild_house import collect_produced_stamina
 from ..templates import ImageTemplate
-from ..run_session import clock as time, atomic_json, checkpoint
+from ..run_session import clock as time, atomic_json, checkpoint, RunCancelled
 
 
 def source_set_alternative(source,trials):
@@ -83,8 +84,11 @@ def source_trial_seed(document, stage):
             and all(isinstance(name, str) and name.strip() and not name.startswith('unit:') for name in names)
             and len(set(names)) == 5
             and all(len(proof[name]) >= 2 for name in names)
+            and all(type(member.get('instant', {}).get('value')) is bool
+                    and member['instant'].get('evidence') and not member['instant'].get('conflicts')
+                    for member in document.get('members', []))
             and not document.get('manual_actions') and not document.get('global_requirements')
-            and auto.get('value') is not False and not auto.get('conflicts'))
+            and auto.get('value') is True and auto.get('evidence') and not auto.get('conflicts'))
 
 
 def source_for_stage(parties, stage, failed, previous, *, allow_local_trials=False):
@@ -120,6 +124,8 @@ def recent_unreleased(path, now, lifetime):
 
 def validate_options(options: dict) -> dict:
     value = dict(options)
+    if value.setdefault('search_effort', 'normal') not in ('normal', 'high'):
+        raise ValueError('Abyss.search_effort必须为normal或high')
     for key, default, high in [('max_failures_per_stage', 6, 50), ('max_repeat_failures_per_stage', 2, 50), ('max_battles', 100, 300),
                                 ('timeout', 3600, 14400), ('battle_timeout', 220, 600)]:
         number = value.setdefault(key, default)
@@ -130,7 +136,8 @@ def validate_options(options: dict) -> dict:
         raise ValueError('Abyss.elements必须为不重复的fire/water/wind/light/dark列表')
     for key, default in [('allow_local_trials', False), ('audit_only', False), ('discover_sources', True),
                          ('prepare_only', False),
-                         ('allow_five_star_upgrade',False),('allow_divine_amulets',False)]:
+                         ('allow_five_star_upgrade',False),('allow_divine_amulets',False),
+                         ('auto_collect_house_stamina',False)]:
         if type(value.setdefault(key, default)) is not bool:
             raise ValueError(f'Abyss.{key}必须为布尔值')
     return value
@@ -168,6 +175,7 @@ class AbyssPush(BaseTask):
         self._battle_samples = []
         self._next_sample = 0
         self.source_parties=[]
+        self.house_collected=False
 
     def recover_equipment(self,stage,names):
         self.enter(stage.element)
@@ -201,6 +209,22 @@ class AbyssPush(BaseTask):
             raise EventUIError('体力不足且取消按钮未知，未确认回复体力')
         return self.ui.wait(lambda s:s.find('队伍编组',(300,0,650,70),exact=True),
                             description,handle=known_blocker)
+
+    def collect_house_stamina(self, stage):
+        detail = self.ui.capture()
+        if self.read_detail(detail) != stage:
+            raise EventUIError('取消体力回复后关卡详情未知，未前往公会之家')
+        cancel = detail.find('取消', (570, 425, 750, 490), exact=True)
+        if cancel is None:
+            raise EventUIError('关卡详情取消按钮未知，未前往公会之家')
+        self.ui.click(cancel)
+        abyss_map = self.ui.wait(lambda s: map_element(s) == stage.element
+                                 and s.find('公会之家', (580, 485, 725, 540), exact=True),
+                                 '深域返回地图后公会之家入口')
+        result = collect_produced_stamina(self.ui, abyss_map)
+        self.report.setdefault('house_stamina', []).append(result)
+        self.save_report()
+        self.log('公会之家体力已领取，重新读取关卡和剩余次数')
 
     def observe_battle(self, screen):
         if time.monotonic()<self._next_sample:return
@@ -267,6 +291,18 @@ class AbyssPush(BaseTask):
             return True
         return False
 
+    def login_bonus_dialog(self, screen: EventScreen) -> bool:
+        # On the first login of the day, the bonus card can appear before the
+        # home page. Both the board labels and its skip icon must be present.
+        if (screen.find('欢迎回来', (70, 340, 230, 425))
+                and screen.find('Goal', (780, 310, 930, 425))
+                and (button := ImageTemplate('btn_skip', threshold=.90,
+                                             roi=(850, 0, 950, 80)).match(screen.image))):
+            self.ui.save('abyss_login_bonus', screen)
+            self.ui.click(button)
+            return True
+        return False
+
     def combat_pre_dialog(self, screen: EventScreen) -> bool:
         if screen.find('限定商店', (300, 0, 660, 75), exact=True):
             cancel = screen.find('取消', (470, 435, 705, 510), exact=True)
@@ -316,31 +352,31 @@ class AbyssPush(BaseTask):
             if result_button:
                 self.ui.click(result_button)
                 continue
+            if self.login_bonus_dialog(screen):
+                continue
             if self.story_dialog(screen):
                 continue
             current = map_element(screen)
             if current == element:
                 # Wait for NEXT and stage labels to settle after the map pans.
                 previous = None
+                seen_at = 0.0
                 stable = 0
-                misses = 0
                 def settled(s):
-                    nonlocal previous, stable, misses
+                    nonlocal previous, seen_at, stable
                     target = next_stage(s)
                     key = (target[0], tuple(target[1].center)) if target else None
                     if key is None:
-                        misses += 1
-                        if misses >= 3:
-                            previous = None
-                            stable = 0
                         return False
-                    misses = 0
+                    now = time.monotonic()
                     close = (key is not None and previous is not None and key[0] == previous[0]
-                             and max(abs(a-b) for a, b in zip(key[1], previous[1])) <= 3)
+                             and max(abs(a-b) for a, b in zip(key[1], previous[1])) <= 3
+                             and now-seen_at <= 12)
                     stable = stable+1 if close else 0
                     previous = key
+                    seen_at = now
                     return stable >= 2
-                return self.ui.wait(settled, '深域NEXT稳定', timeout=25)
+                return self.ui.wait(settled, '深域NEXT稳定', timeout=45)
             if current:
                 self.ui.expect_click(AREAS[element][1], (280, 60, 900, 110), exact=True)
             elif screen.find('角色详情', (300, 0, 650, 70), exact=True):
@@ -392,10 +428,19 @@ class AbyssPush(BaseTask):
             elif screen.find('角色一览', (40, 0, 250, 65), exact=True):
                 button=(screen.find('冒险',(475,480,590,540),exact=True)
                         or screen.find('我的主页',(30,480,130,540),exact=True))
-                if button is None:raise EventUIError('角色一览底栏导航未知')
+                if button is None:
+                    done=screen.find('确定',(820,440,940,530),exact=True)
+                    if done is None:raise EventUIError('角色一览底栏导航未知')
+                    self.ui.click(done)
+                    continue
                 self.ui.click(button)
             elif self.read_detail(screen):
                 self.ui.expect_click('取消', (570, 425, 750, 490), exact=True)
+            elif (screen.find('队伍编组', (300, 0, 650, 70), exact=True)
+                    and (done := screen.find('确定', (820, 440, 940, 525), exact=True))):
+                # An interrupted character search can leave Android's input
+                # panel over the formation buttons. Close that panel first.
+                self.ui.click(done)
             elif screen.find('队伍编组', (300, 0, 650, 70), exact=True):
                 self.ui.expect_click('取消', (630, 420, 785, 490), exact=True)
             elif screen.find('深域关卡', (45, 0, 210, 55), exact=True):
@@ -452,8 +497,9 @@ class AbyssPush(BaseTask):
     def search(self, stage: AbyssStage) -> None:
         if not self.options['discover_sources']:
             return
-        if source_for_stage(self.source_parties, stage, set(), [],
-                            allow_local_trials=self.options['allow_local_trials']):
+        if (self.options['search_effort'] != 'high'
+                and source_for_stage(self.source_parties, stage, set(), [],
+                                     allow_local_trials=self.options['allow_local_trials'])):
             return
         self.log('自动获取并解析攻略：'+stage.title)
         report = acquire_strategies(task_source_options('abyss', self.options, stage=stage),
@@ -491,7 +537,8 @@ class AbyssPush(BaseTask):
                 budgets[stage.key]=self.history.budget(stage,self.options['max_failures_per_stage'],
                                                        self.options['max_repeat_failures_per_stage'])
             budget=budgets[stage.key]
-            if record['failures'].get(stage.key,0)>=budget:
+            budget_exhausted=record['failures'].get(stage.key,0)>=budget
+            if budget_exhausted and self.options['search_effort'] != 'high':
                 record.update(status='stopped',reason='本关失败预算用完，继续其他属性')
                 return
             previous=self.history.trials(stage)
@@ -501,6 +548,9 @@ class AbyssPush(BaseTask):
             if stage.key not in searched and prior_win is None:
                 self.search(stage)
                 searched.add(stage.key)
+            if budget_exhausted:
+                record.update(status='stopped',reason='本关失败预算用完；已尽力搜索新来源，未继续开战')
+                return
             if not self.options['allow_local_trials'] and not source_for_stage(self.source_parties, stage, set(), []):
                 record.update(status='blocked', reason='已解析来源尚无完整且适用的作业；详见source_searches逐字段证据与pending')
                 return
@@ -512,7 +562,16 @@ class AbyssPush(BaseTask):
                 record.update(status='stopped', reason='挑战按钮不可用')
                 return
             self.ui.click(challenge)
-            self.wait_formation('深域编队')
+            try:
+                self.wait_formation('深域编队')
+            except EventUIError as error:
+                if (str(error) != '体力不足，已取消回复体力；保留剩余挑战次数'
+                        or not self.options['auto_collect_house_stamina']
+                        or self.house_collected):
+                    raise
+                self.house_collected = True
+                self.collect_house_stamina(stage)
+                continue
             failed=self.history.failed_teams(stage)
             retry=previous[-1].get('retry',{}) if previous else {}
             source=(None if prior_win else source_for_stage(self.source_parties,stage,failed,previous,
@@ -684,6 +743,21 @@ class AbyssPush(BaseTask):
                 if record['status'] == 'running':
                     record.update(status='blocked', reason=str(error))
             self.ui.save('stopped')
+        except RunCancelled as error:
+            self.report['status'] = 'cancelled'
+            self.report['pending'].append(str(error))
+            for record in self.report['areas'].values():
+                if record['status'] == 'running':
+                    record.update(status='stopped', reason=str(error))
+            raise
+        except Exception as error:
+            reason=f'{type(error).__name__}: {error}'
+            self.report['status'] = 'failed'
+            self.report['pending'].append(reason)
+            for record in self.report['areas'].values():
+                if record['status'] == 'running':
+                    record.update(status='blocked', reason=reason)
+            raise
         finally:
             self.save_report()
         return self.report

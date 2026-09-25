@@ -55,7 +55,12 @@ def next_stage(screen: EventScreen) -> tuple[AbyssStage, TextBox] | None:
         px, py = point
         scores[max(0, py-14):py+15, max(0, px-20):px+21] = -1
         runner_up=cv.minMaxLoc(scores)[1]
-        if (best < .56 or best-runner_up < .16):
+        # On the far chapter-3 map the arrow sits partly under the attribute
+        # tabs. Its true match can be around .69 with one artwork decoy near
+        # .56; the yellow-pixel and unique-stage checks below still apply.
+        ordinary = best >= .56 and best-runner_up >= .16
+        occluded = best >= .68 and runner_up < .57 and best-runner_up >= .12
+        if not (ordinary or occluded):
             return None
         patch = cv.cvtColor(screen.image[arrow_top+py:arrow_top+py+17, px:px+21], cv.COLOR_BGR2HSV)
         yellow = (patch[:, :, 0] >= 12) & (patch[:, :, 0] <= 38) & (patch[:, :, 1] > 90) & (patch[:, :, 2] > 170)
@@ -67,7 +72,13 @@ def next_stage(screen: EventScreen) -> tuple[AbyssStage, TextBox] | None:
     labels = screen.all(r'\d+[-=]\d+', (max(0, x-45), y+60, min(960, x+45), min(412, y+(220 if boss else 190))))
     if len(labels) != 1:
         return None
-    chapter, number = map(int, re.split('[-=]',normalized(labels[0].text)))
+    # The map label may gain a stray dot from animated artwork (".5-3").
+    # Accept surrounding punctuation only; never infer a stage from a longer
+    # number or unrelated OCR sentence.
+    match = re.fullmatch(r'[.·:。,\s]*(\d+)[-=](\d+)[.·:。,\s]*', normalized(labels[0].text))
+    if match is None:
+        return None
+    chapter, number = map(int, match.groups())
     if chapter < 1 or not 1 <= number <= 10:
         return None
     return AbyssStage(element, chapter, number), labels[0]

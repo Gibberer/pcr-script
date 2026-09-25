@@ -424,6 +424,33 @@ class WorkflowTests(TestCase):
         self.assertEqual(result.outcome, "retreated")
         self.assertEqual(ui.clicks, ["btn_menu_text", "btn_giveup", "btn_giveup_blue"])
 
+    def test_retreat_waits_for_menu_hidden_by_combat_animation(self):
+        ui = ReplayUI([frame(("0:21",900,25)), frame(("0:20",900,25)),
+                       frame(("btn_menu_text",900,25)), frame(("btn_giveup",480,300)),
+                       fixture("boss_plus")])
+        combat = EventCombat.__new__(EventCombat)
+        combat.ui = ui
+        combat.r = SimpleNamespace(log=Mock(), story_dialog=Mock(return_value=False))
+        combat.match = lambda key, screen: key if screen.find(key) else None
+        with patch('pcrscript.tasks.event_battle.time.sleep'):
+            result = combat.retreat('测试动画遮挡')
+        self.assertEqual(result.outcome, 'retreated')
+        self.assertEqual(ui.clicks, ['btn_menu_text', 'btn_giveup'])
+
+    def test_pause_does_not_toggle_menu_while_panel_ocr_settles(self):
+        combat = EventCombat.__new__(EventCombat)
+        panel = frame(('进行中战斗',480,45),('主菜单',480,85),('返回',335,438))
+        combat.ui = Mock()
+        combat.ui.capture.side_effect = [frame(('菜单',900,25)),
+            frame(('菜单',900,25)),frame(('菜单',900,25)),panel,panel,panel]
+        combat.ui.wait.return_value = frame(('AUTO开启',480,355))
+        combat.r = SimpleNamespace(check_deadline=Mock(),story_dialog=Mock(return_value=False))
+        combat.match = Mock(return_value=None)
+        with patch('pcrscript.tasks.event_battle.time.sleep'):
+            self.assertTrue(combat.configure_paused(None,None))
+        self.assertEqual(combat.ui.click.call_count,1)
+        self.assertEqual(combat.ui.click.call_args.args[0].text,'菜单')
+
     def test_disabled_battle_start_is_not_clicked(self):
         combat = EventCombat.__new__(EventCombat)
         combat.ui = ReplayUI([frame(("战斗开始", 847, 452))])

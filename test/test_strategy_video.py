@@ -12,7 +12,7 @@ import numpy as np
 
 from pcrscript.game_ui.avatars import AvatarIndex, face_crop
 from pcrscript.game_ui.avatar_assets import ensure_avatar_index
-from pcrscript.game_ui.guide_vision import GuideText, combat_team, formation_team, wide_special_equipment_team, combat_set, combat_auto, labeled_fields, formation_fields
+from pcrscript.game_ui.guide_vision import GuideText, battle_rectangles, combat_team, formation_team, wide_special_equipment_team, combat_set, combat_auto, labeled_fields, formation_fields
 from pcrscript.tasks.strategy_document import Evidence, empty_member, finalize, to_event_party, abyss_candidate, event_parties, event_trial_parties, dungeon_plan
 from pcrscript.tasks.strategy_video import choose_pages, observed_scope, parse_video_source, acquire_strategies, task_source_options, texts_in_view, sample_seconds, frame_texts
 from pcrscript.tasks.strategy_party_pool import boss_parties, next_boss_party
@@ -36,12 +36,58 @@ def complete_party():
 
 
 class VideoStrategyTests(TestCase):
+    def test_decorated_element_part_selects_exact_abyss_stage(self):
+        source=dict(title='公主连结 5属性深域4~5图自动作业合集',pages=[
+            dict(cid=1,part='个人公主骑士练度参考'),
+            dict(cid=2,part='火4图'),
+            dict(cid=3,part='【风】5-6'),
+            dict(cid=4,part='【火】5-6'),
+            dict(cid=5,part='【水】5-6')])
+        options=task_source_options('abyss',dict(search_effort='high'),stage=AbyssStage('fire',5,6))
+        self.assertEqual([p['cid'] for p in choose_pages(source,options)],[1,4])
+
+    def test_high_abyss_effort_expands_bounded_source_budget(self):
+        stage=AbyssStage('water',4,6)
+        normal=task_source_options('abyss',dict(sources=dict(max_videos=4)),stage=stage)
+        high=task_source_options('abyss',dict(search_effort='high',
+            sources=dict(max_videos=4,max_video_seconds=240)),stage=stage)
+        self.assertEqual(normal['max_videos'],4)
+        self.assertEqual(high['max_videos'],12)
+        self.assertEqual(high['max_video_seconds'],600)
+        self.assertEqual(high['max_pages_per_video'],8)
+        self.assertEqual(high['max_frames_per_page'],96)
+        self.assertEqual(high['max_download_seconds'],420)
+        self.assertEqual(high['parse_timeout'],3600)
+        self.assertTrue(high['skip_manual_media'])
+        self.assertTrue(high['skip_long_media'])
+        with self.assertRaisesRegex(ValueError,'sources.max_videos'):
+            task_source_options('abyss',dict(search_effort='high',
+                sources=dict(max_videos='4')),stage=stage)
+
+    def test_combat_row_verifies_inferred_cards_with_connected_set_bubbles(self):
+        image=np.zeros((540,960,3),np.uint8)
+        cyan=(255,200,0)
+        for i in range(5):
+            x=190+119*i
+            cv.rectangle(image,(x,390),(x+99,489),cyan,-1 if i in (1,4) else 4)
+            if i in (1,4):
+                cv.rectangle(image,(x+70,380),(x+116,410),cyan,-1)
+        self.assertEqual(len(battle_rectangles(image)),5)
+        cv.rectangle(image,(662,376),(785,495),(0,0,0),-1)
+        self.assertEqual(battle_rectangles(image),[])
+
     def test_wide_video_samples_brief_formation_and_equipment_screens(self):
         samples = sample_seconds(96, 50, wide=True)
         self.assertIn(2.0, samples)
         self.assertIn(3.5, samples)
         self.assertLessEqual(len(samples), 50)
         self.assertNotIn(2.0, sample_seconds(96, 50))
+
+    def test_long_video_samples_opening_battle_more_densely(self):
+        samples = sample_seconds(232, 50)
+        self.assertLessEqual(len(samples), 50)
+        self.assertGreaterEqual(sum(3 <= s < 60 for s in samples), 24)
+        self.assertTrue(any(s > 200 for s in samples))
 
     def test_identical_frame_reuses_ocr_only_with_saved_image(self):
         with TemporaryDirectory() as folder,patch('pcrscript.tasks.strategy_video.read_text',
@@ -135,17 +181,22 @@ class VideoStrategyTests(TestCase):
 
     def test_exact_incomplete_abyss_roster_only_seeds_authorized_auto_trial(self):
         stage = AbyssStage('fire', 5, 2)
+        members=[empty_member('角色'+str(i)) for i in range(5)]
+        for member in members:
+            member['instant'].add(True,Evidence('https://example.com/5-2',method='video_title_full_set'))
         document = finalize(dict(source='https://example.com/5-2',
             scope=dict(element='fire', stage='5-2', chapters=[5, 5]),
             scope_verified=True, region='unknown', target_region='cn',
-            members=[empty_member('角色'+str(i)) for i in range(5)],
+            members=members,
             identity_evidence=[dict(name='角色'+str(i), cid=1, seconds=second)
                                for i in range(5) for second in (1.0, 2.0)],
-            auto=dict(value=None, evidence=[], conflicts=[]),
+            auto=dict(value=True, evidence=[dict(method='combat_auto_button')], conflicts=[]),
             manual_actions=[], global_requirements=[]))
         candidate = abyss_candidate(document)
         self.assertIsNone(source_for_stage([candidate], stage, set(), []))
         self.assertIs(source_for_stage([candidate], stage, set(), [], allow_local_trials=True), candidate)
+        unknown=dict(document,members=[dict(document['members'][0],instant=dict(value=None,evidence=[],conflicts=[])),*document['members'][1:]])
+        self.assertIsNone(source_for_stage([abyss_candidate(unknown)],stage,set(),[],allow_local_trials=True))
         self.assertIsNone(source_for_stage([abyss_candidate(dict(document,identity_evidence=[]))],
                                            stage, set(), [], allow_local_trials=True))
         for change in (dict(manual_actions=[{'text':'半自动'}]),
@@ -168,7 +219,7 @@ class VideoStrategyTests(TestCase):
         self.assertIsNotNone(party)
         self.assertEqual(stub.trial_source['instant'], [True]*5)
         self.assertEqual(audit['build_basis'], 'local_trial_source_roster')
-        self.assertEqual(len([a for a in audit['assumptions'] if 'SET未知' in a]), 5)
+        self.assertFalse(any('SET未知' in a for a in audit['assumptions']))
 
     def test_part_selection_and_contradictory_stage(self):
         source = dict(title='测试', pages=[dict(cid=1,part='练度要求'),dict(cid=2,part='水4-1'),dict(cid=3,part='火4-1')])
@@ -332,6 +383,16 @@ class VideoStrategyTests(TestCase):
         image[400:435,890:945]=255
         self.assertFalse(combat_auto(image,labels))
         self.assertIsNone(combat_auto(image,[]))
+
+    def test_full_set_title_requires_exact_single_stage(self):
+        from pcrscript.tasks.strategy_video import exact_full_set_claim
+        source=dict(title='［公主连结］深域风 2-10 银莲版本，全 set',
+                    pages=[dict(cid=1,part='recording')])
+        scope=dict(element='wind',stage='2-10',chapters=[2,2])
+        self.assertTrue(exact_full_set_claim(source,scope,'abyss'))
+        self.assertFalse(exact_full_set_claim(source,dict(element='wind',stage='3-10'),'abyss'))
+        self.assertFalse(exact_full_set_claim(dict(source,pages=[dict(cid=1),dict(cid=2)]),scope,'abyss'))
+        self.assertFalse(exact_full_set_claim(dict(source,title=source['title']+' 半自动'),scope,'abyss'))
 
     def test_empty_avatar_bootstrap_cache_and_expired_revalidation(self):
         with TemporaryDirectory() as folder:
@@ -563,6 +624,18 @@ class VideoStrategyTests(TestCase):
             self.assertEqual(report['pages'][0]['duration'],1183)
             self.assertEqual(report['pages'][0]['max_video_seconds'],240)
 
+    def test_download_window_can_be_extended_for_long_target_part(self):
+        with TemporaryDirectory() as folder:
+            source=dict(bvid='BV0000000000',url='https://example.com/synthetic',
+                        title='公主连结 红焰深域',
+                        pages=[dict(cid=1,part='火5-6',duration=240)])
+            index=SimpleNamespace(names=['角色'],matrix=np.ones((1,1728),np.float32))
+            fetch=Mock(side_effect=RuntimeError('synthetic download failure'))
+            parse_video_source(source,dict(task_type='abyss',stage='5-6',element='fire',
+                parsed_dir=folder,max_video_seconds=600,max_download_seconds=420),
+                index,api=Mock(),ocr=Mock(),media_fetcher=fetch)
+            self.assertEqual(fetch.call_args.kwargs['max_seconds'],420)
+
     def test_automatic_abyss_preserves_description_tp_requirement(self):
         with TemporaryDirectory() as folder:
             source=dict(bvid='BV0000000000',url='https://example.com/synthetic',
@@ -576,6 +649,12 @@ class VideoStrategyTests(TestCase):
             fetch.assert_not_called()
             self.assertEqual(report['manual_actions'][0]['evidence']['method'],'source_description')
             self.assertIn('TP+2',report['pages'][0]['skipped'])
+            source['description']=''
+            source['title']='公主连结 翠岚深域 风2-10 TP+2'
+            report=parse_video_source(source,dict(task_type='abyss',stage='2-10',element='wind',
+                parsed_dir=folder,skip_manual_media=True),index,api=Mock(),ocr=Mock(),media_fetcher=fetch)
+            fetch.assert_not_called()
+            self.assertEqual(report['manual_actions'][0]['evidence']['method'],'source_title')
 
     def test_event_video_requires_matching_event_and_mode(self):
         with TemporaryDirectory() as folder:

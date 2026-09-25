@@ -55,7 +55,7 @@ def battle_rectangles(image, *, relaxed=False) -> list[tuple[int, int, int, int]
     if not 3 <= len(anchors) <= 6:
         return []
     size = float(np.median([r[2] for r in anchors]))
-    tolerance = .15 if relaxed else .08
+    tolerance = .15 if relaxed else .10
     anchors = [r for r in anchors if abs(r[2]-size) < size*tolerance and abs(r[3]-size) < size*tolerance]
     if len(anchors) < 3:
         return []
@@ -66,21 +66,28 @@ def battle_rectangles(image, *, relaxed=False) -> list[tuple[int, int, int, int]
     if not 1.1*size < step < 1.5*size:
         return []
     positions = np.rint((centers-centers[0])/step).astype(int)
-    if np.max(np.abs(centers-(centers[0]+positions*step))) > size*.06 or positions[-1] != 4:
+    if np.max(np.abs(centers-(centers[0]+positions*step))) > size*.06 or positions[-1] > 4:
         return []
     top = float(np.median([r[1] for r in anchors]))
     if max(abs(r[1]-top) for r in anchors) > size*tolerance:
         return []
-    result = [(round(centers[0]+i*step-size/2), round(top), round(size), round(size)) for i in range(5)]
-    for x, y, w, h in result:
-        if x < 0 or y < 0 or x+w > width or y+h > height:
-            return []
-        # Require actual border pixels for inferred positions, not just a grid guess.
-        border = np.concatenate([mask[y:y+h, x:x+max(2, w//14)].ravel(),
-                                 mask[y+h-max(2, h//14):y+h, x:x+w].ravel()])
-        if np.mean(border > 0) < .22:
-            return []
-    return result
+    candidates = []
+    # A SET bubble can merge with a card outline and hide that card from the
+    # contour list. Infer its slot only if all five real cyan borders exist.
+    for first_slot in range(5-int(positions[-1])):
+        origin = centers[0]-first_slot*step
+        result = [(round(origin+i*step-size/2), round(top), round(size), round(size))
+                  for i in range(5)]
+        borders = []
+        for x, y, w, h in result:
+            if x < 0 or y < 0 or x+w > width or y+h > height:
+                break
+            border = np.concatenate([mask[y:y+h, x:x+max(2, w//14)].ravel(),
+                                     mask[y+h-max(2, h//14):y+h, x:x+w].ravel()])
+            borders.append(float(np.mean(border > 0)))
+        if len(borders) == 5 and min(borders) >= .18:
+            candidates.append(result)
+    return candidates[0] if len(candidates) == 1 else []
 
 
 def match_portrait(image, rectangle, index: AvatarIndex, *, align=True,
@@ -117,7 +124,9 @@ def combat_team(image, index: AvatarIndex, *, relaxed=False) -> list[dict]:
     boxes = battle_rectangles(image, relaxed=relaxed)
     if len(boxes) != 5:
         return []
-    matched = [match_portrait(image, r, index) for r in boxes]
+    # Closely related outfits can have a small runner-up margin despite a
+    # high absolute score; the video parser still requires repeat frames.
+    matched = [match_portrait(image, r, index, margin=.04) for r in boxes]
     if any(m is None for m in matched) or len({m['name'] for m in matched}) != 5:
         return []
     for match, rectangle in zip(matched, boxes):

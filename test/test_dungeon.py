@@ -132,6 +132,17 @@ class DungeonTests(TestCase):
         self.assertEqual(formation.ui.driver.input.call_count,3)
         formation.inspect.assert_not_called()
 
+    def test_adb_chinese_formation_uses_verified_roster_scan(self):
+        formation=object.__new__(EventFormation)
+        formation.ui=Mock()
+        formation.ui.driver.supports_unicode_input=False
+        formation._select_by_scrolling=Mock(return_value=(True, {'order': ['测试角色']}))
+        party=EventParty('synthetic','https://example.com',[
+            MemberRequirement('测试角色',1,1,3)])
+        self.assertEqual(formation.select(party), (True, {'order': ['测试角色']}))
+        formation._select_by_scrolling.assert_called_once_with(party)
+        formation.ui.driver.input.assert_not_called()
+
     def test_route_conflicts_ignore_ordinary_floor_reuse(self):
         with TemporaryDirectory() as root:
             p=Path(root)/'plan.yml';p.write_text(yaml.safe_dump(synthetic_plan()),encoding='utf-8')

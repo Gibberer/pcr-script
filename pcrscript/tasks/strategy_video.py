@@ -21,7 +21,7 @@ from .strategy_document import Evidence, Fact, empty_member, finalize, export_do
 from .strategy_sources import MANUAL_PART, UNVERIFIED_SETTING, discover_sources
 from .strategy_inputs import preferred_sources
 
-PARSER_VERSION = 24
+PARSER_VERSION = 28
 FRAME_OCR_VERSION = 1
 ELEMENTS = {'火': 'fire', '水': 'water', '风': 'wind', '光': 'light', '暗': 'dark',
             '红焰': 'fire', '苍波': 'water', '翠岚': 'wind', '珀天': 'light', '紫冥': 'dark'}
@@ -42,9 +42,15 @@ def texts_in_view(texts, raw_width: int, crop_left: int, crop_width: int):
 
 
 def sample_seconds(duration: float, maximum: int, *, wide: bool = False) -> list[float]:
-    """Include short-lived opening formation/equipment screens in wide videos."""
+    """Give opening formations denser coverage while sampling the full video."""
     early = [s for s in ([.5, 1.5, 2.0, 3.5] if wide else [.5, 1.5]) if s < duration]
     regular_count = max(0, maximum-len(early))
+    if duration > 90 and regular_count >= 20:
+        front = min(60, duration*.4)
+        opening = regular_count//2
+        regular = list(np.linspace(3, front, opening, endpoint=False))
+        regular += list(np.linspace(front, duration, regular_count-opening, endpoint=False))
+        return sorted(set(early+regular))
     step = max(1, (duration-3)/max(1, regular_count))
     regular = list(np.arange(3, duration, step))[:regular_count]
     return sorted(set(early+regular))
@@ -100,6 +106,20 @@ def task_source_options(kind: str, options: dict, *, stage=None,
     result.update(task_type=kind, region='cn')
     result['source_urls'] = options.get('source_urls') or result.get('source_urls', [])
     if kind == 'abyss':
+        effort = options.get('search_effort', 'normal')
+        if effort not in ('normal', 'high'):
+            raise ValueError('Abyss.search_effort必须为normal或high')
+        result['search_effort'] = effort
+        if effort == 'high':
+            # Floors also work when a saved GUI configuration still contains
+            # the normal preset's explicit source limits.
+            for key, minimum in [('max_videos', 12), ('max_pages_per_video', 8),
+                                 ('max_frames_per_page', 96), ('max_video_seconds', 600),
+                                 ('max_download_seconds', 420), ('parse_timeout', 3600)]:
+                configured = result.get(key, minimum)
+                if type(configured) is not int or configured < 1:
+                    raise ValueError(f'sources.{key}必须为正整数')
+                result[key] = max(configured, minimum)
         result['skip_manual_media'] = not options.get('prepare_only', False)
         result['skip_long_media'] = not options.get('prepare_only', False)
         if stage is not None:
@@ -130,7 +150,7 @@ def task_source_options(kind: str, options: dict, *, stage=None,
 def page_scope(page: dict, kind: str) -> dict:
     title = page.get('part', page.get('title', ''))
     if kind == 'abyss':
-        match = re.search(r'(红焰|苍波|翠岚|珀天|紫冥|火|水|风|光|暗)(?:深域)?\s*(\d+)\s*[-－]\s*(\d+)(?!\d|图)', title)
+        match = re.search(r'(红焰|苍波|翠岚|珀天|紫冥|火|水|风|光|暗)(?:属性|深域)?[】\]）)]?\s*(\d+)\s*[-－]\s*(\d+)(?!\d|图)', title)
         if match:
             return dict(element=ELEMENTS[match[1]], stage=f'{int(match[2])}-{int(match[3])}',
                         chapters=[int(match[2]), int(match[2])])
@@ -152,6 +172,18 @@ def page_scope(page: dict, kind: str) -> dict:
         if difficulty and phase:
             return dict(difficulty=difficulty, mode=int(phase[1]))
     return {}
+
+
+def exact_full_set_claim(source: dict, scope: dict, kind: str) -> bool:
+    """Use an explicit single-stage video title as SET evidence."""
+    if kind != 'abyss' or len(source.get('pages', [])) != 1:
+        return False
+    title = source.get('title', '')
+    declared = page_scope({'part': title}, kind)
+    return (bool(re.search(r'全\s*SET', title, re.I))
+            and not MANUAL_PART.search(title)
+            and declared.get('element') == scope.get('element')
+            and declared.get('stage') == scope.get('stage'))
 
 
 def choose_pages(source: dict, options: dict) -> list[dict]:
@@ -316,12 +348,13 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
     errors, pages_report = [], []
     source_region = declared_region(source.get('title', '')+' '+source.get('description', ''))
     text_source = '\n'.join([source.get('description', '')]+[r.get('text', '') for r in source.get('author_comments', [])])
-    source_setting = UNVERIFIED_SETTING.search(source.get('description') or '')
+    title_setting = UNVERIFIED_SETTING.search(source.get('title') or '')
+    source_setting = title_setting or UNVERIFIED_SETTING.search(source.get('description') or '')
     if source_setting:
-        description = source.get('description') or ''
-        manual.append(dict(text=description[:240], evidence=asdict(Evidence(
+        setting_text = (source.get('title') if title_setting else source.get('description')) or ''
+        manual.append(dict(text=setting_text[:240], evidence=asdict(Evidence(
             source['url'], int(pages[0]['cid']) if pages else 0,
-            method='source_description', text=description[:240]))))
+            method='source_title' if title_setting else 'source_description', text=setting_text[:240]))))
     for page in pages:
         check()
         page_name = page.get('part', page.get('title', ''))
@@ -337,7 +370,7 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
                 continue
         if source_setting and options.get('skip_manual_media'):
             pages_report.append(dict(cid=page['cid'], title=page_name,
-                                     skipped='简介含未核实TP+2大师点条件，自动任务不下载此分P'))
+                                     skipped='标题或简介含未核实TP+2大师点条件，自动任务不下载此分P'))
             continue
         page_duration = float(page.get('duration') or 0)
         if (options.get('skip_long_media') and page_duration > 0
@@ -350,7 +383,8 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
         try:
             video, media = media_fetcher(api, source['bvid'], page,
                                        Path(options.get('media_dir', 'cache/game/strategies/media')),
-                                       timeout=options.get('request_timeout', 20), check=check)
+                                       timeout=options.get('request_timeout', 20),
+                                       max_seconds=options.get('max_download_seconds', 180), check=check)
         except (requests.RequestException, RuntimeError, ValueError, OSError) as error:
             errors.append(dict(cid=page['cid'], error=str(error)))
             continue
@@ -570,6 +604,10 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
         team.pop('observations')
         team['region'] = source_region
         team['target_region'] = options.get('region', 'cn')
+        if exact_full_set_claim(source, team['scope'], options['task_type']):
+            proof = Evidence(source['url'], method='video_title_full_set', text=source['title'])
+            for member in team['members']:
+                member['instant'].add(True, proof)
         team['global_requirements'] = list({r['text']: r for r in globals_ if not r['advisory']}.values())
         team['recommendations'] = list({r['text']: r for r in globals_ if r['advisory']}.values())
         team['manual_actions'] = list({r['text']: r for r in manual}.values())
@@ -591,14 +629,16 @@ def acquire_strategies(options: dict, *, api=None, index=None, ocr=None, check=l
     if options.get('task_type') not in ('abyss', 'dungeon', 'event', 'revival'):
         raise ValueError('视频解析task_type必须为abyss、dungeon、event或revival')
     for key, default, upper in [('max_videos', 4, 30), ('max_frames_per_page', 50, 300),
-                                ('max_video_seconds', 180, 3600), ('parse_timeout', 900, 7200)]:
+                                ('max_video_seconds', 180, 3600),
+                                ('max_download_seconds', 180, 900),
+                                ('parse_timeout', 900, 7200)]:
         value = options.setdefault(key, default)
         if type(value) is not int or not 1 <= value <= upper:
             raise ValueError(f'{key}必须为1到{upper}的整数')
     api = api or BilibiliApi(timeout=options.get('request_timeout', 20), browser_session=options.get('browser_session', True))
     report = dict(status='running', parties=[], parsed_sources=[], pending=[], errors=[])
     directory = Path(options.get('parsed_dir', 'cache/game/strategies/parsed'))
-    scope = {k: options.get(k) for k in ('task_type', 'area', 'stage', 'element', 'difficulty', 'mode', 'region', 'source_urls')}
+    scope = {k: options.get(k) for k in ('task_type', 'area', 'stage', 'element', 'difficulty', 'mode', 'region', 'source_urls', 'search_effort')}
     output = directory/('catalog-'+sha256(json.dumps(scope, sort_keys=True).encode()).hexdigest()[:20]+'.json')
     started = time.monotonic()
     max_seconds = options.get('parse_timeout', 900)

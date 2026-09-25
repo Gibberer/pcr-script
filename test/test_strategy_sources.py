@@ -4,7 +4,7 @@ from unittest import TestCase
 from unittest.mock import Mock,patch
 import json
 import requests
-from pcrscript.tasks.strategy_sources import discover_sources,relevant
+from pcrscript.tasks.strategy_sources import discover_sources,relevant,source_queries
 from pcrscript.tasks import find_taskclass
 
 BV='BV1234567890'
@@ -15,6 +15,124 @@ def fake_api():
  return a
 
 class SourceTests(TestCase):
+ def test_high_effort_queries_more_phrasings_and_reviews_chapter_collection(self):
+  queries=source_queries(['珀天深域','深域 光','光属性'],'4-6','high',kind='abyss',element='light')
+  self.assertGreater(len(queries),4)
+  self.assertIn('公主连结 深域 光 4-6',queries)
+  self.assertIn('光4-6 全set',queries)
+  self.assertTrue(any('光深域4-6' in query and '自动' in query for query in queries))
+  with TemporaryDirectory() as folder:
+   api=fake_api()
+   api.search.return_value['data']['result'][0]['data'][0]['title']='公主连结 珀天深域1-7图'
+   api.getVideoInfo.return_value['data'].update(title='公主连结 国服 珀天深域1-7图',
+    pages=[{'cid':1,'page':1,'part':'1-5','duration':200}])
+   base=dict(task_type='abyss',area='珀天深域',aliases=['深域 光','光属性'],
+    element='light',stage='4-6',category_terms=['深域'],cache_dir=folder)
+   normal=discover_sources(base,api=api)
+   self.assertFalse(normal['candidates'])
+   high=discover_sources(dict(base,search_effort='high'),api=api)
+   self.assertEqual([c['bvid'] for c in high['candidates']],[BV])
+   self.assertGreater(api.search.call_count,4)
+   self.assertNotEqual(normal['catalog'],high['catalog'])
+ def test_high_effort_scans_past_normal_metadata_window(self):
+  with TemporaryDirectory() as folder:
+   api=fake_api()
+   ids=[f'BV{i:010d}' for i in range(51)]
+   api.search.return_value={'code':0,'data':{'result':[{'result_type':'video','data':[
+    {'bvid':bvid,'title':'公主连结 珀天深域4-6'} for bvid in ids]}]}}
+   def info(*,bvid):
+    valid=bvid==ids[-1]
+    return {'code':0,'data':{'bvid':bvid,
+     'title':'公主连结 国服 珀天深域4-6' if valid else '其他游戏 珀天深域4-6',
+     'pages':[{'cid':1,'page':1,'part':'光4-6','duration':100}]}}
+   api.getVideoInfo.side_effect=info
+   base=dict(task_type='abyss',area='珀天深域',aliases=['光属性'],element='light',
+    stage='4-6',category_terms=['深域'],max_videos=1,cache_dir=folder)
+   self.assertEqual(discover_sources(base,api=api)['candidates'],[])
+   high=discover_sources(dict(base,search_effort='high'),api=api)
+   self.assertEqual([c['bvid'] for c in high['candidates']],[ids[-1]])
+ def test_high_effort_prioritizes_short_exact_auto_part(self):
+  with TemporaryDirectory() as folder:
+   api=fake_api();ids=['BV0000000001','BV0000000002']
+   api.search.return_value={'code':0,'data':{'result':[{'result_type':'video','data':[
+    {'bvid':bvid,'title':'公主连结 红焰深域5-6'} for bvid in ids]}]}}
+   def info(*,bvid):
+    fast=bvid==ids[1]
+    return {'code':0,'data':{'bvid':bvid,
+     'title':'公主连结 国服 红焰深域5-6 自动作业' if fast else '公主连结 国服 红焰深域5-6',
+     'pages':[{'cid':1,'page':1,'part':'火5-6','duration':120 if fast else 390}]}}
+   api.getVideoInfo.side_effect=info
+   result=discover_sources(dict(task_type='abyss',area='红焰深域',aliases=['火属性'],
+    element='fire',stage='5-6',category_terms=['深域'],max_videos=2,
+    search_effort='high',cache_dir=folder),api=api)
+   self.assertEqual([c['bvid'] for c in result['candidates']],ids[::-1])
+ def test_high_effort_prefers_newer_exact_auto_roster(self):
+  with TemporaryDirectory() as folder:
+   api=fake_api();ids=['BV0000000001','BV0000000002']
+   api.search.return_value={'code':0,'data':{'result':[{'result_type':'video','data':[
+    {'bvid':bvid,'title':'公主连结 风深域2-10 自动作业'} for bvid in ids]}]}}
+   def info(*,bvid):
+    recent=bvid==ids[1]
+    return {'code':0,'data':{'bvid':bvid,'title':'公主连结 国服 风深域2-10 自动作业',
+     'pubdate':200 if recent else 100,
+     'pages':[{'cid':1,'page':1,'part':'风2-10','duration':180 if recent else 90}]}}
+   api.getVideoInfo.side_effect=info
+   result=discover_sources(dict(task_type='abyss',area='翠岚深域',aliases=['风'],
+    element='wind',stage='2-10',category_terms=['深域'],max_videos=1,
+    search_effort='high',cache_dir=folder),api=api)
+   self.assertEqual([c['bvid'] for c in result['candidates']],[ids[1]])
+ def test_high_effort_newer_exact_video_precedes_older_auto_hint(self):
+  with TemporaryDirectory() as folder:
+   api=fake_api();ids=['BV0000000001','BV0000000002']
+   api.search.return_value={'code':0,'data':{'result':[{'result_type':'video','data':[
+    {'bvid':bvid,'title':'公主连结 风深域3-3'} for bvid in ids]}]}}
+   def info(*,bvid):
+    recent=bvid==ids[1]
+    return {'code':0,'data':{'bvid':bvid,
+     'title':'公主连结 风深域3-3' if recent else '公主连结 风深域3-3 SetAuto',
+     'pubdate':200 if recent else 100,
+     'pages':[{'cid':1,'page':1,'part':'风3-3','duration':100}]}}
+   api.getVideoInfo.side_effect=info
+   result=discover_sources(dict(task_type='abyss',area='翠岚深域',aliases=['风'],
+    element='wind',stage='3-3',category_terms=['深域'],max_videos=2,
+    search_effort='high',cache_dir=folder),api=api)
+   self.assertEqual([c['bvid'] for c in result['candidates']],[ids[1],ids[0]])
+ def test_high_effort_ranks_exact_single_video_title_before_generic_collection(self):
+  with TemporaryDirectory() as folder:
+   api=fake_api();ids=['BV0000000001','BV0000000002']
+   api.search.return_value={'code':0,'data':{'result':[{'result_type':'video','data':[
+    {'bvid':bvid,'title':'公主连结 风深域2-10'} for bvid in ids]}]}}
+   def info(*,bvid):
+    exact=bvid==ids[1]
+    return {'code':0,'data':{'bvid':bvid,'title':(
+      '公主连结 风深域2-10 全 set' if exact else '公主连结 风深域1-7图通用队'),
+     'pubdate':100 if exact else 200,
+     'pages':[{'cid':1,'page':1,'part':'P1' if exact else '风6-10','duration':100}]}}
+   api.getVideoInfo.side_effect=info
+   result=discover_sources(dict(task_type='abyss',area='翠岚深域',aliases=['风'],
+    element='wind',stage='2-10',category_terms=['深域'],max_videos=2,
+    search_effort='high',cache_dir=folder),api=api)
+   self.assertEqual([c['bvid'] for c in result['candidates']],[ids[1],ids[0]])
+ def test_high_effort_considers_new_exact_video_beyond_metadata_window(self):
+  with TemporaryDirectory() as folder:
+   api=fake_api();ids=[f'BV{i:010d}' for i in range(100)]
+   api.search.return_value={'code':0,'data':{'result':[{'result_type':'video','data':[
+    {'bvid':bvid,'title':'公主连结 翠岚深域 图2',
+     'pubdate':100} for bvid in ids[:-1]]+[
+    {'bvid':ids[-1],'title':'公主连结 风深域2-10 自动',
+     'pubdate':200}]}]}}
+   def info(*,bvid):
+    exact=bvid==ids[-1]
+    return {'code':0,'data':{'bvid':bvid,
+     'title':'公主连结 国服 风深域2-10 自动' if exact else '公主连结 国服 翠岚深域 图2',
+     'pubdate':200 if exact else 100,
+     'pages':[{'cid':1,'page':1,'part':'风2-10' if exact else '风2-1',
+               'duration':100}]}}
+   api.getVideoInfo.side_effect=info
+   result=discover_sources(dict(task_type='abyss',area='翠岚深域',aliases=['风'],
+    element='wind',stage='2-10',category_terms=['深域'],max_videos=1,
+    search_effort='high',cache_dir=folder),api=api)
+   self.assertEqual([c['bvid'] for c in result['candidates']],[ids[-1]])
  def options(self,folder):return dict(task_type='dungeon',area='测试区域',aliases=[],cache_dir=folder)
  def test_empty_cache_fetch_then_reuse_and_expiry(self):
   with TemporaryDirectory() as folder:
@@ -91,6 +209,17 @@ class SourceTests(TestCase):
     desc='风2-10刚需TP+2大师点',pages=[{'cid':1,'page':1,'part':'风2-10','duration':120}])
    result=discover_sources(dict(task_type='abyss',area='深域',aliases=['风'],element='wind',
     stage='2-10',category_terms=['深域'],max_videos=1,max_video_seconds=240,
+    skip_manual_media=True,skip_long_media=True,cache_dir=folder),api=api)
+   self.assertEqual(result['candidates'],[])
+   self.assertIn('TP+2',result['excluded'][0]['reason'])
+ def test_automatic_abyss_excludes_tp_requirement_in_main_title(self):
+  with TemporaryDirectory() as folder:
+   api=fake_api()
+   api.search.return_value['data']['result'][0]['data'][0]['title']='公主连结 深域 风3-3'
+   api.getVideoInfo.return_value['data'].update(title='公主连结 国服 风深域3-3 TP+2',
+    desc='',pages=[{'cid':1,'page':1,'part':'风3-3','duration':120}])
+   result=discover_sources(dict(task_type='abyss',area='深域',aliases=['风'],element='wind',
+    stage='3-3',category_terms=['深域'],max_videos=1,max_video_seconds=240,
     skip_manual_media=True,skip_long_media=True,cache_dir=folder),api=api)
    self.assertEqual(result['candidates'],[])
    self.assertIn('TP+2',result['excluded'][0]['reason'])

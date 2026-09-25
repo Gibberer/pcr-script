@@ -4,6 +4,8 @@ Extra:
   dnpath: ''
   adb_path: adb
   adb_serial: ''
+  adb_unicode_console_path: ''
+  adb_unicode_console_index: 0
 StoryEvent:
   source_urls: []
   discover_sources: true
@@ -88,6 +90,8 @@ CharacterBond:
 
 # 按需深域推进；本地试打须明确启用，不自动加入每日。
 Abyss:
+  search_effort: normal
+  auto_collect_house_stamina: false
   prepare_only: false
   allow_local_trials: false
   source_urls: []

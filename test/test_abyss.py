@@ -9,12 +9,14 @@ import cv2 as cv
 
 from pcrscript.game_ui.screen import EventScreen, TextBox, EventUIError
 from pcrscript.game_ui.abyss import AbyssStage, next_stage, detail_stage, remaining, advanced
+from pcrscript.game_ui.guild_house import collect_produced_stamina, visible_stamina
 from pcrscript.tasks.task_abyss import AbyssPush, validate_options, equipment_retrial, source_for_stage, recent_unreleased, recent_previous_win
 from pcrscript.tasks.event_battle import BattleResult
 from pcrscript.tasks.strategy_sources import discover_sources
 from pcrscript.tasks.event_strategy import EventParty, MemberRequirement
 from pcrscript.tasks.abyss_party import AbyssFormation, archive_observations
 from pcrscript.tasks.abyss_history import AbyssHistory
+from pcrscript.run_session import RunCancelled
 from test_strategy_sources import fake_api
 
 
@@ -50,6 +52,55 @@ class AbyssTests(TestCase):
         self.assertEqual(next_stage(task.enter('fire'))[0],AbyssStage('fire',3,1))
         self.assertEqual(task.ui.click.call_args.args[0].text,'跳过')
 
+    def test_enter_skips_verified_daily_login_board(self):
+        task=object.__new__(AbyssPush);task.deadline=float('inf');task.ui=Mock()
+        icon=cv.imread('images/btn_skip.png')
+        board=screen(('欢迎回来',145,390),('Goal!',850,365))
+        board.image[19:19+icon.shape[0],865:865+icon.shape[1]]=icon
+        task.ui.capture.side_effect=[board,map_screen()]
+        task.ui.wait.return_value=map_screen()
+        self.assertEqual(next_stage(task.enter('fire'))[0],AbyssStage('fire',3,1))
+        task.ui.click.assert_called_once_with((898.5,42.0))
+
+    def test_enter_closes_android_keyboard_before_formation(self):
+        task=object.__new__(AbyssPush);task.deadline=float('inf');task.ui=Mock()
+        keyboard=screen(('队伍编组',480,42),('确定',880,485))
+        task.ui.capture.side_effect=[keyboard,map_screen()]
+        task.ui.wait.return_value=map_screen()
+        self.assertEqual(next_stage(task.enter('fire'))[0],AbyssStage('fire',3,1))
+        self.assertEqual(task.ui.click.call_args.args[0].text,'确定')
+        task.ui.expect_click.assert_not_called()
+
+    def test_enter_closes_android_keyboard_on_character_roster(self):
+        task=object.__new__(AbyssPush);task.deadline=float('inf');task.ui=Mock()
+        keyboard=screen(('角色一览',110,35),('确定',880,490))
+        roster=screen(('角色一览',110,35),('冒险',532,515))
+        task.ui.capture.side_effect=[keyboard,roster,map_screen()]
+        task.ui.wait.return_value=map_screen()
+        self.assertEqual(next_stage(task.enter('fire'))[0],AbyssStage('fire',3,1))
+        self.assertEqual(task.ui.click.call_args_list[0].args[0].text,'确定')
+
+    def test_enter_accepts_matching_next_across_missed_frame(self):
+        task=object.__new__(AbyssPush);task.deadline=float('inf');task.ui=Mock()
+        task.ui.capture.return_value=map_screen()
+        frames=[map_screen(),screen(('深域关卡',110,30),('红焰深域',110,65)),
+                map_screen(),screen(('深域关卡',110,30),('红焰深域',110,65)),map_screen()]
+        def wait(predicate, description, **kwargs):
+            for frame in frames:
+                if predicate(frame):
+                    return frame
+            raise EventUIError('深域NEXT稳定超时')
+        task.ui.wait.side_effect=wait
+        self.assertEqual(next_stage(task.enter('fire'))[0],AbyssStage('fire',3,1))
+
+    def test_next_stage_tolerates_stray_map_label_punctuation(self):
+        noisy=screen(('深域关卡',110,30),('苍波深域',110,65),
+                     ('NEXT',625,120),('.5-3',625,272))
+        self.assertEqual(next_stage(noisy)[0],AbyssStage('water',5,3))
+        decimal=screen(('深域关卡',110,30),('苍波深域',110,65),
+                       ('NEXT',625,120),('0.5-3',625,272))
+        self.assertIsNone(next_stage(decimal))
+
     def test_enter_cancels_stale_shard_purchase_before_replanning(self):
         task=object.__new__(AbyssPush);task.deadline=float('inf');task.ui=Mock()
         task.ui.capture.side_effect=[screen(('购买确认',480,42),('取消',370,479)),map_screen()]
@@ -84,6 +135,16 @@ class AbyssTests(TestCase):
             self.assertEqual(resumed.budget(stage,6,2),1)
             resumed.data['stages'][resumed.key(stage)].append({'progressed':False})
             self.assertEqual(resumed.budget(stage,6,2),0)
+
+    def test_high_effort_searches_exhausted_stage_without_battle(self):
+        with TemporaryDirectory() as folder,patch('pcrscript.tasks.task_abyss.remaining',return_value=10):
+            task=self.task(folder,[map_screen()])
+            task.options['search_effort']='high'
+            task.history.data['stages']['fire/3-1']=[{'progressed':False} for _ in range(6)]
+            task.push_area('fire')
+            task.search.assert_called_once_with(AbyssStage('fire',3,1))
+            self.assertEqual(task.total_battles,0)
+            self.assertEqual(task.report['areas']['fire']['status'],'stopped')
 
     def test_interrupted_win_reconciles_only_with_next_and_spent_attempt(self):
         import json
@@ -239,6 +300,37 @@ class AbyssTests(TestCase):
         with self.assertRaisesRegex(EventUIError,'体力不足，已取消'):
             task.wait_formation('深域编队')
         self.assertEqual(task.ui.click.call_args.args[0].text,'取消')
+
+    def test_guild_house_collects_only_after_verified_stamina_receipt(self):
+        abyss=screen(('深域关卡',110,30),('公会之家',654,525))
+        notice=screen(('附加效果家具',480,42),('关闭',478,479))
+        house=screen(('体力',434,24),('6/413',504,23),('全部收取',900,444))
+        receipt=screen(('全部收取',480,39),('收取了以下道具。',475,75),
+                       ('体力×172',379,344),('关闭',478,482))
+        after=screen(('体力',434,24),('502/413',498,23),('全部收取',900,444))
+        ui=Mock();ui.wait.side_effect=[notice,house,receipt,after]
+        self.assertEqual(collect_produced_stamina(ui,abyss),{'before':6,'after':502})
+        self.assertEqual(visible_stamina(after),502)
+        self.assertEqual([call.args[0].text for call in ui.click.call_args_list],
+                         ['公会之家','关闭','全部收取','关闭'])
+
+    def test_guild_house_unknown_receipt_stops_without_claim_of_stamina(self):
+        abyss=screen(('公会之家',654,525))
+        house=screen(('体力',434,24),('6/413',504,23),('全部收取',900,444))
+        receipt=screen(('全部收取',480,39),('收取了以下道具。',475,75),
+                       ('扫荡券×44',384,145),('关闭',478,482))
+        ui=Mock();ui.wait.side_effect=[house,receipt]
+        with self.assertRaisesRegex(EventUIError,'没有可确认的体力'):
+            collect_produced_stamina(ui,abyss)
+        self.assertEqual([call.args[0].text for call in ui.click.call_args_list],
+                         ['公会之家','全部收取'])
+
+    def test_guild_house_recovery_requires_matching_stage_detail(self):
+        task=object.__new__(AbyssPush);task.ui=Mock()
+        task.ui.capture.return_value=screen(('紫冥深域4-2',150,48),('取消',665,455))
+        with self.assertRaisesRegex(EventUIError,'关卡详情未知'):
+            task.collect_house_stamina(AbyssStage('dark',4,1))
+        task.ui.click.assert_not_called()
     def test_partial_title_uses_local_ocr_without_guessing_requested_stage(self):
         task=object.__new__(AbyssPush);task.ui=Mock()
         partial=screen(('红焰深域3-',150,48),('推荐公主骑士品级',750,40),('取消',665,455),('挑战',840,455))
@@ -319,9 +411,22 @@ class AbyssTests(TestCase):
         s.image[222:239,577:598]=template
         self.assertEqual(next_stage(s)[0],AbyssStage('dark',3,4))
 
+    def test_occluded_next_accepts_moderate_margin_only_with_weak_decoy(self):
+        s=screen(('深域关卡',110,30),('翠岚深域',110,65),('3-6',626,253))
+        template=cv.imread(str(Path(__file__).resolve().parents[1]/'images/revival_next.png'))[18:35,17:38]
+        s.image[109:126,614:635]=template
+        scores=np.zeros((225,940),np.float32)
+        scores[10,614]=.693
+        scores[78,373]=.558
+        with patch('pcrscript.game_ui.abyss.cv.matchTemplate',side_effect=lambda *args: scores.copy()):
+            self.assertEqual(next_stage(s)[0],AbyssStage('wind',3,6))
+            scores[78,373]=.69
+            self.assertIsNone(next_stage(s))
+
     def test_options_reject_unbounded_retries_and_wrong_types(self):
         for option in ({'max_failures_per_stage':51},{'max_battles':0},{'timeout':True},
-                       {'elements':['fire','fire']},{'allow_local_trials':'yes'}):
+                       {'elements':['fire','fire']},{'allow_local_trials':'yes'},
+                       {'search_effort':'unlimited'}):
             with self.assertRaises(ValueError): validate_options(option)
 
     def test_special_equipment_change_allows_only_one_fresh_source_try(self):
@@ -374,6 +479,36 @@ class AbyssTests(TestCase):
         task.combat=Mock();task.combat.run.return_value=BattleResult('settled')
         return task
 
+    def test_unexpected_error_closes_business_report_without_losing_battle(self):
+        import json
+        with TemporaryDirectory() as folder:
+            task=self.task(folder,[])
+            task.options['elements']=['fire']
+            task.report['areas']['fire']=dict(status='running')
+            task.report['battles'].append(dict(outcome='settled',progressed=True))
+            task.push_area=Mock(side_effect=ValueError('bad map label'))
+            with self.assertRaisesRegex(ValueError,'bad map label'):
+                task.run()
+            saved=json.loads((Path(folder)/'report.json').read_text(encoding='utf-8'))
+            self.assertEqual(saved['status'],'failed')
+            self.assertEqual(saved['areas']['fire']['status'],'blocked')
+            self.assertTrue(saved['battles'][0]['progressed'])
+
+    def test_cancel_closes_business_report_and_preserves_in_flight_trial(self):
+        import json
+        with TemporaryDirectory() as folder:
+            task=self.task(folder,[])
+            task.options['elements']=['fire']
+            task.report['areas']['fire']=dict(status='running')
+            task.report['battles'].append(dict(outcome='in_flight'))
+            task.push_area=Mock(side_effect=RunCancelled('用户请求停止任务'))
+            with self.assertRaises(RunCancelled):
+                task.run()
+            saved=json.loads((Path(folder)/'report.json').read_text(encoding='utf-8'))
+            self.assertEqual(saved['status'],'cancelled')
+            self.assertEqual(saved['areas']['fire']['status'],'stopped')
+            self.assertEqual(saved['battles'][0]['outcome'],'in_flight')
+
     def test_three_no_progress_results_stop_even_when_settled(self):
         with TemporaryDirectory() as folder,patch('pcrscript.tasks.task_abyss.remaining',return_value=10):
             task=self.task(folder,[map_screen()]*6)
@@ -403,6 +538,20 @@ class AbyssTests(TestCase):
             task.push_area('fire')
             self.assertEqual(task.total_battles,1)
 
+    def test_stamina_block_collects_once_then_rechecks_stage_without_spending_attempt(self):
+        with TemporaryDirectory() as folder,patch('pcrscript.tasks.task_abyss.remaining',return_value=10):
+            task=self.task(folder,[map_screen(1),map_screen(1),map_screen(2)])
+            task.options['auto_collect_house_stamina']=True
+            task.options['max_battles']=1
+            task.house_collected=False
+            task.wait_formation=Mock(side_effect=[
+                EventUIError('体力不足，已取消回复体力；保留剩余挑战次数'),None])
+            task.collect_house_stamina=Mock()
+            task.push_area('fire')
+            task.collect_house_stamina.assert_called_once_with(AbyssStage('fire',3,1))
+            self.assertEqual(task.total_battles,1)
+            self.assertEqual(task.report['areas']['fire']['cleared'],['3-1'])
+
     def test_only_changed_next_counts_as_progress_and_global_limit_stops(self):
         with TemporaryDirectory() as folder,patch('pcrscript.tasks.task_abyss.remaining',return_value=10):
             task=self.task(folder,[map_screen(1),map_screen(2)])
@@ -431,18 +580,24 @@ class AbyssTests(TestCase):
                                  ['a','b','c','d','e'])
 
     def test_incomplete_exact_video_roster_uses_authorized_trial_branch(self):
-        from pcrscript.tasks.strategy_document import abyss_candidate, empty_member, finalize
+        from pcrscript.tasks.strategy_document import abyss_candidate, empty_member, finalize, Evidence
         with TemporaryDirectory() as folder,patch('pcrscript.tasks.task_abyss.remaining',return_value=10):
             task=self.task(folder,[map_screen(1),map_screen(2)])
             task.options['max_battles']=1
+            members=[empty_member(name) for name in ['a','b','c','d','e']]
+            for member in members:
+                member['instant'].add(True,Evidence('https://example.com/synthetic',method='video_title_full_set'))
             document=finalize(dict(source='https://example.com/synthetic',
                 scope=dict(element='fire',stage='3-1',chapters=[3,3]),
                 scope_verified=True,region='cn',target_region='cn',
-                members=[empty_member(name) for name in ['a','b','c','d','e']],
+                members=members,
                 identity_evidence=[dict(name=name,cid=1,seconds=second)
                                    for name in ['a','b','c','d','e'] for second in (1.0,2.0)],
-                auto=dict(value=None,evidence=[],conflicts=[]),
+                auto=dict(value=True,evidence=[dict(method='combat_auto_button')],conflicts=[]),
                 manual_actions=[],global_requirements=[]))
+            from pcrscript.tasks.task_abyss import source_trial_seed
+            self.assertFalse(source_trial_seed(dict(document,auto=dict(value=None,evidence=[],conflicts=[])),
+                                                AbyssStage('fire',3,1)))
             task.source_parties=[abyss_candidate(document)]
             task.formation.source_trial.return_value=(EventParty('synthetic','local',[]),
                 {'order':['a','b','c','d','e'],'build_basis':'local_trial_source_roster'})

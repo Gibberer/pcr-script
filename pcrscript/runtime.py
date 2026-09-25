@@ -25,8 +25,8 @@ def select_driver(config: dict[str, Any]) -> Driver:
     extra = config.get("Extra", {})
     if not isinstance(extra, dict):
         raise ValueError("Extra 必须是配置对象")
-    if any(not isinstance(extra.get(key, ""), str) for key in ("dnpath", "adb_path", "adb_serial")):
-        raise ValueError("Extra.dnpath、adb_path 和 adb_serial 必须是字符串")
+    if any(not isinstance(extra.get(key, ""), str) for key in ("dnpath", "adb_path", "adb_serial", "adb_unicode_console_path")):
+        raise ValueError("Extra.dnpath、adb_path、adb_serial 和 adb_unicode_console_path 必须是字符串")
     dnpath = str(extra.get("dnpath") or "").strip()
     if dnpath:
         drivers = DNSimulator(dnpath, useADB=False).get_dirvers() or []
@@ -34,17 +34,25 @@ def select_driver(config: dict[str, Any]) -> Driver:
             raise RuntimeError("未发现雷电窗口，请在与模拟器相同的 Windows 会话运行")
         return drivers[0]
     adb_path = str(extra.get("adb_path") or "adb").strip()
+    unicode_console_path = str(extra.get("adb_unicode_console_path") or "").strip()
+    unicode_console_index = extra.get("adb_unicode_console_index", 0)
+    if type(unicode_console_index) is not int or unicode_console_index < 0:
+        raise ValueError("Extra.adb_unicode_console_index 必须为非负整数")
+    if unicode_console_path and not Path(unicode_console_path).is_file():
+        raise ValueError("Extra.adb_unicode_console_path 未找到文件")
     devices = GeneralSimulator(adb_path).get_devices() or []
     serial = str(extra.get("adb_serial") or "").strip()
     if serial:
         if serial not in devices:
             raise RuntimeError(f"ADB 设备 {serial} 未连接或未授权")
-        return ADBDriver(serial, adb_path)
+        return ADBDriver(serial, adb_path, unicode_console_path=unicode_console_path,
+                         unicode_console_index=unicode_console_index)
     if not devices:
         raise RuntimeError("未找到已连接且授权的 ADB 设备；请检查 adb devices")
     if len(devices) != 1:
         raise RuntimeError("存在多个 ADB 设备，请在 Extra.adb_serial 指定目标序列号")
-    return ADBDriver(devices[0], adb_path)
+    return ADBDriver(devices[0], adb_path, unicode_console_path=unicode_console_path,
+                     unicode_console_index=unicode_console_index)
 
 
 def robot_from_config(config: dict[str, Any]) -> Robot:

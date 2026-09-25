@@ -211,6 +211,11 @@ class EventFormation:
                        and (member.unique is None or member.unique2 is None)]
         if unspecified:
             return False, {"unready": unspecified}
+        if (not getattr(self.ui.driver, 'supports_unicode_input', True)
+                and any(not member.name.isascii() for member in party.members)):
+            # Android's `input text` rejects Chinese on some emulators. The
+            # existing full-roster scan verifies costumes without text input.
+            return self._select_by_scrolling(party)
         self.ui.wait(lambda s: s.find("队伍编组", (300, 0, 650, 70)), "队伍编组")
         self.ui.expect_click("全部", (30, 65, 115, 108), exact=True)
         for _ in range(10):
