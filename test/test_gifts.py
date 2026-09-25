@@ -37,6 +37,16 @@ class GiftTests(TestCase):
             self.assertIsNotNone(button)
             self.assertTrue(s.blue_button(button))
 
+    def test_inventory_page_recovers_truncated_dismantle_label(self):
+        task = GetGift.__new__(GetGift)
+        task.ui = Mock()
+        observed = screen(('道具一览', 110, 30), ('键分解', 855, 30))
+        recovered = screen(('一键分解', 855, 30))
+        task.ui.read_region.return_value = recovered
+        button = task.dismantle_button(observed)
+        self.assertEqual(button.text, '一键分解')
+        task.ui.read_region.assert_called_once_with(observed, (750, 0, 950, 60))
+
     def test_missing_or_low_confidence_inventory_is_not_zero(self):
         for text in ("", "5001/5000", "0/0", "5000/?"):
             with self.subTest(text=text), self.assertRaises(EventUIError):
