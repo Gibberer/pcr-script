@@ -4,8 +4,8 @@ GUI、每日命令和单项命令共用 `pcrscript/tasks/` 中的 Task 注册表
 
 ## 任务能力
 
-- `BaseTask` 定义上下文、配置、只读 `prepare()` 与执行契约，不携带图片匹配接口。
-- `ImageTask` 提供旧图片任务需要的模板匹配、动作绑定、设计坐标换算和进度；OCR 任务组合 `game_ui` 能力。
+- `BaseTask` 定义上下文、配置、只读 `prepare()` 与执行契约，并用 `report_progress(label, current=None, total=None)` 上报业务进度，不携带图片匹配接口。步骤总数未知时只传说明，GUI 显示活动中的进度条；有明确上限时同时传当前数与总数。
+- `ImageTask` 提供旧图片任务需要的模板匹配、动作绑定、设计坐标换算和动作序列进度；OCR 任务组合 `game_ui` 能力。
 - `TimeLimitTask` 独立提供活动时间筛选，可与图片任务或 OCR 任务组合。
 - `registry.py` 是唯一注册表；具体任务使用 `task_<功能>.py`，辅助模块不以 `task_` 开头。`task_combat.py` 中的编队与战斗子任务不单独注册。
 
@@ -25,5 +25,7 @@ GUI、每日命令和单项命令共用 `pcrscript/tasks/` 中的 Task 注册表
 ## 结果与错误
 
 每次调度将执行记录写入 `cache/daily/runs/<run>/tasks/<序号>-<任务名>/result.json`，任务报告与必要截图在同一目录；重复运行同名任务不会覆盖本轮其他任务。`events.jsonl` 记录 `task.result`，运行控制和异常证据见[运行诊断](run-diagnostics.md)。没有业务后置核验的旧任务只标记 `finished`，不能当作资源已确认的 `complete`。
+
+单项任务在运行记录中显示 0/1 到 1/1 的任务级进度；日常列表沿用逐项计数。任务内部的 OCR 业务阶段和旧图片动作共用第二行进度，每次任务结束都会清除该行，避免下一项显示上项的进度。进度仅表示执行位置；最终业务状态仍以任务报告为准。
 
 单项异常向调用方抛出；每日列表记录错误并继续后续项。消费后不递归重放整任务；恢复必须先核对实际结果。旧任务中尚未有界的等待和缺少业务结果核验的场景见[待验证清单](pending-validation.md)。

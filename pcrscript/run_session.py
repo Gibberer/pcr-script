@@ -16,8 +16,18 @@ _current = None
 def atomic_json(path, value):
     path = Path(path)
     tmp = path.with_name(path.name + '.' + uuid.uuid4().hex + '.tmp')
-    tmp.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding='utf-8')
-    os.replace(tmp, path)
+    try:
+        tmp.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding='utf-8')
+        for attempt in range(5):
+            try:
+                os.replace(tmp, path)
+                return
+            except PermissionError as error:
+                if os.name != 'nt' or getattr(error, 'winerror', None) not in (5, 32) or attempt == 4:
+                    raise
+                _time.sleep(.05 * (attempt + 1))
+    finally:
+        tmp.unlink(missing_ok=True)
 
 
 def emit(kind, **data):
@@ -126,6 +136,7 @@ class RunSession:
         self.errors = 0
         self.command_id = None
         self.snapshot_id = None
+        self.snapshot_directory = None
         self.step = None
         self.progress = {'task': None, 'action': None}
         self.step_since = _time.monotonic()
@@ -138,7 +149,8 @@ class RunSession:
         with self.lock:
             if kind == 'progress' and data.get('scope') in self.progress:
                 scope = data['scope']
-                self.progress[scope] = {key: value for key, value in data.items() if key != 'scope'}
+                self.progress[scope] = (None if data.get('clear') else
+                    {key: value for key, value in data.items() if key != 'scope'})
                 if scope == 'task':
                     self.progress['action'] = None
             if kind in ('task', 'action', 'wait'):
@@ -152,6 +164,7 @@ class RunSession:
             atomic_json(self.path / 'status.json', dict(pid=os.getpid(), name=self.name, state=self.state,
                 heartbeat=_time.time(), last_operation=self.last_operation, frame_time=self.frame_time,
                 errors=self.errors, command_id=self.command_id, snapshot_id=self.snapshot_id,
+                snapshot_directory=self.snapshot_directory,
                 current_step=self.step, progress=self.progress, paused_seconds=self.paused_seconds))
 
     def frame(self, image):
@@ -193,6 +206,7 @@ class RunSession:
                 owner_stack=''.join(traceback.format_stack(stack)) if stack else None)
             atomic_json(target / 'details.json', detail)
             self.event('incident', directory=target.name, reason=reason)
+            return target.name
 
     def command(self):
         try:
@@ -240,8 +254,10 @@ class RunSession:
                 except (OSError, ValueError):
                     command = {}
                 if command.get('id') and command['id'] != self.snapshot_id:
-                    self.incident('requested snapshot')
-                    self.snapshot_id = command['id']
+                    directory = self.incident('requested snapshot')
+                    with self.lock:
+                        self.snapshot_directory = directory
+                        self.snapshot_id = command['id']
                 stalled = self.state == 'running' and (
                     _time.monotonic() - self.last_activity > self.stall_seconds or
                     self.step is not None and _time.monotonic() - self.step_since > 300)

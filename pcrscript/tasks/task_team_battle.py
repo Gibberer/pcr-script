@@ -625,6 +625,7 @@ class TeamBattle(TimeLimitTask):
 
     def run(self, event: Event | None = None):
         try:
+            self.report_progress('检查团队战开放状态与地图')
             if event is None:
                 from ..news import fetch_event_news
                 event = fetch_event_news().clanBattle
@@ -642,6 +643,7 @@ class TeamBattle(TimeLimitTask):
                 if bosses:
                     minimum = min(boss.lap for boss in bosses)
                     for boss in sorted(bosses, key=lambda b: priority(b, minimum), reverse=True):
+                        self.report_progress(f'模拟 {boss.name} · 核对推荐队伍')
                         if boss.full and boss.lap+1 > minimum+2:
                             continue
                         self.try_boss(boss, cp, extension, simulation_only=True)
@@ -654,6 +656,8 @@ class TeamBattle(TimeLimitTask):
             changed_retries = 0
             for _ in range(self.options['max_real_attacks']*2+3):
                 self.check_deadline()
+                self.report_progress(f"团队战 · 已完成 {self.report['attempts']} 次实战",
+                                     self.report['attempts'], self.options['max_real_attacks']*2)
                 screen = self.map()
                 cp, extension = self.counts(screen)
                 if cp == 0 and extension == 0:

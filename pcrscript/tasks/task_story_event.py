@@ -497,8 +497,11 @@ class CampaignClean(TimeLimitTask):
         if step not in ('stories', 'memoirs', 'missions', 'sweep', 'exchange'):
             raise ValueError(f'未知活动步骤: {step}')
         try:
+            self.report_progress(f'进入活动 · {step}')
             if self.enter():
+                self.report_progress(f'处理活动步骤 · {step}', 0, 1)
                 getattr(self, step)()
+                self.report_progress(f'活动步骤已处理 · {step}', 1, 1)
                 self.report['status'] = 'partial' if self.report['pending'] else 'complete'
             else:
                 self.report['status'] = 'unavailable'
@@ -515,28 +518,35 @@ class CampaignClean(TimeLimitTask):
         if only != 'all':
             return self.run_only(only)
         try:
+            self.report_progress('进入剧情活动')
             if not self.enter():
                 self.report["status"] = "unavailable"
                 return self.report
             if self.options.get("first_clear", False) or self.options.get("bosses", False):
                 from .event_battle import EventBattles
                 battles = EventBattles(self)
+            stages = []
             if self.options.get("first_clear", False):
-                battles.first_clear()
+                stages.append(('首次过关', battles.first_clear))
             if self.options.get("bosses", False):
-                battles.bosses()
+                stages.append(('首领', battles.bosses))
             if hard_chapter:
-                self.sweep()
+                stages.append(('困难扫荡', self.sweep))
             if exhaust_power:
-                self.sweep(hard=False)
+                stages.append(('普通扫荡', lambda: self.sweep(hard=False)))
             if self.options.get("stories", True):
-                self.stories()
+                stages.append(('剧情', self.stories))
             if self.options.get("memoirs", True):
-                self.memoirs()
+                stages.append(('回忆录', self.memoirs))
             if self.options.get("missions", True):
-                self.missions()
+                stages.append(('任务奖励', self.missions))
             if self.options.get("exchange", True):
-                self.exchange()
+                stages.append(('兑换', self.exchange))
+            for index, (label, action) in enumerate(stages):
+                self.report_progress(f'剧情活动 · {label}', index, len(stages))
+                action()
+            if stages:
+                self.report_progress('剧情活动步骤已处理', len(stages), len(stages))
             self.report["status"] = "complete" if not self.report["pending"] else "partial"
             return self.report
         except Exception as error:

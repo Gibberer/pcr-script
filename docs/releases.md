@@ -4,9 +4,39 @@
 
 ## 本地验证
 
+先找可用的 .NET 10 **SDK**。本机曾由 Agent 下载到忽略的 `cache/build/dotnet/dotnet.exe`；系统 PATH 中的 `dotnet.exe` 可能只有运行时，所以不能仅凭 `where dotnet` 或系统 `dotnet --info` 判断本地不能编译。缓存随工作区保留，但不在 Git 中；缓存和系统 SDK 都没有时，下面的命令会按[微软官方安装脚本](https://learn.microsoft.com/en-us/dotnet/core/tools/dotnet-install-script)下载 SDK 到该缓存目录（不需要管理员权限）。
+
+```powershell
+$pcrDotnet = $null
+foreach ($pcrCandidate in @(
+    './cache/build/dotnet/dotnet.exe'
+    (Get-Command dotnet -ErrorAction SilentlyContinue).Source
+)) {
+    if ($pcrCandidate -and (Test-Path $pcrCandidate) -and (& $pcrCandidate --list-sdks | Select-String '^10\.0\.')) {
+        $pcrDotnet = (Resolve-Path $pcrCandidate).Path
+        break
+    }
+}
+if (-not $pcrDotnet) {
+    New-Item -ItemType Directory -Force cache/build | Out-Null
+    Invoke-WebRequest https://dot.net/v1/dotnet-install.ps1 -OutFile cache/build/dotnet-install.ps1 -UseBasicParsing
+    $pcrBuild = (Resolve-Path cache/build).Path
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $pcrBuild 'dotnet-install.ps1') -Channel 10.0 -InstallDir (Join-Path $pcrBuild 'dotnet') -NoPath
+    if ($LASTEXITCODE -ne 0) { throw '下载 .NET 10 SDK 失败' }
+    $pcrDotnet = Join-Path $pcrBuild 'dotnet/dotnet.exe'
+}
+New-Item -ItemType Directory -Force cache/build/cli, cache/build/nuget | Out-Null
+$env:DOTNET_ROOT = Split-Path $pcrDotnet
+$env:DOTNET_CLI_HOME = (Resolve-Path cache/build/cli).Path
+$env:NUGET_PACKAGES = (Resolve-Path cache/build/nuget).Path
+& $pcrDotnet --list-sdks
+```
+
+安装脚本不传 `-Runtime`，因此下载的是 SDK。首次构建或 `.csproj` 依赖变化时，`build` 会自动还原 NuGet 依赖。随后在同一个 PowerShell 会话执行原有验证命令：
+
 ```powershell
 ./.venv/Scripts/python.exe -X utf8 -m unittest discover -s test -p 'test_*.py'
-dotnet build desktop/PcrDesktop/PcrDesktop.csproj -c Release -o artifacts/gui -p:DebugType=None -p:DebugSymbols=false
+& $pcrDotnet build desktop/PcrDesktop/PcrDesktop.csproj -c Release -o artifacts/gui -p:DebugType=None -p:DebugSymbols=false
 ./test/verify_desktop_runtime.ps1 -Python ./.venv/Scripts/python.exe
 ```
 

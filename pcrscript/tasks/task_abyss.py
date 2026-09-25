@@ -21,7 +21,7 @@ from ..game_ui.abyss import AREAS, AbyssStage, map_element, next_stage, detail_s
 from ..game_ui.screen import EventScreen, EventUI, EventUIError
 from ..game_ui.guild_house import collect_produced_stamina
 from ..templates import ImageTemplate
-from ..run_session import clock as time, atomic_json, checkpoint, RunCancelled
+from ..run_session import clock as time, atomic_json, checkpoint, emit, RunCancelled
 
 
 def source_set_alternative(source,trials):
@@ -153,6 +153,7 @@ class AbyssPush(BaseTask):
             raise ValueError('abyss_push使用Abyss配置')
         options = validate_options(config.get(cls.config_section, {}))
         if options['prepare_only']:
+            emit('progress', scope='action', label='获取并解析深域攻略', unit='task')
             return (), {}, acquire_strategies(task_source_options('abyss', options))
         return (), {}, None
 
@@ -524,6 +525,8 @@ class AbyssPush(BaseTask):
                 record.update(status='stopped', reason='剩余挑战次数为零')
                 return
             stage, detail = self.open_stage(screen)
+            self.report_progress(f'深域 {stage.title} · 正在核对编队与来源',
+                                 self.total_battles, self.options['max_battles'])
             record['next'] = stage.key
             record.setdefault('initial', stage.key)
             detail_count=self.read_remaining(detail,detail=True)
@@ -674,6 +677,8 @@ class AbyssPush(BaseTask):
                 return
             self.check_deadline()
             self.total_battles += 1
+            self.report_progress(f'深域 {stage.title} · 第 {self.total_battles} 次试打',
+                                 self.total_battles, self.options['max_battles'])
             self._battle_evidence_id = f'abyss_{element}_{stage.key}_{self.total_battles}'
             battle = dict(stage=asdict(stage), attempt=self.total_battles, formation=audit,
                           outcome='in_flight', before_remaining=count, started_at=time.time())
@@ -726,6 +731,7 @@ class AbyssPush(BaseTask):
 
     def run(self) -> TaskReport:
         try:
+            self.report_progress('读取深域地图与当前关卡')
             for element in self.options['elements']:
                 if self.total_battles >= self.options['max_battles']:
                     self.report['pending'].append('全局战斗上限，剩余属性未执行')

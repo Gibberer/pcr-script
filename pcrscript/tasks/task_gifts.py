@@ -112,6 +112,7 @@ class GetGift(BaseTask):
         self.ui.expect_click("特别装备分解", (780, 410, 950, 465), exact=True)
         for batch in range(21):
             self.check()
+            self.report_progress(f"核对特别装备库存 · 已分解 {self.report['dismantled']} 件")
             s = self.ui.wait(self.dismantle_button, "特别装备库存")
             before, capacity = inventory(s)
             self.report["inventory"].append({"used": before, "capacity": capacity})
@@ -159,9 +160,11 @@ class GetGift(BaseTask):
     def run(self, exclude_stamina: bool = True) -> TaskReport:
         recovered = False
         try:
+            self.report_progress('进入礼物箱')
             self.open_gifts(exclude_stamina)
             for batch in range(int(self.options.get("max_gift_batches", 30))):
                 self.check()
+                self.report_progress(f"核对礼物 · 已领取 {self.report['gift_batches']} 批")
                 s = self.gift_list()
                 button = s.find("全部收取", (700, 440, 930, 515), exact=True)
                 if not button or not s.blue_button(button):

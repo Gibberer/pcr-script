@@ -92,6 +92,7 @@ class RevivalEventOnce(CampaignClean):
             self.report['status'] = 'already_complete'
             return self.report
         try:
+            self.report_progress('进入复刻活动')
             if not self.event.startTimestamp <= time.time() < self.event.endTimestamp:
                 self.report['status'] = 'unavailable'
                 return self.report
@@ -100,14 +101,16 @@ class RevivalEventOnce(CampaignClean):
                 # Reuse the list workflow without re-entering the normal event.
                 from .event_battle import EventBattles
                 battles = EventBattles(self)
-                battles.first_clear()
-                battles.bosses()
-                self.stories()
-                self.memoirs()
-                self.missions()
-                self.exchange()
+                stages = [('首次过关', battles.first_clear), ('首领', battles.bosses),
+                          ('剧情', self.stories), ('回忆录', self.memoirs),
+                          ('任务奖励', self.missions), ('兑换', self.exchange)]
+                for index, (label, action) in enumerate(stages):
+                    self.report_progress(f'复刻活动 · {label}', index, len(stages))
+                    action()
+                self.report_progress('复刻活动步骤已处理', len(stages), len(stages))
             else:
                 from .revival_map import RevivalMap
+                self.report_progress('复刻活动 · 地图推进')
                 RevivalMap(self).run()
             self.report['status'] = 'partial' if self.report['pending'] else 'complete'
             return self.report

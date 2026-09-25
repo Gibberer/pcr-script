@@ -335,10 +335,12 @@ def execute(path: Path, request: dict[str, Any], run_id: str) -> None:
     with RunSession(name, run_id=run_id):
         if name == 'daily':
             from pcrscript.runtime import open_leidian_emulator, run_script, select_driver
+            from pcrscript.run_session import emit
             tasks = next(iter(config.get('Task', {}).values()), [])
             validate_plan([dict(enabled=True, name=t[0], args=t[1:]) for t in tasks])
             if not tasks:
                 raise ValueError('没有启用的每日任务')
+            emit('progress', scope='action', label='启动游戏与连接设备', unit='task')
             dnpath = str(config['Extra'].get('dnpath') or '').strip()
             if dnpath:
                 if open_leidian_emulator(dnpath) != 0:

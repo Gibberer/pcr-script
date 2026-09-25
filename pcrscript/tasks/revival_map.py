@@ -197,6 +197,7 @@ class RevivalMap:
     def run(self):
         if self.r.event.extras.get('original_event_id') != 10150:
             raise EventUIError('此地图活动尚无关卡数量与特殊剧情记录，不能套用旧活动')
+        self.r.report_progress('复刻地图 · 普通关卡')
         self.clear_quests('普通', '1-10')
         normal = self.boss_detail('普通')
         count = self.ui.number(normal, (891, 28, 926, 56))
@@ -206,6 +207,7 @@ class RevivalMap:
             self.normal_boss_from_detail()
         else:
             self.home()
+        self.r.report_progress('复刻地图 · 困难关卡')
         self.clear_quests('困难', '1-5')
         self.boss_detail('困难')
         self.hard_trial_from_detail()
@@ -213,8 +215,10 @@ class RevivalMap:
             # In this event SP unlocks after VH; VH becomes locked after its
             # daily clear and cannot be reopened just to inspect the counter.
             self.r.log('特别首领已通过，表演赛已解锁；前置高难亦已完成')
+            self.r.report_progress('复刻地图 · 领取奖励')
             return self.rewards()
         for label, difficulty in [('高难', 'very_hard'), ('特别', 'special')]:
+            self.r.report_progress(f'复刻地图 · {label}首领')
             try:
                 self.sourced_boss(label, difficulty)
             except EventUIError as error:
@@ -222,6 +226,7 @@ class RevivalMap:
                 failure(error)
                 self.r.report['pending'].append(str(error))
                 self.hub()  # Continue rewards only after a known safe return.
+        self.r.report_progress('复刻地图 · 领取奖励')
         self.rewards()
 
     def special_complete(self):

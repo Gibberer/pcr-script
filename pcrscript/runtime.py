@@ -10,7 +10,7 @@ from pcrscript.driver import ADBDriver, Driver
 from pcrscript.tasks import EventNews, TimeLimitTask, find_taskclass
 from pcrscript.news import fetch_event_news
 from pcrscript.run_session import clock as time
-from pcrscript.run_session import task_directory, task_result
+from pcrscript.run_session import emit, task_directory, task_result
 
 
 def load_config(path: str | Path) -> dict[str, Any]:
@@ -82,10 +82,14 @@ def run_task_with_config(config: dict[str, Any], task_name: str, *args: Any,
         options = copy.deepcopy(config.get(task_class.config_section, {}))
         options.update(option_overrides)
         config[task_class.config_section] = options
+    emit('progress', scope='task', current=0, total=1, name=task_name)
+    emit('progress', scope='action', label='检查任务条件', unit='task')
     args, kwargs, report = task_class.prepare(config, *args, **kwargs)
     if report is not None:
         task_result(dict(task=task_name, status=report['status'], report=report,
                          duration_seconds=0.0), task_directory(task_name))
+        emit('progress', scope='action', clear=True)
+        emit('progress', scope='task', current=1, total=1, name=task_name)
         return report
     return robot_from_config(config).run_task(task_name, *args, **kwargs)
 
@@ -144,6 +148,7 @@ def modify_task_list(news: EventNews, task_list: list[list[Any]]) -> None:
 
 def run_script(config: dict[str, Any], use_adb: bool = False) -> None:
     # Keep the legacy argument for callers; the configured transport selects the driver.
+    emit('progress', scope='action', label='连接设备并读取活动情报', unit='task')
     robot = Robot(select_driver(config))
     robot.configure(config)
     news = fetch_event_news()
@@ -155,5 +160,6 @@ def run_script(config: dict[str, Any], use_adb: bool = False) -> None:
     # 根据当前进行的活动修改原始任务
     modify_task_list(news, task_list)
     # 日常沿用当前账号；从欢迎页进入，或从已打开的游戏页面返回首页。
+    emit('progress', scope='action', label='进入游戏首页', unit='task')
     robot.changeaccount()
     robot.work(task_list)
