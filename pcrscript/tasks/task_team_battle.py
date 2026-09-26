@@ -715,10 +715,12 @@ class TeamBattle(TimeLimitTask):
                         except BossChanged:
                             changed = True
                             break
-                        if row and row['win']:
+                        if row:
                             self.report['extension_attacks'] += 1
                             self.spent.add(self.carry['team_key'])
                             self.carry = None
+                            if not row['win']:
+                                self.report['pending'].append('延长挑战实战未击败首领；已对账消耗，继续核对剩余普通次数')
                             break
                     if changed:
                         changed_retries += 1
@@ -751,9 +753,11 @@ class TeamBattle(TimeLimitTask):
                             self.report['pending'].append('行会进度连续改变首领，已停止使用过期模拟结果')
                             break
                         continue
-                    if selected and selected['win']:
+                    if selected:
                         self.report['extension_attacks'] += 1
                         self.spent.add(selected['team_key'])
+                        if not selected['win']:
+                            self.report['pending'].append('延长挑战实战未击败首领；已对账消耗，继续核对剩余普通次数')
                         continue
                     self.report['pending'].append('延长挑战未找到可安全完成的首领；已参战队伍保留在游戏内')
                     break

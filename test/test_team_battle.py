@@ -335,6 +335,39 @@ class TeamBattleTests(unittest.TestCase):
         self.assertEqual(result['extension_attacks'], 1)
         self.assertEqual(task.try_boss.call_args.args[3], ORPHAN_EXTENSION)
 
+    def test_nonlethal_extension_is_counted_once_and_does_not_retry_stale_counter(self):
+        for carried in (False, True):
+            with self.subTest(carried=carried):
+                task = TeamBattle.__new__(TeamBattle)
+                task.options = {'max_real_attacks': 1, 'simulation_only': False}
+                task.report = {'status': 'running', 'pending': [], 'simulations': [],
+                               'battles': [], 'attempts': 1, 'normal_attacks': 1,
+                               'extension_attacks': 0}
+                task.carry = ({'lane': 0, 'lap': 12, 'team_key': 'team-1',
+                               'remaining': 70} if carried else None)
+                task.spent = set()
+                task.event_valid = Mock(return_value=True)
+                task.enter = Mock(return_value=object())
+                task.check_deadline = Mock()
+                task.report_progress = Mock()
+                task.map = Mock(return_value=object())
+                task.counts = Mock(side_effect=[(1, 1), (1, 1), (1, 0), (1, 0)])
+                bosses = [Boss(0, 13, 125, 70_000_000, 70_000_000, '首领甲'),
+                          Boss(1, 12, 290, 70_000_000, 70_000_000, '首领乙')]
+                task.wait_bosses = Mock(return_value=(object(), bosses))
+                task.try_boss = Mock(return_value={'win': False, 'team_key': 'team-1'})
+                task.save_report = Mock()
+
+                result = task.run(event=object())
+
+                self.assertEqual(result['status'], 'partial')
+                self.assertEqual(result['extension_attacks'], 1)
+                self.assertEqual(result['remaining_extension'], 0)
+                self.assertEqual(task.spent, {'team-1'})
+                self.assertIsNone(task.carry)
+                self.assertEqual(task.try_boss.call_count, 1)
+                self.assertIn('延长挑战实战未击败首领', result['pending'][0])
+
     def test_changed_boss_discards_old_simulation_and_rechecks_map(self):
         task = TeamBattle.__new__(TeamBattle)
         task.options = {'max_real_attacks': 1, 'simulation_only': False}
