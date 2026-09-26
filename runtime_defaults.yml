@@ -37,7 +37,7 @@ Caravan:
   timeout: 1800
   max_rolls: 200
 TeamBattle:
-  timeout: 1800
+  timeout: 3600
   battle_timeout: 220
   max_real_attacks: 3
   max_simulations: 12

@@ -19,7 +19,7 @@ from ..run_session import clock as time
 
 def validate_options(options: dict) -> dict:
     value = dict(options)
-    for key, default, upper in (('timeout', 1800, 7200), ('battle_timeout', 220, 600),
+    for key, default, upper in (('timeout', 3600, 7200), ('battle_timeout', 220, 600),
                                 ('max_real_attacks', 3, 3), ('max_simulations', 12, 40)):
         number = value.setdefault(key, default)
         if type(number) is not int or not 1 <= number <= upper:
@@ -31,6 +31,13 @@ def validate_options(options: dict) -> dict:
 
 class BossChanged(EventUIError):
     """The guild changed the selected boss before its simulated plan was used."""
+
+
+class TaskDeadline(EventUIError):
+    """The task budget expired between safe actions."""
+
+
+ORPHAN_EXTENSION = '__visible_extension_team__'
 
 
 @register('team_battle', requires_home=True)
@@ -75,7 +82,7 @@ class TeamBattle(TimeLimitTask):
 
     def check_deadline(self):
         if time.monotonic() >= self.deadline:
-            raise EventUIError('团队战任务达到运行时限')
+            raise TaskDeadline('团队战任务达到运行时限，剩余挑战待下次运行')
 
     def popup(self, screen) -> bool:
         """Dismiss only a visible modal button, including the two first-entry dialogs."""
@@ -399,7 +406,10 @@ class TeamBattle(TimeLimitTask):
                 if value is None:
                     raise EventUIError('延长挑战的可用时间无法确认')
                 minutes, seconds = map(int, normalized(value.text).split(':'))
-                if seconds >= 60 or returned_time is None or minutes*60+seconds != returned_time:
+                if seconds >= 60 or not 0 < minutes*60+seconds <= 90:
+                    raise EventUIError('延长挑战时间无效')
+                self.extension_time = minutes*60+seconds
+                if returned_time is not None and self.extension_time != returned_time:
                     raise EventUIError('延长挑战时间与上次实战回执不一致')
                 patch = cv.cvtColor(screen.image[379:410, 346:381], cv.COLOR_BGR2HSV)
                 checked = float(np.mean((patch[:, :, 0] > 85) & (patch[:, :, 0] < 120)
@@ -432,7 +442,6 @@ class TeamBattle(TimeLimitTask):
         deadline = time.monotonic() + self.options['battle_timeout']
         started = False
         while time.monotonic() < deadline:
-            self.check_deadline()
             screen = self.ui.capture()
             text = normalized(screen.text())
             if screen.find('团队战开始确认', (300, 0, 650, 75), exact=True):
@@ -517,7 +526,6 @@ class TeamBattle(TimeLimitTask):
         end = time.monotonic() + 35
         latest = None
         while time.monotonic() < end:
-            self.check_deadline()
             screen = self.ui.capture()
             if self.popup(screen):
                 latest = None
@@ -540,24 +548,32 @@ class TeamBattle(TimeLimitTask):
 
     def try_boss(self, boss: Boss, cp_before: int, extension_before: int, wanted=None,
                  available_time: int | None = None, *, simulation_only: bool = False):
+        orphan_extension = wanted == ORPHAN_EXTENSION
         if wanted is None:
             self.tried = set()
             self.tried_teams = set()
         for _ in range(self.options['max_simulations']-len(self.report['simulations'])):
+            self.check_deadline()
             self.prepare_boss(boss, True)
             if wanted is None:
                 names = self.recommendation(boss_hp=boss.current_hp)
             else:
                 formation = self.open_formation(use_extension=True, returned_time=available_time)
-                names = None
-                for _ in range(5):
+                if orphan_extension:
+                    available_time = self.extension_time
                     names = self.team(formation)
-                    if names == wanted:
-                        break
-                    time.sleep(.6)
-                    formation = self.ui.capture()
+                    if names is None:
+                        raise EventUIError('延长挑战未显示可核验的五人队伍')
                 else:
-                    raise EventUIError('追击未保留首次挑战的五人编队')
+                    names = None
+                    for _ in range(5):
+                        names = self.team(formation)
+                        if names == wanted:
+                            break
+                        time.sleep(.6)
+                        formation = self.ui.capture()
+                    else:
+                        raise EventUIError('追击未保留首次挑战的五人编队')
             if names is None:
                 self.ui.expect_click('取消', (560, 425, 755, 505), exact=True)
                 self.map()
@@ -583,6 +599,8 @@ class TeamBattle(TimeLimitTask):
             if wanted is not None and (available_time is None or
                                        simulation['elapsed_wall']+8 > available_time):
                 return None
+            if time.monotonic() + self.options['battle_timeout'] + 60 >= self.deadline:
+                raise TaskDeadline('团队战剩余运行时间不足以安全完成实战，待下次运行')
             self.prepare_boss(boss, False)
             current = self.open_formation(use_extension=wanted is not None,
                                           returned_time=available_time)
@@ -618,6 +636,8 @@ class TeamBattle(TimeLimitTask):
                        simulation=simulation, equipment=real_gear, **real)
             self.report['battles'].append(row)
             self.report['attempts'] += 1
+            self.report['remaining_normal'] = cp_after
+            self.report['remaining_extension'] = extension_after
             self.report.pop('in_flight', None)
             self.save_report()
             return row
@@ -639,6 +659,8 @@ class TeamBattle(TimeLimitTask):
             if self.options['simulation_only']:
                 screen = self.map()
                 cp, extension = self.counts(screen)
+                self.report['remaining_normal'] = cp
+                self.report['remaining_extension'] = extension
                 _, bosses = self.wait_bosses(screen)
                 if bosses:
                     minimum = min(boss.lap for boss in bosses)
@@ -654,12 +676,16 @@ class TeamBattle(TimeLimitTask):
                 self.report['status'] = 'complete' if self.report['simulations'] else 'partial'
                 return self.report
             changed_retries = 0
+            remaining_counts = None
             for _ in range(self.options['max_real_attacks']*2+3):
                 self.check_deadline()
                 self.report_progress(f"团队战 · 已完成 {self.report['attempts']} 次实战",
                                      self.report['attempts'], self.options['max_real_attacks']*2)
                 screen = self.map()
                 cp, extension = self.counts(screen)
+                self.report['remaining_normal'] = cp
+                self.report['remaining_extension'] = extension
+                remaining_counts = (cp, extension)
                 if cp == 0 and extension == 0:
                     break
                 if self.report['attempts'] >= self.options['max_real_attacks']*2:
@@ -669,6 +695,9 @@ class TeamBattle(TimeLimitTask):
                     self.report['pending'].append('地图未出现可识别的首领轮次，可能仍在等待行会进度刷新')
                     break
                 cp, extension = self.counts(screen)
+                self.report['remaining_normal'] = cp
+                self.report['remaining_extension'] = extension
+                remaining_counts = (cp, extension)
                 if cp == 0 and extension == 0:
                     break
                 if self.carry:
@@ -702,7 +731,31 @@ class TeamBattle(TimeLimitTask):
                     self.report['pending'].append('延长挑战未找到同队伍可安全击杀的首领')
                     break
                 if extension:
-                    self.report['pending'].append('存在未完成的延长挑战，缺少对应已参战队伍')
+                    if extension != 1:
+                        self.report['pending'].append('延长挑战队伍不唯一，无法安全接续')
+                        break
+                    changed = False
+                    selected = None
+                    for boss in sorted((b for b in bosses if b.full),
+                                       key=lambda b: priority(b, min(v.lap for v in bosses)), reverse=True):
+                        try:
+                            selected = self.try_boss(boss, cp, extension, ORPHAN_EXTENSION)
+                        except BossChanged:
+                            changed = True
+                            break
+                        if selected:
+                            break
+                    if changed:
+                        changed_retries += 1
+                        if changed_retries > 3:
+                            self.report['pending'].append('行会进度连续改变首领，已停止使用过期模拟结果')
+                            break
+                        continue
+                    if selected and selected['win']:
+                        self.report['extension_attacks'] += 1
+                        self.spent.add(selected['team_key'])
+                        continue
+                    self.report['pending'].append('延长挑战未找到可安全完成的首领；已参战队伍保留在游戏内')
                     break
                 if cp == 0 or self.report['normal_attacks'] >= self.options['max_real_attacks']:
                     break
@@ -739,7 +792,17 @@ class TeamBattle(TimeLimitTask):
                     self.spent.add(selected['team_key'])
             else:
                 self.report['pending'].append('团队战达到安全战斗上限')
+            if remaining_counts != (0, 0) and not self.report['pending']:
+                self.report['pending'].append('仍有未完成挑战次数')
             self.report['status'] = 'complete' if not self.report['pending'] else 'partial'
+            return self.report
+        except TaskDeadline as error:
+            if self.report.get('in_flight'):
+                self.report['status'] = 'error'
+                self.report['pending'].append('实战结果尚未与地图次数对账：'+str(error))
+                raise
+            self.report['status'] = 'partial'
+            self.report['pending'].append(str(error))
             return self.report
         except Exception as error:
             self.report['status'] = 'error'

@@ -9,7 +9,7 @@ import numpy as np
 from pcrscript.game_ui.screen import EventScreen, EventUI, EventUIError, TextBox
 from pcrscript.game_ui.team_battle import Boss, can_repeat, map_bosses, meets_reference, priority, recommendation_damage, recommendation_time, result_damage
 from pcrscript.news import _query_clan_battle
-from pcrscript.tasks.task_team_battle import BossChanged, TeamBattle, validate_options
+from pcrscript.tasks.task_team_battle import BossChanged, ORPHAN_EXTENSION, TaskDeadline, TeamBattle, validate_options
 
 
 def box(text, x, y):
@@ -18,6 +18,7 @@ def box(text, x, y):
 
 class TeamBattleTests(unittest.TestCase):
     def test_lanes_and_repeat_budget(self):
+        self.assertEqual(validate_options({})['timeout'], 3600)
         items = [box('团队战', 105, 35), box('剩余挑战次数', 360, 400),
                  box('讨伐信息', 240, 450)]
         items += [box(f'第{lap}轮', x, y) for x, y, lap in
@@ -183,7 +184,8 @@ class TeamBattleTests(unittest.TestCase):
 
     def test_damage_target_met_can_proceed_after_simulation(self):
         task = TeamBattle.__new__(TeamBattle)
-        task.options = {'max_simulations': 1}
+        task.deadline = float('inf')
+        task.options = {'max_simulations': 1, 'battle_timeout': 220}
         task.report = {'simulations': [], 'battles': [], 'attempts': 0}
         task.teams = {'team-1': {'labels': (), 'reference_damage': 30_000_000,
                                  'estimated_seconds': 90}}
@@ -212,6 +214,7 @@ class TeamBattleTests(unittest.TestCase):
 
     def test_damage_target_missed_never_starts_real_attack(self):
         task = TeamBattle.__new__(TeamBattle)
+        task.deadline = float('inf')
         task.options = {'max_simulations': 1}
         task.report = {'simulations': [], 'battles': []}
         task.teams = {'team-1': {'labels': (), 'reference_damage': 70_000_000}}
@@ -230,6 +233,7 @@ class TeamBattleTests(unittest.TestCase):
     def test_simulation_only_stops_before_real_formation(self):
         self.assertTrue(validate_options({'simulation_only': True})['simulation_only'])
         task = TeamBattle.__new__(TeamBattle)
+        task.deadline = float('inf')
         task.options = {'max_simulations': 1}
         task.report = {'simulations': [], 'battles': []}
         task.teams = {'team-1': {'labels': (), 'reference_damage': 70_000_000}}
@@ -246,6 +250,90 @@ class TeamBattleTests(unittest.TestCase):
         task.battle.assert_called_once()
         task.open_formation.assert_not_called()
         self.assertEqual(len(task.report['simulations']), 1)
+
+    def test_existing_extension_uses_game_selected_team_after_restart(self):
+        task = TeamBattle.__new__(TeamBattle)
+        task.deadline = float('inf')
+        task.options = {'max_simulations': 1, 'battle_timeout': 220}
+        task.report = {'simulations': [], 'battles': [], 'attempts': 0}
+        task.teams = {'team-1': {'labels': ('a', 'b', 'c', 'd', 'e')}}
+        task.prepare_boss = Mock()
+        def formation(**kwargs):
+            task.extension_time = 70
+            return object()
+        task.open_formation = Mock(side_effect=formation)
+        task.team = Mock(return_value='team-1')
+        task.equipped = Mock(return_value={'slots': []})
+        task.battle = Mock(side_effect=[
+            {'win': True, 'elapsed_wall': 35, 'remaining': None},
+            {'win': True, 'elapsed_wall': 36, 'remaining': None},
+        ])
+        task.save_report = Mock()
+        task.ui = Mock()
+        task.map = Mock(return_value=object())
+        task.counts = Mock(return_value=(1, 0))
+        boss = Boss(0, 12, 125, 70_000_000, 70_000_000, '首领')
+        row = task.try_boss(boss, 1, 1, ORPHAN_EXTENSION)
+        self.assertTrue(row['win'])
+        self.assertEqual(row['cp_after'], 1)
+        self.assertEqual(row['extension_after'], 0)
+        self.assertEqual(task.open_formation.call_args_list[1].kwargs['returned_time'], 70)
+
+    def test_deadline_returns_partial_report_without_starting_another_action(self):
+        task = TeamBattle.__new__(TeamBattle)
+        task.options = {'max_real_attacks': 3, 'simulation_only': False}
+        task.report = {'status': 'running', 'pending': [], 'simulations': [],
+                       'battles': [], 'attempts': 0, 'normal_attacks': 0,
+                       'extension_attacks': 0}
+        task.event_valid = Mock(return_value=True)
+        task.enter = Mock(return_value=object())
+        task.check_deadline = Mock(side_effect=TaskDeadline('预算结束'))
+        task.map = Mock()
+        task.save_report = Mock()
+        result = task.run(event=object())
+        self.assertEqual(result['status'], 'partial')
+        self.assertEqual(result['pending'], ['预算结束'])
+        task.map.assert_not_called()
+
+    def test_remaining_attempts_are_not_reported_complete_at_attack_limit(self):
+        task = TeamBattle.__new__(TeamBattle)
+        task.options = {'max_real_attacks': 1, 'simulation_only': False}
+        task.report = {'status': 'running', 'pending': [], 'simulations': [],
+                       'battles': [], 'attempts': 2, 'normal_attacks': 1,
+                       'extension_attacks': 1}
+        task.event_valid = Mock(return_value=True)
+        task.enter = Mock(return_value=object())
+        task.check_deadline = Mock()
+        task.report_progress = Mock()
+        task.map = Mock(return_value=object())
+        task.counts = Mock(return_value=(1, 0))
+        task.save_report = Mock()
+        result = task.run(event=object())
+        self.assertEqual(result['status'], 'partial')
+        self.assertIn('仍有未完成挑战次数', result['pending'])
+
+    def test_existing_extension_is_attempted_before_remaining_normal_attack(self):
+        task = TeamBattle.__new__(TeamBattle)
+        task.options = {'max_real_attacks': 1, 'simulation_only': False}
+        task.report = {'status': 'running', 'pending': [], 'simulations': [],
+                       'battles': [], 'attempts': 0, 'normal_attacks': 0,
+                       'extension_attacks': 0}
+        task.carry = None
+        task.spent = set()
+        task.event_valid = Mock(return_value=True)
+        task.enter = Mock(return_value=object())
+        task.check_deadline = Mock()
+        task.report_progress = Mock()
+        task.map = Mock(return_value=object())
+        task.counts = Mock(side_effect=[(1, 1), (1, 1), (0, 0)])
+        boss = Boss(0, 12, 125, 70_000_000, 70_000_000, '首领')
+        task.wait_bosses = Mock(return_value=(object(), [boss]))
+        task.try_boss = Mock(return_value={'win': True, 'team_key': 'team-1'})
+        task.save_report = Mock()
+        result = task.run(event=object())
+        self.assertEqual(result['status'], 'complete')
+        self.assertEqual(result['extension_attacks'], 1)
+        self.assertEqual(task.try_boss.call_args.args[3], ORPHAN_EXTENSION)
 
     def test_changed_boss_discards_old_simulation_and_rechecks_map(self):
         task = TeamBattle.__new__(TeamBattle)
