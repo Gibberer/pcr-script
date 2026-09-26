@@ -10,7 +10,7 @@ from pcrscript.driver import ADBDriver, Driver
 from pcrscript.tasks import EventNews, TimeLimitTask, find_taskclass
 from pcrscript.news import fetch_event_news
 from pcrscript.run_session import clock as time
-from pcrscript.run_session import task_directory, task_result
+from pcrscript.run_session import emit, task_directory, task_result
 
 
 def load_config(path: str | Path) -> dict[str, Any]:
@@ -25,8 +25,8 @@ def select_driver(config: dict[str, Any]) -> Driver:
     extra = config.get("Extra", {})
     if not isinstance(extra, dict):
         raise ValueError("Extra 必须是配置对象")
-    if any(not isinstance(extra.get(key, ""), str) for key in ("dnpath", "adb_path", "adb_serial")):
-        raise ValueError("Extra.dnpath、adb_path 和 adb_serial 必须是字符串")
+    if any(not isinstance(extra.get(key, ""), str) for key in ("dnpath", "adb_path", "adb_serial", "adb_unicode_console_path")):
+        raise ValueError("Extra.dnpath、adb_path、adb_serial 和 adb_unicode_console_path 必须是字符串")
     dnpath = str(extra.get("dnpath") or "").strip()
     if dnpath:
         drivers = DNSimulator(dnpath, useADB=False).get_dirvers() or []
@@ -34,17 +34,25 @@ def select_driver(config: dict[str, Any]) -> Driver:
             raise RuntimeError("未发现雷电窗口，请在与模拟器相同的 Windows 会话运行")
         return drivers[0]
     adb_path = str(extra.get("adb_path") or "adb").strip()
+    unicode_console_path = str(extra.get("adb_unicode_console_path") or "").strip()
+    unicode_console_index = extra.get("adb_unicode_console_index", 0)
+    if type(unicode_console_index) is not int or unicode_console_index < 0:
+        raise ValueError("Extra.adb_unicode_console_index 必须为非负整数")
+    if unicode_console_path and not Path(unicode_console_path).is_file():
+        raise ValueError("Extra.adb_unicode_console_path 未找到文件")
     devices = GeneralSimulator(adb_path).get_devices() or []
     serial = str(extra.get("adb_serial") or "").strip()
     if serial:
         if serial not in devices:
             raise RuntimeError(f"ADB 设备 {serial} 未连接或未授权")
-        return ADBDriver(serial, adb_path)
+        return ADBDriver(serial, adb_path, unicode_console_path=unicode_console_path,
+                         unicode_console_index=unicode_console_index)
     if not devices:
         raise RuntimeError("未找到已连接且授权的 ADB 设备；请检查 adb devices")
     if len(devices) != 1:
         raise RuntimeError("存在多个 ADB 设备，请在 Extra.adb_serial 指定目标序列号")
-    return ADBDriver(devices[0], adb_path)
+    return ADBDriver(devices[0], adb_path, unicode_console_path=unicode_console_path,
+                     unicode_console_index=unicode_console_index)
 
 
 def robot_from_config(config: dict[str, Any]) -> Robot:
@@ -74,10 +82,14 @@ def run_task_with_config(config: dict[str, Any], task_name: str, *args: Any,
         options = copy.deepcopy(config.get(task_class.config_section, {}))
         options.update(option_overrides)
         config[task_class.config_section] = options
+    emit('progress', scope='task', current=0, total=1, name=task_name)
+    emit('progress', scope='action', label='检查任务条件', unit='task')
     args, kwargs, report = task_class.prepare(config, *args, **kwargs)
     if report is not None:
         task_result(dict(task=task_name, status=report['status'], report=report,
                          duration_seconds=0.0), task_directory(task_name))
+        emit('progress', scope='action', clear=True)
+        emit('progress', scope='task', current=1, total=1, name=task_name)
         return report
     return robot_from_config(config).run_task(task_name, *args, **kwargs)
 
@@ -136,6 +148,7 @@ def modify_task_list(news: EventNews, task_list: list[list[Any]]) -> None:
 
 def run_script(config: dict[str, Any], use_adb: bool = False) -> None:
     # Keep the legacy argument for callers; the configured transport selects the driver.
+    emit('progress', scope='action', label='连接设备并读取活动情报', unit='task')
     robot = Robot(select_driver(config))
     robot.configure(config)
     news = fetch_event_news()
@@ -147,5 +160,6 @@ def run_script(config: dict[str, Any], use_adb: bool = False) -> None:
     # 根据当前进行的活动修改原始任务
     modify_task_list(news, task_list)
     # 日常沿用当前账号；从欢迎页进入，或从已打开的游戏页面返回首页。
+    emit('progress', scope='action', label='进入游戏首页', unit='task')
     robot.changeaccount()
     robot.work(task_list)

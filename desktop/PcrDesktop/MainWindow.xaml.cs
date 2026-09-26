@@ -214,6 +214,7 @@ public partial class MainWindow : Window
 
     private async Task StartRun(bool daily, bool special = false)
     {
+        await PythonEnvironment.RequireReady(ReadSettings());
         if (!special) ApplyEditor();
         if (daily && !_plan.Any(row => row.Enabled)) throw new InvalidOperationException("请先添加并启用日常任务");
         if (!daily && !special && PlanGrid.SelectedItem is not TaskRow) throw new InvalidOperationException("请选择列表中的日常任务");
@@ -231,7 +232,6 @@ public partial class MainWindow : Window
             else { TaskPicker.SelectedItem = TaskPicker.Items.Cast<TaskChoice>().Single(t => t.Name == selected); BuildParameters(values); }
         }
         RequireLoaded(ignoreConfigPath: !daily);
-        await PythonEnvironment.RequireReady(ReadSettings());
         if (!_environmentReady) throw new InvalidOperationException("源码已更新，请先成功安装依赖");
         await Idle(_loadedSettings!);
         if (daily)
@@ -298,14 +298,27 @@ public partial class MainWindow : Window
         {
             var state = Backend.ReadObject(Path.Combine(folder, "status.json"));
             string value = state["state"]!.ToString();
-            UpdateRunControls(value);
             var age = DateTimeOffset.Now.ToUnixTimeSeconds() - state["heartbeat"]!.GetValue<double>();
+            UpdateRunControls(age > 10 && (value is "running" or "paused") ? "stale" : value);
             var label = value switch { "running" => "运行中", "paused" => "已暂停", "finished" => "已结束", "failed" => "失败", "cancelled" => "已停止", _ => value };
-            if (age > 10 && value is "running" or "paused") label = "心跳失联（不能视为已停止）";
+            if (age > 10 && (value is "running" or "paused")) label = "心跳失联（不能视为已停止）";
             if (_pendingCommand is not null)
             {
                 var ack = state[_pendingAction == "snapshot" ? "snapshot_id" : "command_id"]?.ToString();
-                if (ack == _pendingCommand) { _pendingCommand = null; Message("控制请求已确认"); }
+                if (ack == _pendingCommand)
+                {
+                    if (_pendingAction == "snapshot" && state["snapshot_directory"] is JsonValue directory)
+                        Message("现场已保存：" + Path.Combine(folder, directory.ToString()));
+                    else Message("控制请求已确认");
+                    _pendingCommand = null;
+                    _pendingAction = null;
+                }
+                else if (value is "finished" or "failed" or "cancelled")
+                {
+                    Message($"运行已结束，{_pendingAction}请求未确认；请查看运行目录中的诊断记录。");
+                    _pendingCommand = null;
+                    _pendingAction = null;
+                }
                 else label += $" · 等待{_pendingAction}确认" + (DateTimeOffset.Now - _requestedAt > TimeSpan.FromSeconds(10) ? "（已超时，尚未确认）" : "");
             }
             var terminal = value is "finished" or "failed" or "cancelled";
@@ -337,18 +350,30 @@ public partial class MainWindow : Window
             var title = _choices.FirstOrDefault(choice => choice.Name == name)?.Label ?? name;
             var total = Math.Max(1, task["total"]?.GetValue<int>() ?? 1);
             var current = Math.Max(0, Math.Min(total, task["current"]?.GetValue<int>() ?? 0));
-            TaskProgressText.Text = $"日常任务 {current}/{total} · {title}";
+            TaskProgressText.Text = $"任务 {current}/{total} · {title}";
             TaskProgressBar.Maximum = total;
             TaskProgressBar.Value = current;
         }
         if (action is not null)
         {
-            var total = Math.Max(1, action["total"]?.GetValue<int>() ?? 1);
-            var current = Math.Max(0, Math.Min(total, action["current"]?.GetValue<int>() ?? 0));
-            ActionProgressText.Text = $"{action["label"]} · 操作 {current}/{total}";
-            ActionProgressBar.IsIndeterminate = running && total == 1 && current == 0;
-            ActionProgressBar.Maximum = total;
-            ActionProgressBar.Value = current;
+            var label = action["label"]?.ToString() ?? "正在处理";
+            var unit = action["unit"]?.ToString() == "task" ? "任务进度" : "操作";
+            if (action["total"] is JsonValue totalValue && action["current"] is JsonValue currentValue)
+            {
+                var total = Math.Max(1, totalValue.GetValue<int>());
+                var current = Math.Max(0, Math.Min(total, currentValue.GetValue<int>()));
+                ActionProgressText.Text = $"{label} · {unit} {current}/{total}";
+                ActionProgressBar.IsIndeterminate = false;
+                ActionProgressBar.Maximum = total;
+                ActionProgressBar.Value = current;
+            }
+            else
+            {
+                ActionProgressText.Text = label;
+                ActionProgressBar.IsIndeterminate = running;
+                ActionProgressBar.Maximum = 1;
+                ActionProgressBar.Value = 0;
+            }
         }
     }
 
@@ -356,8 +381,8 @@ public partial class MainWindow : Window
     {
         PauseButton.IsEnabled = _active && state == "running" && _pendingCommand is null;
         ResumeButton.IsEnabled = _active && state == "paused" && _pendingCommand is null;
-        StopButton.IsEnabled = _active && state is "running" or "paused";
-        SnapshotButton.IsEnabled = _active && state is "running" or "paused";
+        StopButton.IsEnabled = _active && (state is "running" or "paused");
+        SnapshotButton.IsEnabled = _active && (state is "running" or "paused") && _pendingCommand is null;
     }
 
     private async Task SendControl(string action)
@@ -390,17 +415,6 @@ public partial class MainWindow : Window
     private async void Resume_Click(object sender, RoutedEventArgs e) => await Guard(() => SendControl("resume"));
     private async void Stop_Click(object sender, RoutedEventArgs e) => await Guard(() => SendControl("stop"));
     private async void Snapshot_Click(object sender, RoutedEventArgs e) => await Guard(() => SendControl("snapshot"));
-    private async void RefreshRun_Click(object sender, RoutedEventArgs e) => await Guard(async () =>
-    {
-        Poll();
-        if (_runSettings is null) return;
-        await Backend.Request(_runSettings, "idle");
-        _active = false;
-        _pendingCommand = null;
-        UpdateRunControls("finished");
-        StatusText.Text += "\n已检查运行锁：当前工程无活跃任务进程。";
-        Message("运行锁已释放，可以重新启动任务或关闭窗口");
-    });
     private void Browse_Click(object sender, RoutedEventArgs e)
     {
         var dialog = new OpenFolderDialog { Title = "选择 Python 工程目录" };

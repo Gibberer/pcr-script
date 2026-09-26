@@ -137,8 +137,11 @@ public partial class App : Application
                         smallEncoder.Frames.Add(BitmapFrame.Create(smallImage)); smallEncoder.Save(smallStream);
                     }
                     var setupSettings = new Settings { Workspace = e.Args[2], Python = e.Args[3] };
-                    if (!SetupWindow.IsProject(e.Args[2]) || SetupWindow.IsReady(setupSettings))
-                        throw new InvalidOperationException("首次引导的工程/必需设置检查失败");
+                    if (!SetupWindow.IsReady(setupSettings) ||
+                        !SetupWindow.IsReady(new Settings { Workspace = e.Args[2],
+                            Python = Path.Combine(e.Args[2], "missing-python.exe"), EmulatorDirectory = "missing-device" }) ||
+                        SetupWindow.IsReady(new Settings { Workspace = Path.Combine(e.Args[2], "missing-project") }))
+                        throw new InvalidOperationException("首次引导的工程目录检查失败");
                     setupSettings.Workspace = @"C:\PCR\pcr-script";
                     setupSettings.Python = @"C:\Python312\python.exe";
                     var setup = new SetupWindow(setupSettings);
@@ -168,13 +171,7 @@ public partial class App : Application
         if (!first) { MessageBox.Show("PCR 控制台已打开。"); Shutdown(); return; }
         ShutdownMode = ShutdownMode.OnExplicitShutdown;
         var settings = Settings.Load();
-        bool ready = SetupWindow.IsReady(settings);
-        if (ready)
-        {
-            try { await PythonEnvironment.RequireReady(settings); }
-            catch (Exception error) when (error is IOException or System.ComponentModel.Win32Exception) { ready = false; }
-        }
-        if (!ready && new SetupWindow(settings).ShowDialog() != true)
+        if (!SetupWindow.IsReady(settings) && new SetupWindow(settings).ShowDialog() != true)
         {
             Shutdown(); return;
         }

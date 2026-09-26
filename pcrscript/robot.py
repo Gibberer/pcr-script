@@ -45,6 +45,7 @@ class Robot:
         self.task_config: dict[str, Any] = {}
         self.task_results: list[TaskExecutionRecord] = []
         self._task_output: Path | None = None
+        self._in_work = False
         self._dummy_task = _DummyTask(self)
         global num
         if not name:
@@ -176,10 +177,15 @@ class Robot:
         self._first_enter_check()
         self._log("======:已进入游戏首页:======")
         if tasklist:
-            for index, (funcname, *args) in enumerate(tasklist, 1):
-                emit('progress', scope='task', current=index - 1, total=len(tasklist), name=funcname)
-                self._run_task(funcname, args)
-                emit('progress', scope='task', current=index, total=len(tasklist), name=funcname)
+            self._in_work = True
+            try:
+                for index, (funcname, *args) in enumerate(tasklist, 1):
+                    emit('progress', scope='task', current=index - 1, total=len(tasklist), name=funcname)
+                    self._run_task(funcname, args)
+                    emit('progress', scope='task', current=index, total=len(tasklist), name=funcname)
+            finally:
+                self._in_work = False
+                emit('progress', scope='action', clear=True)
         return self.task_results
 
     def configure(self, config: dict[str, Any]) -> None:
@@ -198,6 +204,9 @@ class Robot:
         self._task_output = directory
         started = time.monotonic()
         record: TaskExecutionRecord = {'task': taskname, 'status': 'running'}
+        if not self._in_work:
+            emit('progress', scope='task', current=0, total=1, name=taskname)
+        emit('progress', scope='action', clear=True)
         self._log(f'start task: {taskname}')
         try:
             if taskclass is None and not callable(legacy):
@@ -222,6 +231,9 @@ class Robot:
             self._task_output = previous_output
             self.task_results.append(record)
             task_result(record, directory)
+            emit('progress', scope='action', clear=True)
+            if not self._in_work and record['status'] not in ('error', 'cancelled'):
+                emit('progress', scope='task', current=1, total=1, name=taskname)
             self._log(f'end task: {taskname} ({record["status"]})')
 
     def _run_task(self, taskname: str, args: list[Any]) -> Any:

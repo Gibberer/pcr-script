@@ -26,17 +26,24 @@ public partial class SetupWindow : Window
             ? Path.Combine(settings.Workspace, ".venv", "Scripts", "python.exe") : settings.Python;
         Bootstrap.Text = settings.BootstrapPython;
         InspectProject();
-        if (!File.Exists(PythonPath.Text)) ProgressText.Text = "尚未准备 Python 环境。已有 Python 请检测后创建环境；没有 Python 请先点击官网下载。";
+        if (!File.Exists(PythonPath.Text)) ProgressText.Text = "Python 尚未准备；可以先进入控制台，运行前再安装。";
     }
 
-    public static bool IsProject(string path) => Directory.Exists(Path.Combine(path, "pcrscript"))
-        && Directory.Exists(Path.Combine(path, "images")) && File.Exists(Path.Combine(path, "requirements.txt"));
+    public static bool IsProject(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return false;
+        try
+        {
+            return Directory.Exists(Path.Combine(path, "pcrscript"))
+                && Directory.Exists(Path.Combine(path, "images"))
+                && File.Exists(Path.Combine(path, "requirements.txt"));
+        }
+        catch (Exception error) when (error is ArgumentException or NotSupportedException or PathTooLongException) { return false; }
+    }
 
-    public static bool IsReady(Settings settings) => settings.SetupCompleted && IsProject(settings.Workspace)
+    public static bool IsReady(Settings settings) => IsProject(settings.Workspace)
         && File.Exists(Path.Combine(settings.Workspace, "pcrscript", "desktop.py"))
-        && File.Exists(Path.Combine(settings.Workspace, "runtime_defaults.yml"))
-        && (string.IsNullOrWhiteSpace(settings.EmulatorDirectory) || File.Exists(Path.Combine(settings.EmulatorDirectory, "ldconsole.exe")))
-        && File.Exists(settings.Python);
+        && File.Exists(Path.Combine(settings.Workspace, "runtime_defaults.yml"));
 
     private void InspectProject()
     {
@@ -46,6 +53,7 @@ public partial class SetupWindow : Window
         if (IsProject(path))
         {
             ProjectStatus.Text = File.Exists(Path.Combine(path, "pcrscript", "desktop.py"))
+                && File.Exists(Path.Combine(path, "runtime_defaults.yml"))
                 ? "已识别 PCR 工程，将直接使用现有源码。"
                 : "已识别旧版 PCR 工程，但缺少 GUI 接口；请先更新源码，或下载到新的空目录。";
             DownloadPanel.Visibility = Visibility.Collapsed;
@@ -127,7 +135,7 @@ public partial class SetupWindow : Window
         await RuntimeSource.Download(Repository.Text.Trim(), Branch.Text.Trim(), target, Progress, coreOnly: DownloadScope.SelectedIndex == 0);
         InspectProject();
         PythonPath.Text = Path.Combine(target, ".venv", "Scripts", "python.exe");
-        Progress("下载完成，请创建 Python 环境 / 安装依赖");
+        Progress("下载完成，可以进入控制台；运行任务前再准备 Python 环境。");
     });
 
     private void PythonDownload_Click(object sender, RoutedEventArgs e) => PythonEnvironment.OpenDownload();
@@ -148,27 +156,13 @@ public partial class SetupWindow : Window
     private async void Finish_Click(object sender, RoutedEventArgs e)
     {
         bool finished = false;
-        await Guard(async () =>
+        await Guard(() =>
         {
             var project = Project();
             var emulator = EmulatorPath.Text.Trim();
-            if (emulator.Length > 0)
-            {
-                emulator = Path.GetFullPath(emulator);
-                if (!File.Exists(Path.Combine(emulator, "ldconsole.exe"))) throw new IOException("雷电目录中没有 ldconsole.exe，请重新选择；使用 ADB 时留空");
-            }
             var adb = AdbPath.Text.Trim();
-            if (emulator.Length == 0)
-            {
-                if (adb.Length == 0) throw new IOException("未配置雷电目录时，请填写 adb 或选择 adb.exe");
-                try { await Backend.Command(adb, ["version"], project, timeoutSeconds: 15); }
-                catch (Exception error) when (error is IOException or System.ComponentModel.Win32Exception or TimeoutException)
-                { throw new IOException("ADB 程序不可用；请安装 Android Platform Tools 并选择 adb.exe，或将 adb 加入 PATH", error); }
-            }
-            var python = Path.GetFullPath(PythonPath.Text.Trim());
-            if (!File.Exists(python)) throw new IOException(PythonEnvironment.InstallHint);
-            var candidate = new Settings { Workspace = project, Python = python };
-            await Backend.Request(candidate, "catalog");
+            var python = PythonPath.Text.Trim();
+            if (python.Length == 0) python = Path.Combine(project, ".venv", "Scripts", "python.exe");
             _settings.Workspace = project; _settings.Python = python;
             _settings.EmulatorDirectory = emulator; _settings.AdbExecutable = adb;
             _settings.AdbSerial = AdbSerial.Text.Trim(); _settings.SetupCompleted = true;
@@ -177,6 +171,7 @@ public partial class SetupWindow : Window
             _settings.DownloadCoreOnly = DownloadScope.SelectedIndex == 0;
             _settings.Save();
             finished = true;
+            return Task.CompletedTask;
         });
         if (finished) DialogResult = true;
     }

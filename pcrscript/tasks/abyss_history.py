@@ -12,6 +12,12 @@ def team_key(names):
     return '|'.join(sorted(names))
 
 
+def previous_stage_key(stage):
+    if stage.number > 1:
+        return f'{stage.chapter}-{stage.number-1}'
+    return f'{stage.chapter-1}-10' if stage.chapter > 1 else None
+
+
 class AbyssHistory:
     def __init__(self, directory='cache/game/strategies/abyss_history', account='default'):
         self.path = Path(directory)/(sha256(account.encode()).hexdigest()[:20]+'.json')
@@ -34,7 +40,44 @@ class AbyssHistory:
         return {team_key(t['order']) for t in self.trials(stage) if t.get('progressed') is not True}
 
     def budget(self, stage, first, repeat):
-        return repeat if self.key(stage) in self.previously_failed else first
+        spent=sum(t.get('progressed') is not True for t in self.trials(stage))
+        return max(0,min(repeat if self.key(stage) in self.previously_failed else first,
+                         first-spent))
+
+    def reconcile_previous_win(self, stage, remaining):
+        """Confirm an interrupted win from the new NEXT and one spent attempt."""
+        prior=previous_stage_key(stage)
+        if prior is None or type(remaining) is not int:
+            return None
+        trials=self.data['stages'].get(stage.element+'/'+prior, [])
+        if not trials:
+            return None
+        trial=trials[-1]
+        if trial.get('progressed') is not None or trial.get('outcome')!='in_flight':
+            return None
+        path=Path(trial.get('report',''))
+        try:
+            report=json.loads(path.read_text(encoding='utf-8'))
+        except (OSError,ValueError,TypeError):
+            return None
+        if not isinstance(report,dict):
+            return None
+        match=next((battle for battle in report.get('battles',[])
+                    if isinstance(battle,dict) and battle.get('history_id')==trial.get('id')),None)
+        old=match.get('stage',{}) if isinstance(match,dict) else {}
+        if not isinstance(old,dict):
+            return None
+        if (old.get('element')!=stage.element or f"{old.get('chapter')}-{old.get('number')}"!=prior
+                or match.get('outcome')!='settled'
+                or type(match.get('before_remaining')) is not int
+                or match['before_remaining']-remaining!=1):
+            return None
+        trial.update(outcome='settled',progressed=True,after_remaining=remaining,
+                     finished_at=time.time(),reconciliation='当前NEXT前进且挑战次数减少一，结合上轮已结束战斗报告')
+        self.save()
+        return dict(stage=stage.element+'/'+prior,history_id=trial['id'],
+                    prior_report=str(path),before_remaining=match['before_remaining'],
+                    after_remaining=remaining,next=stage.key)
 
     def start(self, stage, audit, report):
         trial = dict(id=uuid4().hex, started_at=time.time(), order=audit['order'],

@@ -93,7 +93,7 @@
       <TabItem x:Name="RunTab" Header="运行状态">
         <Grid Margin="18">
           <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-          <StackPanel><TextBlock x:Name="RunScopeText" Text="等待选择日常或专项" FontSize="19" FontWeight="SemiBold" Margin="0,0,0,12"/><WrapPanel><Button x:Name="PauseButton" IsEnabled="False" Content="暂停" Click="Pause_Click"/><Button x:Name="ResumeButton" IsEnabled="False" Content="恢复" Click="Resume_Click"/><Button x:Name="StopButton" IsEnabled="False" Foreground="#B42318" Content="停止" Click="Stop_Click"/><Button x:Name="SnapshotButton" IsEnabled="False" Content="保存现场" Click="Snapshot_Click"/><Button Content="重新检查运行" Click="RefreshRun_Click"/><Button Content="打开运行目录" Click="OpenRun_Click"/></WrapPanel></StackPanel>
+          <StackPanel><TextBlock x:Name="RunScopeText" Text="等待选择日常或专项" FontSize="19" FontWeight="SemiBold" Margin="0,0,0,12"/><WrapPanel><Button x:Name="PauseButton" IsEnabled="False" Content="暂停" Click="Pause_Click"/><Button x:Name="ResumeButton" IsEnabled="False" Content="恢复" Click="Resume_Click"/><Button x:Name="StopButton" IsEnabled="False" Foreground="#B42318" Content="停止" Click="Stop_Click"/><Button x:Name="SnapshotButton" IsEnabled="False" Content="保存现场" Click="Snapshot_Click"/><Button Content="打开运行目录" Click="OpenRun_Click"/></WrapPanel></StackPanel>
           <Border Grid.Row="1" Background="#EEF4FC" Padding="16" Margin="0,4,0,14"><StackPanel>
             <TextBlock x:Name="StatusText" Text="尚未启动任务" FontSize="15" TextWrapping="Wrap"/>
             <StackPanel x:Name="ProgressPanel" Visibility="Collapsed" Margin="0,12,0,0">

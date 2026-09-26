@@ -106,6 +106,7 @@ class UpgradeAllCharacters(BaseTask):
     def batches(self, mode: str) -> None:
         for batch in range(self.options.get('max_batches', 40)):
             self.check()
+            self.report_progress(f"{'品级提升' if mode == 'rank' else '自动强化'} · 第 {batch + 1} 批")
             self.bulk()
             self.ui.expect_click('自动选择', (770, 90, 930, 130), exact=True)
             s = self.bulk()
@@ -141,6 +142,7 @@ class UpgradeAllCharacters(BaseTask):
 
     def run(self) -> TaskReport:
         try:
+            self.report_progress('进入角色强化页面')
             if not self.enter():
                 self.report['status'] = 'already_complete'
                 self.report['reason'] = '游戏明确提示没有可一键强化的角色'

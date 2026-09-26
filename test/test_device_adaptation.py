@@ -1,5 +1,6 @@
 """Offline checks for dynamic screenshot coordinates and explicit ADB selection."""
 from tempfile import TemporaryDirectory
+from pathlib import Path
 from unittest import TestCase
 from unittest.mock import Mock, patch
 
@@ -80,3 +81,22 @@ class DeviceAdaptationTests(TestCase):
             driver.click(123, 45)
         self.assertEqual(command.call_args.args[0],
                          ['C:/tools/adb.exe', '-s', 'phone-1', 'shell', 'input', 'tap', '123', '45'])
+
+    def test_adb_can_route_unicode_input_through_explicit_leidian_console(self):
+        with TemporaryDirectory() as root:
+            console=Path(root)/'ldconsole.exe'
+            console.touch()
+            with patch('pcrscript.runtime.GeneralSimulator.get_devices',return_value=['phone-1']):
+                driver=select_driver({'Extra': {'dnpath': '', 'adb_serial': 'phone-1',
+                    'adb_unicode_console_path': str(console), 'adb_unicode_console_index': 2}})
+            self.assertTrue(driver.supports_unicode_input)
+            with patch('pcrscript.driver.subprocess.run',return_value=Mock(stdout=b'')) as command:
+                driver.input('厄里斯')
+            command.assert_called_once_with([str(console), 'action', '--index', '2',
+                                             '--key', 'call.input', '--value', '厄里斯'],
+                                            check=True, timeout=15)
+
+    def test_adb_unicode_console_must_exist(self):
+        with self.assertRaisesRegex(ValueError,'adb_unicode_console_path'):
+            select_driver({'Extra': {'dnpath': '',
+                'adb_unicode_console_path': 'C:/missing/ldconsole.exe'}})

@@ -4,6 +4,8 @@ Extra:
   dnpath: ''
   adb_path: adb
   adb_serial: ''
+  adb_unicode_console_path: ''
+  adb_unicode_console_index: 0
 StoryEvent:
   source_urls: []
   discover_sources: true
@@ -34,6 +36,11 @@ Gift:
 Caravan:
   timeout: 1800
   max_rolls: 200
+TeamBattle:
+  timeout: 3600
+  battle_timeout: 220
+  max_real_attacks: 3
+  max_simulations: 12
 Task:
   1:
     - [free_gacha, false]
@@ -46,6 +53,7 @@ Task:
     - [revival_event_once]
     - [campaign_clean, true, false]
     - [quick_clean, 2]
+    - [team_battle]
     - [luna_tower_clean]
     - [shop_buy, {1: [-1], 9: [-1]}]
     - [get_quest_reward]
@@ -82,6 +90,8 @@ CharacterBond:
 
 # 按需深域推进；本地试打须明确启用，不自动加入每日。
 Abyss:
+  search_effort: normal
+  auto_collect_house_stamina: false
   prepare_only: false
   allow_local_trials: false
   source_urls: []

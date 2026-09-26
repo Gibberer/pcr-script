@@ -31,6 +31,7 @@ class DungeonFirstClear(BaseTask):
             raise ValueError('Dungeon.prepare_only必须为布尔值')
         if options.get('prepare_only'):
             from .strategy_video import acquire_strategies, task_source_options
+            emit('progress', scope='action', label='获取并解析地下城攻略', unit='task')
             return (), {}, acquire_strategies(task_source_options('dungeon', options))
         return (), {}, None
 
@@ -337,6 +338,7 @@ class DungeonFirstClear(BaseTask):
 
     def run(self) -> TaskReport:
         try:
+            self.report_progress('进入地下城并核对进度')
             self.plan = None
             s = self.enter()
             route_audited = False
@@ -353,6 +355,8 @@ class DungeonFirstClear(BaseTask):
                     return self.finish_clear(s)
                 before = progress(s)
                 self.report['progress'] = asdict(before)
+                self.report_progress(f'第 {before.floor} 层 · 剩余生命 {before.hp} · 本轮最多 {limit} 次',
+                                     attempt, limit)
                 if self.state.get('in_flight'):
                     previous = self.state['in_flight']
                     old = previous['before']
