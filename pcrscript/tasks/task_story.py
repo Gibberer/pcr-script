@@ -158,11 +158,13 @@ class GetQuestReward(BaseTask):
                                     for name in self.TABS), "任务页面")
 
     def run(self):
+        self.report_progress('进入任务页面')
         home = self.ui.wait(lambda s: s.find("任务", (790, 390, 890, 470), exact=True), "首页任务入口")
         self.ui.click(home.find("任务", (790, 390, 890, 470), exact=True))
         self.quest()
         report = {"claimed_tabs": [], "empty_tabs": []}
-        for name in self.TABS:
+        for index, name in enumerate(self.TABS):
+            self.report_progress(f'核对{name}任务奖励', index, len(self.TABS))
             s = self.quest()
             tab = s.find(name, (300, 7, 800, 46), exact=True)
             if not self.active_tab(s, tab):
@@ -196,4 +198,5 @@ class GetQuestReward(BaseTask):
                 button = s.find("全部收取", (730, 405, 950, 468), exact=True)
                 if button is None or s.blue_button(button):
                     raise EventUIError(f"{name}任务连续三次领奖后仍有可领项")
+        self.report_progress('任务奖励已核对', len(self.TABS), len(self.TABS))
         return report

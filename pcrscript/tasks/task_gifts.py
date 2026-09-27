@@ -93,6 +93,13 @@ class GetGift(BaseTask):
                 raise EventUIError("礼物体力选项切换失败")
         return s
 
+    def dismantle_button(self, screen: EventScreen):
+        if not screen.find("道具一览", (30, 0, 220, 60)):
+            return None
+        roi = (750, 0, 950, 60)
+        return (screen.find("一键分解", roi, exact=True)
+                or self.ui.read_region(screen, roi).find("一键分解", roi, exact=True))
+
     def free_space(self, require_full: bool = False) -> bool:
         """Only auto-dismantle via the game's saved rules; never touch settings.
 
@@ -105,8 +112,8 @@ class GetGift(BaseTask):
         self.ui.expect_click("特别装备分解", (780, 410, 950, 465), exact=True)
         for batch in range(21):
             self.check()
-            s = self.ui.wait(lambda s: s.find("道具一览", (30, 0, 220, 60))
-                             and s.find("一键分解", (750, 0, 950, 60), exact=True), "特别装备库存")
+            self.report_progress(f"核对特别装备库存 · 已分解 {self.report['dismantled']} 件")
+            s = self.ui.wait(self.dismantle_button, "特别装备库存")
             before, capacity = inventory(s)
             self.report["inventory"].append({"used": before, "capacity": capacity})
             self.ui.save(f"inventory_{batch}", s)
@@ -121,7 +128,10 @@ class GetGift(BaseTask):
                 self.report["pending"].append("本轮特别装备分解已达到数量上限")
                 self.home()
                 return False
-            self.ui.click(s.find("一键分解", (750, 0, 950, 60), exact=True))
+            button = self.dismantle_button(s)
+            if button is None:
+                raise EventUIError("一键分解按钮无法确认")
+            self.ui.click(button)
             self.ui.expect_click("自动(?:分解)?", (615, 350, 765, 415), exact=True)
             s = self.ui.wait(lambda s: s.find("特别装备分解确认|没有.*(装备|道具)|无.*(装备|道具)|自动分解对象|分解的.*不存在"), "自动分解确认")
             if not s.find("特别装备分解确认", (250, 20, 720, 70), exact=True):
@@ -138,7 +148,7 @@ class GetGift(BaseTask):
             self.ui.click(button)
             self.ui.wait(lambda s: s.find("回收结果", (250, 20, 720, 70), exact=True), "分解结算")
             self.ui.expect_click("确认", (360, 440, 605, 515), exact=True)
-            s = self.ui.wait(lambda s: s.find("一键分解", (750, 0, 950, 60), exact=True), "分解后库存")
+            s = self.ui.wait(self.dismantle_button, "分解后库存")
             after, new_capacity = inventory(s)
             removed = before - after
             self.report["dismantled"] += max(0, removed)
@@ -150,9 +160,11 @@ class GetGift(BaseTask):
     def run(self, exclude_stamina: bool = True) -> TaskReport:
         recovered = False
         try:
+            self.report_progress('进入礼物箱')
             self.open_gifts(exclude_stamina)
             for batch in range(int(self.options.get("max_gift_batches", 30))):
                 self.check()
+                self.report_progress(f"核对礼物 · 已领取 {self.report['gift_batches']} 批")
                 s = self.gift_list()
                 button = s.find("全部收取", (700, 440, 930, 515), exact=True)
                 if not button or not s.blue_button(button):

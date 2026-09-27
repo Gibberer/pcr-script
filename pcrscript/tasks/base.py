@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, NotRequired, Optional, TypeAlia
 import numpy as np
 from numpy.typing import NDArray
 from ..run_session import clock as time
+from ..run_session import emit
 if TYPE_CHECKING:
     from pcrscript import Robot
 
@@ -53,6 +54,26 @@ class BaseTask(metaclass=ABCMeta):
 
     def __call__(self, *args: Any, **kwds: Any) -> Any:
         return self.run(*args, **kwds)
+
+    def report_progress(self, label: str, current: int | None = None,
+                        total: int | None = None) -> None:
+        """Publish a business milestone without depending on image actions.
+
+        Unknown-length OCR work reports a label with an indeterminate bar.
+        Counts describe a bounded batch, not a claim that the game is complete.
+        """
+        if not label or not isinstance(label, str):
+            raise ValueError('进度说明不能为空')
+        if (current is None) != (total is None):
+            raise ValueError('进度计数与总数必须同时提供')
+        if total is not None and (not isinstance(total, int) or isinstance(total, bool)
+                                  or not isinstance(current, int) or isinstance(current, bool)
+                                  or total < 1 or not 0 <= current <= total):
+            raise ValueError('进度必须满足 0 ≤ 当前数 ≤ 正整数总数')
+        data = {'label': label, 'unit': 'task'}
+        if total is not None:
+            data.update(current=current, total=total)
+        emit('progress', scope='action', **data)
 
     @abstractmethod
     def run(self, *args: Any, **kwargs: Any) -> Any:

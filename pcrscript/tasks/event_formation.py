@@ -50,6 +50,16 @@ class EventFormation:
     def search_rectangles(self, image: Screenshot) -> list[Region]:
         return search_card_rectangles(image, top=self.search_top)
 
+    @staticmethod
+    def search_identity_candidate(screen, rectangle, identity, wanted):
+        if identity is None or identity == wanted:
+            return True
+        x, y, w, _ = rectangle
+        # A stale or mistaken avatar match must not hide a card whose own
+        # visible name is exact. inspect() still verifies its skills before
+        # the character can join the party.
+        return normalized(screen.text((x, y-4, x+w, y+26))) == wanted
+
     def resolve_requirement(self, requirement, actual):
         return requirement
 
@@ -201,6 +211,11 @@ class EventFormation:
                        and (member.unique is None or member.unique2 is None)]
         if unspecified:
             return False, {"unready": unspecified}
+        if (not getattr(self.ui.driver, 'supports_unicode_input', True)
+                and any(not member.name.isascii() for member in party.members)):
+            # Android's `input text` rejects Chinese on some emulators. The
+            # existing full-roster scan verifies costumes without text input.
+            return self._select_by_scrolling(party)
         self.ui.wait(lambda s: s.find("队伍编组", (300, 0, 650, 70)), "队伍编组")
         self.ui.expect_click("全部", (30, 65, 115, 108), exact=True)
         for _ in range(10):
@@ -247,7 +262,7 @@ class EventFormation:
             ranked = sorted(zip(rects, identities), key=lambda pair: pair[1] != wanted)
             found = False
             for rect, identity in ranked:
-                if identity is not None and identity != wanted:
+                if not self.search_identity_candidate(s, rect, identity, wanted):
                     continue
                 x, y, w, h = rect
                 pos = (x+w//2, y+h//2)

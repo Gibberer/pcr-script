@@ -130,6 +130,34 @@ def _query_secret_dungeon(conn: sqlite3.Connection):
         # 暂时找到的老版本数据库还没有特别地下城，实际脚本也不用这个内容暂时忽略
         return None
 
+
+def _query_clan_battle(conn: sqlite3.Connection):
+    """The schedule row lasts until next month; the battle itself is five days.
+
+    The five-day span matches the current CN in-game calendar. The task still
+    verifies the live entrance and challenge counter before doing anything.
+    """
+    cn_timezone = timezone(timedelta(hours=8))
+    now = datetime.now(cn_timezone).replace(tzinfo=None).isoformat(' ', 'seconds')
+    try:
+        row = conn.execute(
+            'SELECT clan_battle_id, start_time, end_time FROM clan_battle_schedule '
+            'WHERE ISO(start_time) <= ? AND ISO(end_time) > ? '
+            'ORDER BY start_time DESC, clan_battle_id DESC LIMIT 1', (now, now)).fetchone()
+    except sqlite3.OperationalError as error:
+        if 'no such table' in str(error):
+            return None
+        raise
+    if row is None:
+        return None
+    battle_id, start, schedule_end = row
+    begin = datetime.strptime(start, _time_format).replace(tzinfo=cn_timezone)
+    battle_end = begin.replace(hour=0, minute=0, second=0) + timedelta(days=5, seconds=-1)
+    if datetime.now(cn_timezone) > battle_end:
+        return None
+    return Event(begin.timestamp(), battle_end.timestamp(), '团队战',
+                 {'clan_battle_id': battle_id, 'schedule_end': schedule_end})
+
 def _iso_datetime(date):
     return str(datetime.strptime(date, _time_format))
 
@@ -143,8 +171,10 @@ def _build_event_news(cache_path, db_file):
             drop_normal = _query_drop_normal_event(conn)
             drop_hard = _query_drop_hard_event(conn)
             secret_dungeon = _query_secret_dungeon(conn)
+            clan_battle = _query_clan_battle(conn)
     return EventNews(freeGacha=free_gacha, hatsune=hatsune, tower=tower, dropItemNormal=drop_normal, 
-                         dropItemHard=drop_hard, secretDungeon=secret_dungeon, revival=revival)
+                         dropItemHard=drop_hard, secretDungeon=secret_dungeon, revival=revival,
+                         clanBattle=clan_battle)
 
 def fetch_event_news() -> EventNews:
     # 从redive.estertion.win抓国服信息

@@ -22,6 +22,7 @@ Windows GUI 通过 `pcrscript/desktop.py` 复用同一状态文件与控制协�
 ./.venv/Scripts/python.exe -X utf8 scripts/agent/run_control.py pause
 ./.venv/Scripts/python.exe -X utf8 scripts/agent/run_control.py snapshot
 ./.venv/Scripts/python.exe -X utf8 scripts/agent/run_control.py resume
+./.venv/Scripts/python.exe -X utf8 scripts/agent/run_control.py stop
 ```
 
 暂停是协作式的：在下一次截图/点击/滑动/输入前确认停下。只有命令确认且 state=paused 才允许 Agent 使用后台驱动查看画面；请求发出后，在确认前可能还有正在执行的操作。默认等确认十秒，超时返回非零，**不等于已暂停**。不并行发送相互冲突的 pause/resume 请求。snapshot 使用独立请求文件，不会取消暂停。

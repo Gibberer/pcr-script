@@ -144,7 +144,7 @@ class DesktopTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, '已并入'):
             desktop.validate_plan([dict(enabled=True, name='campaign_reward_exchange', args=[])])
 
-    def test_dependency_check_reports_missing_and_wrong_versions(self):
+    def test_dependency_check_allows_installed_version_differences(self):
         import importlib.metadata
         (self.root / 'requirements.txt').write_text('present==1.0\nmissing==2.0\nwrong==3.0\n', encoding='utf-8')
         def version(name):
@@ -154,7 +154,12 @@ class DesktopTests(unittest.TestCase):
         with patch('importlib.metadata.version', side_effect=version):
             report = desktop.environment_report()
         self.assertFalse(report['ready'])
-        self.assertEqual(report['missing'], ['missing==2.0', 'wrong==3.0'])
+        self.assertEqual(report['missing'], ['missing==2.0'])
+        (self.root / 'requirements.txt').write_text('present==1.0\nwrong==3.0\n', encoding='utf-8')
+        with patch('importlib.metadata.version', side_effect=version):
+            report = desktop.environment_report()
+        self.assertTrue(report['ready'])
+        self.assertEqual(report['missing'], [])
 
     def test_action_status_preserves_chinese_text(self):
         with RunSession('unicode-test', root=self.root / 'cache/daily/runs') as session:
@@ -280,23 +285,6 @@ class DesktopTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, 'timed out'):
                 robot.run_task('schedule')
             self.assertEqual(task.call_count, 1)
-
-    def test_daily_start_preserves_open_game_and_enters_from_welcome(self):
-        from pcrscript import Robot
-        driver = Mock(get_screen_size=Mock(return_value=(960, 540)))
-        robot = Robot(driver, show_progress=False)
-        with patch.object(robot, '_Robot__find_match_pos', return_value=None), \
-             patch('pcrscript.robot.ToHomePage.run') as home:
-            robot.changeaccount()
-        home.assert_called_once_with(timeout=60)
-        driver.click.assert_not_called()
-
-        with patch.object(robot, '_Robot__find_match_pos', return_value=(100, 100)), \
-             patch.object(robot, '_Robot__action_squential') as enter, \
-             patch('pcrscript.robot.ToHomePage.run') as home:
-            robot.changeaccount()
-        enter.assert_called_once()
-        home.assert_not_called()
 
     def test_progress_bar_only_uses_interactive_terminal(self):
         from pcrscript import Robot

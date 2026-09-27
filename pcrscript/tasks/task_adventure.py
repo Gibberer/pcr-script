@@ -79,7 +79,7 @@ class QuickClean(ImageTask, TimeLimitTask):
                     ClickAction(template='btn_cancel', timeout=1),
                     ThrowErrorAction("No Power!!!")
                 ]),
-            MatchAction(template="btn_challenge",matched_actions=[ClickAction()], unmatch_actions=[
+            MatchAction(template=ImageTemplate("btn_challenge", roi=(400, 440, 700, 520)),matched_actions=[ClickAction()], unmatch_actions=[
                 ClickAction('btn_ok_blue'),
                 ClickAction("btn_ok"),
                 ClickAction("btn_not_store_next"),

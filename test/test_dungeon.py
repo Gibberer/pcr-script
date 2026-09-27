@@ -4,6 +4,7 @@ from tempfile import TemporaryDirectory
 from unittest import TestCase, main
 from unittest.mock import Mock, patch
 import json
+import subprocess
 import numpy as np
 import requests
 import yaml
@@ -15,7 +16,7 @@ from pcrscript.tasks.event_formation import EventFormation, skill_title_pattern
 from pcrscript.tasks.task_dungeon import DungeonFirstClear
 from pcrscript.tasks.event_battle import EventCombat, BattleResult
 from pcrscript.game_ui.screen import EventUIError
-from pcrscript.game_ui.character_equipment import inspect_unreleased_equipment
+from pcrscript.game_ui.character_equipment import inspect_unreleased_equipment, open_character_memory
 from pcrscript.tasks.event_strategy import CharacterStatus, MemberRequirement, EventParty, readiness
 from pcrscript.extras.bilibili_api import BilibiliApi
 
@@ -130,6 +131,17 @@ class DungeonTests(TestCase):
                 formation.select(party)
         self.assertEqual(formation.ui.driver.input.call_count,3)
         formation.inspect.assert_not_called()
+
+    def test_adb_chinese_formation_uses_verified_roster_scan(self):
+        formation=object.__new__(EventFormation)
+        formation.ui=Mock()
+        formation.ui.driver.supports_unicode_input=False
+        formation._select_by_scrolling=Mock(return_value=(True, {'order': ['测试角色']}))
+        party=EventParty('synthetic','https://example.com',[
+            MemberRequirement('测试角色',1,1,3)])
+        self.assertEqual(formation.select(party), (True, {'order': ['测试角色']}))
+        formation._select_by_scrolling.assert_called_once_with(party)
+        formation.ui.driver.input.assert_not_called()
 
     def test_route_conflicts_ignore_ordinary_floor_reuse(self):
         with TemporaryDirectory() as root:
@@ -271,6 +283,14 @@ class DungeonTests(TestCase):
                 self.assertEqual(result,'evidence.png' if name==expected else None)
                 for call in ui.expect_click.call_args_list:
                     self.assertIn(call.args[0],('才能开花','专用装备'))
+
+    def test_character_search_input_failure_blocks_equipment_claim(self):
+        ui=Mock()
+        ui.capture.return_value=frame(('重置',689,90))
+        ui.driver.input.side_effect=subprocess.CalledProcessError(137,['adb'])
+        with self.assertRaisesRegex(EventUIError,'专武状态未核实'):
+            open_character_memory(ui,'测试角色')
+        ui.save.assert_not_called()
 
     def test_reward_animation_waits_for_next_floor_before_click(self):
         task = object.__new__(DungeonFirstClear)

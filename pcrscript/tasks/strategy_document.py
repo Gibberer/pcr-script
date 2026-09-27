@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from .event_strategy import EventParty, MemberRequirement
+from ..game_ui.screen import normalized
 
 VERSION = 2
 BUILD_FIELDS = ('level', 'rank', 'stars', 'unique', 'unique2', 'skill_level', 'instant')
@@ -108,11 +109,11 @@ def export_document(path: Path, report: dict) -> None:
 def abyss_candidate(party: dict) -> dict:
     """Retain full evidence in the existing candidate-facing structure."""
     scope = party['scope']
-    return dict(names=[m['name'] for m in party['members']],
+    return dict(names=[normalized(m['name']) for m in party['members']],
                 instant=[m['instant']['value'] for m in party['members']],
                 required_stars=[m['stars']['value'] for m in party['members']],
                 source=party['source'], element=scope.get('element'), stages=[scope['stage']] if scope.get('stage') else [],
-                chapters=scope.get('chapters'), excluded_stages=[],
+                chapters=scope.get('chapters'), excluded_stages=party.get('excluded_stages',[]),
                 build_basis='source' if party['readiness'] == 'ready' else 'source_incomplete',
                 document=party, notes=party.get('notes', ''), pending=party['pending'])
 

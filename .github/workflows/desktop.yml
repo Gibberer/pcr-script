@@ -82,7 +82,7 @@ jobs:
           PCR GUI 使用说明
 
           完整解压后运行 PcrDesktop.exe，保留旁边的 DLL 和 .exe.config 文件。
-          首次引导中选择工程目录、设备连接方式与 Python，下载核心文件并安装依赖。
+          首次引导只需选择工程目录；设备连接与 Python 依赖可在进入控制台后准备。
           雷电填写安装目录；ADB 连接 Android 设备时留空，并提前安装 Android Platform Tools、完成设备授权。
           不需要提前 clone 仓库；下载/更新需要 Git，执行任务推荐 Python 3.12 x64。
 

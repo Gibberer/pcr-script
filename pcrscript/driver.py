@@ -18,6 +18,8 @@ class WHType(enum.Enum):
     Mouse = 2
 
 class Driver(metaclass=ABCMeta):
+    supports_unicode_input = True
+
     @abstractmethod
     def click(self, x, y):
         pass
@@ -48,11 +50,15 @@ class Driver(metaclass=ABCMeta):
 
 class ADBDriver(Driver):
     png = True
+    supports_unicode_input = False
 
-    def __init__(self, device_name, adb_path="adb"):
+    def __init__(self, device_name, adb_path="adb", *, unicode_console_path="", unicode_console_index=0):
         super().__init__()
         self.device_name = device_name
         self.adb_path = adb_path
+        self.unicode_console_path = unicode_console_path
+        self.unicode_console_index = unicode_console_index
+        self.supports_unicode_input = bool(unicode_console_path)
         self.device_width = 0
         self.device_height = 0
 
@@ -60,6 +66,11 @@ class ADBDriver(Driver):
         self._run("shell", "input", "tap", str(x), str(y))
 
     def input(self, text):
+        if self.unicode_console_path and not text.isascii():
+            subprocess.run([self.unicode_console_path, "action", "--index",
+                            str(self.unicode_console_index), "--key", "call.input",
+                            "--value", text], check=True, timeout=15)
+            return
         self._run("shell", "input", "text", text)
 
     def screenshot(self, output="screen_shot.png"):

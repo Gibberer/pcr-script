@@ -139,14 +139,25 @@ class AbyssFormation(EventFormation):
         choices=alternatives(audit['order'],available,roles,failed,survival=survival,
                              boss=stage.number==10,focus=focus)
         rejected=[]
+        blocked_incoming={}
         for choice in choices:
             if hasattr(self,'check_deadline'):self.check_deadline()
+            prior=blocked_incoming.get(choice['incoming'])
+            if prior is not None:
+                rejected.append(dict(choice=choice,selection=prior,
+                                     reason='同一替补已在本轮核验失败'))
+                continue
             # Candidate selection checks the current account's build, never
             # infers ownership or unique equipment from downloaded metadata.
             members=[MemberRequirement(n,1,1,1,None,None,True,0) for n in choice['order']]
             candidate=EventParty('本地调整 '+stage.title,'游戏属性筛选与本地技能数据库',members)
             ready,selection=self.select(candidate)
             if not ready:
+                unready=selection.get('unready',[])
+                if (unready and not selection.get('errors')
+                        and all(isinstance(row,dict)
+                                and row.get('character')==choice['incoming'] for row in unready)):
+                    blocked_incoming[choice['incoming']]=selection
                 rejected.append(dict(choice=choice,selection=selection));continue
             party,current=self.current_trial(stage)
             if party is None:
@@ -166,9 +177,25 @@ class AbyssFormation(EventFormation):
 
     def source_trial(self,stage,source,*,recover=True):
         if source.get('document'):
+            document = source['document']
+            if document.get('readiness') != 'ready':
+                # The video proves this exact roster, but its build is not a
+                # guide requirement. Audit the account's current build instead.
+                trial = dict(source)
+                trial.pop('document')
+                trial['instant'] = [flag if type(flag) is bool else True
+                                    for flag in source['instant']]
+                party, audit = self.source_trial(stage, trial, recover=recover)
+                audit.update(source=source, build_basis='local_trial_source_roster',
+                             assumptions=list(document.get('pending', [])) +
+                             [name+'.SET未知，试打暂按开启' for name, flag in
+                              zip(source['names'], source['instant']) if type(flag) is not bool])
+                if trial.get('adaptations'):
+                    audit['adaptations'] = trial['adaptations']
+                return party, audit
             from .strategy_document import to_event_party
             try:
-                party = to_event_party(source['document'])
+                party = to_event_party(document)
             except ValueError as error:
                 return None, dict(source=source, unready=[str(error)])
             self.strict_source = True
@@ -221,6 +248,9 @@ class AbyssFormation(EventFormation):
                 if missing and not unresolved:
                     return self.adapt_source(stage,source,missing)
                 return None,dict(source=source,selection=details,unready=['来源阵容成员未确认'])
+            # The preliminary audit described the saved team before select().
+            # Never reuse it after the five cards have been replaced.
+            checked=None
         party,audit=checked if checked is not None else self.current_trial(stage)
         audit['source']=source
         if party is None and recover and hasattr(self,'recover_equipment'):
@@ -230,11 +260,14 @@ class AbyssFormation(EventFormation):
                 self.recover_equipment(stage,source['names'])
                 return self.source_trial(stage,source,recover=False)
         if party:
-            settings=dict(zip(source['names'],source['instant']))
-            for member in party.members:member.instant=settings[member.name]
-            observed={a['name']:a for a in audit['observed']}
+            settings=dict(zip((normalized(name) for name in source['names']),source['instant']))
+            if {normalized(member.name) for member in party.members} != set(settings):
+                audit['unready']=['选队后的五人身份与来源不一致，未开战']
+                return None,audit
+            for member in party.members:member.instant=settings[normalized(member.name)]
+            observed={normalized(a['name']):a for a in audit['observed']}
             mismatches=[n for n,star in zip(source['names'],source['required_stars'])
-                        if star==6 and observed[n]['stars']!=6]
+                        if star==6 and observed[normalized(n)]['stars']!=6]
             if mismatches:
                 audit['unready']=[{'characters':mismatches,'reasons':['来源明确六星，但账号当前状态不一致']}]
                 return None,audit

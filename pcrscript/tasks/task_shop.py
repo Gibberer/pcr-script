@@ -169,14 +169,17 @@ class ShopBuy(BaseTask):
 
     def run(self, rule: dict):
         parsed = parse_rule(rule)
+        tabs = [(tab, positions) for tab, positions in parsed.items() if positions]
+        self.report_progress('进入商店')
         self.enter()
         report = {"purchased": [], "skipped": []}
-        for tab, positions in parsed.items():
-            if not positions:
-                continue
+        for index, (tab, positions) in enumerate(tabs):
+            self.report_progress(f'核对{SHOP_TABS[tab]}商店', index, len(tabs))
             s = self.select(tab, positions)
             if s is None:
                 report["skipped"].append(SHOP_TABS[tab])
                 continue
             report["purchased"].append(self.buy(tab, s))
+        if tabs:
+            self.report_progress('商店规则已处理', len(tabs), len(tabs))
         return report

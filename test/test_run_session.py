@@ -28,6 +28,27 @@ class Driver:
 
 
 class RunSessionTests(unittest.TestCase):
+    def test_atomic_status_write_retries_windows_sharing_denial(self):
+        from unittest.mock import patch
+        from pcrscript import run_session
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'status.json'
+            replace = run_session.os.replace
+            attempts = []
+
+            def busy_twice(source, target):
+                attempts.append(1)
+                if len(attempts) < 3:
+                    raise PermissionError(13, 'temporarily busy', str(target), 5)
+                return replace(source, target)
+
+            with patch.object(run_session.os, 'replace', side_effect=busy_twice), \
+                 patch.object(run_session._time, 'sleep'):
+                atomic_json(path, {'state': 'running'})
+            self.assertEqual(len(attempts), 3)
+            self.assertEqual(json.loads(path.read_text(encoding='utf-8')), {'state': 'running'})
+            self.assertFalse(list(Path(root).glob('*.tmp')))
+
     def test_structured_progress_reaches_status_without_terminal_output(self):
         from unittest.mock import Mock
         from pcrscript import Robot
@@ -47,6 +68,32 @@ class RunSessionTests(unittest.TestCase):
                 progress = json.loads((run.path / 'status.json').read_text(encoding='utf-8'))['progress']
                 self.assertEqual(progress['task'], {'current': 1, 'total': 3, 'name': 'get_gift'})
                 self.assertIsNone(progress['action'])
+
+    def test_ocr_progress_and_single_task_completion_clear_detail(self):
+        from unittest.mock import Mock, patch
+        from pcrscript import Robot
+        from pcrscript.tasks.base import BaseTask
+
+        class OCRProbe(BaseTask):
+            def run(self):
+                self.report_progress('识别关卡')
+                self.report_progress('已核对 2 关', 2, 3)
+                return {'status': 'complete'}
+
+        with tempfile.TemporaryDirectory() as root:
+            with RunSession('progress-test', root) as run:
+                robot = Robot(Mock(get_screen_size=Mock(return_value=(960, 540))), show_progress=False)
+                with patch('pcrscript.robot.find_taskclass', return_value=OCRProbe):
+                    robot.run_task('ocr_probe')
+                run.status()
+                status = json.loads((run.path / 'status.json').read_text(encoding='utf-8'))
+                self.assertEqual(status['progress']['task'],
+                                 {'current': 1, 'total': 1, 'name': 'ocr_probe'})
+                self.assertIsNone(status['progress']['action'])
+                steps = [json.loads(line) for line in (run.path / 'events.jsonl').read_text(encoding='utf-8').splitlines()]
+                self.assertIn({'label': '已核对 2 关', 'unit': 'task', 'current': 2, 'total': 3},
+                              [{k: v for k, v in event.items() if k not in ('time', 'kind', 'scope')}
+                               for event in steps if event.get('kind') == 'progress'])
 
     def test_retained_console_stream_after_log_closes(self):
         console, log = io.StringIO(), io.StringIO()
@@ -195,7 +242,10 @@ with RunSession('child', sys.argv[1]) as run:
                     time.sleep(.05)
                 self.assertEqual(run.snapshot_id, 'snapshot1')
                 self.assertEqual(run.state, 'paused')
-                self.assertTrue(list(run.path.glob('incident-*/details.json')))
+                run.status()
+                status = json.loads((run.path/'status.json').read_text(encoding='utf-8'))
+                self.assertEqual(status['snapshot_directory'], run.snapshot_directory)
+                self.assertTrue((run.path/run.snapshot_directory/'details.json').is_file())
 
     def test_input_payload_is_not_logged(self):
         with tempfile.TemporaryDirectory() as root:

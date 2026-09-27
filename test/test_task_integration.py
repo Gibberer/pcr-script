@@ -22,7 +22,7 @@ class TaskIntegrationTests(TestCase):
         expected = {'adventure_daily','arena','campaign_clean','caravan','dungeon_first_clear','upgrade_all_characters','max_character_bonds','abyss_push',
                     'clear_campaign_first_time','clear_story','common_adventure','free_gacha','get_gift',
                     'get_quest_reward','luna_tower_clean','normal_gacha',
-                    'princess_arena','quick_clean','research','revival_event_once','schedule','shop_buy','tohomepage'}
+                    'princess_arena','quick_clean','research','revival_event_once','schedule','shop_buy','team_battle','tohomepage'}
         self.assertEqual(set(registered_tasks()), expected)
         for name in expected:
             self.assertTrue(issubclass(find_taskclass(name), BaseTask))

@@ -12,13 +12,14 @@ import numpy as np
 
 from pcrscript.game_ui.avatars import AvatarIndex, face_crop
 from pcrscript.game_ui.avatar_assets import ensure_avatar_index
-from pcrscript.game_ui.guide_vision import GuideText, combat_team, combat_set, combat_auto, labeled_fields, formation_fields
+from pcrscript.game_ui.guide_vision import GuideText, battle_rectangles, combat_team, formation_team, wide_special_equipment_team, combat_set, combat_auto, labeled_fields, formation_fields
 from pcrscript.tasks.strategy_document import Evidence, empty_member, finalize, to_event_party, abyss_candidate, event_parties, event_trial_parties, dungeon_plan
-from pcrscript.tasks.strategy_video import choose_pages, observed_scope, parse_video_source, acquire_strategies, task_source_options
+from pcrscript.tasks.strategy_video import choose_pages, observed_scope, parse_video_source, acquire_strategies, task_source_options, texts_in_view, sample_seconds, frame_texts
 from pcrscript.tasks.strategy_party_pool import boss_parties, next_boss_party
 from pcrscript.tasks.strategy_trial import TrialFormation
 from pcrscript.tasks.event_strategy import CharacterStatus
 from pcrscript.tasks.task_abyss import AbyssPush, source_for_stage
+from pcrscript.tasks.abyss_party import AbyssFormation
 from pcrscript.tasks.task_dungeon import DungeonFirstClear
 from pcrscript.game_ui.abyss import AbyssStage
 
@@ -35,6 +36,120 @@ def complete_party():
 
 
 class VideoStrategyTests(TestCase):
+    def test_decorated_element_part_selects_exact_abyss_stage(self):
+        source=dict(title='公主连结 5属性深域4~5图自动作业合集',pages=[
+            dict(cid=1,part='个人公主骑士练度参考'),
+            dict(cid=2,part='火4图'),
+            dict(cid=3,part='【风】5-6'),
+            dict(cid=4,part='【火】5-6'),
+            dict(cid=5,part='【水】5-6')])
+        options=task_source_options('abyss',dict(search_effort='high'),stage=AbyssStage('fire',5,6))
+        self.assertEqual([p['cid'] for p in choose_pages(source,options)],[1,4])
+
+    def test_high_abyss_effort_expands_bounded_source_budget(self):
+        stage=AbyssStage('water',4,6)
+        normal=task_source_options('abyss',dict(sources=dict(max_videos=4)),stage=stage)
+        high=task_source_options('abyss',dict(search_effort='high',
+            sources=dict(max_videos=4,max_video_seconds=240)),stage=stage)
+        self.assertEqual(normal['max_videos'],4)
+        self.assertEqual(high['max_videos'],12)
+        self.assertEqual(high['max_video_seconds'],600)
+        self.assertEqual(high['max_pages_per_video'],8)
+        self.assertEqual(high['max_frames_per_page'],96)
+        self.assertEqual(high['max_download_seconds'],420)
+        self.assertEqual(high['parse_timeout'],3600)
+        self.assertTrue(high['skip_manual_media'])
+        self.assertTrue(high['skip_long_media'])
+        with self.assertRaisesRegex(ValueError,'sources.max_videos'):
+            task_source_options('abyss',dict(search_effort='high',
+                sources=dict(max_videos='4')),stage=stage)
+
+    def test_combat_row_verifies_inferred_cards_with_connected_set_bubbles(self):
+        image=np.zeros((540,960,3),np.uint8)
+        cyan=(255,200,0)
+        for i in range(5):
+            x=190+119*i
+            cv.rectangle(image,(x,390),(x+99,489),cyan,-1 if i in (1,4) else 4)
+            if i in (1,4):
+                cv.rectangle(image,(x+70,380),(x+116,410),cyan,-1)
+        self.assertEqual(len(battle_rectangles(image)),5)
+        cv.rectangle(image,(662,376),(785,495),(0,0,0),-1)
+        self.assertEqual(battle_rectangles(image),[])
+
+    def test_wide_video_samples_brief_formation_and_equipment_screens(self):
+        samples = sample_seconds(96, 50, wide=True)
+        self.assertIn(2.0, samples)
+        self.assertIn(3.5, samples)
+        self.assertLessEqual(len(samples), 50)
+        self.assertNotIn(2.0, sample_seconds(96, 50))
+
+    def test_long_video_samples_opening_battle_more_densely(self):
+        samples = sample_seconds(232, 50)
+        self.assertLessEqual(len(samples), 50)
+        self.assertGreaterEqual(sum(3 <= s < 60 for s in samples), 24)
+        self.assertTrue(any(s > 200 for s in samples))
+
+    def test_identical_frame_reuses_ocr_only_with_saved_image(self):
+        with TemporaryDirectory() as folder,patch('pcrscript.tasks.strategy_video.read_text',
+                return_value=[GuideText('队伍编组',1,(1,2,3,4))]) as read:
+            image=Path(folder)/'frame.jpg'
+            frame=np.zeros((720,1280,3),np.uint8)
+            self.assertEqual(frame_texts(frame,image,Mock())[0].text,'队伍编组')
+            self.assertEqual(frame_texts(frame,image,Mock())[0].text,'队伍编组')
+            self.assertEqual(read.call_count,1)
+            frame[0,0]=255
+            frame_texts(frame,image,Mock())
+            self.assertEqual(read.call_count,2)
+            image.unlink()
+            frame_texts(frame,image,Mock())
+            self.assertEqual(read.call_count,3)
+
+    def test_wide_combat_projects_set_labels_into_cropped_view(self):
+        labels = [GuideText('立即', 1, (413, 514, 33, 17)),
+                  GuideText('发动', 1, (413, 528, 34, 23))]
+        projected = texts_in_view(labels, 1280, 115, 1049)
+        view = np.zeros((540, 960, 3), np.uint8)
+        view[382:418, 270:314] = (255, 180, 0)
+        self.assertTrue(combat_set(view, {'rectangle': (196, 396, 89, 89)}, projected))
+        self.assertIsNone(combat_set(view, {'rectangle': (316, 396, 89, 89)}, projected))
+
+    def test_formation_roster_requires_page_labels_and_five_distinct_portraits(self):
+        with TemporaryDirectory() as directory:
+            index = AvatarIndex(directory, load_existing=False)
+            image = np.zeros((540, 960, 3), dtype=np.uint8)
+            expected = [f'合成角色{i}' for i in range(5)]
+            for i, name in enumerate(expected):
+                box = (96+109*i-48, 405, 96, 96)
+                patch = np.random.default_rng(i+1).integers(0, 256, (48, 62, 3), dtype=np.uint8)
+                x, y, w, h = box
+                image[y+round(h*.23):y+round(h*.73), x+round(w*.18):x+round(w*.82)] = patch
+                index.add(name, patch, persist=False)
+            labels = [GuideText('队伍编组', .99, (0, 0, 80, 20)),
+                      GuideText('当前的成员', .99, (0, 0, 80, 20))]
+            self.assertEqual([row['name'] for row in formation_team(image, labels, index)], expected)
+            self.assertEqual(formation_team(image, labels[:1], index), [])
+            image[427:475, 501:563] = image[427:475, 392:454]
+            self.assertEqual(formation_team(image, labels, index), [])
+
+    def test_wide_special_equipment_roster_requires_dialog_and_distinct_portraits(self):
+        with TemporaryDirectory() as directory:
+            index = AvatarIndex(directory, load_existing=False)
+            image = np.zeros((540, 960, 3), dtype=np.uint8)
+            expected = [f'合成角色{i}' for i in range(5)]
+            boxes = [(round(88+178.5*i), 108, 72, 72) for i in range(5)]
+            for i, (name, (x, y, w, h)) in enumerate(zip(expected, boxes)):
+                patch = np.random.default_rng(i+51).integers(0, 256, (36, 46, 3), dtype=np.uint8)
+                image[y+round(h*.23):y+round(h*.73), x+round(w*.18):x+round(w*.82)] = patch
+                index.add(name, patch, persist=False)
+            labels = [GuideText('特别装备设定', .99, (0, 0, 80, 20)),
+                      GuideText('可变更队伍角色的特别装备。', .99, (0, 0, 160, 20))]
+            self.assertEqual([row['name'] for row in wide_special_equipment_team(image, labels, index)], expected)
+            self.assertEqual(wide_special_equipment_team(image, labels[:1], index), [])
+            x, y, w, h = boxes[-1]
+            x0, y0, _, _ = boxes[-2]
+            image[y+round(h*.23):y+round(h*.73), x+round(w*.18):x+round(w*.82)] = image[y0+round(h*.23):y0+round(h*.73), x0+round(w*.18):x0+round(w*.82)]
+            self.assertEqual(wide_special_equipment_team(image, labels, index), [])
+
     def test_fields_never_default_and_weapon_stars_are_not_rarity(self):
         self.assertEqual(labeled_fields(''), {})
         self.assertEqual(labeled_fields('专310'), {'unique': True})
@@ -59,13 +174,90 @@ class VideoStrategyTests(TestCase):
         candidate = abyss_candidate(party)
         self.assertIs(source_for_stage([candidate], AbyssStage('fire',4,1),set(),[]), candidate)
         self.assertIsNone(source_for_stage([candidate], AbyssStage('fire',4,2),set(),[]))
+        alias=dict(party,members=[dict(party['members'][0],name='涅妃＝涅菈'),*party['members'][1:]])
+        self.assertEqual(abyss_candidate(alias)['names'][0],'涅妃=涅菈')
         for key, value in [('global_requirements', [{'text':'属性等级99'}]), ('manual_actions',[{'text':'手动'}]), ('region','jp')]:
             with self.subTest(key=key), self.assertRaises(ValueError): to_event_party(dict(party, **{key:value}))
+
+    def test_exact_incomplete_abyss_roster_only_seeds_authorized_auto_trial(self):
+        stage = AbyssStage('fire', 5, 2)
+        members=[empty_member('角色'+str(i)) for i in range(5)]
+        for member in members:
+            member['instant'].add(True,Evidence('https://example.com/5-2',method='video_title_full_set'))
+        document = finalize(dict(source='https://example.com/5-2',
+            scope=dict(element='fire', stage='5-2', chapters=[5, 5]),
+            scope_verified=True, region='unknown', target_region='cn',
+            members=members,
+            identity_evidence=[dict(name='角色'+str(i), cid=1, seconds=second)
+                               for i in range(5) for second in (1.0, 2.0)],
+            auto=dict(value=True, evidence=[dict(method='combat_auto_button')], conflicts=[]),
+            manual_actions=[], global_requirements=[]))
+        candidate = abyss_candidate(document)
+        self.assertIsNone(source_for_stage([candidate], stage, set(), []))
+        self.assertIs(source_for_stage([candidate], stage, set(), [], allow_local_trials=True), candidate)
+        unknown=dict(document,members=[dict(document['members'][0],instant=dict(value=None,evidence=[],conflicts=[])),*document['members'][1:]])
+        self.assertIsNone(source_for_stage([abyss_candidate(unknown)],stage,set(),[],allow_local_trials=True))
+        self.assertIsNone(source_for_stage([abyss_candidate(dict(document,identity_evidence=[]))],
+                                           stage, set(), [], allow_local_trials=True))
+        for change in (dict(manual_actions=[{'text':'半自动'}]),
+                       dict(global_requirements=[{'text':'属性等级750'}]),
+                       dict(scope_verified=False), dict(region='jp'),
+                       dict(auto=dict(value=False, evidence=[], conflicts=[]))):
+            with self.subTest(change=change):
+                rejected = abyss_candidate(dict(document, **change))
+                self.assertIsNone(source_for_stage([rejected], stage, set(), [], allow_local_trials=True))
+
+        class TrialStub(AbyssFormation):
+            def source_trial(self, stage, source, *, recover=True):
+                if not source.get('document'):
+                    self.trial_source = source
+                    return object(), {'order': source['names']}
+                return super().source_trial(stage, source, recover=recover)
+
+        stub = object.__new__(TrialStub)
+        party, audit = stub.source_trial(stage, candidate)
+        self.assertIsNotNone(party)
+        self.assertEqual(stub.trial_source['instant'], [True]*5)
+        self.assertEqual(audit['build_basis'], 'local_trial_source_roster')
+        self.assertFalse(any('SET未知' in a for a in audit['assumptions']))
 
     def test_part_selection_and_contradictory_stage(self):
         source = dict(title='测试', pages=[dict(cid=1,part='练度要求'),dict(cid=2,part='水4-1'),dict(cid=3,part='火4-1')])
         self.assertEqual([p['cid'] for p in choose_pages(source,dict(task_type='abyss',stage='4-1',element='fire',max_pages_per_video=2))],[1,3])
         self.assertFalse(observed_scope([GuideText('火4-2',1,(0,0,10,10))], source['pages'][2], 'abyss')[1])
+
+    def test_abyss_compilation_pages_require_visible_target_scope(self):
+        source = dict(title='公主连结 国服深域1-7图合集', pages=[
+            dict(cid=1,part='国服深域1-7图合集'), dict(cid=2,part='风7-10 全自动')])
+        options = dict(task_type='abyss',stage='5-1',element='fire')
+        self.assertEqual([p['cid'] for p in choose_pages(source,options)],[1])
+        self.assertEqual(observed_scope([GuideText('火5-1',.99,(0,0,10,10))],source['pages'][0],'abyss'),
+                         (dict(element='fire',stage='5-1',chapters=[5,5]),True))
+        self.assertEqual(observed_scope([],source['pages'][0],'abyss'),({},False))
+        self.assertEqual(choose_pages(dict(source,title='公主连结 水深域1-7图'),options),[])
+        exact=dict(title='公主连结 红焰深域 火5-1至5-10',pages=[dict(cid=3,part='5-1'),dict(cid=4,part='5-2')])
+        chosen=choose_pages(exact,options)
+        self.assertEqual([p['cid'] for p in chosen],[3])
+        self.assertEqual(chosen[0]['original_part'],'5-1')
+        cut=dict(exact,pages=[dict(cid=3,part='5-1'),dict(cid=4,part='5-6（改星')])
+        cut_options=dict(options,stage='5-6')
+        self.assertEqual([p['cid'] for p in choose_pages(cut,cut_options)],[4])
+        self.assertEqual(observed_scope([],chosen[0],'abyss'),
+                         (dict(element='fire',stage='5-1',chapters=[5,5]),True))
+        manual=dict(exact,pages=[dict(cid=5,part='5-1（半自动）')])
+        self.assertEqual(choose_pages(manual,options)[0]['original_part'],'5-1（半自动）')
+
+    def test_chapter_range_parts_are_not_mistaken_for_exact_stages(self):
+        source=dict(title='公主连结 水深域1-7图作业一图流',pages=[
+            dict(cid=1,part='6-7'),dict(cid=2,part='1-5')])
+        options=dict(task_type='abyss',element='water',stage='3-6')
+        self.assertEqual([p['cid'] for p in choose_pages(source,options)],[2])
+        self.assertEqual([p['cid'] for p in choose_pages(source,dict(options,stage='6-7'))],[1])
+        self.assertEqual([p['cid'] for p in choose_pages(source,dict(options,stage='1-5'))],[2])
+        self.assertEqual(choose_pages(source,dict(options,stage='8-1')),[])
+        self.assertEqual(observed_scope([],source['pages'][1],'abyss'),({},False))
+        self.assertEqual(observed_scope([GuideText('公主连结简中服水深域1-5图参考作业',1,(0,0,200,25))],
+                                        source['pages'][1],'abyss'),({},False))
 
     def test_event_scope_rejects_other_modes_and_incomplete_build(self):
         options = task_source_options('revival', {'source_urls': []},
@@ -192,6 +384,16 @@ class VideoStrategyTests(TestCase):
         self.assertFalse(combat_auto(image,labels))
         self.assertIsNone(combat_auto(image,[]))
 
+    def test_full_set_title_requires_exact_single_stage(self):
+        from pcrscript.tasks.strategy_video import exact_full_set_claim
+        source=dict(title='［公主连结］深域风 2-10 银莲版本，全 set',
+                    pages=[dict(cid=1,part='recording')])
+        scope=dict(element='wind',stage='2-10',chapters=[2,2])
+        self.assertTrue(exact_full_set_claim(source,scope,'abyss'))
+        self.assertFalse(exact_full_set_claim(source,dict(element='wind',stage='3-10'),'abyss'))
+        self.assertFalse(exact_full_set_claim(dict(source,pages=[dict(cid=1),dict(cid=2)]),scope,'abyss'))
+        self.assertFalse(exact_full_set_claim(dict(source,title=source['title']+' 半自动'),scope,'abyss'))
+
     def test_empty_avatar_bootstrap_cache_and_expired_revalidation(self):
         with TemporaryDirectory() as folder:
             http=Mock()
@@ -221,12 +423,30 @@ class VideoStrategyTests(TestCase):
 
     def test_search_candidates_are_parsed_not_just_preferred_urls(self):
         with TemporaryDirectory() as folder:
-            api=Mock();api.getVideoInfo.return_value=dict(code=0,data=dict(bvid='BV0000000000',title='公主连结 测试',pages=[]))
+            api=Mock();api.getVideoInfo.return_value=dict(code=0,data=dict(bvid='BV0000000000',title='公主连结 火4-1',pages=[dict(cid=1,part='火4-1')]))
             index=SimpleNamespace(names=['角色'],matrix=np.ones((1,1728),np.float32))
             with patch('pcrscript.tasks.strategy_video.discover_sources',return_value=dict(candidates=[dict(bvid='BV0000000000')])), patch('pcrscript.tasks.strategy_video.parse_video_source',return_value=dict(parties=[complete_party()],errors=[])) as parse:
-                result=acquire_strategies(dict(task_type='abyss',area='测试',parsed_dir=folder),api=api,index=index)
+                result=acquire_strategies(dict(task_type='abyss',area='测试',stage='4-1',element='fire',parsed_dir=folder),api=api,index=index)
                 self.assertEqual(result['status'],'complete');parse.assert_called_once()
                 self.assertTrue(Path(result['document']).is_file())
+
+    def test_irrelevant_preferred_video_does_not_exhaust_parse_budget(self):
+        with TemporaryDirectory() as folder:
+            api=Mock()
+            api.getVideoInfo.side_effect=lambda bvid: dict(code=0,data=dict(bvid=bvid,
+                title='公主连结 水深域' if bvid=='BVWATER' else '公主连结 火4-1',
+                pages=[dict(cid=1,part='水4-1' if bvid=='BVWATER' else '火4-1')]))
+            index=SimpleNamespace(names=['角色'],matrix=np.ones((1,1728),np.float32))
+            with patch('pcrscript.tasks.strategy_video.preferred_sources',return_value=([
+                    dict(bvid='BVWATER',user_provided=True),dict(bvid='BVLINKED',user_provided=False)],[])), \
+                 patch('pcrscript.tasks.strategy_video.discover_sources',return_value=dict(candidates=[dict(bvid='BVFIRE')])), \
+                 patch('pcrscript.tasks.strategy_video.parse_video_source',return_value=dict(parties=[complete_party()],errors=[])) as parse:
+                result=acquire_strategies(dict(task_type='abyss',area='红焰深域',stage='4-1',element='fire',
+                    source_urls=['https://example.com/synthetic'],max_videos=1,parsed_dir=folder),api=api,index=index)
+            self.assertEqual(result['status'],'complete')
+            self.assertEqual(result['skipped_sources'][0]['bvid'],'BVWATER')
+            self.assertEqual(parse.call_count,1)
+            self.assertEqual(parse.call_args.args[0]['bvid'],'BVFIRE')
 
     def test_video_to_document_with_synthetic_frames_and_explicit_fields(self):
         with TemporaryDirectory() as folder:
@@ -243,6 +463,198 @@ class VideoStrategyTests(TestCase):
             self.assertEqual(report['status'],'complete')
             self.assertEqual(len(to_event_party(report['parties'][0]).members),5)
             self.assertEqual(report['parties'][0]['identity_evidence'][0]['rectangle'],[253,520,133,133])
+
+    def test_compilation_table_retains_members_without_claiming_stage(self):
+        with TemporaryDirectory() as folder:
+            path=Path(folder)/'table.avi'
+            writer=cv.VideoWriter(str(path),cv.VideoWriter_fourcc(*'MJPG'),2,(960,540))
+            for i in range(10):writer.write(np.full((540,960,3),30+i,np.uint8))
+            writer.release()
+            names=['角色'+str(i) for i in range(5)]
+            row=dict(element='fire',names=names,required_stars=[None]*5,
+                confidence=[[(n,.99)] for n in names],instant=[True]*5,chapters=None)
+            source=dict(bvid='BV0000000000',url='https://example.com/synthetic',
+                title='公主连结 国服深域1-7图合集',pages=[dict(cid=1,part='深域合集',duration=5)])
+            index=SimpleNamespace(names=names,matrix=np.ones((5,1728),np.float32))
+            with patch('pcrscript.tasks.strategy_video.read_text',return_value=[GuideText('一队通用',1,(0,0,100,20))]), \
+                 patch('pcrscript.tasks.strategy_video.combat_team',return_value=[]), \
+                 patch('pcrscript.tasks.strategy_tables.universal_row',return_value=row):
+                report=parse_video_source(source,dict(task_type='abyss',stage='5-1',element='fire',parsed_dir=folder),
+                    index,api=Mock(),ocr=Mock(),media_fetcher=lambda *a,**k:(path,dict(duration=5)))
+            self.assertEqual([m['name'] for m in report['parties'][0]['members']],names)
+            self.assertFalse(report['parties'][0]['scope_verified'])
+            self.assertEqual(report['parties'][0]['readiness'],'incomplete')
+
+    def test_chapter_table_keeps_roster_and_exception_notes(self):
+        with TemporaryDirectory() as folder:
+            path=Path(folder)/'table.avi'
+            writer=cv.VideoWriter(str(path),cv.VideoWriter_fourcc(*'MJPG'),2,(960,540))
+            for i in range(10):writer.write(np.full((540,960,3),30+i,np.uint8))
+            writer.release()
+            names=['角色'+str(i) for i in range(5)]
+            row=dict(element='water',names=names,required_stars=[None]*5,
+                     confidence=[[(n,.99)] for n in names],instant=[True]*5,
+                     chapters=[1,3],notes='3-10替换角色',excluded_stages=['3-10'])
+            source=dict(bvid='BV0000000000',url='https://example.com/synthetic',
+                        title='公主连结 水深域1-7图作业一图流',pages=[
+                            dict(cid=1,part='6-7',duration=5),dict(cid=2,part='1-5',duration=5)])
+            index=SimpleNamespace(names=names,matrix=np.ones((5,1728),np.float32))
+            texts=[GuideText('前三章',1,(0,0,100,20)),
+                   GuideText('公主连结简中服水深域1-5图参考作业',1,(0,0,200,20))]
+            with patch('pcrscript.tasks.strategy_video.read_text',return_value=texts), \
+                 patch('pcrscript.tasks.strategy_video.combat_team',return_value=[]), \
+                 patch('pcrscript.tasks.strategy_tables.universal_row',return_value=row):
+                report=parse_video_source(source,dict(task_type='abyss',stage='3-6',element='water',parsed_dir=folder),
+                    index,api=Mock(),ocr=Mock(),media_fetcher=lambda *a,**k:(path,dict(duration=5)))
+            self.assertEqual([p['cid'] for p in report['pages']],[2])
+            party=report['parties'][0]
+            self.assertEqual([m['name'] for m in party['members']],names)
+            self.assertEqual(party['scope'],{'element':'water','chapters':[1,3]})
+            self.assertEqual(abyss_candidate(party)['excluded_stages'],['3-10'])
+            self.assertIsNone(source_for_stage([abyss_candidate(party)],AbyssStage('water',3,6),set(),[],allow_local_trials=True))
+
+    def test_wide_combat_crop_retains_identity_but_not_auto_claim(self):
+        with TemporaryDirectory() as folder:
+            path=Path(folder)/'wide.avi'
+            writer=cv.VideoWriter(str(path),cv.VideoWriter_fourcc(*'MJPG'),2,(1280,590))
+            for i in range(10):writer.write(np.full((590,1280,3),30+i,np.uint8))
+            writer.release()
+            names=['角色'+str(i) for i in range(5)]
+            found=[dict(name=n,rectangle=[190+i*120,390,100,100],score=.99) for i,n in enumerate(names)]
+            source=dict(bvid='BV0000000000',url='https://example.com/synthetic',
+                title='公主连结 红焰深域 火5-1至5-10',pages=[dict(cid=1,part='5-1',duration=5)])
+            index=SimpleNamespace(names=names,matrix=np.ones((5,1728),np.float32))
+            with patch('pcrscript.tasks.strategy_video.read_text',return_value=[]), \
+                 patch('pcrscript.tasks.strategy_video.combat_team',return_value=found) as combat:
+                report=parse_video_source(source,dict(task_type='abyss',stage='5-1',element='fire',parsed_dir=folder),
+                    index,api=Mock(),ocr=Mock(),media_fetcher=lambda *a,**k:(path,dict(duration=5)))
+            self.assertTrue(combat.call_args.kwargs['relaxed'])
+            party=report['parties'][0]
+            self.assertEqual([m['name'] for m in party['members']],names)
+            self.assertIsNone(party['auto']['value'])
+            self.assertEqual(party['readiness'],'incomplete')
+            self.assertGreater(party['identity_evidence'][0]['rectangle'][0],300)
+            source['pages'][0]['part']='5-1（半自动）'
+            with patch('pcrscript.tasks.strategy_video.read_text',return_value=[]), \
+                 patch('pcrscript.tasks.strategy_video.combat_team',return_value=found):
+                manual=parse_video_source(source,dict(task_type='abyss',stage='5-1',element='fire',parsed_dir=folder),
+                    index,api=Mock(),ocr=Mock(),media_fetcher=lambda *a,**k:(path,dict(duration=5)))
+            self.assertEqual(manual['parties'][0]['manual_actions'][0]['text'],'5-1（半自动）')
+            self.assertTrue(any('手动' in reason for reason in manual['parties'][0]['pending']))
+
+    def test_wide_combat_reads_auto_on_uncropped_edge(self):
+        with TemporaryDirectory() as folder:
+            path=Path(folder)/'wide-auto.avi'
+            writer=cv.VideoWriter(str(path),cv.VideoWriter_fourcc(*'MJPG'),2,(1280,590))
+            frame=np.full((590,1280,3),35,np.uint8)
+            frame[437:468,1205:1255]=(255,220,0)
+            for _ in range(10):writer.write(frame)
+            writer.release()
+            names=['角色'+str(i) for i in range(5)]
+            found=[dict(name=n,rectangle=[190+i*120,390,100,100],score=.99) for i,n in enumerate(names)]
+            source=dict(bvid='BV0000000001',url='https://example.com/synthetic',
+                title='公主连结 红焰深域 火5-1至5-10',pages=[dict(cid=2,part='5-4',duration=5)])
+            index=SimpleNamespace(names=names,matrix=np.ones((5,1728),np.float32))
+            labels=[GuideText('自动',.99,(1209,539,45,31))]
+            with patch('pcrscript.tasks.strategy_video.read_text',return_value=labels), \
+                 patch('pcrscript.tasks.strategy_video.combat_team',return_value=found):
+                report=parse_video_source(source,dict(task_type='abyss',stage='5-4',element='fire',parsed_dir=folder),
+                    index,api=Mock(),ocr=Mock(),media_fetcher=lambda *a,**k:(path,dict(duration=5)))
+            self.assertTrue(report['parties'][0]['auto']['value'])
+            self.assertEqual(len(report['parties'][0]['auto']['evidence'])>=2,True)
+
+    def test_manual_part_metadata_survives_video_download_failure(self):
+        with TemporaryDirectory() as folder:
+            source=dict(bvid='BV0000000000',url='https://example.com/synthetic',
+                title='公主连结 红焰深域 火5-3至5-10',pages=[dict(cid=1,part='5-3（半自动）',duration=5)])
+            index=SimpleNamespace(names=['角色'],matrix=np.ones((1,1728),np.float32))
+            report=parse_video_source(source,dict(task_type='abyss',stage='5-3',element='fire',parsed_dir=folder),
+                index,api=Mock(),ocr=Mock(),media_fetcher=Mock(side_effect=RuntimeError('下载中断')))
+            self.assertEqual(report['manual_actions'][0]['text'],'5-3（半自动）')
+            self.assertEqual(report['manual_actions'][0]['evidence']['method'],'part_title')
+            self.assertEqual(len(report['errors']),1)
+            source['pages'][0]['part']='5-3（改星'
+            report=parse_video_source(source,dict(task_type='abyss',stage='5-3',element='fire',parsed_dir=folder),
+                index,api=Mock(),ocr=Mock(),media_fetcher=Mock(side_effect=RuntimeError('下载中断')))
+            self.assertEqual(report['manual_actions'][0]['text'],'5-3（改星')
+
+    def test_automatic_abyss_skips_download_for_explicit_manual_part(self):
+        self.assertTrue(task_source_options('abyss',dict(elements=['wind'],sources=dict(stage='2-10')))
+                        ['skip_manual_media'])
+        self.assertFalse(task_source_options('abyss',dict(elements=['wind'],prepare_only=True,
+                         sources=dict(stage='2-10')))['skip_manual_media'])
+        with TemporaryDirectory() as folder:
+            source=dict(bvid='BV0000000000',url='https://example.com/synthetic',
+                title='公主连结 翠岚深域 风2-1至2-10',
+                pages=[dict(cid=1,part='2-10（半自动剩80万血）',duration=120)])
+            index=SimpleNamespace(names=['角色'],matrix=np.ones((1,1728),np.float32))
+            fetch=Mock(side_effect=AssertionError('manual media must not download'))
+            report=parse_video_source(source,dict(task_type='abyss',stage='2-10',element='wind',
+                parsed_dir=folder,skip_manual_media=True),index,api=Mock(),ocr=Mock(),media_fetcher=fetch)
+            fetch.assert_not_called()
+            self.assertEqual(report['manual_actions'][0]['text'],'2-10（半自动剩80万血）')
+            self.assertEqual(report['pages'][0]['skipped'],'标题要求手动操作或未核实TP+2，自动任务不下载此分P')
+            source['pages'][0]['part']='2-10（有TP+2，稳轴）'
+            report=parse_video_source(source,dict(task_type='abyss',stage='2-10',element='wind',
+                parsed_dir=folder,skip_manual_media=True),index,api=Mock(),ocr=Mock(),media_fetcher=fetch)
+            fetch.assert_not_called()
+            self.assertEqual(report['manual_actions'][0]['text'],'2-10（有TP+2，稳轴）')
+            source['pages'][0]['part']='2-10（简易1押）'
+            report=parse_video_source(source,dict(task_type='abyss',stage='2-10',element='wind',
+                parsed_dir=folder,skip_manual_media=True),index,api=Mock(),ocr=Mock(),media_fetcher=fetch)
+            fetch.assert_not_called()
+            self.assertEqual(report['manual_actions'][0]['text'],'2-10（简易1押）')
+
+    def test_automatic_abyss_skips_long_media_before_download(self):
+        self.assertTrue(task_source_options('abyss',dict(elements=['wind'],sources=dict(stage='2-10')))
+                        ['skip_long_media'])
+        self.assertFalse(task_source_options('abyss',dict(elements=['wind'],prepare_only=True,
+                         sources=dict(stage='2-10')))['skip_long_media'])
+        with TemporaryDirectory() as folder:
+            source=dict(bvid='BV0000000000',url='https://example.com/synthetic',
+                title='公主连结 翠岚深域 风2-1至2-10',
+                pages=[dict(cid=1,part='深域合集',duration=1183)])
+            index=SimpleNamespace(names=['角色'],matrix=np.ones((1,1728),np.float32))
+            fetch=Mock(side_effect=AssertionError('long media must not download'))
+            report=parse_video_source(source,dict(task_type='abyss',stage='2-10',element='wind',
+                parsed_dir=folder,skip_long_media=True,max_video_seconds=240),
+                index,api=Mock(),ocr=Mock(),media_fetcher=fetch)
+            fetch.assert_not_called()
+            self.assertEqual(report['pages'][0]['skipped'],'分P时长超出自动解析上限，未下载')
+            self.assertEqual(report['pages'][0]['duration'],1183)
+            self.assertEqual(report['pages'][0]['max_video_seconds'],240)
+
+    def test_download_window_can_be_extended_for_long_target_part(self):
+        with TemporaryDirectory() as folder:
+            source=dict(bvid='BV0000000000',url='https://example.com/synthetic',
+                        title='公主连结 红焰深域',
+                        pages=[dict(cid=1,part='火5-6',duration=240)])
+            index=SimpleNamespace(names=['角色'],matrix=np.ones((1,1728),np.float32))
+            fetch=Mock(side_effect=RuntimeError('synthetic download failure'))
+            parse_video_source(source,dict(task_type='abyss',stage='5-6',element='fire',
+                parsed_dir=folder,max_video_seconds=600,max_download_seconds=420),
+                index,api=Mock(),ocr=Mock(),media_fetcher=fetch)
+            self.assertEqual(fetch.call_args.kwargs['max_seconds'],420)
+
+    def test_automatic_abyss_preserves_description_tp_requirement(self):
+        with TemporaryDirectory() as folder:
+            source=dict(bvid='BV0000000000',url='https://example.com/synthetic',
+                title='公主连结 翠岚深域 风2-10',
+                description='2-10的轴刚需TP+2大师点',
+                pages=[dict(cid=1,part='风2-10',duration=120)])
+            index=SimpleNamespace(names=['角色'],matrix=np.ones((1,1728),np.float32))
+            fetch=Mock(side_effect=AssertionError('unverified setting must not download'))
+            report=parse_video_source(source,dict(task_type='abyss',stage='2-10',element='wind',
+                parsed_dir=folder,skip_manual_media=True),index,api=Mock(),ocr=Mock(),media_fetcher=fetch)
+            fetch.assert_not_called()
+            self.assertEqual(report['manual_actions'][0]['evidence']['method'],'source_description')
+            self.assertIn('TP+2',report['pages'][0]['skipped'])
+            source['description']=''
+            source['title']='公主连结 翠岚深域 风2-10 TP+2'
+            report=parse_video_source(source,dict(task_type='abyss',stage='2-10',element='wind',
+                parsed_dir=folder,skip_manual_media=True),index,api=Mock(),ocr=Mock(),media_fetcher=fetch)
+            fetch.assert_not_called()
+            self.assertEqual(report['manual_actions'][0]['evidence']['method'],'source_title')
 
     def test_event_video_requires_matching_event_and_mode(self):
         with TemporaryDirectory() as folder:

@@ -44,7 +44,7 @@ internal static class PythonEnvironment
             ["-X", "utf8", "pcrscript/desktop.py", "environment"], settings.Workspace))!.AsObject();
         if (result["compatible"]?.GetValue<bool>() != true) throw new IOException(InstallHint);
         if (result["ready"]?.GetValue<bool>() != true)
-            throw new IOException("Python 已找到，但依赖未安装或版本不匹配：" +
+            throw new IOException("Python 已找到，但缺少依赖：" +
                 string.Join("、", result["missing"]!.AsArray().Select(item => item!.GetValue<string>())) +
                 "。请点击“创建环境 / 安装依赖”，完成后重新检测。下载需要联网。");
     }

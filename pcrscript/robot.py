@@ -45,6 +45,7 @@ class Robot:
         self.task_config: dict[str, Any] = {}
         self.task_results: list[TaskExecutionRecord] = []
         self._task_output: Path | None = None
+        self._in_work = False
         self._dummy_task = _DummyTask(self)
         global num
         if not name:
@@ -67,13 +68,8 @@ class Robot:
             with open(logpath, 'a') as f:
                 f.write("{}:{}\n".format(self._name, account))
         if not account:
-            # Daily runs keep the current account. A game that is already open
-            # may start on any page, so navigate home instead of logging out.
-            screenshot = self.driver.screenshot()
-            if self.__find_match_pos(screenshot, 'welcome_main_menu'):
-                self.__action_squential(ClickAction(pos=(30, 200)))
-            else:
-                ToHomePage(self).run(timeout=60)
+            # Keep the current account. work() owns the existing login flow,
+            # which handles loading/title screens before confirming home.
             return
         while True:
             screenshot = self.driver.screenshot()
@@ -138,10 +134,11 @@ class Robot:
                 ClickAction(pos=(50, 300)).do(screenshot, self)
             time.sleep(3)
 
-    def _first_enter_check(self):
+    def _first_enter_check(self, timeout=60):
         pos = random.choice(((199, 300), (400, 300), (590, 300), (790, 300)))
-        self.__action_squential(MatchAction(ImageTemplate('shop', consecutive_hit=3), unmatch_actions=(
-            ClickAction(template = ImageTemplate('btn_close') | ImageTemplate('btn_ok_blue')
+        action = MatchAction(ImageTemplate('shop', consecutive_hit=3), unmatch_actions=(
+            ClickAction(template = ImageTemplate('btn_close') | ImageTemplate('btn_close_2')
+                        | ImageTemplate('btn_ok_blue')
                         | ImageTemplate('btn_download') | ImageTemplate('btn_skip')
                         | ImageTemplate('btn_cancel') | ImageTemplate('select_branch_first')
                         | ImageTemplate('app_no_responed')),
@@ -153,7 +150,10 @@ class Robot:
                 SleepAction(2),
                 ClickAction(pos=(838, 494))
             ])
-        ), timeout=0), net_error_check=False)
+        ), timeout=timeout)
+        self.__action_squential(action, net_error_check=False)
+        if action.is_timeout:
+            raise RuntimeError('未能在时限内进入游戏首页，任务未开始；请检查当前页面或弹窗')
         time.sleep(3)
         ClickAction(template='btn_close').bindTask(self._dummy_task).do(self.driver.screenshot(), self)
 
@@ -176,10 +176,15 @@ class Robot:
         self._first_enter_check()
         self._log("======:已进入游戏首页:======")
         if tasklist:
-            for index, (funcname, *args) in enumerate(tasklist, 1):
-                emit('progress', scope='task', current=index - 1, total=len(tasklist), name=funcname)
-                self._run_task(funcname, args)
-                emit('progress', scope='task', current=index, total=len(tasklist), name=funcname)
+            self._in_work = True
+            try:
+                for index, (funcname, *args) in enumerate(tasklist, 1):
+                    emit('progress', scope='task', current=index - 1, total=len(tasklist), name=funcname)
+                    self._run_task(funcname, args)
+                    emit('progress', scope='task', current=index, total=len(tasklist), name=funcname)
+            finally:
+                self._in_work = False
+                emit('progress', scope='action', clear=True)
         return self.task_results
 
     def configure(self, config: dict[str, Any]) -> None:
@@ -198,6 +203,9 @@ class Robot:
         self._task_output = directory
         started = time.monotonic()
         record: TaskExecutionRecord = {'task': taskname, 'status': 'running'}
+        if not self._in_work:
+            emit('progress', scope='task', current=0, total=1, name=taskname)
+        emit('progress', scope='action', clear=True)
         self._log(f'start task: {taskname}')
         try:
             if taskclass is None and not callable(legacy):
@@ -222,6 +230,9 @@ class Robot:
             self._task_output = previous_output
             self.task_results.append(record)
             task_result(record, directory)
+            emit('progress', scope='action', clear=True)
+            if not self._in_work and record['status'] not in ('error', 'cancelled'):
+                emit('progress', scope='task', current=1, total=1, name=taskname)
             self._log(f'end task: {taskname} ({record["status"]})')
 
     def _run_task(self, taskname: str, args: list[Any]) -> Any:

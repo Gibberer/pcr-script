@@ -1,5 +1,6 @@
 """Opt-in five-star upgrades with verified identity and item/currency receipts."""
 import re
+import time
 import sqlite3
 from contextlib import closing
 import cv2 as cv
@@ -36,9 +37,9 @@ def star_confirmation_ready(screen,required):
     """Check the exact cost and unlabeled shard icon on the final dialog."""
     cost=number(screen,(175,260,250,305))
     balance=number(screen,(315,260,420,305))
-    # OCR may insert a dot between the icon's multiplication sign and amount
-    # (observed as ×.150); the exact required integer must still match.
-    material=screen.find(r'[×x][.·]?'+str(required),(55,355,150,415),exact=True)
+    # OCR may include the shard icon's small "1" before the multiplication
+    # sign or a dot after it. The exact required integer must still match.
+    material=screen.find(r'(?:1)?[×x][.·]?'+str(required),(55,355,150,415),exact=True)
     return bool(screen.find('消耗玛那',(45,250,155,310),exact=True)
                 and screen.find('必要道具',(45,295,160,335),exact=True)
                 and material and cost is not None and balance is not None
@@ -55,6 +56,12 @@ def star_result_step(screen):
     return None
 
 
+def star_upgrade_settled(screen, target, result_dismissed):
+    return bool(result_dismissed and star_result_step(screen) is None
+                and screen.find('角色强化',(40,0,250,65),exact=True)
+                and unlocked_stars(screen)==target)
+
+
 def purchase_receipt(screen,name,amount,cost,before,owned,read_small=None):
     if not screen.find('购买完毕',(250,105,710,175),exact=True):
         raise EventUIError('女神秘石购买完成标题未知')
@@ -65,11 +72,28 @@ def purchase_receipt(screen,name,amount,cost,before,owned,read_small=None):
     held_before=number(screen,(515,250,570,285))
     if held_before is None and read_small is not None:
         held_before=read_small(screen,(530,255,560,280))
-    values=(held_before,number(screen,(640,250,705,285)),
+    held_after=number(screen,(640,250,705,285))
+    if held_after is None and read_small is not None:
+        held_after=read_small(screen,(670,255,700,280))
+    values=(held_before,held_after,
             number(screen,(480,285,580,325)),number(screen,(620,285,710,325)))
     if values!=(owned,owned+amount,before,before-cost):
         raise EventUIError('女神秘石购买回执碎片或余额变化不符')
     return dict(owned_after=values[1],after=values[3])
+
+
+def price_tier_notice(screen,name):
+    if not screen.find('确认所需的女神的秘石个数',(300,105,660,175),exact=True):
+        return None
+    body=normalized(screen.text((330,205,640,315)))
+    if not (normalized(name)+'的记忆碎片' in body
+            and re.search(r'已购数量变为\d+',body)
+            and re.search(r'单价\d+个',body)):
+        raise EventUIError('秘石单价变化提示的角色或价格未知')
+    button=screen.find('确认',(350,335,620,410),exact=True)
+    if button is None:
+        raise EventUIError('秘石单价变化提示没有明确确认按钮')
+    return button
 
 
 def five_star_shards(name,stars,owned,next_required,database='cache/redive_cn.db'):
@@ -83,12 +107,40 @@ def five_star_shards(name,stars,owned,next_required,database='cache/redive_cn.db
     return max(0,sum(rows.values())-owned)
 
 
+def reduce_purchase_amount(ui,screen,name,amount,missing):
+    """Bring MAX down to the exact missing count using the labeled minus control."""
+    while amount>missing:
+        if not (screen.find('购买确认',(250,0,720,75),exact=True)
+                and screen.find(re.escape(normalized(name)+'的记忆碎片'),(250,95,710,150),exact=True)
+                and screen.find('重置',(260,285,365,335),exact=True)
+                and screen.find('MAX',(590,285,700,335),exact=True)):
+            raise EventUIError('购买数量调整页面未知，未购买')
+        ui.click((394,310))
+        screen=ui.capture()
+        new_amount=number(screen,(440,290,520,329))
+        if new_amount!=amount-1:
+            raise EventUIError('购买数量递减未核实，未购买')
+        amount=new_amount
+    return screen,amount
+
+
 def buy_shards(ui,name,missing,report,save,allow_amulets):
     if not allow_amulets:
         raise EventUIError('升星碎片不足，女神秘石兑换未授权')
     ui.expect_click('获取方法',(480,400,700,475),exact=True)
     ui.wait(lambda s:s.find('记忆碎片获取方法',(250,0,720,75),exact=True),'碎片获取方法')
-    ui.expect_click('女神的秘石商店',(260,285,690,365),exact=True)
+    for _ in range(12):
+        s=ui.capture()
+        if not (s.find('记忆碎片获取方法',(250,0,720,75),exact=True)
+                and s.find(re.escape(normalized(name)+'的记忆碎片'),(250,90,710,155),exact=True)):
+            raise EventUIError('碎片获取列表的角色或页面不明确')
+        shop=s.find('女神的秘石商店',(250,285,710,450),exact=True)
+        if shop:
+            ui.click(shop)
+            break
+        ui.swipe((600,405),(600,300))
+    else:
+        raise EventUIError('碎片获取列表未找到女神的秘石商店')
     ui.wait(lambda s:s.find('商店',(40,0,200,65),exact=True),'秘石商店')
     for batch in range(20):
         s=ui.capture()
@@ -116,13 +168,7 @@ def buy_shards(ui,name,missing,report,save,allow_amulets):
         amount=number(s,(440,290,520,329))
         if amount is None:raise EventUIError('购买数量无法确认')
         if amount>missing:
-            # MAX may show the game's five-star quantity cap. Only accept
-            # an explicit cap explanation; never buy an unchecked excess.
-            text=normalized(s.text())
-            if re.search(r'(?:五星|5星|★5)',text) and re.search(r'只需|需要|足够',text):
-                ui.save('five_star_quantity_cap',s)
-                ui.expect_click('确认',(480,430,710,520),exact=True)
-                s=ui.capture();amount=number(s,(440,290,520,329))
+            s,amount=reduce_purchase_amount(ui,s,name,amount,missing)
         cost=number(s,(420,332,480,369))
         if amount is None or not 1<=amount<=missing or cost is None or not 0<cost<=before:
             raise EventUIError('碎片数量/总价/余额校验未通过')
@@ -135,7 +181,14 @@ def buy_shards(ui,name,missing,report,save,allow_amulets):
         purchase.update(status='confirmed',**receipt,evidence_after=str(ui.save('purchased_'+str(batch),s)))
         save();missing-=amount
         ui.expect_click('确认',(370,340,585,410),exact=True)
-        ui.wait(lambda frame:frame.find('商店',(40,0,200,65),exact=True),'返回秘石商店')
+        def close_notice(frame):
+            notice=price_tier_notice(frame,name)
+            if notice:
+                ui.save('price_tier_'+str(batch),frame)
+                ui.click(notice)
+        ui.wait(lambda frame:frame.find('商店',(40,0,200,65),exact=True)
+                and not frame.find('确认所需的女神的秘石个数',(300,105,660,175),exact=True),
+                '返回秘石商店',handle=close_notice)
         if missing==0:return
     raise EventUIError('碎片兑换达到分批保护上限')
 
@@ -187,18 +240,24 @@ def upgrade_to_five(ui,name,report,save,*,allow_amulets=False):
         record=dict(before=stars,target=stars+1,evidence=before,status='pending')
         report['upgrades'].append(record);save()
         ui.expect_click('确认|才能开花',(480,430,720,520),exact=True)
-        animation_closed=False
-        result_closed=False
+        animation_clicks=0
+        result_clicks=0
+        last_click=0.0
         def close(frame):
-            nonlocal animation_closed,result_closed
+            nonlocal animation_clicks,result_clicks,last_click
             action=star_result_step(frame)
-            if action=='animation' and not animation_closed:
-                animation_closed=True
+            now=time.monotonic()
+            if now-last_click < 1.5:
+                return
+            if action=='animation' and animation_clicks<3:
+                animation_clicks+=1
+                last_click=now
                 ui.click((480,420))
-            elif action is not None and action!='animation' and not result_closed:
-                result_closed=True
+            elif action is not None and action!='animation' and result_clicks<3:
+                result_clicks+=1
+                last_click=now
                 ui.click(action)
-        ui.wait(lambda s:s.find('角色强化',(40,0,250,65),exact=True) and unlocked_stars(s)==stars+1,
+        ui.wait(lambda s:star_upgrade_settled(s,stars+1,result_clicks>0),
                 '升星结果',timeout=60,handle=close)
         record['status']='confirmed';save()
     raise EventUIError('升至5星步骤超出边界')

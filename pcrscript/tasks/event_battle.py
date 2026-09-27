@@ -63,11 +63,10 @@ class EventCombat:
 
     def retreat(self, reason: str) -> BattleResult:
         """The battle-menu retreat only; never the boss-detail run reset."""
-        s = self.ui.capture()
-        menu = self.match("btn_menu_text", s) or s.find('菜单', (840, 0, 960, 60), exact=True)
-        if menu:
-            self.ui.click(menu)
-        for _ in range(15):
+        # An UB animation can hide the menu for several observations. Keep
+        # checking the result screen and retry the labeled battle menu when it
+        # returns; never guess a coordinate while controls are hidden.
+        for _ in range(45):
             s = self.ui.capture()
             if s.find('WIN|战斗胜利|战斗失败|伤害报告') or self.match('btn_next_step', s):
                 return BattleResult('settled', '战斗已结束，取消撤退并核对结果')
@@ -75,12 +74,18 @@ class EventCombat:
                     or getattr(self.r, 'combat_return', lambda frame: False)(s)):
                 self.r.log("已退出本次战斗："+reason)
                 return BattleResult("retreated", reason)
+            if self.r.story_dialog(s):
+                continue
             button = self.match("btn_giveup_blue", s) or self.match("btn_giveup", s)
             if not button and s.find("战斗菜单|放弃这场|放弃战斗|退出战斗"):
                 button = s.find("放弃|退出", (200, 150, 900, 510), exact=True)
             if button:
                 self.ui.click(button)
             else:
+                menu = self.match("btn_menu_text", s) or s.find('菜单', (840, 0, 960, 60), exact=True)
+                if menu:
+                    self.ui.click(menu)
+                    continue
                 time.sleep(.5)
         self.ui.save("retreat_failed")
         raise EventUIError("无法确认战斗撤退，停止后续操作")
@@ -106,6 +111,7 @@ class EventCombat:
         """Pause during setup so animations and stage stories cannot race SET."""
         pause_deadline = time.monotonic()+45
         stable = 0
+        menu_requested = False
         while time.monotonic() < pause_deadline:
             self.r.check_deadline()
             s = self.ui.capture()
@@ -123,8 +129,9 @@ class EventCombat:
             if s.find('WIN|战斗胜利|战斗失败|TIMEUP|伤害报告'):
                 return False
             menu = s.find('菜单', (840, 0, 960, 60), exact=True) or self.match('btn_menu_text', s)
-            if menu:
+            if menu and not menu_requested:
                 self.ui.click(menu, delay=.2)
+                menu_requested = True
             elif not self.r.story_dialog(s):
                 time.sleep(.3)
         else:
@@ -227,6 +234,8 @@ class EventCombat:
                           or s.find("下一步|确认|确定|关闭", (250, 330, 950, 525), exact=True))
                 if button:
                     self.ui.click(button)
+                else:
+                    self.r.story_dialog(s)
             elif not in_battle and (getattr(self.r, 'combat_dialog', lambda frame: False)(s) or self.r.story_dialog(s)):
                 continue
             elif s.find("战斗设定", (250, 0, 720, 100)):

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+import subprocess
 import cv2 as cv
 import numpy as np
 
@@ -31,7 +32,10 @@ def open_character_memory(ui: EventUI, name: str):
     # Composite names can use a full-width equals sign in the database, while
     # the game's character search accepts the first component. The memory
     # shard label below still has to verify the exact full identity.
-    ui.driver.input(normalized(name).split('(')[0].split('=')[0])
+    try:
+        ui.driver.input(normalized(name).split('(')[0].split('=')[0])
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
+        raise EventUIError('角色搜索输入失败，专武状态未核实') from error
     time.sleep(1)
     ui.click((480, 115))
     s = ui.capture()

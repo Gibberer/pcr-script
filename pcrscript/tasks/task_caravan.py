@@ -237,6 +237,7 @@ class Caravan(BaseTask):
         last_progress = time.monotonic()
         zero_seen = 0
         try:
+            self.report_progress('识别驾车游地图与骰子')
             while time.monotonic() < self.deadline:
                 s = self.ui.capture()
                 if s.find('正在.*连接|加载中|下载中', (0, 0, 960, 540)):
@@ -304,6 +305,7 @@ class Caravan(BaseTask):
                         self.report.pop('pending_spend', None)
                         last_progress = time.monotonic()
                         self.save_report()
+                        self.report_progress(f"第 {turn} 回合 · 已消耗 {self.report['spent']} 枚骰子 · 剩余 {count} 枚")
                         print(f'[驾车游] 骰子{count}，第{turn}回合，距离{distance}', flush=True)
                     if self.last_distance is not None and distance > self.last_distance:
                         self.locked = False

@@ -45,6 +45,7 @@ GUI 的 `MainWindow.DailyEditor.cs` 管理选中项编辑、顺序和未保存�
 | [task_dungeon.py](../pcrscript/tasks/task_dungeon.py) | `dungeon_first_clear` |
 | [task_abyss.py](../pcrscript/tasks/task_abyss.py) | `abyss_push`（深域按需推进） |
 | [task_caravan.py](../pcrscript/tasks/task_caravan.py) | `caravan` |
+| [task_team_battle.py](../pcrscript/tasks/task_team_battle.py) | `team_battle` |
 | [task_gacha.py](../pcrscript/tasks/task_gacha.py) | `free_gacha`、`normal_gacha` |
 | [task_gifts.py](../pcrscript/tasks/task_gifts.py) | `get_gift` |
 | [task_home.py](../pcrscript/tasks/task_home.py) | `tohomepage` |

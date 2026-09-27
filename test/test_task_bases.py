@@ -56,7 +56,7 @@ class TaskBaseTests(TestCase):
         ocr_names = {'caravan', 'get_gift', 'campaign_clean',
                      'clear_campaign_first_time', 'revival_event_once', 'dungeon_first_clear',
                      'upgrade_all_characters', 'max_character_bonds', 'abyss_push',
-                     'shop_buy', 'get_quest_reward'}
+                     'shop_buy', 'get_quest_reward', 'team_battle'}
         for name in set(registered_tasks()) - ocr_names:
             self.assertTrue(issubclass(find_taskclass(name), ImageTask), name)
 

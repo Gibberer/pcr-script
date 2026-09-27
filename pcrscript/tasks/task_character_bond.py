@@ -263,11 +263,13 @@ class MaxCharacterBonds(BaseTask):
 
     def run(self) -> TaskReport:
         try:
+            self.report_progress('进入角色列表')
             self.enter()
             if focus := self.options.get('focus_character'):
                 from ..game_ui.character_equipment import open_character_memory
                 if open_character_memory(self.ui, focus) is None:
                     raise EventUIError('指定角色的完整衣装身份未能确认')
+                self.report_progress(f'核对角色 · {focus}')
                 self.process_detail()
                 self.report['status'] = 'complete' if self.report['characters'][-1].get('status') == 'complete' else 'partial'
                 return self.report
@@ -277,6 +279,7 @@ class MaxCharacterBonds(BaseTask):
             scanned = 0
             for page in range(max_pages):
                 self.check()
+                self.report_progress(f'检查角色列表第 {page + 1} 页 · 已处理 {len(self.attempted)} 名')
                 for x, y in slots:
                     self.check()
                     s = self.roster()
@@ -291,6 +294,7 @@ class MaxCharacterBonds(BaseTask):
                     for _ in range(max_characters+1):
                         name = self.process_card(x, y)
                         scanned += 1
+                        self.report_progress(f'已处理 {len(self.attempted)} 名角色 · 第 {page + 1} 页')
                         if len(self.attempted) >= max_characters:
                             self.report['status'] = 'partial'
                             self.report['pending'].append('达到本轮角色数量上限，下一次可接续')
