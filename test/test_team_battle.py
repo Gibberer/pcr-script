@@ -82,6 +82,7 @@ class TeamBattleTests(unittest.TestCase):
         task.ui.capture.side_effect = [listed, listed]
         task.check_deadline = Mock()
         task.tried = set()
+        task.recommendation_rows = []
         with self.assertRaisesRegex(EventUIError, '进入角色页面'):
             task.recommendation()
         task.ui.swipe.assert_called_once_with((120, 360), (120, 260), duration=250)
@@ -403,11 +404,122 @@ class TeamBattleTests(unittest.TestCase):
         self.assertEqual(ui.number(screen, (397, 391, 431, 424)), 1)
         self.assertEqual(ui._ocr.call_count, 3)
 
-    def test_used_character_is_rejected_even_in_simulation_formation(self):
+    def test_red_fire_portraits_are_not_participation_banners(self):
         image = np.zeros((540, 960, 3), np.uint8)
-        self.assertFalse(TeamBattle.used_member_marked(EventScreen(image, [])))
         image[482:505, 48:144] = (20, 20, 170)
-        self.assertTrue(TeamBattle.used_member_marked(EventScreen(image, [])))
+        screen = EventScreen(image, [])
+        task = TeamBattle.__new__(TeamBattle)
+        task.ui = Mock()
+        task.ui.read_region.return_value = screen
+        self.assertFalse(task.used_member_marked(screen))
+        marked = EventScreen(image, [box('已参加团队战', 95, 494)])
+        self.assertTrue(task.used_member_marked(marked))
+        # Tiny participation text missed by full-frame OCR still rejects.
+        task.ui.read_region.return_value = marked
+        self.assertTrue(task.used_member_marked(screen))
+
+    def test_five_portraits_identify_team_despite_missing_or_changed_ocr_names(self):
+        from pcrscript.tasks.event_formation import EventFormation
+        image = np.zeros((540, 960, 3), np.uint8)
+        slots = EventFormation.slots
+        for x, _ in slots:
+            image[415:494, x-38:x+38] = (30, 60, 200)
+        names = ['甲', '乙', '丙', '丁', '戊']
+        full = [box(name, x-26, 416) for name, (x, _) in zip(names, slots)]
+        screen = EventScreen(image, [box('队伍编组', 480, 42), full[1], full[3], full[4]])
+        task = TeamBattle.__new__(TeamBattle)
+        task.formation = EventFormation.__new__(EventFormation)
+        task.teams = {}
+        task.ui = Mock()
+        key = task.team(screen)
+        self.assertEqual(task.teams[key]['labels'], (None, '乙', None, '丁', '戊'))
+        task.ui.read_region.assert_not_called()
+        self.assertEqual(task.team(EventScreen(image, [box('队伍编组', 480, 42), *full])), key)
+        self.assertEqual(task.teams[key]['labels'], tuple(names))
+        self.assertEqual(task.team(EventScreen(image, [box('队伍编组', 480, 42)])), key)
+        # Names cannot disguise a changed portrait (including another costume).
+        changed = image.copy()
+        changed[428:470, slots[2][0]-30:slots[2][0]+32] = (200, 60, 30)
+        self.assertNotEqual(task.team(EventScreen(changed, [box('队伍编组', 480, 42), *full])), key)
+        # A genuinely empty slot must still block, regardless of OCR labels.
+        image[415:494, slots[2][0]-38:slots[2][0]+38] = 0
+        self.assertIsNone(task.team(screen))
+
+    def test_unreadable_names_are_reported_unknown_without_rejecting_five_portraits(self):
+        from pcrscript.tasks.event_formation import EventFormation
+        image = np.full((540, 960, 3), (30, 60, 200), np.uint8)
+        screen = EventScreen(image, [box('队伍编组', 480, 42)])
+        task = TeamBattle.__new__(TeamBattle)
+        task.formation = EventFormation.__new__(EventFormation)
+        task.teams = {}
+        task.ui = Mock()
+        key = task.team(screen)
+        self.assertEqual(task.teams[key]['labels'], (None,)*5)
+        task.ui.read_region.assert_not_called()
+
+    def test_spent_member_match_uses_portraits_when_names_are_missing(self):
+        task = TeamBattle.__new__(TeamBattle)
+        face = np.array([1., 0.])
+        other = np.array([0., 1.])
+        task.teams = {'old': {'labels': ('甲',), 'portraits': (face,)},
+                      'new': {'labels': (None,), 'portraits': (face,)},
+                      'costume': {'labels': ('甲',), 'portraits': (other,)}}
+        task.spent = {'old'}
+        self.assertTrue(task.unavailable_team('new'))
+        self.assertFalse(task.unavailable_team('costume'))
+
+    def test_recommendation_identity_survives_scroll_and_checkbox_changes(self):
+        task = TeamBattle.__new__(TeamBattle)
+        task.recommendation_rows = []
+        rng = np.random.default_rng(73)
+        faces = [rng.integers(0, 256, (40, 44, 3), dtype=np.uint8) for _ in range(5)]
+        def row(y, pictures, checked):
+            image = np.zeros((540, 960, 3), np.uint8)
+            for x, face in zip((224, 312, 402, 491, 581), pictures):
+                image[y-53:y-13, x-22:x+22] = face
+            image[y-20:y, 840:870] = checked
+            return EventScreen(image, []), box('使用', 712, y)
+        first = task.recommendation_signature(*row(277, faces, 0))
+        self.assertEqual(task.recommendation_signature(*row(337, faces, 255)), first)
+        other = list(faces)
+        other[2] = 255-other[2]
+        self.assertNotEqual(task.recommendation_signature(*row(337, other, 0)), first)
+        self.assertIsNone(task.recommendation_signature(*row(200, faces, 0)))
+
+    def test_recommendation_accepts_full_fire_team_with_one_missing_ocr_name(self):
+        from pcrscript.tasks.event_formation import EventFormation
+        image = np.full((540, 960, 3), 240, np.uint8)
+        for x in (224, 312, 402, 491, 581):
+            image[220:266, x-22:x+22] = (25, 80, 220)
+        listed = EventScreen(image, [box('推荐编组', 480, 42), box('高级', 622, 165),
+                                      box('使用', 712, 277), box('保存队伍', 855, 226),
+                                      box('参考伤害', 110, 251), box('70000000', 120, 272),
+                                      box('讨伐时间', 86, 299), box('0:19', 151, 299)])
+        fire = np.zeros_like(image)
+        for x, _ in EventFormation.slots:
+            fire[415:505, x-48:x+48] = (20, 20, 170)
+        names = [box(name, x-26, 416) for name, (x, _) in
+                 zip(('甲', '乙', '丙', '丁', '戊'), EventFormation.slots)]
+        formation = EventScreen(fire, [box('队伍编组', 480, 42), *names[1:]])
+        task = TeamBattle.__new__(TeamBattle)
+        task.ui = Mock()
+        task.ui.capture.return_value = listed
+        task.ui.wait.side_effect = [listed, formation]
+        task.ui.read_region.side_effect = [EventScreen(image, []),
+                                           EventScreen(fire, [])]
+        task.formation = EventFormation.__new__(EventFormation)
+        task.teams = {}
+        task.recommendation_rows = []
+        task.tried = set()
+        task.tried_teams = set()
+        task.spent = set()
+        task.check_deadline = Mock()
+        with patch('pcrscript.tasks.task_team_battle.time.sleep'):
+            key = task.recommendation(boss_hp=70_000_000)
+        self.assertEqual(task.teams[key]['labels'], (None, '乙', '丙', '丁', '戊'))
+        self.assertEqual(task.teams[key]['reference_damage'], 70_000_000)
+        task.ui.swipe.assert_not_called()
+        self.assertEqual(task.tried_teams, {key})
 
 
     def test_clan_battle_schedule_only_covers_five_days(self):

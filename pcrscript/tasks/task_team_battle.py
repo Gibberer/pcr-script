@@ -72,6 +72,7 @@ class TeamBattle(TimeLimitTask):
                            normal_attacks=0, extension_attacks=0)
         self.formation = EventFormation(self.ui)
         self.teams = {}
+        self.recommendation_rows = []
         self.tried = set()
         self.tried_teams = set()
         self.spent = set()
@@ -210,13 +211,15 @@ class TeamBattle(TimeLimitTask):
             raise EventUIError('推荐队伍未进入编队页面')
         if len(self.formation.occupied_slots(screen)) != 5:
             return None
-        labels = tuple(normalized(screen.text((x-48, 399, x+47, 426))) for x, _ in self.formation.slots)
-        if any(not label or len(label) > 10 for label in labels):
-            return None
+        # The in-game recommendation selects the members. The five observed
+        # portraits bind that selection to simulation/real formation; OCR names
+        # are report annotations, never the identity or occupancy gate.
+        labels = tuple(normalized(screen.text((x-48, 399, x+47, 426))) or None
+                       for x, _ in self.formation.slots)
         portraits = tuple(feature(screen.image[428:470, x-30:x+32]) for x, _ in self.formation.slots)
         for key, prior in self.teams.items():
-            if labels == prior['labels'] and all(float(a @ b) >= .82
-                                                 for a, b in zip(portraits, prior['portraits'])):
+            if all(float(a @ b) >= .92 for a, b in zip(portraits, prior['portraits'])):
+                prior['labels'] = tuple(old or new for old, new in zip(prior['labels'], labels))
                 return key
         key = f'team-{1 + max((int(old[5:]) for old in self.teams if old.startswith("team-")
                                  and old[5:].isdigit()), default=0)}'
@@ -225,27 +228,31 @@ class TeamBattle(TimeLimitTask):
 
     def unavailable_team(self, key):
         chosen = self.teams[key]
-        return any(label == old_label and float(face @ old_face) >= .72
+        return any(float(face @ old_face) >= .92
                    for old_key in self.spent
-                   for label, face in zip(chosen['labels'], chosen['portraits'])
-                   for old_label, old_face in zip(self.teams[old_key]['labels'], self.teams[old_key]['portraits']))
+                   for face in chosen['portraits']
+                   for old_face in self.teams[old_key]['portraits'])
 
-    @staticmethod
-    def used_member_marked(screen):
-        if screen.find('参加团队战', (35, 465, 585, 515)):
+    def used_member_marked(self, screen):
+        roi = (35, 465, 585, 515)
+        if screen.find('参加团队', roi):
             return True
-        for x in (96, 205, 314, 423, 532):
-            hsv = cv.cvtColor(screen.image[482:505, x-48:x+48], cv.COLOR_BGR2HSV)
-            red = ((hsv[:, :, 0] < 12) | (hsv[:, :, 0] > 170)) & (hsv[:, :, 1] > 80) & (hsv[:, :, 2] > 60)
-            if float(np.mean(red)) > .4:
-                return True
-        return False
+        # Participation banners can be yellow or green. Red portraits and fire
+        # attribute icons are not evidence of prior participation.
+        enlarged = self.ui.read_region(screen, roi)
+        return bool(enlarged.find('参加团队', roi))
 
-    @staticmethod
-    def recommendation_signature(screen, button):
-        y = button.center[1]
-        patch = screen.image[max(185, y-75):min(425, y+32), 175:625]
-        return sha256(patch.tobytes()).hexdigest()
+    def recommendation_signature(self, screen, button):
+        center = button.center[1]-33
+        if center-24 < 185 or center+24 > 421:
+            return None
+        faces = tuple(feature(screen.image[center-20:center+20, x-22:x+22])
+                      for x in (224, 312, 402, 491, 581))
+        for index, prior in enumerate(self.recommendation_rows):
+            if all(float(a @ b) >= .92 for a, b in zip(faces, prior)):
+                return index
+        self.recommendation_rows.append(faces)
+        return len(self.recommendation_rows)-1
 
     @staticmethod
     def recommendation_owned(screen, button):
@@ -317,6 +324,8 @@ class TeamBattle(TimeLimitTask):
                              key=lambda button: recommendation_time(screen, button.center[1]) or 10_000)
             for button in buttons:
                 signature = self.recommendation_signature(screen, button)
+                if signature is None:
+                    continue
                 if signature in self.tried and wanted is None:
                     continue
                 estimate = recommendation_time(screen, button.center[1])
@@ -354,15 +363,28 @@ class TeamBattle(TimeLimitTask):
                     self.ui.wait(lambda s: s.find('推荐编组', (380, 15, 570, 70), exact=True), '推荐队伍不可用返回')
                     continue
                 names = self.team(formation)
-                if (names and (wanted is None or names == wanted)
-                        and names not in self.tried_teams
-                        and not self.unavailable_team(names)
-                        and not self.used_member_marked(formation)):
+                reason = None
+                if names is None:
+                    reason = '编队实际不足五人'
+                elif wanted is not None and names != wanted:
+                    reason = '五头像与目标队伍不符'
+                elif names in self.tried_teams:
+                    reason = '同一五头像队伍已经模拟'
+                elif self.unavailable_team(names):
+                    reason = '头像与本次已参战成员重复'
+                elif self.used_member_marked(formation):
+                    reason = '编队显示已参加团队战文字'
+                if reason is None:
                     self.teams[names]['estimated_seconds'] = estimate
                     self.teams[names]['reference_damage'] = reference
                     self.tried.add(signature)
                     self.tried_teams.add(names)
                     return names
+                from ..run_session import emit
+                evidence = str(self.ui.save(f'team_battle_rejected_{signature}', formation))
+                emit('team_battle.recommendation', decision='rejected', reason=reason,
+                     team=names, evidence=evidence)
+                self.log('推荐队伍跳过：'+reason)
                 self.tried.add(signature)
                 self.ui.expect_click('取消', (630, 425, 775, 500), exact=True)
                 screen = self.ui.wait(lambda s: s.find('推荐编组', (380, 15, 570, 70), exact=True), '返回推荐编组')
@@ -500,7 +522,9 @@ class TeamBattle(TimeLimitTask):
                         actual_damage = result_damage(screen)
                         if actual_damage is None:
                             raise EventUIError('团队战结算伤害无法确认')
-                        evidence = str(self.ui.save('team_battle_'+('simulation' if simulate else 'real')+'_partial', screen))
+                        evidence = str(self.ui.save('team_battle_'+('simulation' if simulate else 'real')
+                                                    +'_partial_'+str(len(self.report['simulations'])
+                                                                     +len(self.report['battles'])), screen))
                         self.ui.click(next_button)
                         self.map_after_battle()
                         return dict(win=False, damage_ratio=damage_ratio,
@@ -554,6 +578,7 @@ class TeamBattle(TimeLimitTask):
             self.tried_teams = set()
         for _ in range(self.options['max_simulations']-len(self.report['simulations'])):
             self.check_deadline()
+            self.report_progress(f"团队战 · {boss.name} · 查找第 {len(self.report['simulations'])+1} 支模拟队伍")
             self.prepare_boss(boss, True)
             if wanted is None:
                 names = self.recommendation(boss_hp=boss.current_hp)
@@ -579,6 +604,8 @@ class TeamBattle(TimeLimitTask):
                 self.map()
                 return None
             gear = self.equipped(names)
+            mode = '延长' if wanted is not None else '普通'
+            self.report_progress(f"团队战 · {boss.name} · {mode}模拟第 {len(self.report['simulations'])+1} 队")
             reference = self.teams[names].get('reference_damage') if wanted is None else None
             simulation = self.battle(True, names, use_extension=wanted is not None,
                                      reference_damage=reference, boss_hp=boss.current_hp)
@@ -601,6 +628,7 @@ class TeamBattle(TimeLimitTask):
                 return None
             if time.monotonic() + self.options['battle_timeout'] + 60 >= self.deadline:
                 raise TaskDeadline('团队战剩余运行时间不足以安全完成实战，待下次运行')
+            self.report_progress(f'团队战 · {boss.name} · {mode}实战前复核')
             self.prepare_boss(boss, False)
             current = self.open_formation(use_extension=wanted is not None,
                                           returned_time=available_time)
@@ -622,6 +650,7 @@ class TeamBattle(TimeLimitTask):
             self.report['in_flight'] = dict(boss=boss.name, lane=boss.lane, lap=boss.lap,
                                             team_key=names, team=self.teams[names]['labels'], cp_before=cp_before)
             self.save_report()
+            self.report_progress(f'团队战 · {boss.name} · {mode}实战')
             real = self.battle(False, names, use_extension=wanted is not None,
                                reference_damage=reference, boss_hp=boss.current_hp)
             after = self.map()
