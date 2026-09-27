@@ -522,6 +522,57 @@ class TeamBattleTests(unittest.TestCase):
         self.assertEqual(task.tried_teams, {key})
 
 
+    def test_rejected_record_does_not_hide_same_portraits_with_valid_damage_or_time(self):
+        from pcrscript.tasks.event_formation import EventFormation
+
+        def recommendation(damage, seconds):
+            image = np.full((540, 960, 3), 240, np.uint8)
+            for x in (224, 312, 402, 491, 581):
+                image[220:268, x-22:x+22] = (25, 80, 220)
+            # Make the changed reference column visible to the scroll-end check.
+            image[270:280, 80:130] = (damage//1_000_000, seconds, 0)
+            return EventScreen(image, [box('推荐编组', 480, 42), box('高级', 622, 165),
+                                       box('使用', 712, 277), box('保存队伍', 855, 226),
+                                       box('参考伤害', 110, 251), box(str(damage), 120, 272),
+                                       box('讨伐时间', 86, 299),
+                                       box(f'{seconds//60}:{seconds%60:02d}', 151, 299)])
+
+        image = np.zeros((540, 960, 3), np.uint8)
+        for x, _ in EventFormation.slots:
+            image[415:505, x-48:x+48] = (20, 20, 170)
+        formation = EventScreen(image, [box('队伍编组', 480, 42)])
+        for rejected in ((80_000_000, 10), (70_000_000, 60)):
+            with self.subTest(rejected=rejected):
+                accepted = recommendation(70_000_000, 20)
+                state = {'screen': recommendation(*rejected)}
+                task = TeamBattle.__new__(TeamBattle)
+                task.ui = Mock()
+                task.ui.capture.side_effect = lambda: state['screen']
+                def wait(predicate, purpose, **kwargs):
+                    self.assertTrue(predicate(state['screen']), purpose)
+                    return state['screen']
+                def click(button):
+                    if button.text == '使用':
+                        state['screen'] = formation
+                task.ui.wait.side_effect = wait
+                task.ui.click.side_effect = click
+                task.ui.swipe.side_effect = lambda *args, **kwargs: state.update(screen=accepted)
+                task.ui.read_region.side_effect = lambda screen, roi: EventScreen(screen.image, [])
+                task.formation = EventFormation.__new__(EventFormation)
+                task.teams = {}
+                task.recommendation_rows = []
+                task.tried = set()
+                task.tried_teams = set()
+                task.spent = set()
+                task.check_deadline = Mock()
+                with patch('pcrscript.tasks.task_team_battle.time.sleep'):
+                    key = task.recommendation(boss_hp=70_000_000)
+                self.assertIsNotNone(key)
+                self.assertEqual(task.teams[key]['reference_damage'], 70_000_000)
+                self.assertEqual(task.teams[key]['estimated_seconds'], 20)
+                self.assertEqual(task.ui.swipe.call_count, 1)
+                self.assertEqual(task.tried_teams, {key})
+
     def test_clan_battle_schedule_only_covers_five_days(self):
         cn = timezone(timedelta(hours=8))
         start = (datetime.now(cn)-timedelta(days=1)).replace(hour=5, minute=0, second=0, microsecond=0)

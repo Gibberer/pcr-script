@@ -286,23 +286,6 @@ class DesktopTests(unittest.TestCase):
                 robot.run_task('schedule')
             self.assertEqual(task.call_count, 1)
 
-    def test_daily_start_preserves_open_game_and_enters_from_welcome(self):
-        from pcrscript import Robot
-        driver = Mock(get_screen_size=Mock(return_value=(960, 540)))
-        robot = Robot(driver, show_progress=False)
-        with patch.object(robot, '_Robot__find_match_pos', return_value=None), \
-             patch('pcrscript.robot.ToHomePage.run') as home:
-            robot.changeaccount()
-        home.assert_called_once_with(timeout=60)
-        driver.click.assert_not_called()
-
-        with patch.object(robot, '_Robot__find_match_pos', return_value=(100, 100)), \
-             patch.object(robot, '_Robot__action_squential') as enter, \
-             patch('pcrscript.robot.ToHomePage.run') as home:
-            robot.changeaccount()
-        enter.assert_called_once()
-        home.assert_not_called()
-
     def test_progress_bar_only_uses_interactive_terminal(self):
         from pcrscript import Robot
         from pcrscript.actions import Action

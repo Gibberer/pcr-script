@@ -326,14 +326,17 @@ class TeamBattle(TimeLimitTask):
                 signature = self.recommendation_signature(screen, button)
                 if signature is None:
                     continue
-                if signature in self.tried and wanted is None:
-                    continue
                 estimate = recommendation_time(screen, button.center[1])
                 reference = recommendation_damage(screen, button.center[1])
                 # A row at the bottom can show "使用" while its damage or time
                 # is clipped. Revisit it after a short scroll instead of
                 # recording it as a rejected recommendation.
                 if estimate is None or reference is None:
+                    continue
+                # Damage/time belong to the source record. Rejecting that
+                # record must not blacklist every row with the same portraits.
+                signature = f'{signature}-{reference}-{estimate}'
+                if signature in self.tried and wanted is None:
                     continue
                 if ((boss_hp is not None and reference > boss_hp)
                         or (boss_hp is not None and reference == boss_hp
