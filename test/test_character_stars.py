@@ -2,14 +2,25 @@ import sqlite3
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 from types import SimpleNamespace
 import numpy as np
-from pcrscript.game_ui.character_stars import five_star_shards, unlocked_stars, active_stars, purchase_receipt, price_tier_notice, star_confirmation_ready, star_result_step, star_upgrade_settled, buy_shards, reduce_purchase_amount
+from pcrscript.game_ui.character_stars import five_star_shards, unlocked_stars, active_stars, purchase_receipt, price_tier_notice, star_confirmation_ready, star_result_step, star_upgrade_settled, buy_shards, reduce_purchase_amount, memory_fragment_visible, settle_purchase_receipt
 from pcrscript.game_ui.screen import EventUIError, EventScreen, TextBox
 
 
 class StarBudgetTests(TestCase):
+    def test_shop_ocr_selects_only_exact_costume_across_split_labels(self):
+        rows=[('干歌（夏日）的记忆',330,224),('碎片',290,240),
+              ('干歌（圣诞节）的记',500,224),('忆碎片',455,240)]
+        screen=EventScreen(np.zeros((540,960,3),np.uint8),[
+            TextBox(text,.887,[[x-20,y-8],[x+20,y-8],[x+20,y+8],[x-20,y+8]])
+            for text,x,y in rows])
+        matches=[x for x in (330,500,670,840)
+                 if memory_fragment_visible(screen,'千歌(圣诞节)',(x-75,205,x+75,248))]
+        self.assertEqual(matches,[500])
+        self.assertFalse(memory_fragment_visible(screen,'千歌(夏日)',(425,205,575,248)))
+
     def test_max_purchase_is_reduced_to_exact_missing_shards(self):
         def dialog(amount):
             rows=[('购买确认',480,42),('珠希(夏日)的记忆碎片',350,125),
@@ -25,6 +36,18 @@ class StarBudgetTests(TestCase):
         ui=Mock();ui.capture.return_value=dialog(20)
         with self.assertRaisesRegex(EventUIError,'递减未核实'):
             reduce_purchase_amount(ui,dialog(20),'珠希(夏日)',20,10)
+
+        # A saved nine-shard purchase frame omitted the isolated 9 from
+        # full-frame OCR; only the amount field may be retried regionally.
+        faint=dialog(9)
+        faint.items=[item for item in faint.items if item.text!='9']
+        ui=Mock();ui.capture.return_value=faint;ui.number.return_value=9
+        _,amount=reduce_purchase_amount(ui,dialog(10),'珠希(夏日)',10,9)
+        self.assertEqual(amount,9)
+        ui.number.assert_called_once_with(faint,(440,290,520,329))
+        ui.number.return_value=8
+        with self.assertRaisesRegex(EventUIError,'递减未核实'):
+            reduce_purchase_amount(ui,dialog(10),'珠希(夏日)',10,9)
 
     def test_price_tier_notice_requires_same_outfit_and_explicit_price(self):
         def notice(name):
@@ -126,6 +149,25 @@ class StarBudgetTests(TestCase):
         with self.assertRaises(EventUIError):
             purchase_receipt(small,'栞(游骑兵)',11,33,13233,0,
                              lambda _screen,roi:0 if roi[0]<600 else 12)
+
+    def test_receipt_waits_past_transient_purchase_animation(self):
+        def make(rows):
+            return EventScreen(np.zeros((540,960,3),np.uint8),[
+                TextBox(text,1,[[x-8,y-8],[x+8,y-8],[x+8,y+8],[x-8,y+8]])
+                for text,x,y in rows])
+        transient=make([('购买完毕',480,147),('消耗女神的秘石80',480,261)])
+        stable=make([('购买完毕',480,147),('消耗女神的秘石80',480,205),
+                     ('购买了干歌（圣诞节）的记忆碎片×20。',480,225),
+                     ('20',545,270),('40',672,270),
+                     ('12,228',527,303),('12,148',660,303)])
+        ui=Mock();ui.capture.return_value=stable
+        with self.assertRaises(EventUIError):
+            purchase_receipt(transient,'千歌(圣诞节)',20,80,12228,20)
+        with patch('pcrscript.game_ui.character_stars.time.sleep'):
+            final,receipt=settle_purchase_receipt(ui,transient,'千歌(圣诞节)',20,80,12228,20)
+        self.assertIs(final,stable)
+        self.assertEqual(receipt,{'owned_after':40,'after':12148})
+        ui.capture.assert_called_once()
 
     def test_blue_changed_stars_are_unlocked_without_being_active(self):
         image=np.zeros((540,960,3),np.uint8)

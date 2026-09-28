@@ -79,7 +79,7 @@ class TeamBattleTests(unittest.TestCase):
         task = TeamBattle.__new__(TeamBattle)
         task.ui = Mock()
         task.ui.wait.side_effect = [listed, character]
-        task.ui.capture.side_effect = [listed, listed]
+        task.ui.capture.return_value = listed
         task.check_deadline = Mock()
         task.tried = set()
         task.recommendation_rows = []
@@ -88,6 +88,73 @@ class TeamBattleTests(unittest.TestCase):
         task.ui.swipe.assert_called_once_with((120, 360), (120, 260), duration=250)
         task.ui.expect_click.assert_called_once()
         self.assertEqual(task.tried, set())
+
+    def test_recommendation_scrollbar_ignores_animated_rows_at_bottom(self):
+        image = np.full((540, 960, 3), 200, np.uint8)
+        image[372:412, 920:925] = (220, 130, 50)
+        changed = image.copy()
+        changed[230:270, 185:230] = (25, 80, 220)
+        items = [box('推荐编组', 480, 42), box('高级', 622, 165)]
+        before = EventScreen(image, items)
+        after = EventScreen(changed, items)
+        task = TeamBattle.__new__(TeamBattle)
+        task.ui = Mock()
+        task.ui.capture.return_value = before
+        task.ui.wait.return_value = after
+        self.assertTrue(task.recommendation_at_end(before, up=True))
+        with patch('pcrscript.tasks.task_team_battle.time.sleep'):
+            self.assertFalse(task.scroll_recommendations(up=True))
+        task.ui.swipe.assert_called_once_with((120, 360), (120, 260), duration=250)
+
+    def test_recommendation_updates_list_after_scanning_to_bottom(self):
+        def listed(damage=None):
+            image = np.full((540, 960, 3), 220, np.uint8)
+            items = [box('推荐编组', 480, 42), box('高级', 622, 165),
+                     box('列表更新', 840, 476)]
+            if damage is not None:
+                for x in (224, 312, 402, 491, 581):
+                    image[220:266, x-22:x+22] = (25, 80, 220)
+                items += [box('使用', 711, 277), box('参考伤害', 111, 251),
+                          box(str(damage), 122, 272), box('讨伐时间', 86, 299),
+                          box('0:19', 151, 299)]
+            return EventScreen(image, items)
+
+        initial = listed()
+        updated = listed(70_000_000)
+        formation = EventScreen(np.zeros((540, 960, 3), np.uint8),
+                                [box('队伍编组', 480, 42)])
+        state = {'screen': initial}
+        task = TeamBattle.__new__(TeamBattle)
+        task.ui = Mock()
+        task.ui.capture.side_effect = lambda: state['screen']
+        def wait(predicate, purpose, **kwargs):
+            self.assertTrue(predicate(state['screen']), purpose)
+            return state['screen']
+        task.ui.wait.side_effect = wait
+        def expect_click(label, *args, **kwargs):
+            if label == '列表更新':
+                state['screen'] = updated
+        task.ui.expect_click.side_effect = expect_click
+        def click(button):
+            if button.text == '使用':
+                state['screen'] = formation
+        task.ui.click.side_effect = click
+        task.formation_ready = Mock(side_effect=lambda screen: screen is formation)
+        task.ensure_recommendation_unsaved = Mock()
+        task.recommendation_restricted = Mock(return_value=False)
+        task.team = Mock(return_value='team-1')
+        task.unavailable_team = Mock(return_value=False)
+        task.used_member_marked = Mock(return_value=False)
+        task.check_deadline = Mock()
+        task.teams = {'team-1': {'labels': ('甲',), 'portraits': ()}}
+        task.recommendation_rows = []
+        task.tried = set()
+        task.tried_teams = set()
+        task.spent = set()
+        with patch('pcrscript.tasks.task_team_battle.time.sleep'):
+            self.assertEqual(task.recommendation(boss_hp=70_000_000), 'team-1')
+        self.assertEqual(task.ui.swipe.call_count, 4)
+        task.ui.expect_click.assert_any_call('列表更新', (780, 445, 925, 510), exact=True)
 
     def test_formation_waits_for_detail_transition(self):
         image = np.zeros((540, 960, 3), np.uint8)

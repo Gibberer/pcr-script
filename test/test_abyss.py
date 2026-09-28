@@ -31,6 +31,15 @@ def map_screen(number=1):
 
 
 class AbyssTests(TestCase):
+    def test_prepare_only_obeys_cooperative_stop_during_parsing(self):
+        def acquire(options, *, check):
+            check()
+        with patch('pcrscript.tasks.task_abyss.acquire_strategies', side_effect=acquire), \
+                patch('pcrscript.tasks.task_abyss.checkpoint', side_effect=RunCancelled('stop')):
+            with self.assertRaises(RunCancelled):
+                AbyssPush.prepare({'Abyss': {'prepare_only': True,
+                                             'sources': {'stage': '4-1', 'element': 'fire'}}})
+
     def test_deep_area_story_requires_portrait_text_and_skip_control(self):
         task=object.__new__(AbyssPush);task.ui=Mock()
         icon=cv.imread('images/btn_skip.png')
@@ -62,6 +71,15 @@ class AbyssTests(TestCase):
         self.assertEqual(next_stage(task.enter('fire'))[0],AbyssStage('fire',3,1))
         task.ui.click.assert_called_once_with((898.5,42.0))
 
+    def test_enter_closes_clan_battle_final_day_notice(self):
+        task=object.__new__(AbyssPush);task.deadline=float('inf');task.ui=Mock()
+        notice=screen(('9月团队战最终日！',475,88),
+                      ('团队战活动期间结束',480,288),('关闭',477,434))
+        task.ui.capture.side_effect=[notice,map_screen()]
+        task.ui.wait.return_value=map_screen()
+        self.assertEqual(next_stage(task.enter('fire'))[0],AbyssStage('fire',3,1))
+        task.ui.expect_click.assert_called_once_with('关闭',(365,395,590,475),exact=True)
+
     def test_enter_closes_android_keyboard_before_formation(self):
         task=object.__new__(AbyssPush);task.deadline=float('inf');task.ui=Mock()
         keyboard=screen(('队伍编组',480,42),('确定',880,485))
@@ -76,6 +94,15 @@ class AbyssTests(TestCase):
         keyboard=screen(('角色一览',110,35),('确定',880,490))
         roster=screen(('角色一览',110,35),('冒险',532,515))
         task.ui.capture.side_effect=[keyboard,roster,map_screen()]
+        task.ui.wait.return_value=map_screen()
+        self.assertEqual(next_stage(task.enter('fire'))[0],AbyssStage('fire',3,1))
+        self.assertEqual(task.ui.click.call_args_list[0].args[0].text,'确定')
+
+    def test_enter_closes_android_keyboard_in_shard_shop(self):
+        task=object.__new__(AbyssPush);task.deadline=float('inf');task.ui=Mock()
+        keyboard=screen(('商店',110,35),('确定',880,490))
+        shop=screen(('商店',110,35),('冒险',532,515))
+        task.ui.capture.side_effect=[keyboard,shop,map_screen()]
         task.ui.wait.return_value=map_screen()
         self.assertEqual(next_stage(task.enter('fire'))[0],AbyssStage('fire',3,1))
         self.assertEqual(task.ui.click.call_args_list[0].args[0].text,'确定')
@@ -104,6 +131,24 @@ class AbyssTests(TestCase):
     def test_enter_cancels_stale_shard_purchase_before_replanning(self):
         task=object.__new__(AbyssPush);task.deadline=float('inf');task.ui=Mock()
         task.ui.capture.side_effect=[screen(('购买确认',480,42),('取消',370,479)),map_screen()]
+        task.ui.wait.return_value=map_screen()
+        self.assertEqual(next_stage(task.enter('fire'))[0],AbyssStage('fire',3,1))
+        task.ui.expect_click.assert_called_once_with('取消',(250,440,490,515),exact=True)
+
+    def test_enter_cancels_uncommitted_star_change_before_rechecking(self):
+        task=object.__new__(AbyssPush);task.deadline=float('inf');task.ui=Mock()
+        dialog=screen(('★变更确认',480,42),('现在的★',550,110),
+                      ('取消',370,479),('变更',590,479))
+        task.ui.capture.side_effect=[dialog,map_screen()]
+        task.ui.wait.return_value=map_screen()
+        self.assertEqual(next_stage(task.enter('fire'))[0],AbyssStage('fire',3,1))
+        task.ui.expect_click.assert_called_once_with('取消',(250,440,490,515),exact=True)
+
+    def test_enter_cancels_uncommitted_three_star_change(self):
+        task=object.__new__(AbyssPush);task.deadline=float('inf');task.ui=Mock()
+        dialog=screen(('★变更确认',480,42),('现在的★',315,110),
+                      ('取消',370,479),('变更',590,479))
+        task.ui.capture.side_effect=[dialog,map_screen()]
         task.ui.wait.return_value=map_screen()
         self.assertEqual(next_stage(task.enter('fire'))[0],AbyssStage('fire',3,1))
         task.ui.expect_click.assert_called_once_with('取消',(250,440,490,515),exact=True)

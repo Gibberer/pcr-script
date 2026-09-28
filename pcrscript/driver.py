@@ -220,6 +220,9 @@ class DNDriver(Win32Driver):
 
     def __init__(self, device_name, dnpath, index, click_by_mouse=False):
         super().__init__(device_name)
+        # Both LeiDian input paths accept Chinese through ldconsole, even
+        # though the ADB base driver cannot type it on its own.
+        self.supports_unicode_input = True
         self.dnpath = dnpath
         self.index = index
         self.click_by_mouse = click_by_mouse

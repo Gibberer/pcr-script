@@ -6,6 +6,7 @@ import json
 import requests
 from pcrscript.tasks.strategy_sources import discover_sources,relevant,source_queries
 from pcrscript.tasks import find_taskclass
+from pcrscript.run_session import RunCancelled
 
 BV='BV1234567890'
 def fake_api():
@@ -20,6 +21,7 @@ class SourceTests(TestCase):
   self.assertGreater(len(queries),4)
   self.assertIn('公主连结 深域 光 4-6',queries)
   self.assertIn('光4-6 全set',queries)
+  self.assertIn('珀天深域4图',queries)
   self.assertTrue(any('光深域4-6' in query and '自动' in query for query in queries))
   with TemporaryDirectory() as folder:
    api=fake_api()
@@ -34,6 +36,32 @@ class SourceTests(TestCase):
    self.assertEqual([c['bvid'] for c in high['candidates']],[BV])
    self.assertGreater(api.search.call_count,4)
    self.assertNotEqual(normal['catalog'],high['catalog'])
+ def test_high_effort_finds_exact_part_from_chapter_title_query(self):
+  with TemporaryDirectory() as folder:
+   api=fake_api()
+   def search(query):
+    data=[{'bvid':BV,'title':'公主连结 红焰深域5图'}] if query=='红焰深域5图' else []
+    return {'code':0,'data':{'result':[{'result_type':'video','data':data}]}}
+   api.search.side_effect=search
+   api.getVideoInfo.return_value['data'].update(
+    title='公主连结 红焰深域5图',pages=[{'cid':1,'page':1,'part':'火5-6','duration':90}])
+   result=discover_sources(dict(task_type='abyss',area='红焰深域',aliases=['火'],
+    element='fire',stage='5-6',category_terms=['深域'],search_effort='high',
+    cache_dir=folder),api=api)
+   self.assertEqual([c['bvid'] for c in result['candidates']],[BV])
+ def test_search_honors_cancellation_between_public_queries(self):
+  with TemporaryDirectory() as folder:
+   api=fake_api()
+   calls=0
+   def check():
+    nonlocal calls
+    calls+=1
+    if calls==3:raise RunCancelled('stopped')
+   with self.assertRaises(RunCancelled):
+    discover_sources(dict(task_type='abyss',area='红焰深域',aliases=['火'],
+     element='fire',stage='5-6',category_terms=['深域'],search_effort='high',
+     cache_dir=folder),api=api,check=check)
+   self.assertEqual(api.search.call_count,1)
  def test_high_effort_scans_past_normal_metadata_window(self):
   with TemporaryDirectory() as folder:
    api=fake_api()
@@ -223,6 +251,18 @@ class SourceTests(TestCase):
     skip_manual_media=True,skip_long_media=True,cache_dir=folder),api=api)
    self.assertEqual(result['candidates'],[])
    self.assertIn('TP+2',result['excluded'][0]['reason'])
+ def test_automatic_abyss_excludes_borrowed_member_part(self):
+  with TemporaryDirectory() as folder:
+   api=fake_api()
+   api.search.return_value['data']['result'][0]['data'][0]['title']='公主连结 红焰深域5图'
+   api.getVideoInfo.return_value['data'].update(
+    title='公主连结 红焰深域5图',pages=[{'cid':1,'page':1,
+    'part':'火5-6 借els','duration':100}])
+   result=discover_sources(dict(task_type='abyss',area='红焰深域',aliases=['火'],
+    element='fire',stage='5-6',category_terms=['深域'],max_videos=1,
+    skip_manual_media=True,cache_dir=folder),api=api)
+   self.assertFalse(result['candidates'])
+   self.assertIn('借角',result['excluded'][0]['reason'])
  def test_exact_ascii_difficulty_and_changed_scope(self):
   self.assertFalse(relevant('攻略 EX70',['EX7']))
   self.assertTrue(relevant('地下城EX7攻略',['EX7']))

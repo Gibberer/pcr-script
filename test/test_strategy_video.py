@@ -14,7 +14,7 @@ from pcrscript.game_ui.avatars import AvatarIndex, face_crop
 from pcrscript.game_ui.avatar_assets import ensure_avatar_index
 from pcrscript.game_ui.guide_vision import GuideText, battle_rectangles, combat_team, formation_team, wide_special_equipment_team, combat_set, combat_auto, labeled_fields, formation_fields
 from pcrscript.tasks.strategy_document import Evidence, empty_member, finalize, to_event_party, abyss_candidate, event_parties, event_trial_parties, dungeon_plan
-from pcrscript.tasks.strategy_video import choose_pages, observed_scope, parse_video_source, acquire_strategies, task_source_options, texts_in_view, sample_seconds, frame_texts
+from pcrscript.tasks.strategy_video import choose_pages, observed_scope, parse_video_source, acquire_strategies, task_source_options, texts_in_view, sample_seconds, frame_texts, combat_button_texts, combat_hud_visible, combat_caption_signature
 from pcrscript.tasks.strategy_party_pool import boss_parties, next_boss_party
 from pcrscript.tasks.strategy_trial import TrialFormation
 from pcrscript.tasks.event_strategy import CharacterStatus
@@ -46,6 +46,11 @@ class VideoStrategyTests(TestCase):
         options=task_source_options('abyss',dict(search_effort='high'),stage=AbyssStage('fire',5,6))
         self.assertEqual([p['cid'] for p in choose_pages(source,options)],[1,4])
 
+    def test_stage_part_with_training_note_is_decoded_once(self):
+        source=dict(title='暗深域4-6',pages=[dict(cid=7,part='暗4-6 练度参考',duration=80)])
+        options=dict(task_type='abyss',stage='4-6',element='dark')
+        self.assertEqual([p['cid'] for p in choose_pages(source,options)],[7])
+
     def test_high_abyss_effort_expands_bounded_source_budget(self):
         stage=AbyssStage('water',4,6)
         normal=task_source_options('abyss',dict(sources=dict(max_videos=4)),stage=stage)
@@ -75,6 +80,44 @@ class VideoStrategyTests(TestCase):
         self.assertEqual(len(battle_rectangles(image)),5)
         cv.rectangle(image,(662,376),(785,495),(0,0,0),-1)
         self.assertEqual(battle_rectangles(image),[])
+
+    def test_vertical_combat_card_borders_are_recognized(self):
+        image=np.zeros((540,960,3),np.uint8)
+        for i in range(5):
+            x=258+93*i
+            cv.rectangle(image,(x,377),(x+70,460),(255,200,0),4)
+        self.assertEqual(len(battle_rectangles(image)),5)
+
+    def test_combat_button_regions_use_recognition_without_text_detection(self):
+        frame=np.zeros((720,1280,3),np.uint8)
+        small=np.zeros((540,960,3),np.uint8)
+        boxes=[(258+93*i,377,71,84) for i in range(5)]
+        for x,y,w,h in boxes:
+            small[y-10:y+20,x+55:x+92]=(255,200,0)
+        frame[505:550,1110:1175]=(255,200,0)
+        recognized=[SimpleNamespace(txts=(text,),scores=(.99,))
+                    for _ in boxes for text in ('立即','发动')]
+        recognized.append(SimpleNamespace(txts=('自动',),scores=(.99,)))
+        ocr=Mock(side_effect=recognized)
+        sets,autos=combat_button_texts(frame,small,boxes,ocr,1280,0,1280)
+        self.assertEqual(len(sets),5)
+        self.assertTrue(all(combat_set(small,{'rectangle':box},sets) for box in boxes))
+        self.assertTrue(combat_auto(frame,autos))
+        self.assertEqual(ocr.call_count,11)
+        self.assertTrue(all(call.kwargs['use_det'] is False for call in ocr.call_args_list))
+
+    def test_combat_hud_bridge_requires_visible_cyan_area(self):
+        image=np.zeros((540,960,3),np.uint8)
+        self.assertFalse(combat_hud_visible(image))
+        image[380:480,250:750]=(255,200,0)
+        self.assertTrue(combat_hud_visible(image))
+
+    def test_colored_guide_caption_triggers_audit_candidate(self):
+        frame=np.zeros((720,1280,3),np.uint8)
+        self.assertFalse(combat_caption_signature(frame))
+        for i in range(5):
+            cv.rectangle(frame,(120+55*i,170),(145+55*i,205),(0,220,255),-1)
+        self.assertTrue(combat_caption_signature(frame))
 
     def test_wide_video_samples_brief_formation_and_equipment_screens(self):
         samples = sample_seconds(96, 50, wide=True)
@@ -464,6 +507,36 @@ class VideoStrategyTests(TestCase):
             self.assertEqual(len(to_event_party(report['parties'][0]).members),5)
             self.assertEqual(report['parties'][0]['identity_evidence'][0]['rectangle'],[253,520,133,133])
 
+    def test_combat_frames_skip_full_ocr_after_initial_audit(self):
+        with TemporaryDirectory() as folder:
+            path=Path(folder)/'battle.avi'
+            writer=cv.VideoWriter(str(path),cv.VideoWriter_fourcc(*'MJPG'),2,(960,540))
+            for i in range(12):
+                writer.write(np.full((540,960,3),30+i*8,np.uint8))
+            writer.release()
+            boxes=[(258+93*i,377,71,84) for i in range(5)]
+            found=[dict(name=f'角色{i}',rectangle=list(box),score=.99)
+                   for i,box in enumerate(boxes)]
+            source=dict(bvid='BV0000000009',url='https://example.com/synthetic',
+                        title='公主连结 国服',pages=[dict(cid=9,part='火4-1',duration=5)])
+            index=SimpleNamespace(names=[m['name'] for m in found],
+                                  matrix=np.ones((5,1728),np.float32))
+            with patch('pcrscript.tasks.strategy_video.read_text',return_value=[]) as full, \
+                 patch('pcrscript.tasks.strategy_video.combat_team',return_value=found), \
+                 patch('pcrscript.tasks.strategy_video.battle_rectangles',return_value=boxes), \
+                 patch('pcrscript.tasks.strategy_video.combat_caption_signature',return_value=frozenset()), \
+                 patch('pcrscript.tasks.strategy_video.combat_button_texts',return_value=([],[])) as buttons:
+                report=parse_video_source(source,dict(task_type='abyss',stage='4-1',element='fire',
+                    parsed_dir=folder),index,api=Mock(),ocr=Mock(),
+                    media_fetcher=lambda *a,**k:(path,dict(duration=5)))
+            page=report['pages'][0]
+            self.assertGreater(page['frames'],2)
+            self.assertEqual(page['full_ocr_frames'],2)
+            self.assertEqual(page['combat_fast_frames'],page['frames']-2)
+            self.assertEqual(page['button_ocr_frames'],page['frames']-2)
+            self.assertEqual(full.call_count,2)
+            self.assertEqual(buttons.call_count,page['frames']-2)
+
     def test_compilation_table_retains_members_without_claiming_stage(self):
         with TemporaryDirectory() as folder:
             path=Path(folder)/'table.avi'
@@ -593,7 +666,7 @@ class VideoStrategyTests(TestCase):
                 parsed_dir=folder,skip_manual_media=True),index,api=Mock(),ocr=Mock(),media_fetcher=fetch)
             fetch.assert_not_called()
             self.assertEqual(report['manual_actions'][0]['text'],'2-10（半自动剩80万血）')
-            self.assertEqual(report['pages'][0]['skipped'],'标题要求手动操作或未核实TP+2，自动任务不下载此分P')
+            self.assertEqual(report['pages'][0]['skipped'],'标题要求手动操作、借角或未核实TP+2，自动任务不下载此分P')
             source['pages'][0]['part']='2-10（有TP+2，稳轴）'
             report=parse_video_source(source,dict(task_type='abyss',stage='2-10',element='wind',
                 parsed_dir=folder,skip_manual_media=True),index,api=Mock(),ocr=Mock(),media_fetcher=fetch)
@@ -604,6 +677,11 @@ class VideoStrategyTests(TestCase):
                 parsed_dir=folder,skip_manual_media=True),index,api=Mock(),ocr=Mock(),media_fetcher=fetch)
             fetch.assert_not_called()
             self.assertEqual(report['manual_actions'][0]['text'],'2-10（简易1押）')
+            source['pages'][0]['part']='风2-10 借els'
+            report=parse_video_source(source,dict(task_type='abyss',stage='2-10',element='wind',
+                parsed_dir=folder,skip_manual_media=True),index,api=Mock(),ocr=Mock(),media_fetcher=fetch)
+            fetch.assert_not_called()
+            self.assertEqual(report['manual_actions'][0]['text'],'风2-10 借els')
 
     def test_automatic_abyss_skips_long_media_before_download(self):
         self.assertTrue(task_source_options('abyss',dict(elements=['wind'],sources=dict(stage='2-10')))

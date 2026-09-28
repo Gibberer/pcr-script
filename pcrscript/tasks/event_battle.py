@@ -111,7 +111,8 @@ class EventCombat:
         """Pause during setup so animations and stage stories cannot race SET."""
         pause_deadline = time.monotonic()+45
         stable = 0
-        menu_requested = False
+        menu_attempts = 0
+        last_menu_request = 0.0
         while time.monotonic() < pause_deadline:
             self.r.check_deadline()
             s = self.ui.capture()
@@ -129,9 +130,12 @@ class EventCombat:
             if s.find('WIN|战斗胜利|战斗失败|TIMEUP|伤害报告'):
                 return False
             menu = s.find('菜单', (840, 0, 960, 60), exact=True) or self.match('btn_menu_text', s)
-            if menu and not menu_requested:
+            if (menu and not s.find('返回', (285, 415, 385, 460), exact=True)
+                    and menu_attempts < 3
+                    and (menu_attempts == 0 or time.monotonic()-last_menu_request >= 2)):
                 self.ui.click(menu, delay=.2)
-                menu_requested = True
+                menu_attempts += 1
+                last_menu_request = time.monotonic()
             elif not self.r.story_dialog(s):
                 time.sleep(.3)
         else:

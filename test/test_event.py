@@ -1,17 +1,19 @@
 """Offline replay checks. These tests never connect to the emulator."""
 from pathlib import Path
+from itertools import count
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 from unittest import TestCase, main
 from unittest.mock import patch, Mock
 import json
+import subprocess
 
 import cv2 as cv
 import numpy as np
 
 from pcrscript.game_ui.screen import EventScreen, TextBox, EventUIError, EventUI
 from pcrscript.tasks.event_battle import boss_cleared, boss_mode, quest_stars, EventBattles, EventCombat
-from pcrscript.tasks.event_formation import EventFormation, count_stars
+from pcrscript.tasks.event_formation import EventFormation, count_stars, search_text_confirmed
 from pcrscript.tasks.event_strategy import MemberRequirement, CharacterStatus, readiness, load_parties
 from pcrscript.tasks.task_story_event import CampaignClean
 from pcrscript.tasks.event_sweep import HardSweep
@@ -324,6 +326,35 @@ class StrategyTests(TestCase):
 
 
 class AvatarTests(TestCase):
+    def test_failed_background_search_resets_field_and_stops_safely(self):
+        formation = EventFormation.__new__(EventFormation)
+        formation.ui = Mock()
+        formation.ui.driver.supports_unicode_input = True
+        formation.ui.driver.input.side_effect = subprocess.CalledProcessError(1, 'ldconsole')
+        formation.ui.capture.return_value = frame(('队伍编组', 480, 42),
+                                                  ('用角色名搜索', 470, 135))
+        formation.occupied_slots = Mock(return_value=[])
+        formation.requires_declared_build = False
+        party = SimpleNamespace(members=[SimpleNamespace(name='似似花')])
+        with self.assertRaisesRegex(EventUIError, '后台角色搜索输入失败'):
+            formation.select(party)
+        self.assertEqual(formation.ui.driver.input.call_count, 3)
+        self.assertEqual(sum(c.args == ((691, 135),) for c in formation.ui.click.call_args_list), 3)
+
+    def test_fallback_roster_scan_drags_beside_cards(self):
+        formation = EventFormation.__new__(EventFormation)
+        formation.ui = Mock()
+        formation.ui.capture.return_value = frame(('队伍编组', 480, 42))
+        formation.avatars = SimpleNamespace(names=[], query=lambda patches: [])
+        formation.occupied_slots = lambda screen: []
+        party = SimpleNamespace(members=[SimpleNamespace(name='目标角色')])
+        ready, details = formation._select_by_scrolling(party)
+        self.assertFalse(ready)
+        self.assertEqual(details['missing'], ['目标角色'])
+        self.assertEqual(formation.ui.swipe.call_count, 11)
+        self.assertTrue(all(call.args[0][0] == call.args[1][0] == 914
+                            for call in formation.ui.swipe.call_args_list))
+
     def test_search_card_name_recovers_from_wrong_avatar_match(self):
         card = (60, 177, 100, 99)
         screen = frame(('双人角色', 94, 189), ('别的角色', 420, 189))
@@ -331,6 +362,21 @@ class AvatarTests(TestCase):
             screen, card, '错误头像标签', '双人角色'))
         self.assertFalse(EventFormation.search_identity_candidate(
             screen, card, '错误头像标签', '别的角色'))
+
+    def test_search_field_accepts_only_observed_name_ocr_confusion(self):
+        def field(text, score=.81049, x=350, y=135):
+            return EventScreen(np.zeros((540, 960, 3), np.uint8), [
+                TextBox(text, score, [[x-20, y-10], [x+20, y-10],
+                                      [x+20, y+10], [x-20, y+10]])])
+        # The saved run read 干歌 at 0.81049, below EventScreen.text's
+        # general 0.82 threshold, although the input and result cards showed it.
+        self.assertEqual(field('干歌').text((300, 110, 640, 165)), '')
+        self.assertTrue(search_text_confirmed('千歌', field('干歌')))
+        self.assertTrue(search_text_confirmed('千爱瑠', field('干爱瑠')))
+        self.assertFalse(search_text_confirmed('千歌', field('干爱瑠')))
+        self.assertFalse(search_text_confirmed('怜', field('干歌')))
+        self.assertFalse(search_text_confirmed('千歌', field('干歌', score=.7)))
+        self.assertFalse(search_text_confirmed('千歌', field('干歌', x=75, y=190)))
 
     def test_event_bonus_arrows_do_not_hide_cards(self):
         for number, count in ((0, 1), (2, 6)):
@@ -451,6 +497,22 @@ class WorkflowTests(TestCase):
         self.assertEqual(combat.ui.click.call_count,1)
         self.assertEqual(combat.ui.click.call_args.args[0].text,'菜单')
 
+    def test_pause_retries_ignored_menu_tap_before_settings(self):
+        combat = EventCombat.__new__(EventCombat)
+        menu = frame(('菜单',900,25))
+        panel = frame(('进行中战斗',480,45),('主菜单',480,85),('返回',335,438))
+        combat.ui = Mock()
+        combat.ui.capture.side_effect = [menu]*5+[panel]*3
+        combat.ui.wait.return_value = frame(('AUTO开启',480,355))
+        combat.r = SimpleNamespace(check_deadline=Mock(),story_dialog=Mock(return_value=False))
+        combat.match = Mock(return_value=None)
+        ticks = count(0,1.5)
+        with patch('pcrscript.tasks.event_battle.time.monotonic', side_effect=lambda: next(ticks)), \
+                patch('pcrscript.tasks.event_battle.time.sleep'):
+            self.assertTrue(combat.configure_paused(None,None))
+        self.assertEqual([call.args[0].text for call in combat.ui.click.call_args_list],
+                         ['菜单']*3)
+
     def test_disabled_battle_start_is_not_clicked(self):
         combat = EventCombat.__new__(EventCombat)
         combat.ui = ReplayUI([frame(("战斗开始", 847, 452))])
@@ -511,6 +573,12 @@ class WorkflowTests(TestCase):
 
 
 class DriverTests(TestCase):
+    def test_leidian_background_input_advertises_chinese_search(self):
+        with patch.object(DNDriver, '_init_window_info'):
+            driver = DNDriver('0', 'D:/synthetic-leidian', 0, click_by_mouse=True)
+        self.assertTrue(driver.supports_unicode_input)
+        self.assertFalse(ADBDriver('synthetic-adb').supports_unicode_input)
+
     def test_no_adb_fallback_for_both_screenshot_formats(self):
         d = DNDriver.__new__(DNDriver)
         d.click_by_mouse = True

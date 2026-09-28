@@ -33,6 +33,22 @@ def number(screen,roi):
     return int(normalized(item.text).replace(',','')) if item else None
 
 
+def memory_fragment_text(screen, name, roi):
+    """Read a shard label across OCR boxes, correcting the observed 千/干 glyph."""
+    text=normalized(screen.text(roi))
+    if normalized(name).startswith('千歌('):
+        text=text.replace('干歌(', '千歌(')
+    return text
+
+
+def memory_fragment_visible(screen, name, roi, amount=None):
+    label=normalized(name)+'的记忆碎片'
+    if amount is not None:
+        return bool(re.search(re.escape(label)+r'[×x]'+str(amount),
+                              memory_fragment_text(screen,name,roi)))
+    return label in memory_fragment_text(screen,name,roi)
+
+
 def star_confirmation_ready(screen,required):
     """Check the exact cost and unlabeled shard icon on the final dialog."""
     cost=number(screen,(175,260,250,305))
@@ -65,9 +81,9 @@ def star_upgrade_settled(screen, target, result_dismissed):
 def purchase_receipt(screen,name,amount,cost,before,owned,read_small=None):
     if not screen.find('购买完毕',(250,105,710,175),exact=True):
         raise EventUIError('女神秘石购买完成标题未知')
-    if not screen.find(r'消耗女神的秘石[×x]'+str(cost),(360,180,590,225)):
+    if not screen.find(r'消耗女神的秘石[×x]?'+str(cost)+r'(?!\d)',(360,180,590,225)):
         raise EventUIError('女神秘石购买回执价格不符')
-    if not screen.find(re.escape(normalized(name)+'的记忆碎片')+r'[×x]'+str(amount),(300,205,670,245)):
+    if not memory_fragment_visible(screen,name,(300,205,670,245),amount):
         raise EventUIError('女神秘石购买回执角色或数量不符')
     held_before=number(screen,(515,250,570,285))
     if held_before is None and read_small is not None:
@@ -82,10 +98,22 @@ def purchase_receipt(screen,name,amount,cost,before,owned,read_small=None):
     return dict(owned_after=values[1],after=values[3])
 
 
+def settle_purchase_receipt(ui, screen, name, amount, cost, before, owned):
+    """Wait for the purchase animation to expose stable text and balances."""
+    for attempt in range(4):
+        try:
+            return screen, purchase_receipt(screen,name,amount,cost,before,owned,ui.number)
+        except EventUIError:
+            if attempt==3:
+                raise
+            time.sleep(.6)
+            screen=ui.capture()
+
+
 def price_tier_notice(screen,name):
     if not screen.find('确认所需的女神的秘石个数',(300,105,660,175),exact=True):
         return None
-    body=normalized(screen.text((330,205,640,315)))
+    body=memory_fragment_text(screen,name,(330,205,640,315))
     if not (normalized(name)+'的记忆碎片' in body
             and re.search(r'已购数量变为\d+',body)
             and re.search(r'单价\d+个',body)):
@@ -111,13 +139,17 @@ def reduce_purchase_amount(ui,screen,name,amount,missing):
     """Bring MAX down to the exact missing count using the labeled minus control."""
     while amount>missing:
         if not (screen.find('购买确认',(250,0,720,75),exact=True)
-                and screen.find(re.escape(normalized(name)+'的记忆碎片'),(250,95,710,150),exact=True)
+                and memory_fragment_visible(screen,name,(250,95,710,150))
                 and screen.find('重置',(260,285,365,335),exact=True)
                 and screen.find('MAX',(590,285,700,335),exact=True)):
             raise EventUIError('购买数量调整页面未知，未购买')
         ui.click((394,310))
         screen=ui.capture()
         new_amount=number(screen,(440,290,520,329))
+        if new_amount is None:
+            # Full-frame detection can omit a lone digit in the amount box.
+            # The shared regional OCR still requires a confident exact number.
+            new_amount=ui.number(screen,(440,290,520,329))
         if new_amount!=amount-1:
             raise EventUIError('购买数量递减未核实，未购买')
         amount=new_amount
@@ -132,7 +164,7 @@ def buy_shards(ui,name,missing,report,save,allow_amulets):
     for _ in range(12):
         s=ui.capture()
         if not (s.find('记忆碎片获取方法',(250,0,720,75),exact=True)
-                and s.find(re.escape(normalized(name)+'的记忆碎片'),(250,90,710,155),exact=True)):
+                and memory_fragment_visible(s,name,(250,90,710,155))):
             raise EventUIError('碎片获取列表的角色或页面不明确')
         shop=s.find('女神的秘石商店',(250,285,710,450),exact=True)
         if shop:
@@ -151,12 +183,12 @@ def buy_shards(ui,name,missing,report,save,allow_amulets):
         time.sleep(1);ui.click((210,440));s=ui.capture()
         candidates=[]
         for x in (330,500,670,840):
-            title=normalized(s.text((x-75,205,x+75,248)))
-            if normalized(name) in title:candidates.append(x)
+            if memory_fragment_visible(s,name,(x-75,205,x+75,248)):
+                candidates.append(x)
         if len(candidates)!=1:raise EventUIError('秘石商店未唯一匹配所需衣装，未购买')
         ui.click((candidates[0],344))
         s=ui.wait(lambda s:s.find('购买确认',(250,0,720,75),exact=True),'碎片购买预览')
-        if not s.find(re.escape(normalized(name)+'的记忆碎片'),(250,95,710,150),exact=True):
+        if not memory_fragment_visible(s,name,(250,95,710,150)):
             raise EventUIError('碎片购买角色不符，未购买')
         before=number(s,(630,332,705,369))
         # Full-frame OCR omits a lone one-digit inventory value. Restrict the
@@ -170,6 +202,10 @@ def buy_shards(ui,name,missing,report,save,allow_amulets):
         if amount>missing:
             s,amount=reduce_purchase_amount(ui,s,name,amount,missing)
         cost=number(s,(420,332,480,369))
+        if cost is None:
+            # The orange single-digit total can be absent from full-frame
+            # detection. Retry only the numeric cost field before purchase.
+            cost=ui.number(s,(420,332,480,369))
         if amount is None or not 1<=amount<=missing or cost is None or not 0<cost<=before:
             raise EventUIError('碎片数量/总价/余额校验未通过')
         purchase=dict(name=name,amount=amount,cost=cost,before=before,owned_before=owned,status='pending',
@@ -177,7 +213,7 @@ def buy_shards(ui,name,missing,report,save,allow_amulets):
         report['purchases'].append(purchase);save()
         ui.expect_click('确认',(480,450,700,510),exact=True)
         s=ui.wait(lambda s:s.find('购买完毕',(250,105,710,175),exact=True),'秘石购买回执')
-        receipt=purchase_receipt(s,name,amount,cost,before,owned,ui.number)
+        s,receipt=settle_purchase_receipt(ui,s,name,amount,cost,before,owned)
         purchase.update(status='confirmed',**receipt,evidence_after=str(ui.save('purchased_'+str(batch),s)))
         save();missing-=amount
         ui.expect_click('确认',(370,340,585,410),exact=True)
@@ -193,6 +229,13 @@ def buy_shards(ui,name,missing,report,save,allow_amulets):
     raise EventUIError('碎片兑换达到分批保护上限')
 
 
+def star_change_dialog_ready(frame):
+    # The current-star label sits above the selected column: it is left for
+    # active 3★ and central for active 4★.
+    return bool(frame.find('★变更确认',(250,0,710,75),exact=True)
+                and frame.find('现在的★',(200,85,870,145),exact=True))
+
+
 def upgrade_to_five(ui,name,report,save,*,allow_amulets=False):
     report.update(name=name,purchases=[],upgrades=[],status='checking');save()
     for step in range(5):
@@ -205,7 +248,7 @@ def upgrade_to_five(ui,name,report,save,*,allow_amulets=False):
             if current<5:
                 ui.click((34,98))
                 dialog=ui.wait(lambda frame:frame.find('★变更确认',(250,0,710,75),exact=True),'星级变更')
-                if not dialog.find('现在的★',(250,95,400,140),exact=True):
+                if not star_change_dialog_ready(dialog):
                     raise EventUIError('星级变更弹窗内容未知')
                 ui.click((780,146));dialog=ui.capture()
                 button=dialog.find('变更',(480,450,710,515),exact=True)

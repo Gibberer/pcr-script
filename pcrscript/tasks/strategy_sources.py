@@ -14,6 +14,7 @@ from .strategy_inputs import preferred_sources,validate_urls
 PARSER_VERSION = 19
 
 MANUAL_PART = re.compile(r'半自动|手动|目押|卡轴|(?:\d+|[一二三四五六七八九十])押|改星|调星|切星|降星|星级变更|TP\s*\+\s*2|大师点', re.I)
+BORROW_PART = re.compile(r'借(?:人|角|用|好友|支援|[A-Za-z]|[\u4e00-\u9fff])|使用支援')
 UNVERIFIED_SETTING = re.compile(r'TP\s*\+\s*2|大师点', re.I)
 ABYSS_ELEMENT_LABELS = {'fire': '火', 'water': '水', 'wind': '风', 'light': '光', 'dark': '暗'}
 
@@ -34,6 +35,7 @@ def source_queries(terms: list[str], stage: str, effort: str, *, kind: str,
         queries.append('公主连结 '+terms[min(1, len(terms)-1)]+' 攻略')
     if kind == 'abyss' and stage and effort == 'high':
         short = ABYSS_ELEMENT_LABELS.get(element, terms[-1].replace('属性', ''))
+        chapter = stage.split('-')[0]
         queries.extend([
             f'公主连结 深域 {short} {stage}',
             f'{short}{stage} 全set',
@@ -43,6 +45,8 @@ def source_queries(terms: list[str], stage: str, effort: str, *, kind: str,
             f'公主连结 {terms[0]} 一图流',
             f'公主连结 {short}深域 通关阵容',
             f'公主连结 国服 {short}深域{stage} 最新 自动',
+            f'{terms[0]}{chapter}图',
+            f'{short}深域{chapter}图',
         ])
     return list(dict.fromkeys(queries))
 
@@ -91,13 +95,14 @@ def unusable_abyss_media(pages: list[dict], stage: str, options: dict) -> str | 
         selected = exact or pages
     limit = float(options.get('max_video_seconds', 180))
     for page in selected:
-        if options.get('skip_manual_media') and MANUAL_PART.search(page['title']):
+        if options.get('skip_manual_media') and (MANUAL_PART.search(page['title'])
+                                                  or BORROW_PART.search(page['title'])):
             continue
         duration = page.get('duration')
         if options.get('skip_long_media') and duration is not None and float(duration) > limit:
             continue
         return None
-    return '目标分P均明确要求手动操作或超出自动解析时长上限'
+    return '目标分P均明确要求手动操作、借角或超出自动解析时长上限'
 
 def clean(value: Any) -> str:
     return html.unescape(re.sub(r'<[^>]*>', '', str(value or ''))).strip()
@@ -106,7 +111,7 @@ def relevant(text: str, terms: list[str]) -> bool:
     return any(re.search(r'(?<![a-z0-9])'+re.escape(term)+r'(?![a-z0-9])', text, re.I)
                if term.isascii() else term.casefold() in text.casefold() for term in terms)
 
-def discover_sources(options: dict, *, api=None) -> dict:
+def discover_sources(options: dict, *, api=None, check=lambda: None) -> dict:
     area = options.get('area', '')
     if not isinstance(area, str):
         raise ValueError('area必须为明确的目标名称')
@@ -176,9 +181,11 @@ def discover_sources(options: dict, *, api=None) -> dict:
                     found[bvid] = dict(bvid=bvid, queries=['recent_verified_catalog'],
                                        search_rank=rank-len(prior))
     errors = []
+    check()
     preferred,preferred_errors=preferred_sources(urls,api,timeout=timeout)
     errors.extend(dict(stage='preferred_source',**e) for e in preferred_errors)
     for query in queries:
+        check()
         try:
             result = api.search(query)
             if result.get('code') != 0:
@@ -215,6 +222,7 @@ def discover_sources(options: dict, *, api=None) -> dict:
         items = sorted(found.items(), key=lambda pair: pair[1]['search_rank'])
     metadata_limit = max(72, limit*8) if high_abyss else max(24, limit*4)
     for bvid,item in items[:metadata_limit]:
+        check()
         if not high_abyss and len(candidates) >= limit: break
         try:
             response = api.getVideoInfo(bvid=bvid)

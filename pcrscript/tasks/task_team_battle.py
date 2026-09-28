@@ -38,6 +38,7 @@ class TaskDeadline(EventUIError):
 
 
 ORPHAN_EXTENSION = '__visible_extension_team__'
+MAX_RECOMMENDATION_SWIPES = 120
 
 
 @register('team_battle', requires_home=True)
@@ -80,6 +81,9 @@ class TeamBattle(TimeLimitTask):
 
     def save_report(self):
         (self.ui.output/'report.json').write_text(json.dumps(self.report, ensure_ascii=False, indent=2), encoding='utf-8')
+
+    def log(self, message: str) -> None:
+        print('[团队战] '+message, flush=True)
 
     def check_deadline(self):
         if time.monotonic() >= self.deadline:
@@ -307,6 +311,43 @@ class TeamBattle(TimeLimitTask):
                          and self.recommendation_save_state(s, button)[1] is False,
                          '取消保存推荐队伍', timeout=8)
 
+    @staticmethod
+    def recommendation_scroll_position(screen):
+        # The blue thumb is fixed at x=922 on the tested 960x540 layout.
+        column = cv.cvtColor(screen.image[190:414, 920:925], cv.COLOR_BGR2HSV)
+        blue = ((column[:, :, 0] > 90) & (column[:, :, 0] < 130)
+                & (column[:, :, 1] > 80) & (column[:, :, 2] > 80))
+        rows = np.flatnonzero(np.count_nonzero(blue, axis=1) >= 3)
+        if len(rows) < 5:
+            return None
+        return int(rows[0]+190), int(rows[-1]+190)
+
+    @classmethod
+    def recommendation_at_end(cls, screen, *, up: bool) -> bool:
+        position = cls.recommendation_scroll_position(screen)
+        return bool(position and (position[1] >= 409 if up else position[0] <= 196))
+
+    def scroll_recommendations(self, *, up: bool) -> bool:
+        before = self.ui.capture()
+        if not self.recommendation_list(before):
+            raise EventUIError('推荐编组列表已离开，停止滑动')
+        old_position = self.recommendation_scroll_position(before)
+        old = sha256(before.image[185:425, 35:915].tobytes()).digest()
+        # The damage column has no portrait hit target. Portraits may open a
+        # character page when held by a swipe.
+        start, end = ((120, 360), (120, 260)) if up else ((120, 260), (120, 360))
+        self.ui.swipe(start, end, duration=250)
+        time.sleep(.8)
+        after = self.ui.wait(lambda s: self.recommendation_list(s)
+                             or s.find('角色强化', (30, 0, 195, 65), exact=True),
+                             '推荐列表滑动后页面', timeout=8)
+        if not self.recommendation_list(after):
+            raise EventUIError('推荐列表滑动进入角色页面，停止后续输入')
+        new_position = self.recommendation_scroll_position(after)
+        if old_position is not None and new_position is not None:
+            return new_position != old_position
+        return sha256(after.image[185:425, 35:915].tobytes()).digest() != old
+
     def recommendation(self, wanted=None, boss_hp=None):
         """Use advanced recommendations; a missing or occupied member rejects the row."""
         self.ui.expect_click('推荐编组', (770, 20, 925, 70), exact=True)
@@ -315,96 +356,114 @@ class TeamBattle(TimeLimitTask):
         if not advanced:
             raise EventUIError('推荐编组高级标签未知')
         self.ui.click(advanced)
-        for _ in range(24):
-            self.check_deadline()
-            screen = self.ui.capture()
-            if not self.recommendation_list(screen):
-                raise EventUIError('推荐编组列表已离开，停止滑动')
-            buttons = sorted(screen.all('使用', (625, 195, 800, 425)),
-                             key=lambda button: recommendation_time(screen, button.center[1]) or 10_000)
-            for button in buttons:
-                signature = self.recommendation_signature(screen, button)
-                if signature is None:
-                    continue
-                estimate = recommendation_time(screen, button.center[1])
-                reference = recommendation_damage(screen, button.center[1])
-                # A row at the bottom can show "使用" while its damage or time
-                # is clipped. Revisit it after a short scroll instead of
-                # recording it as a rejected recommendation.
-                if estimate is None or reference is None:
-                    continue
-                # Damage/time belong to the source record. Rejecting that
-                # record must not blacklist every row with the same portraits.
-                signature = f'{signature}-{reference}-{estimate}'
-                if signature in self.tried and wanted is None:
-                    continue
-                if ((boss_hp is not None and reference > boss_hp)
-                        or (boss_hp is not None and reference == boss_hp
-                            and 2*estimate+8 > 110)):
+        for refresh_pass in range(2):
+            still_count = 0
+            for _ in range(MAX_RECOMMENDATION_SWIPES):
+                self.check_deadline()
+                screen = self.ui.capture()
+                if not self.recommendation_list(screen):
+                    raise EventUIError('推荐编组列表已离开，停止滑动')
+                buttons = sorted(screen.all('使用', (625, 195, 800, 425)),
+                                 key=lambda button: recommendation_time(screen, button.center[1]) or 10_000)
+                for button in buttons:
+                    signature = self.recommendation_signature(screen, button)
+                    if signature is None:
+                        continue
+                    estimate = recommendation_time(screen, button.center[1])
+                    reference = recommendation_damage(screen, button.center[1])
+                    # A row at the bottom can show "使用" while its damage or time
+                    # is clipped. Revisit it after a short scroll instead of
+                    # recording it as a rejected recommendation.
+                    if estimate is None or reference is None:
+                        continue
+                    # Damage/time belong to the source record. Rejecting that
+                    # record must not blacklist every row with the same portraits.
+                    signature = f'{signature}-{reference}-{estimate}'
+                    if signature in self.tried and wanted is None:
+                        continue
+                    if ((boss_hp is not None and reference > boss_hp)
+                            or (boss_hp is not None and reference == boss_hp
+                                and 2*estimate+8 > 110)):
+                        self.tried.add(signature)
+                        continue
+                    if not self.recommendation_owned(screen, button):
+                        self.tried.add(signature)
+                        continue
+                    if self.recommendation_restricted(screen, button):
+                        self.tried.add(signature)
+                        continue
+                    self.ensure_recommendation_unsaved(screen, button)
+                    self.ui.click(button)
+                    time.sleep(1.5)
+                    formation = self.ui.wait(lambda s: self.formation_ready(s)
+                                             or (s.find('未持有|无法使用|无法编组', (250, 135, 750, 395))
+                                                 and s.find('关闭|确认|取消', (250, 370, 720, 525), exact=True)
+                                                 and not s.find('队伍编组', (300, 0, 650, 70), exact=True)),
+                                             '推荐队伍使用', timeout=15)
+                    if not self.formation_ready(formation):
+                        self.tried.add(signature)
+                        close = formation.find('关闭|确认|取消', (250, 370, 720, 525), exact=True)
+                        if not close:
+                            raise EventUIError('推荐队伍不可用弹窗缺少可识别关闭按钮')
+                        self.ui.click(close)
+                        self.ui.wait(lambda s: s.find('推荐编组', (380, 15, 570, 70), exact=True), '推荐队伍不可用返回')
+                        continue
+                    names = self.team(formation)
+                    reason = None
+                    if names is None:
+                        reason = '编队实际不足五人'
+                    elif wanted is not None and names != wanted:
+                        reason = '五头像与目标队伍不符'
+                    elif names in self.tried_teams:
+                        reason = '同一五头像队伍已经模拟'
+                    elif self.unavailable_team(names):
+                        reason = '头像与本次已参战成员重复'
+                    elif self.used_member_marked(formation):
+                        reason = '编队显示已参加团队战文字'
+                    if reason is None:
+                        self.teams[names]['estimated_seconds'] = estimate
+                        self.teams[names]['reference_damage'] = reference
+                        self.tried.add(signature)
+                        self.tried_teams.add(names)
+                        return names
+                    from ..run_session import emit
+                    evidence = str(self.ui.save(f'team_battle_rejected_{signature}', formation))
+                    emit('team_battle.recommendation', decision='rejected', reason=reason,
+                         team=names, evidence=evidence)
+                    self.log('推荐队伍跳过：'+reason)
                     self.tried.add(signature)
-                    continue
-                if not self.recommendation_owned(screen, button):
-                    self.tried.add(signature)
-                    continue
-                if self.recommendation_restricted(screen, button):
-                    self.tried.add(signature)
-                    continue
-                self.ensure_recommendation_unsaved(screen, button)
-                self.ui.click(button)
-                time.sleep(1.5)
-                formation = self.ui.wait(lambda s: self.formation_ready(s)
-                                         or (s.find('未持有|无法使用|无法编组', (250, 135, 750, 395))
-                                             and s.find('关闭|确认|取消', (250, 370, 720, 525), exact=True)
-                                             and not s.find('队伍编组', (300, 0, 650, 70), exact=True)),
-                                         '推荐队伍使用', timeout=15)
-                if not self.formation_ready(formation):
-                    self.tried.add(signature)
-                    close = formation.find('关闭|确认|取消', (250, 370, 720, 525), exact=True)
-                    if not close:
-                        raise EventUIError('推荐队伍不可用弹窗缺少可识别关闭按钮')
-                    self.ui.click(close)
-                    self.ui.wait(lambda s: s.find('推荐编组', (380, 15, 570, 70), exact=True), '推荐队伍不可用返回')
-                    continue
-                names = self.team(formation)
-                reason = None
-                if names is None:
-                    reason = '编队实际不足五人'
-                elif wanted is not None and names != wanted:
-                    reason = '五头像与目标队伍不符'
-                elif names in self.tried_teams:
-                    reason = '同一五头像队伍已经模拟'
-                elif self.unavailable_team(names):
-                    reason = '头像与本次已参战成员重复'
-                elif self.used_member_marked(formation):
-                    reason = '编队显示已参加团队战文字'
-                if reason is None:
-                    self.teams[names]['estimated_seconds'] = estimate
-                    self.teams[names]['reference_damage'] = reference
-                    self.tried.add(signature)
-                    self.tried_teams.add(names)
-                    return names
-                from ..run_session import emit
-                evidence = str(self.ui.save(f'team_battle_rejected_{signature}', formation))
-                emit('team_battle.recommendation', decision='rejected', reason=reason,
-                     team=names, evidence=evidence)
-                self.log('推荐队伍跳过：'+reason)
-                self.tried.add(signature)
-                self.ui.expect_click('取消', (630, 425, 775, 500), exact=True)
-                screen = self.ui.wait(lambda s: s.find('推荐编组', (380, 15, 570, 70), exact=True), '返回推荐编组')
-            before = self.ui.capture()
-            if not self.recommendation_list(before):
-                raise EventUIError('推荐编组列表已离开，停止滑动')
-            old = sha256(before.image[185:425, 35:915].tobytes()).digest()
-            # The center of the row contains portraits; holding there opens a
-            # character page. The damage column has no portrait hit target.
-            self.ui.swipe((120, 360), (120, 260), duration=250)
-            after = self.ui.wait(lambda s: self.recommendation_list(s)
-                                 or s.find('角色强化', (30, 0, 195, 65), exact=True),
-                                 '推荐列表滑动后页面', timeout=8)
-            if not self.recommendation_list(after):
-                raise EventUIError('推荐列表滑动进入角色页面，停止后续输入')
-            if sha256(after.image[185:425, 35:915].tobytes()).digest() == old:
-                break
+                    self.ui.expect_click('取消', (630, 425, 775, 500), exact=True)
+                    screen = self.ui.wait(lambda s: s.find('推荐编组', (380, 15, 570, 70), exact=True), '返回推荐编组')
+                if self.recommendation_at_end(self.ui.capture(), up=True):
+                    break
+                if self.scroll_recommendations(up=True):
+                    still_count = 0
+                else:
+                    still_count += 1
+                    if still_count >= 2:
+                        break
+            else:
+                raise EventUIError('推荐列表超过翻页上限，未确认已检查到底部')
+            if refresh_pass == 0:
+                self.check_deadline()
+                self.ui.expect_click('列表更新', (780, 445, 925, 510), exact=True)
+                time.sleep(.8)
+                self.ui.wait(self.recommendation_list, '推荐列表更新后页面', timeout=10)
+                # Updating may leave the list at its old position. Return to
+                # the first row before scanning the new queue.
+                still_count = 0
+                for _ in range(MAX_RECOMMENDATION_SWIPES):
+                    self.check_deadline()
+                    if self.recommendation_at_end(self.ui.capture(), up=False):
+                        break
+                    if self.scroll_recommendations(up=False):
+                        still_count = 0
+                    else:
+                        still_count += 1
+                        if still_count >= 2:
+                            break
+                else:
+                    raise EventUIError('更新后推荐列表超过回顶部上限')
         self.ui.expect_click('关闭', (375, 445, 585, 510), exact=True)
         return None
 

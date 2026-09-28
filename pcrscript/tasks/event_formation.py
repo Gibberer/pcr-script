@@ -7,6 +7,7 @@ from ..game_ui.screen import EventUI, EventScreen
 from dataclasses import asdict
 import json
 import re
+import subprocess
 from uuid import uuid4
 from pcrscript.run_session import clock as time
 
@@ -32,6 +33,18 @@ def skill_title_pattern(title: str) -> str:
     # Musical decoration is sometimes omitted by OCR. Keep every actual word
     # and the evolution '+' exact; only the decorative note is optional.
     return re.escape(normalized(title)).replace('♪', '[♪♫]?')
+
+
+def search_text_confirmed(base: str, screen: EventScreen) -> bool:
+    """Confirm the typed term inside the search field despite faint glyphs."""
+    entered = normalized(' '.join(item.text for item in screen.items
+                                  if item.score >= .75
+                                  and 300 <= item.center[0] <= 640
+                                  and 110 <= item.center[1] <= 165))
+    for expected, mistaken in (('千爱瑠', '干爱瑠'), ('千歌', '干歌')):
+        if base == expected:
+            entered = entered.replace(mistaken, expected)
+    return base in entered
 
 
 class EventFormation:
@@ -238,20 +251,30 @@ class EventFormation:
         for member in party.members:
             print(f"[剧情活动] 搜索并核对 {member.name}", flush=True)
             base = normalized(member.name).split('(')[0]
+            input_failed = False
             for _ in range(3):
                 self.ui.click((691, 135))  # Reset only the text-search field.
                 self.ui.click((480, 136), delay=.3)
-                self.ui.driver.input(base)
+                try:
+                    self.ui.driver.input(base)
+                except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):
+                    # An ldconsole process can fail before acknowledging its
+                    # input. Start the next attempt by resetting the field;
+                    # a blind retry could append the same name twice.
+                    input_failed = True
+                    continue
                 time.sleep(1)  # ldconsole queues input asynchronously.
                 self.ui.click(self.defocus, delay=1)
                 s = self.ui.capture()
                 if not s.find('队伍编组', (300, 0, 650, 70)):
                     raise EventUIError('角色搜索后未处于编队页面')
-                entered = normalized(s.text((300, 110, 640, 165))).replace('干爱瑠', '千爱瑠')
-                if base in entered:
+                if search_text_confirmed(base, s):
                     break
             else:
+                s = self.ui.capture()
                 self.ui.save('search_input_unconfirmed', s)
+                if input_failed:
+                    raise EventUIError('后台角色搜索输入失败，未判断缺少角色：'+member.name)
                 raise EventUIError('搜索词未确认写入，不能判断缺少角色：'+member.name)
             self.ui.save("search_"+normalized(member.name), s)
             if not s.find("队伍编组", (300, 0, 650, 70)):
@@ -308,7 +331,9 @@ class EventFormation:
             raise EventUIError("当前队伍未能清空")
         self.ui.expect_click("全部", (30, 65, 115, 108), exact=True)
         for _ in range(10):
-            self.ui.swipe((670, 145), (670, 353))
+            # Drag beside the cards. A drag starting on a portrait can open
+            # character details instead of scrolling the roster.
+            self.ui.swipe((914, 200), (914, 340))
         pending = {normalized(m.name): m for m in party.members}
         scanned = set()
         previous = None
@@ -367,7 +392,7 @@ class EventFormation:
             if not pending or signature == previous:
                 break
             previous = signature
-            self.ui.swipe((660, 330), (660, 220))
+            self.ui.swipe((914, 340), (914, 200))
         if pending or failures:
             return False, {"missing": list(pending), "unready": failures}
         actual_party = self.inspect_current()

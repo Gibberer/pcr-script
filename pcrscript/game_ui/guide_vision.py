@@ -44,19 +44,21 @@ def battle_rectangles(image, *, relaxed=False) -> list[tuple[int, int, int, int]
     mask[:round(height*.65)] = 0
     contours, _ = cv.findContours(mask, cv.RETR_LIST, cv.CHAIN_APPROX_SIMPLE)
     boxes = [cv.boundingRect(c) for c in contours]
-    boxes = [r for r in boxes if .075*width <= r[2] <= .12*width
-             and (.86 if relaxed else .9) <= r[2]/r[3] <= 1.12
+    boxes = [r for r in boxes if .07*width <= r[2] <= .12*width
+             and .78 <= r[2]/r[3] <= 1.12
              and r[1]+r[3] < height*(.96 if relaxed else .94)]
-    # Nested outlines should contribute only one anchor each.
+    # The inner border remains separate when a SET bubble joins the outer one.
     anchors = []
-    for r in sorted(boxes, key=lambda r: -r[2]*r[3]):
+    for r in sorted(boxes, key=lambda r: r[2]*r[3]):
         if not any(abs(r[0]+r[2]/2-a[0]-a[2]/2) < width*.03 for a in anchors):
             anchors.append(r)
     if not 3 <= len(anchors) <= 6:
         return []
     size = float(np.median([r[2] for r in anchors]))
+    card_height = float(np.median([r[3] for r in anchors]))
     tolerance = .15 if relaxed else .10
-    anchors = [r for r in anchors if abs(r[2]-size) < size*tolerance and abs(r[3]-size) < size*tolerance]
+    anchors = [r for r in anchors if abs(r[2]-size) < size*tolerance
+               and abs(r[3]-card_height) < card_height*tolerance]
     if len(anchors) < 3:
         return []
     anchors.sort(key=lambda r: r[0])
@@ -66,7 +68,7 @@ def battle_rectangles(image, *, relaxed=False) -> list[tuple[int, int, int, int]
     if not 1.1*size < step < 1.5*size:
         return []
     positions = np.rint((centers-centers[0])/step).astype(int)
-    if np.max(np.abs(centers-(centers[0]+positions*step))) > size*.06 or positions[-1] > 4:
+    if np.max(np.abs(centers-(centers[0]+positions*step))) > size*.08 or positions[-1] > 4:
         return []
     top = float(np.median([r[1] for r in anchors]))
     if max(abs(r[1]-top) for r in anchors) > size*tolerance:
@@ -76,7 +78,7 @@ def battle_rectangles(image, *, relaxed=False) -> list[tuple[int, int, int, int]
     # contour list. Infer its slot only if all five real cyan borders exist.
     for first_slot in range(5-int(positions[-1])):
         origin = centers[0]-first_slot*step
-        result = [(round(origin+i*step-size/2), round(top), round(size), round(size))
+        result = [(round(origin+i*step-size/2), round(top), round(size), round(card_height))
                   for i in range(5)]
         borders = []
         for x, y, w, h in result:
@@ -278,7 +280,7 @@ def combat_auto(image, texts: list[GuideText]) -> bool | None:
     """Read the labeled combat AUTO button, independently from member SET."""
     height, width = image.shape[:2]
     labels = [t for t in texts if t.score >= .95 and t.text.upper() in ('自动', 'AUTO')
-              and t.center[0] > width*.9 and height*.70 < t.center[1] < height*.85]
+              and t.center[0] > width*.86 and height*.70 < t.center[1] < height*.85]
     if len(labels) != 1:
         return None
     x, y, w, h = labels[0].rectangle

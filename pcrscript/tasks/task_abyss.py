@@ -14,7 +14,7 @@ from .abyss_history import AbyssHistory, team_key, previous_stage_key
 from .abyss_retry import combat_sample, retry_decision
 from .strategy_video import acquire_strategies, task_source_options
 from .strategy_document import abyss_candidate
-from ..game_ui.character_stars import upgrade_to_five
+from ..game_ui.character_stars import upgrade_to_five, star_change_dialog_ready
 from ..game_ui.character_equipment import inspect_unreleased_equipment
 from ..game_ui.special_equipment import inspect_special_equipment, auto_equip_special
 from ..game_ui.abyss import AREAS, AbyssStage, map_element, next_stage, detail_stage, remaining, advanced
@@ -154,7 +154,8 @@ class AbyssPush(BaseTask):
         options = validate_options(config.get(cls.config_section, {}))
         if options['prepare_only']:
             emit('progress', scope='action', label='获取并解析深域攻略', unit='task')
-            return (), {}, acquire_strategies(task_source_options('abyss', options))
+            return (), {}, acquire_strategies(task_source_options('abyss', options),
+                                               check=checkpoint)
         return (), {}, None
 
     def __init__(self, robot, options: dict | None = None) -> None:
@@ -355,6 +356,11 @@ class AbyssPush(BaseTask):
                 continue
             if self.login_bonus_dialog(screen):
                 continue
+            if (screen.find(r'\d+月团队战最终日[！!]?', (300, 55, 670, 115), exact=True)
+                    and screen.find('团队战活动期间结束', (350, 250, 620, 315), exact=True)):
+                self.ui.save('abyss_clan_battle_final_day_notice', screen)
+                self.ui.expect_click('关闭', (365, 395, 590, 475), exact=True)
+                continue
             if self.story_dialog(screen):
                 continue
             current = map_element(screen)
@@ -394,6 +400,10 @@ class AbyssPush(BaseTask):
                 # Recheck material and cost on the next run rather than
                 # carrying a previously open purchase confirmation forward.
                 self.ui.expect_click('取消', (250, 440, 490, 515), exact=True)
+            elif star_change_dialog_ready(screen):
+                # An interrupted star setting is rebuilt from the character
+                # page. Only dismiss this identified, uncommitted dialog.
+                self.ui.expect_click('取消', (250, 440, 490, 515), exact=True)
             elif screen.find('记忆碎片获取方法', (250, 0, 720, 75), exact=True):
                 self.ui.expect_click('关闭', (350, 440, 620, 510), exact=True)
             elif screen.find('购买完毕', (250, 105, 710, 175), exact=True):
@@ -422,7 +432,11 @@ class AbyssPush(BaseTask):
             elif screen.find('商店', (40, 0, 200, 65), exact=True):
                 button=(screen.find('冒险',(475,480,590,540),exact=True)
                         or screen.find('我的主页',(30,480,130,540),exact=True))
-                if button is None:raise EventUIError('商店底栏导航未知')
+                if button is None:
+                    done=screen.find('确定',(820,440,940,530),exact=True)
+                    if done is None:raise EventUIError('商店底栏导航未知')
+                    self.ui.click(done)
+                    continue
                 self.ui.click(button)
             elif screen.find('角色强化', (40, 0, 250, 65), exact=True):
                 self.ui.click((30, 30))
