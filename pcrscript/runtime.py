@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import Any, Type
 import copy
 import json
+import subprocess
 import yaml
 
 from pcrscript import DNSimulator, GeneralSimulator, Robot
@@ -105,24 +106,29 @@ def open_leidian_emulator(dnpath: str) -> int:
     # 检查当前运行的程序有没有雷电模拟器
     simulator = DNSimulator(dnpath, useADB=False)
     simulator.start()
-    retry_count = 0
-    while retry_count < 10:
-        if simulator.online():
-            # simulator.move_to_screen(1)
-            print("the emulator is ready.")
-            break
-        else:
+    last_error = None
+    for attempt in range(10):
+        try:
+            if simulator.online():
+                print("the emulator is ready.")
+                break
+            last_error = None
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
+            last_error = error
+            detail = (f'退出码 0x{error.returncode & 0xffffffff:08X}'
+                      if isinstance(error, subprocess.CalledProcessError) else '查询超过 15 秒')
+            print(f'雷电设备查询 list2 失败（{detail}），启动检查 {attempt + 1}/10', flush=True)
+        if attempt < 9:
             print("no emulator detected, wait for 20 seconds")
             time.sleep(20)
-            retry_count += 1
-    if retry_count >= 10:
+    else:
+        if last_error is not None:
+            raise RuntimeError(f'雷电启动检查已达 10 次上限，最后一次设备查询失败（{detail}）') from last_error
         print("exit cannot found device")
         return -1
-    else:
-        print("try start princess connect application")
-        time.sleep(10)
-        exit_code = simulator.open_app("com.bilibili.priconne")
-        return exit_code
+    print("try start princess connect application")
+    time.sleep(10)
+    return simulator.open_app("com.bilibili.priconne")
 
 def modify_task_list(news: EventNews, task_list: list[list[Any]]) -> None:
     for i in range(len(task_list) - 1, -1, -1):
