@@ -14,7 +14,7 @@ from .abyss_history import AbyssHistory, team_key, previous_stage_key
 from .abyss_retry import combat_sample, retry_decision
 from .strategy_video import acquire_strategies, task_source_options
 from .strategy_document import abyss_candidate
-from ..game_ui.character_stars import upgrade_to_five
+from ..game_ui.character_stars import upgrade_to_five, star_change_dialog_ready
 from ..game_ui.character_equipment import inspect_unreleased_equipment
 from ..game_ui.special_equipment import inspect_special_equipment, auto_equip_special
 from ..game_ui.abyss import AREAS, AbyssStage, map_element, next_stage, detail_stage, remaining, advanced
@@ -400,8 +400,7 @@ class AbyssPush(BaseTask):
                 # Recheck material and cost on the next run rather than
                 # carrying a previously open purchase confirmation forward.
                 self.ui.expect_click('取消', (250, 440, 490, 515), exact=True)
-            elif (screen.find('★变更确认', (300, 0, 650, 75), exact=True)
-                  and screen.find('现在的★', (475, 85, 635, 135), exact=True)):
+            elif star_change_dialog_ready(screen):
                 # An interrupted star setting is rebuilt from the character
                 # page. Only dismiss this identified, uncommitted dialog.
                 self.ui.expect_click('取消', (250, 440, 490, 515), exact=True)

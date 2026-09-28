@@ -229,6 +229,13 @@ def buy_shards(ui,name,missing,report,save,allow_amulets):
     raise EventUIError('碎片兑换达到分批保护上限')
 
 
+def star_change_dialog_ready(frame):
+    # The current-star label sits above the selected column: it is left for
+    # active 3★ and central for active 4★.
+    return bool(frame.find('★变更确认',(250,0,710,75),exact=True)
+                and frame.find('现在的★',(200,85,870,145),exact=True))
+
+
 def upgrade_to_five(ui,name,report,save,*,allow_amulets=False):
     report.update(name=name,purchases=[],upgrades=[],status='checking');save()
     for step in range(5):
@@ -241,7 +248,7 @@ def upgrade_to_five(ui,name,report,save,*,allow_amulets=False):
             if current<5:
                 ui.click((34,98))
                 dialog=ui.wait(lambda frame:frame.find('★变更确认',(250,0,710,75),exact=True),'星级变更')
-                if not dialog.find('现在的★',(475,85,635,135),exact=True):
+                if not star_change_dialog_ready(dialog):
                     raise EventUIError('星级变更弹窗内容未知')
                 ui.click((780,146));dialog=ui.capture()
                 button=dialog.find('变更',(480,450,710,515),exact=True)

@@ -144,6 +144,15 @@ class AbyssTests(TestCase):
         self.assertEqual(next_stage(task.enter('fire'))[0],AbyssStage('fire',3,1))
         task.ui.expect_click.assert_called_once_with('取消',(250,440,490,515),exact=True)
 
+    def test_enter_cancels_uncommitted_three_star_change(self):
+        task=object.__new__(AbyssPush);task.deadline=float('inf');task.ui=Mock()
+        dialog=screen(('★变更确认',480,42),('现在的★',315,110),
+                      ('取消',370,479),('变更',590,479))
+        task.ui.capture.side_effect=[dialog,map_screen()]
+        task.ui.wait.return_value=map_screen()
+        self.assertEqual(next_stage(task.enter('fire'))[0],AbyssStage('fire',3,1))
+        task.ui.expect_click.assert_called_once_with('取消',(250,440,490,515),exact=True)
+
     def test_enter_dismisses_post_win_clan_battle_cp_notice(self):
         task=object.__new__(AbyssPush);task.deadline=float('inf');task.ui=Mock()
         notice=screen(('挑战团队战吧',480,90),('团队战的挑战次数增加了1次',480,285),
