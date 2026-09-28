@@ -63,4 +63,4 @@ notepad daily_config.yml
 
 ## 开发
 
-想修改脚本，可以下载完整仓库，也可以把项目文件夹交给 AI Agent 协助开发。工程说明见 [文档索引](docs/README.md)，打包方法见 [构建与发布](docs/releases.md)。账号配置和游戏截图请留在本地，不要上传到仓库。
+想修改脚本，可以下载完整仓库，也可以把项目文件夹交给 AI Agent 协助开发。工程说明见 [文档索引](docs/README.md)，打包方法见 [构建与发布](docs/releases.md)。
