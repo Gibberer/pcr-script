@@ -42,11 +42,21 @@ $env:NUGET_PACKAGES = (Resolve-Path cache/build/nuget).Path
 
 构建使用 .NET 10 SDK，输出面向系统 .NET Framework 4.8 的 x64 GUI，不捆绑 .NET 10 运行时。验证脚本使用合成配置、下载到临时目录、离屏渲染页面，并测试辅助进程超时终止；本地另用真实 WPF 窗口复核日常列表与添加对话框。不操作模拟器。截图不能代替真实游戏验收。
 
+修改首次安装流程或便携工具版本时，额外运行联网安装验证：
+
+```powershell
+./test/verify_desktop_bootstrap.ps1
+```
+
+它在忽略的 `cache/build/bootstrap-<UUID>/` 下载全新工具，校验 SHA-256、测试缺少 PATH 中 Git 时的回退，创建新 `.venv`，禁用 pip 下载缓存安装依赖，执行 `pip check`、关键模块导入与任务目录加载。不修改用户 GUI 设置，不连接游戏设备；日志留在该目录。此检查验证实际安装能力，不代表干净 Windows（系统 DLL、权限、手机驱动等）的完整验收。离线 GUI 烟测另覆盖错误校验值和 ZIP 路径越界拒绝。
+
+便携工具版本和 SHA-256 唯一维护在 `desktop/PcrDesktop/PortableTools.cs`，更新时核对官方来源、下载校验值并重新执行联网安装验证。Python 使用官方 [NuGet 分发](https://docs.python.org/3.12/using/windows.html#the-nuget-org-packages)，包含 `venv` 和 `ensurepip`；Git 使用 [Git for Windows 的 MinGit](https://github.com/git-for-windows/git/releases)；ADB 来自 [Google Platform Tools](https://developer.android.com/tools/releases/platform-tools)，固定版本地址以官方 SDK 清单为准。解压保留各包许可文件；用户点击 ADB 下载前需在界面阅读并接受 SDK 许可。
+
 ## 合并后发布
 
 1. 确认 PR 已审核、合并进 `master`，并确认 Windows GUI 检查通过。
 2. 在要发布的已合并提交上创建一个新的 `gui-v<版本号>` 标签并推送。不要复用或移动旧发布标签。
-3. `Windows GUI` 工作流先执行 Python 回归、GUI 编译、核心/完整下载验证、离屏界面验证与 5 MB 体积检查，生成 ZIP 和 SHA-256。
+3. `Windows GUI` 工作流先执行 Python 回归、GUI 编译、核心/完整下载验证、离屏界面验证与 5 MB 体积检查；标签发布和手动构建还需通过全新工具及依赖的联网安装验证，再生成 ZIP 和 SHA-256。
 4. 发布 job 下载这一次构建的 Artifact，确认标签提交属于 `master`、核对 SHA-256，再创建 GitHub Release，附上 `PcrDesktop-win-x64.zip` 与 `SHA256SUMS.txt`。同名 Release 已存在则停止，不覆盖已发布文件。
 5. 从 Release 页面重新下载文件，核对 SHA-256，在干净 Windows 环境验证解压、首次引导、工程下载及依赖安装。正常日常中的游戏操作验收沿用知识库待办，不为打包而重复消费。
 
@@ -55,6 +65,8 @@ $env:NUGET_PACKAGES = (Resolve-Path cache/build/nuget).Path
 ## 交付内容
 
 用户下载可直接启动的 GUI ZIP，必须一起保留 EXE、DLL、`.exe.config`。GUI 内部下载 Python 源码和图片；默认只取核心运行目录，不要求用户提前 clone 整个仓库。默认源码分支为 `master`。旧版的默认开发分支设置自动迁移到 `master`，用户明确设置的其他分支仍保留，可在环境设置中自行切换。
+
+运行前不要求用户预装 Git/Python：GUI 按需下载固定版本便携工具，放在 `%LOCALAPPDATA%/PcrDesktop/tools/`，工程依赖只装入其 `.venv`。手机 ADB 可在 GUI 下载，USB 调试、手机授权和必要的厂商驱动仍由用户准备。发布包使用说明须与 [GUI 指南](guides/desktop.md) 同步，不能只更新仓库 README。
 
 不打包账号、实际配置、游戏数据库、头像、视频、作业或运行证据。源码更新为显式快进更新，GUI EXE 更新仍通过下载新 Release 包完成。暂未提供自动回滚或版本隔离的 Python 依赖环境。
 

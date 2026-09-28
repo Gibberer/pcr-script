@@ -235,13 +235,13 @@ class DNDriver(Win32Driver):
         self._init_window_info()
 
     def _cmd(self, cmd, ret=False):
-        # 雷电窗口模式不得在截图/点击失败后偷偷切换到 ADB。
+        # 雷电模拟器窗口模式不得在截图/点击失败后偷偷切换到 ADB。
         self._assert_adb_allowed()
         return super()._cmd(cmd, ret)
 
     def _assert_adb_allowed(self):
         if self.click_by_mouse:
-            raise RuntimeError("雷电窗口操作失败（已禁用 ADB 回退），请检查模拟器窗口是否存在")
+            raise RuntimeError("雷电模拟器窗口操作失败（已禁用 ADB 回退），请检查模拟器窗口是否存在")
     
 
     def _init_window_info(self):

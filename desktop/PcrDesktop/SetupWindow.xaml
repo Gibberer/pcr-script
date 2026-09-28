@@ -1,40 +1,52 @@
 <Window x:Class="PcrDesktop.SetupWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Style="{StaticResource AppWindow}" Title="PCR · 首次使用设置" Width="760" Height="730" ResizeMode="NoResize" WindowStartupLocation="CenterScreen" Background="#F3F5F8" Closing="Setup_Closing">
+        Style="{StaticResource AppWindow}" Title="PCR · 首次使用设置" Width="790" Height="760" MinWidth="720" MinHeight="640" WindowStartupLocation="CenterScreen" Background="#F3F5F8" Closing="Setup_Closing">
   <Grid Margin="26">
     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-    <StackPanel Margin="0,0,0,18"><TextBlock Text="选择项目工程" FontSize="26" FontWeight="SemiBold" Foreground="#172B46"/>
-      <TextBlock Text="只需选择有效的项目目录即可进入控制台；设备和 Python 可以稍后配置。" TextWrapping="Wrap" Margin="0,10,0,0" Foreground="#586578"/></StackPanel>
+    <StackPanel Margin="0,0,0,14"><TextBlock Text="准备首次运行" FontSize="26" FontWeight="SemiBold" Foreground="#172B46"/>
+      <TextBlock Text="选择项目保存位置，连接雷电模拟器或手机，然后准备运行环境。" TextWrapping="Wrap" Margin="0,8,0,0" Foreground="#586578"/></StackPanel>
     <ScrollViewer x:Name="SetupFields" Grid.Row="1" VerticalScrollBarVisibility="Auto"><StackPanel>
-      <TextBlock Text="1  项目工程目录" FontSize="18" FontWeight="SemiBold"/>
+      <TextBlock Text="1  保存项目的位置" FontSize="18" FontWeight="SemiBold"/>
       <DockPanel Margin="0,8,0,0"><Button DockPanel.Dock="Right" Content="选择目录…" Click="ProjectBrowse_Click"/><TextBox x:Name="ProjectPath" TextChanged="Project_Changed"/></DockPanel>
-      <TextBlock x:Name="ProjectStatus" TextWrapping="Wrap" Foreground="#42556F" Margin="0,0,0,10"/>
+      <TextBlock x:Name="ProjectStatus" TextWrapping="Wrap" Foreground="#42556F" Margin="0,0,0,8"/>
       <StackPanel x:Name="DownloadPanel" Visibility="Collapsed">
-        <TextBlock Text="没有项目时，可下载到这个空目录；已有文件不会被覆盖。" TextWrapping="Wrap"/>
-        <TextBox x:Name="Repository" ToolTip="Git 仓库地址"/>
-        <ComboBox x:Name="DownloadScope" SelectedIndex="0" Margin="0,5,0,8">
-          <ComboBoxItem Content="仅核心运行文件（默认）：Python 核心、图片、默认选项和依赖清单"/>
-          <ComboBoxItem Content="完整仓库：包含脚本工具、文档、测试和 GUI 源码"/>
-        </ComboBox>
-        <DockPanel><Button DockPanel.Dock="Right" x:Name="DownloadButton" Content="从 GitHub 下载项目" Click="Download_Click"/><TextBox x:Name="Branch" ToolTip="分支"/></DockPanel>
+        <Expander Header="下载选项（通常无需修改）"><StackPanel>
+          <TextBox x:Name="Repository" ToolTip="Git 仓库地址"/>
+          <ComboBox x:Name="DownloadScope" SelectedIndex="0" Margin="0,5,0,8">
+            <ComboBoxItem Content="仅核心运行文件（推荐日常使用）"/>
+            <ComboBoxItem Content="完整仓库（开发、命令行或交给 Agent）"/>
+          </ComboBox>
+          <DockPanel><Button DockPanel.Dock="Right" x:Name="DownloadButton" Content="仅下载项目" Click="Download_Click"/><TextBox x:Name="Branch" ToolTip="分支"/></DockPanel>
+        </StackPanel></Expander>
       </StackPanel>
-      <TextBlock Text="2  设备连接（可稍后设置）" FontSize="18" FontWeight="SemiBold" Margin="0,16,0,0"/>
-      <DockPanel Margin="0,8,0,0"><Button DockPanel.Dock="Right" Content="选择目录…" Click="EmulatorBrowse_Click"/><TextBox x:Name="EmulatorPath"/></DockPanel>
-      <TextBlock Text="使用雷电后台驱动时选择包含 ldconsole.exe 的目录；留空时使用 ADB。" TextWrapping="Wrap" Foreground="#586578"/>
-      <TextBlock Text="ADB 程序（不使用雷电时必需）" Margin="0,10,0,0"/>
-      <DockPanel><Button DockPanel.Dock="Right" Content="选择 adb.exe…" Click="AdbBrowse_Click"/><TextBox x:Name="AdbPath" ToolTip="填 adb 使用系统 PATH，或选择 Android Platform Tools 中的 adb.exe"/></DockPanel>
-      <TextBlock Text="ADB 设备序列号（连接多个设备时必填）" Margin="0,8,0,0"/>
-      <TextBox x:Name="AdbSerial" ToolTip="填写 adb devices 列出的目标序列号；只有一个已授权设备时可留空"/>
-      <TextBlock Text="留空雷电目录会走 ADB。可填 adb 使用系统 PATH；连接多个设备时必须指定序列号。" TextWrapping="Wrap" Foreground="#586578"/>
-      <TextBlock Text="3  Python 运行环境（可稍后安装）" FontSize="18" FontWeight="SemiBold" Margin="0,20,0,0"/>
-      <TextBlock Text="自动使用项目中的 .venv；也可选择已有 Python 环境。" Foreground="#586578" Margin="0,8,0,0"/>
-      <DockPanel><Button DockPanel.Dock="Right" Content="选择 Python…" Click="PythonBrowse_Click"/><TextBox x:Name="PythonPath"/></DockPanel>
-      <TextBlock Text="未创建环境时，用已安装的 Python 3.12+ 创建并安装依赖：" TextWrapping="Wrap"/>
-      <DockPanel><Button DockPanel.Dock="Right" Content="创建环境 / 安装依赖" Click="Install_Click"/><TextBox x:Name="Bootstrap" Text="python"/></DockPanel>
-      <WrapPanel><Button Content="下载 Python（官网）" Click="PythonDownload_Click"/><Button Content="检测 Python" Click="DetectPython_Click"/></WrapPanel>
-      <TextBlock Text="没有 Python？先从官网安装（建议 3.12 x64，勾选 Add python.exe to PATH），再检测并创建环境。依赖下载需要联网，失败可重试。" TextWrapping="Wrap" Foreground="#586578"/>
-      <TextBlock x:Name="ProgressText" TextWrapping="Wrap" Foreground="#42556F" Margin="0,10,0,0"/>
+      <TextBlock Text="2  连接雷电模拟器或手机" FontSize="18" FontWeight="SemiBold" Margin="0,14,0,0"/>
+      <TextBlock Text="雷电模拟器：选择安装目录（包含 ldconsole.exe），把模拟器分辨率设为 960×540，然后启动游戏。" TextWrapping="Wrap" Margin="0,8,0,0"/>
+      <DockPanel><Button DockPanel.Dock="Right" Content="选择雷电模拟器目录…" Click="EmulatorBrowse_Click"/><TextBox x:Name="EmulatorPath"/></DockPanel>
+      <TextBlock Text="手机：雷电模拟器目录留空，在下方准备 ADB。连接成功只代表设备在线，手机布局仍需验证。" TextWrapping="Wrap" Foreground="#586578"/>
+      <Expander Header="手机 / ADB 设置" Margin="0,8,0,0"><StackPanel>
+        <TextBlock Text="开启手机的开发者选项和 USB 调试，用数据线连接并允许此电脑调试。" TextWrapping="Wrap"/>
+        <DockPanel><Button DockPanel.Dock="Right" Content="选择 adb.exe…" Click="AdbBrowse_Click"/><TextBox x:Name="AdbPath" ToolTip="已有 ADB 可填写完整路径或 adb（PATH）"/></DockPanel>
+        <WrapPanel><Button Content="阅读 Android SDK 许可" Click="AdbLicense_Click"/><CheckBox x:Name="AdbLicense" Content="我已阅读并同意许可协议" VerticalAlignment="Center"/></WrapPanel>
+        <Button Content="下载 ADB 工具" Click="InstallAdb_Click" HorizontalAlignment="Left"/>
+        <TextBlock Text="ADB 设备序列号（检查连接后可选择；只有一个已授权设备可留空）" TextWrapping="Wrap" Margin="0,8,0,0"/>
+        <ComboBox x:Name="AdbSerial" IsEditable="True" Margin="0,5,0,8"/>
+      </StackPanel></Expander>
+      <TextBlock Text="3  准备运行环境" FontSize="18" FontWeight="SemiBold" Margin="0,14,0,0"/>
+      <TextBlock Text="点击下方“一键准备运行环境”。首次需要联网，可能耗时数分钟；失败后可重试。完成后点击“检查设备连接”。" TextWrapping="Wrap" Margin="0,8,0,0"/>
+      <Button Content="检查设备连接" Click="CheckDevice_Click" HorizontalAlignment="Left"/>
+      <Expander Header="已有 Python / 手动设置"><StackPanel>
+        <TextBlock Text="运行用 Python（默认工程中的 .venv）"/>
+        <DockPanel><Button DockPanel.Dock="Right" Content="选择 Python…" Click="PythonBrowse_Click"/><TextBox x:Name="PythonPath"/></DockPanel>
+        <TextBlock Text="创建 .venv 用的 Python（留空可自动检测或下载）"/>
+        <TextBox x:Name="Bootstrap"/>
+        <WrapPanel><Button Content="下载 Python（官网）" Click="PythonDownload_Click"/><Button Content="检测 Python" Click="DetectPython_Click"/></WrapPanel>
+      </StackPanel></Expander>
+      <Expander Header="准备过程与错误详情" Margin="0,8,0,0"><TextBox x:Name="SetupLog" IsReadOnly="True" Height="140" VerticalScrollBarVisibility="Auto" TextWrapping="Wrap"/></Expander>
     </StackPanel></ScrollViewer>
-    <DockPanel Grid.Row="2" Margin="0,18,0,0"><Button DockPanel.Dock="Right" x:Name="FinishButton" Content="完成并进入任务控制台" Click="Finish_Click" Background="#DBEAFE"/>
-      <TextBlock Text="配置方案可稍后在任务执行页新建或选择。" VerticalAlignment="Center" Foreground="#586578"/></DockPanel>
+    <StackPanel Grid.Row="2" Margin="0,14,0,0">
+      <TextBlock x:Name="ProgressText" TextWrapping="Wrap" MaxHeight="70" Foreground="#42556F" ToolTip="完整输出见上方“准备过程与错误详情”"/>
+      <WrapPanel Margin="0,8,0,0"><Button x:Name="PrepareButton" Content="一键准备运行环境" Click="Install_Click" Background="#DBEAFE"/>
+        <Button x:Name="FinishButton" Content="进入任务控制台（可稍后准备）" Click="Finish_Click"/>
+      </WrapPanel>
+    </StackPanel>
   </Grid>
 </Window>

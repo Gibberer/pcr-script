@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
+using System.Text.Json.Nodes;
 using Microsoft.Win32;
 
 namespace PcrDesktop;
@@ -18,7 +19,8 @@ public partial class SetupWindow : Window
         Repository.Text = settings.Repository;
         Branch.Text = settings.Branch;
         DownloadScope.SelectedIndex = settings.DownloadCoreOnly ? 0 : 1;
-        ProjectPath.Text = settings.Workspace;
+        ProjectPath.Text = string.IsNullOrWhiteSpace(settings.Workspace)
+            ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "PcrDesktop", "workspace") : settings.Workspace;
         EmulatorPath.Text = settings.EmulatorDirectory;
         AdbPath.Text = settings.AdbExecutable;
         AdbSerial.Text = settings.AdbSerial;
@@ -26,7 +28,7 @@ public partial class SetupWindow : Window
             ? Path.Combine(settings.Workspace, ".venv", "Scripts", "python.exe") : settings.Python;
         Bootstrap.Text = settings.BootstrapPython;
         InspectProject();
-        if (!File.Exists(PythonPath.Text)) ProgressText.Text = "Python 尚未准备；可以先进入控制台，运行前再安装。";
+        if (!File.Exists(PythonPath.Text)) ProgressText.Text = "选择设备后点击“一键准备运行环境”，无需提前安装 Python 或 Git。";
     }
 
     public static bool IsProject(string path)
@@ -84,7 +86,7 @@ public partial class SetupWindow : Window
 
     private void EmulatorBrowse_Click(object sender, RoutedEventArgs e)
     {
-        var dialog = new OpenFolderDialog { Title = "选择包含 ldconsole.exe 的雷电安装目录" };
+        var dialog = new OpenFolderDialog { Title = "选择包含 ldconsole.exe 的雷电模拟器安装目录" };
         if (dialog.ShowDialog(this) == true) EmulatorPath.Text = dialog.FolderName;
     }
 
@@ -105,13 +107,19 @@ public partial class SetupWindow : Window
         if (_busy) return;
         _busy = true;
         SetupFields.IsEnabled = false;
-        FinishButton.IsEnabled = DownloadButton.IsEnabled = false;
+        FinishButton.IsEnabled = PrepareButton.IsEnabled = DownloadButton.IsEnabled = false;
         try { await action(); }
-        catch (Exception error) { ProgressText.Text = error.Message; }
-        finally { _busy = false; SetupFields.IsEnabled = true; FinishButton.IsEnabled = DownloadButton.IsEnabled = true; }
+        catch (Exception error) { Progress(error.Message); }
+        finally { _busy = false; SetupFields.IsEnabled = true; FinishButton.IsEnabled = PrepareButton.IsEnabled = DownloadButton.IsEnabled = true; }
     }
 
-    private void Progress(string text) => Dispatcher.Invoke(() => ProgressText.Text = text);
+    private void Progress(string text) => Dispatcher.Invoke(() =>
+    {
+        ProgressText.Text = text;
+        if (SetupLog.Text.Length > 60000) SetupLog.Text = SetupLog.Text.Substring(30000);
+        SetupLog.AppendText(text + Environment.NewLine);
+        SetupLog.ScrollToEnd();
+    });
 
     private string Project()
     {
@@ -123,7 +131,9 @@ public partial class SetupWindow : Window
         return root;
     }
 
-    private async void Download_Click(object sender, RoutedEventArgs e) => await Guard(async () =>
+    private async void Download_Click(object sender, RoutedEventArgs e) => await Guard(DownloadProject);
+
+    private async Task DownloadProject()
     {
         if (string.IsNullOrWhiteSpace(ProjectPath.Text)) throw new IOException("请先选择下载目录");
         var target = Path.GetFullPath(ProjectPath.Text.Trim());
@@ -135,22 +145,48 @@ public partial class SetupWindow : Window
         await RuntimeSource.Download(Repository.Text.Trim(), Branch.Text.Trim(), target, Progress, coreOnly: DownloadScope.SelectedIndex == 0);
         InspectProject();
         PythonPath.Text = Path.Combine(target, ".venv", "Scripts", "python.exe");
-        Progress("下载完成，可以进入控制台；运行任务前再准备 Python 环境。");
-    });
+        Progress("项目下载完成。下一步准备 Python 与依赖。");
+    }
 
     private void PythonDownload_Click(object sender, RoutedEventArgs e) => PythonEnvironment.OpenDownload();
     private async void DetectPython_Click(object sender, RoutedEventArgs e) => await Guard(async () =>
     {
         var cwd = Directory.Exists(ProjectPath.Text) ? ProjectPath.Text : AppDomain.CurrentDomain.BaseDirectory;
         Bootstrap.Text = await PythonEnvironment.Detect(Bootstrap.Text.Trim(), cwd);
-        Progress("已检测到 " + Bootstrap.Text + "。请选择工程后创建环境 / 安装依赖。");
+        Progress("已检测到 " + Bootstrap.Text + "。现在可点击“一键准备运行环境”。");
     });
 
     private async void Install_Click(object sender, RoutedEventArgs e) => await Guard(async () =>
     {
+        if (!IsProject(ProjectPath.Text.Trim())) await DownloadProject();
         var project = Project();
         PythonPath.Text = await PythonEnvironment.Install(project, Bootstrap.Text.Trim(), Progress);
-        Progress("环境准备完成，可点击完成进入控制台");
+        FinishButton.Content = "进入任务控制台";
+        Progress("运行环境已就绪。请检查设备连接，登录游戏首页，再进入控制台核对日常任务。");
+    });
+
+    private void AdbLicense_Click(object sender, RoutedEventArgs e) =>
+        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("https://developer.android.com/tools/releases/platform-tools") { UseShellExecute = true });
+
+    private async void InstallAdb_Click(object sender, RoutedEventArgs e) => await Guard(async () =>
+    {
+        if (AdbLicense.IsChecked != true) throw new IOException("请先阅读并勾选同意 Android SDK 许可协议；也可选择已有 adb.exe。");
+        AdbPath.Text = await PortableTools.Ensure(PortableTools.Adb, Progress);
+        Progress("ADB 已准备完成。请开启手机 USB 调试，解锁手机并允许此电脑调试，然后检查设备连接。");
+    });
+
+    private async void CheckDevice_Click(object sender, RoutedEventArgs e) => await Guard(async () =>
+    {
+        var settings = new Settings { Workspace = Project(), Python = PythonPath.Text.Trim() };
+        await PythonEnvironment.RequireReady(settings);
+        var result = await Backend.Request(settings, "devices", new JsonObject
+        {
+            ["dnpath"] = EmulatorPath.Text.Trim(), ["adb_path"] = AdbPath.Text.Trim(), ["adb_serial"] = AdbSerial.Text.Trim()
+        });
+        var serial = AdbSerial.Text;
+        AdbSerial.ItemsSource = result["devices"]!.AsArray().Select(item => item!.GetValue<string>()).ToList();
+        AdbSerial.Text = serial;
+        Progress(result["message"]!.GetValue<string>());
     });
 
     private async void Finish_Click(object sender, RoutedEventArgs e)

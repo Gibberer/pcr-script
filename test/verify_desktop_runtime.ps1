@@ -37,6 +37,15 @@ $exePath = (Resolve-Path $Executable).Path
 $pythonPath = (Resolve-Path $Python).Path
 $imagePath = [IO.Path]::GetFullPath($Evidence)
 New-Item -ItemType Directory -Path ([IO.Path]::GetDirectoryName($imagePath)) -Force | Out-Null
+# A failed clone must not occupy the selected target or prevent a normal retry.
+$failedImage = $imagePath + '.missing-branch.png'
+$arguments = @('--smoke', $failedImage, $target, $pythonPath, $sourceUrl, 'missing-synthetic-branch') | ForEach-Object { '"' + $_ + '"' }
+$process = Start-Process -FilePath $exePath -ArgumentList $arguments -PassThru -WindowStyle Hidden
+if (-not $process.WaitForExit(120000)) { $process.Kill(); throw 'Failed-download test timed out' }
+if ($process.ExitCode -eq 0 -or (Test-Path $target)) { throw 'Failed download published a partial target' }
+if (Get-ChildItem -LiteralPath $fixture -Directory -Force | Where-Object Name -Like '.pcr-download-*') {
+    throw 'Failed download staging directory was not cleaned up'
+}
 $arguments = @('--smoke', $imagePath, $target, $pythonPath, $sourceUrl, 'runtime-test') | ForEach-Object { '"' + $_ + '"' }
 $process = Start-Process -FilePath $exePath -ArgumentList $arguments -PassThru -WindowStyle Hidden
 if (-not $process.WaitForExit(120000)) { $process.Kill(); throw 'Runtime GUI smoke timed out' }

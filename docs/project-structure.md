@@ -31,6 +31,8 @@ GUI 使用见 [图文指南](guides/desktop.md)，日常与专项见 [任务指�
 
 GUI 的 `MainWindow.DailyEditor.cs` 管理选中项编辑、顺序和未保存状态；`AddTaskWindow` 隔离新增草稿；`TaskParameters.cs` 为日常、专项和添加窗口共用的参数表单与校验。游戏逻辑仍只在 Python 中实现。
 
+GUI 的 `PortableTools.cs` 管理固定版本工具的下载、SHA-256 校验与安全解压；`RuntimeSource.cs` 复用系统 Git 或便携 MinGit 下载与更新源码；`PythonEnvironment.cs` 负责检测/下载 Python、创建 `.venv`、安装检查及本地日志。`pcrscript/desktop.py devices` 通过现有 `simulator.py` 只读枚举连接状态，运行锁占用时拒绝检查。合成 GUI 验证入口不连接游戏；全新环境安装验证见[发布指南](releases.md)。
+
 ## 任务文件索引
 
 `task_*.py` 存放具体 Task 实现。`base.py`、`image.py` 是基类，`registry.py` 是注册表；`_actions.py`、`event_*.py`、`revival_map.py`、`revival_state.py` 是辅助逻辑，不是独立任务入口。

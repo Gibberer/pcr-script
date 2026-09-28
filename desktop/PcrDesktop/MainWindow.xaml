@@ -119,17 +119,22 @@
           </Grid>
         </Grid>
       </TabItem>
-      <TabItem Header="环境设置">
-        <ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel Margin="20">
+      <TabItem Header="环境设置" x:Name="EnvironmentTab">
+        <ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel Margin="20" x:Name="EnvironmentFields">
           <TextBlock Text="本地 Python 工程" FontSize="18" FontWeight="SemiBold"/>
           <TextBlock Text="工程目录" Margin="0,12,0,0"/><DockPanel><Button Content="选择…" DockPanel.Dock="Right" Click="Browse_Click"/><TextBox x:Name="WorkspaceBox"/></DockPanel>
-          <TextBlock Text="运行用 Python（例如 工程\.venv\Scripts\python.exe）"/><TextBox x:Name="PythonBox"/>
           <TextBlock x:Name="EmulatorLabel" Text="设备连接：ADB" Margin="0,8,0,10"/>
           <Button Content="重新配置工程 / 设备…" Click="Setup_Click" HorizontalAlignment="Left"/>
-          <TextBlock Text="创建环境使用的 Python 3.12+ 路径或命令"/><TextBox x:Name="BootstrapBox"/>
-          <WrapPanel><Button Content="下载 Python（官网）" Click="PythonDownload_Click"/><Button Content="检测 Python" Click="DetectPython_Click"/></WrapPanel>
-          <TextBlock Text="没有 Python 时先从官网安装（建议 3.12 x64，勾选 PATH），然后检测并安装依赖。依赖下载需要联网。" TextWrapping="Wrap"/>
-          <WrapPanel><Button Content="保存环境设置" Click="Settings_Click"/><Button Content="创建环境 / 安装依赖" Click="Install_Click"/></WrapPanel>
+          <TextBlock Text="无需预装 Python：一键检测或下载、创建项目 .venv、安装并检查依赖。首次需要联网。" TextWrapping="Wrap"/>
+          <WrapPanel><Button Content="一键准备运行环境" Click="Install_Click"/><Button Content="保存环境设置" Click="Settings_Click"/></WrapPanel>
+          <ProgressBar x:Name="EnvironmentProgress" Height="4" Margin="0,8,0,8"/>
+          <TextBlock x:Name="EnvironmentStatus" Text="安装前请先停止正在运行的任务。" TextWrapping="Wrap"/>
+          <Expander Header="安装日志（完整文件保存在 cache/desktop/setup）"><TextBox x:Name="EnvironmentLog" IsReadOnly="True" Height="150" VerticalScrollBarVisibility="Auto" TextWrapping="Wrap"/></Expander>
+          <Expander Header="已有 Python / 手动设置" Margin="0,12,0,0"><StackPanel>
+            <TextBlock Text="运行用 Python（默认工程中的 .venv）"/><TextBox x:Name="PythonBox"/>
+            <TextBlock Text="创建 .venv 用的 Python 3.12+（可自动检测或下载）"/><TextBox x:Name="BootstrapBox"/>
+            <WrapPanel><Button Content="下载 Python（官网）" Click="PythonDownload_Click"/><Button Content="检测 Python" Click="DetectPython_Click"/></WrapPanel>
+          </StackPanel></Expander>
           <Expander Header="源码版本与更新" IsExpanded="False" Margin="0,18,0,0"><StackPanel>
           <TextBlock Text="Git 仓库地址"/><TextBox x:Name="RepositoryBox"/>
           <TextBlock Text="分支"/><TextBox x:Name="BranchBox"/>
@@ -140,7 +145,7 @@
           </ComboBox>
           <TextBlock Text="此选项仅用于新下载；更新已有工程会保留原下载范围。" Foreground="#586578"/>
           <WrapPanel><Button Content="下载到新目录…" Click="Clone_Click"/><Button Content="检查源码版本" Click="Version_Click"/><Button Content="更新源码（仅快进）" Click="Update_Click"/></WrapPanel>
-          <TextBlock Text="更新前先停止任务；存在本地源码改动时拒绝更新。配置与缓存保留。首次运行需安装 Python 和 Git。" TextWrapping="Wrap" Foreground="#586578"/>
+          <TextBlock Text="更新前先停止任务；存在本地源码改动时拒绝更新。配置与缓存保留。缺少 Git 时自动下载便携工具。" TextWrapping="Wrap" Foreground="#586578"/>
           </StackPanel></Expander><Expander Header="配置数据预览（只读）" IsExpanded="False"><StackPanel>
           <TextBlock Text="在配置选项页编辑；以下为最近加载或保存的数据。" TextWrapping="Wrap" Foreground="#586578"/>
           <TextBox x:Name="OptionsBox" IsReadOnly="True" Height="290" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" FontFamily="Consolas"/>

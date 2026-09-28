@@ -55,9 +55,10 @@ public partial class MainWindow : Window
         _timer.Start();
         if (loadSettings) Loaded += async (_, _) => await Guard(async () =>
         {
-            if (Directory.Exists(WorkspaceBox.Text) && !string.IsNullOrWhiteSpace(PythonBox.Text))
+            if (Directory.Exists(WorkspaceBox.Text))
             {
-                await LoadPreferredConfig();
+                try { await LoadPreferredConfig(); }
+                catch { Tabs.SelectedItem = EnvironmentTab; throw; }
             }
         });
     }
@@ -65,7 +66,7 @@ public partial class MainWindow : Window
     private void Message(string text) => MessageText.Text = text;
     private static string DeviceLabel(Settings settings) => string.IsNullOrWhiteSpace(settings.EmulatorDirectory)
         ? "设备连接：ADB" + (string.IsNullOrWhiteSpace(settings.AdbSerial) ? "（自动选择唯一设备）" : " · " + settings.AdbSerial)
-        : "雷电目录：" + settings.EmulatorDirectory;
+        : "雷电模拟器目录：" + settings.EmulatorDirectory;
     private void Log(string text) => Dispatcher.Invoke(() =>
     {
         // Bound UI memory while the complete log remains in the run directory.
@@ -430,7 +431,7 @@ public partial class MainWindow : Window
     private async void DetectPython_Click(object sender, RoutedEventArgs e) => await Guard(async () =>
     {
         BootstrapBox.Text = await PythonEnvironment.Detect(BootstrapBox.Text.Trim(), ReadSettings().Workspace);
-        Message("已检测到 Python：" + BootstrapBox.Text + "。现在可创建环境 / 安装依赖。");
+        Message("已检测到 Python：" + BootstrapBox.Text + "。现在可一键准备运行环境。");
     });
 
     private async void Install_Click(object sender, RoutedEventArgs e) => await Guard(async () =>
@@ -440,9 +441,24 @@ public partial class MainWindow : Window
         if (_active) throw new InvalidOperationException("请先停止任务");
         if (File.Exists(settings.Python)) await Idle(settings);
         _environmentReady = false;
-        PythonBox.Text = await PythonEnvironment.Install(settings.Workspace, settings.BootstrapPython, Log);
+        EnvironmentProgress.IsIndeterminate = true;
+        EnvironmentFields.IsEnabled = false;
+        try
+        {
+            PythonBox.Text = await PythonEnvironment.Install(settings.Workspace, settings.BootstrapPython, text => Dispatcher.Invoke(() =>
+            {
+                Log(text);
+                EnvironmentStatus.Text = text;
+                if (EnvironmentLog.Text.Length > 60000) EnvironmentLog.Text = EnvironmentLog.Text.Substring(30000);
+                EnvironmentLog.AppendText(text + Environment.NewLine);
+                EnvironmentLog.ScrollToEnd();
+            }));
+        }
+        catch (Exception error) { EnvironmentStatus.Text = error.Message; throw; }
+        finally { EnvironmentProgress.IsIndeterminate = false; EnvironmentFields.IsEnabled = true; }
         await LoadPreferredConfig();
         _environmentReady = true;
+        EnvironmentStatus.Text = "Python 与依赖检查通过，已加载任务配置。";
         Message("Python 环境已就绪");
     });
 
@@ -457,10 +473,11 @@ public partial class MainWindow : Window
         await RuntimeSource.Download(RepositoryBox.Text.Trim(), BranchBox.Text.Trim(), target, Log, coreOnly: DownloadScopeBox.SelectedIndex == 0);
         WorkspaceBox.Text = target; PythonBox.Text = Path.Combine(target, ".venv", "Scripts", "python.exe");
         _settings = ReadSettings(); _settings.Save(); _loadedSettings = null;
-        Message("源码下载完成，请创建 Python 环境 / 安装依赖");
+        Message("源码下载完成，请点击“一键准备运行环境”。");
     });
 
-    private async Task<string> Git(Settings settings, params string[] args) => (await Backend.Command("git", args, settings.Workspace)).Trim();
+    private async Task<string> Git(Settings settings, params string[] args) =>
+        (await Backend.Command(await PortableTools.EnsureGit(settings.Workspace, Log), args, settings.Workspace)).Trim();
     private async void Version_Click(object sender, RoutedEventArgs e) => await Guard(async () =>
     {
         var settings = ReadSettings();
@@ -472,7 +489,7 @@ public partial class MainWindow : Window
         if ((await Git(settings, "status", "--porcelain")).Length > 0) throw new IOException("存在本地源码改动，更新已取消；请先处理改动");
         if (await Git(settings, "branch", "--show-current") != settings.Branch) throw new IOException("当前分支与设置不一致，更新已取消");
         await RuntimeSource.IncludeRootDefaultsForUpdate(settings.Workspace);
-        await Backend.Command("git", ["fetch", "origin", settings.Branch], settings.Workspace, log: Log, timeoutSeconds: 600);
+        await Backend.Command(await PortableTools.EnsureGit(settings.Workspace, Log), ["fetch", "origin", settings.Branch], settings.Workspace, log: Log, timeoutSeconds: 600);
         await Idle(settings);
         await Git(settings, "merge", "--ff-only", "FETCH_HEAD");
         _environmentReady = false;
@@ -523,6 +540,7 @@ public partial class MainWindow : Window
 
     public async Task LoadSmoke(string workspace, string python)
     {
+        BootstrapChecks.VerifyArchive(workspace);
         var step = new JsonArray("action", JsonSerializer.Serialize(new { name = "领取礼物", target = "收取确认" }));
         var readable = StatusDisplay.FormatStep(step);
         if (!readable.Contains("领取礼物") || readable.Contains("\\u"))
