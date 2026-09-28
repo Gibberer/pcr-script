@@ -7,6 +7,7 @@ from ..game_ui.screen import EventUI, EventScreen
 from dataclasses import asdict
 import json
 import re
+import subprocess
 from uuid import uuid4
 from pcrscript.run_session import clock as time
 
@@ -250,10 +251,18 @@ class EventFormation:
         for member in party.members:
             print(f"[剧情活动] 搜索并核对 {member.name}", flush=True)
             base = normalized(member.name).split('(')[0]
+            input_failed = False
             for _ in range(3):
                 self.ui.click((691, 135))  # Reset only the text-search field.
                 self.ui.click((480, 136), delay=.3)
-                self.ui.driver.input(base)
+                try:
+                    self.ui.driver.input(base)
+                except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):
+                    # An ldconsole process can fail before acknowledging its
+                    # input. Start the next attempt by resetting the field;
+                    # a blind retry could append the same name twice.
+                    input_failed = True
+                    continue
                 time.sleep(1)  # ldconsole queues input asynchronously.
                 self.ui.click(self.defocus, delay=1)
                 s = self.ui.capture()
@@ -262,7 +271,10 @@ class EventFormation:
                 if search_text_confirmed(base, s):
                     break
             else:
+                s = self.ui.capture()
                 self.ui.save('search_input_unconfirmed', s)
+                if input_failed:
+                    raise EventUIError('后台角色搜索输入失败，未判断缺少角色：'+member.name)
                 raise EventUIError('搜索词未确认写入，不能判断缺少角色：'+member.name)
             self.ui.save("search_"+normalized(member.name), s)
             if not s.find("队伍编组", (300, 0, 650, 70)):

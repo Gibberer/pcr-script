@@ -146,6 +146,10 @@ def reduce_purchase_amount(ui,screen,name,amount,missing):
         ui.click((394,310))
         screen=ui.capture()
         new_amount=number(screen,(440,290,520,329))
+        if new_amount is None:
+            # Full-frame detection can omit a lone digit in the amount box.
+            # The shared regional OCR still requires a confident exact number.
+            new_amount=ui.number(screen,(440,290,520,329))
         if new_amount!=amount-1:
             raise EventUIError('购买数量递减未核实，未购买')
         amount=new_amount

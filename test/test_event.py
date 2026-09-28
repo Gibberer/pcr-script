@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from unittest import TestCase, main
 from unittest.mock import patch, Mock
 import json
+import subprocess
 
 import cv2 as cv
 import numpy as np
@@ -324,6 +325,21 @@ class StrategyTests(TestCase):
 
 
 class AvatarTests(TestCase):
+    def test_failed_background_search_resets_field_and_stops_safely(self):
+        formation = EventFormation.__new__(EventFormation)
+        formation.ui = Mock()
+        formation.ui.driver.supports_unicode_input = True
+        formation.ui.driver.input.side_effect = subprocess.CalledProcessError(1, 'ldconsole')
+        formation.ui.capture.return_value = frame(('队伍编组', 480, 42),
+                                                  ('用角色名搜索', 470, 135))
+        formation.occupied_slots = Mock(return_value=[])
+        formation.requires_declared_build = False
+        party = SimpleNamespace(members=[SimpleNamespace(name='似似花')])
+        with self.assertRaisesRegex(EventUIError, '后台角色搜索输入失败'):
+            formation.select(party)
+        self.assertEqual(formation.ui.driver.input.call_count, 3)
+        self.assertEqual(sum(c.args == ((691, 135),) for c in formation.ui.click.call_args_list), 3)
+
     def test_fallback_roster_scan_drags_beside_cards(self):
         formation = EventFormation.__new__(EventFormation)
         formation.ui = Mock()

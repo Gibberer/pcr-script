@@ -37,6 +37,18 @@ class StarBudgetTests(TestCase):
         with self.assertRaisesRegex(EventUIError,'递减未核实'):
             reduce_purchase_amount(ui,dialog(20),'珠希(夏日)',20,10)
 
+        # A saved nine-shard purchase frame omitted the isolated 9 from
+        # full-frame OCR; only the amount field may be retried regionally.
+        faint=dialog(9)
+        faint.items=[item for item in faint.items if item.text!='9']
+        ui=Mock();ui.capture.return_value=faint;ui.number.return_value=9
+        _,amount=reduce_purchase_amount(ui,dialog(10),'珠希(夏日)',10,9)
+        self.assertEqual(amount,9)
+        ui.number.assert_called_once_with(faint,(440,290,520,329))
+        ui.number.return_value=8
+        with self.assertRaisesRegex(EventUIError,'递减未核实'):
+            reduce_purchase_amount(ui,dialog(10),'珠希(夏日)',10,9)
+
     def test_price_tier_notice_requires_same_outfit_and_explicit_price(self):
         def notice(name):
             rows=[('确认所需的女神的秘石个数',480,145),
