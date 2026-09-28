@@ -3,7 +3,7 @@
   <Grid Margin="26">
     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
     <StackPanel Margin="0,0,0,14"><TextBlock Text="准备首次运行" FontSize="26" FontWeight="SemiBold" Foreground="#172B46"/>
-      <TextBlock Text="准备好雷电或手机即可开始。程序会按需下载 Git、Python 并安装依赖，无需输入命令。" TextWrapping="Wrap" Margin="0,8,0,0" Foreground="#586578"/></StackPanel>
+      <TextBlock Text="选择项目保存位置，连接雷电模拟器或手机，然后准备运行环境。" TextWrapping="Wrap" Margin="0,8,0,0" Foreground="#586578"/></StackPanel>
     <ScrollViewer x:Name="SetupFields" Grid.Row="1" VerticalScrollBarVisibility="Auto"><StackPanel>
       <TextBlock Text="1  保存项目的位置" FontSize="18" FontWeight="SemiBold"/>
       <DockPanel Margin="0,8,0,0"><Button DockPanel.Dock="Right" Content="选择目录…" Click="ProjectBrowse_Click"/><TextBox x:Name="ProjectPath" TextChanged="Project_Changed"/></DockPanel>
@@ -18,10 +18,10 @@
           <DockPanel><Button DockPanel.Dock="Right" x:Name="DownloadButton" Content="仅下载项目" Click="Download_Click"/><TextBox x:Name="Branch" ToolTip="分支"/></DockPanel>
         </StackPanel></Expander>
       </StackPanel>
-      <TextBlock Text="2  连接雷电或手机" FontSize="18" FontWeight="SemiBold" Margin="0,14,0,0"/>
-      <TextBlock Text="雷电：选择安装目录（包含 ldconsole.exe），启动游戏并设置为 960×540。" TextWrapping="Wrap" Margin="0,8,0,0"/>
-      <DockPanel><Button DockPanel.Dock="Right" Content="选择雷电目录…" Click="EmulatorBrowse_Click"/><TextBox x:Name="EmulatorPath"/></DockPanel>
-      <TextBlock Text="手机：雷电目录留空，在下方准备 ADB。连接成功只代表设备在线，手机布局仍需验证。" TextWrapping="Wrap" Foreground="#586578"/>
+      <TextBlock Text="2  连接雷电模拟器或手机" FontSize="18" FontWeight="SemiBold" Margin="0,14,0,0"/>
+      <TextBlock Text="雷电模拟器：选择安装目录（包含 ldconsole.exe），把模拟器分辨率设为 960×540，然后启动游戏。" TextWrapping="Wrap" Margin="0,8,0,0"/>
+      <DockPanel><Button DockPanel.Dock="Right" Content="选择雷电模拟器目录…" Click="EmulatorBrowse_Click"/><TextBox x:Name="EmulatorPath"/></DockPanel>
+      <TextBlock Text="手机：雷电模拟器目录留空，在下方准备 ADB。连接成功只代表设备在线，手机布局仍需验证。" TextWrapping="Wrap" Foreground="#586578"/>
       <Expander Header="手机 / ADB 设置" Margin="0,8,0,0"><StackPanel>
         <TextBlock Text="开启手机的开发者选项和 USB 调试，用数据线连接并允许此电脑调试。" TextWrapping="Wrap"/>
         <DockPanel><Button DockPanel.Dock="Right" Content="选择 adb.exe…" Click="AdbBrowse_Click"/><TextBox x:Name="AdbPath" ToolTip="已有 ADB 可填写完整路径或 adb（PATH）"/></DockPanel>

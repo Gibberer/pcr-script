@@ -66,7 +66,7 @@ public partial class MainWindow : Window
     private void Message(string text) => MessageText.Text = text;
     private static string DeviceLabel(Settings settings) => string.IsNullOrWhiteSpace(settings.EmulatorDirectory)
         ? "设备连接：ADB" + (string.IsNullOrWhiteSpace(settings.AdbSerial) ? "（自动选择唯一设备）" : " · " + settings.AdbSerial)
-        : "雷电目录：" + settings.EmulatorDirectory;
+        : "雷电模拟器目录：" + settings.EmulatorDirectory;
     private void Log(string text) => Dispatcher.Invoke(() =>
     {
         // Bound UI memory while the complete log remains in the run directory.

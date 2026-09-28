@@ -114,7 +114,7 @@ public partial class MainWindow
         ResetDailyEditor();
         MarkConfigSaved();
         ConfigPicker.SelectedIndex = -1;
-        Message("运行选项已就绪；设置雷电目录或连接 ADB 设备后可运行单任务，整组方案可另行保存");
+        Message("运行选项已就绪；设置雷电模拟器目录或连接 ADB 设备后可运行单任务，整组方案可另行保存");
     }
 
     private async void Setup_Click(object sender, RoutedEventArgs e) => await Guard(async () =>

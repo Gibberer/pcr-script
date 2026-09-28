@@ -28,7 +28,7 @@ notepad daily_config.yml
 已有 `daily_config.yml` 时跳过复制。找到 `Extra` 段，按设备修改：
 
 ```yaml
-# 雷电：路径可用正斜杠，避免 YAML 中反斜杠转义
+# 雷电模拟器：路径可用正斜杠，避免 YAML 中反斜杠转义
 Extra:
   dnpath: 'D:/leidian/LDPlayer9'
 ```
@@ -42,7 +42,7 @@ Extra:
   adb_serial: ''  # 多设备时填写 adb devices 输出的目标序列号
 ```
 
-只修改原配置中对应字段，保留 `Extra` 的其他选项和其他配置段。雷电需设置为 960×540 并启动；手机连接及排错见 [设备准备](desktop.md#设备准备)。手机和其他布局仍需验证。
+只修改原配置中对应字段，保留 `Extra` 的其他选项和其他配置段。雷电模拟器需设置为 960×540 并启动；手机连接及排错见 [设备准备](desktop.md#设备准备)。手机和其他布局仍需验证。
 
 登录游戏并进入首页。核对 `Task` 列表、日程表、扫荡预设和各项消费选项；参数说明见 [任务指南](tasks.md)，其他写法见 [示例配置](examples/daily.example.yml)。
 

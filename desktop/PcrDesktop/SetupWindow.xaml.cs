@@ -86,7 +86,7 @@ public partial class SetupWindow : Window
 
     private void EmulatorBrowse_Click(object sender, RoutedEventArgs e)
     {
-        var dialog = new OpenFolderDialog { Title = "选择包含 ldconsole.exe 的雷电安装目录" };
+        var dialog = new OpenFolderDialog { Title = "选择包含 ldconsole.exe 的雷电模拟器安装目录" };
         if (dialog.ShowDialog(this) == true) EmulatorPath.Text = dialog.FolderName;
     }
 

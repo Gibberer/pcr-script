@@ -32,7 +32,7 @@ def select_driver(config: dict[str, Any]) -> Driver:
     if dnpath:
         drivers = DNSimulator(dnpath, useADB=False).get_dirvers() or []
         if not drivers:
-            raise RuntimeError("未发现雷电窗口，请在与模拟器相同的 Windows 会话运行")
+            raise RuntimeError("未发现雷电模拟器窗口，请在与模拟器相同的 Windows 会话运行")
         return drivers[0]
     adb_path = str(extra.get("adb_path") or "adb").strip()
     unicode_console_path = str(extra.get("adb_unicode_console_path") or "").strip()
@@ -117,13 +117,13 @@ def open_leidian_emulator(dnpath: str) -> int:
             last_error = error
             detail = (f'退出码 0x{error.returncode & 0xffffffff:08X}'
                       if isinstance(error, subprocess.CalledProcessError) else '查询超过 15 秒')
-            print(f'雷电设备查询 list2 失败（{detail}），启动检查 {attempt + 1}/10', flush=True)
+            print(f'雷电模拟器设备查询 list2 失败（{detail}），启动检查 {attempt + 1}/10', flush=True)
         if attempt < 9:
             print("no emulator detected, wait for 20 seconds")
             time.sleep(20)
     else:
         if last_error is not None:
-            raise RuntimeError(f'雷电启动检查已达 10 次上限，最后一次设备查询失败（{detail}）') from last_error
+            raise RuntimeError(f'雷电模拟器启动检查已达 10 次上限，最后一次设备查询失败（{detail}）') from last_error
         print("exit cannot found device")
         return -1
     print("try start princess connect application")

@@ -125,12 +125,12 @@ def device_report(options: dict[str, Any]) -> dict[str, Any]:
     emulator = str(options.get('dnpath') or '').strip()
     if emulator:
         if not (Path(emulator) / 'ldconsole.exe').is_file():
-            raise ValueError('此目录没有 ldconsole.exe，请选择雷电安装目录，而非桌面快捷方式。')
+            raise ValueError('此目录没有 ldconsole.exe，请选择雷电模拟器安装目录，而非桌面快捷方式。')
         diagnostics = io.StringIO()
         with redirect_stdout(diagnostics):
             devices = DNSimulator(emulator, useADB=False).get_devices() or []
-        message = ('雷电连接正常，在线实例：' + '、'.join(devices) + '。请登录游戏首页，并确认分辨率为 960×540。') if devices else (
-            '未发现已启动的雷电实例，请先启动模拟器，等待 Android 桌面显示后重试。' + diagnostics.getvalue().strip())
+        message = ('雷电模拟器连接正常，在线实例：' + '、'.join(devices) + '。请登录游戏首页，并确认分辨率为 960×540。') if devices else (
+            '未发现已启动的雷电模拟器实例，请先启动模拟器，等待 Android 桌面显示后重试。' + diagnostics.getvalue().strip())
         return dict(protocol=PROTOCOL, ready=bool(devices), devices=[], message=message)
     states = GeneralSimulator(str(options.get('adb_path') or 'adb')).get_device_states()
     devices = [serial for serial, state in states.items() if state == 'device']
@@ -379,7 +379,7 @@ def execute(path: Path, request: dict[str, Any], run_id: str) -> None:
             dnpath = str(config['Extra'].get('dnpath') or '').strip()
             if dnpath:
                 if open_leidian_emulator(dnpath) != 0:
-                    raise RuntimeError('雷电启动失败')
+                    raise RuntimeError('雷电模拟器启动失败')
             else:
                 import subprocess
                 from pcrscript.run_session import clock
