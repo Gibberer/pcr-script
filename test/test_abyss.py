@@ -98,6 +98,15 @@ class AbyssTests(TestCase):
         self.assertEqual(next_stage(task.enter('fire'))[0],AbyssStage('fire',3,1))
         self.assertEqual(task.ui.click.call_args_list[0].args[0].text,'确定')
 
+    def test_enter_closes_android_keyboard_in_shard_shop(self):
+        task=object.__new__(AbyssPush);task.deadline=float('inf');task.ui=Mock()
+        keyboard=screen(('商店',110,35),('确定',880,490))
+        shop=screen(('商店',110,35),('冒险',532,515))
+        task.ui.capture.side_effect=[keyboard,shop,map_screen()]
+        task.ui.wait.return_value=map_screen()
+        self.assertEqual(next_stage(task.enter('fire'))[0],AbyssStage('fire',3,1))
+        self.assertEqual(task.ui.click.call_args_list[0].args[0].text,'确定')
+
     def test_enter_accepts_matching_next_across_missed_frame(self):
         task=object.__new__(AbyssPush);task.deadline=float('inf');task.ui=Mock()
         task.ui.capture.return_value=map_screen()

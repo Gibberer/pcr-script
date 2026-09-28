@@ -34,6 +34,18 @@ def skill_title_pattern(title: str) -> str:
     return re.escape(normalized(title)).replace('♪', '[♪♫]?')
 
 
+def search_text_confirmed(base: str, screen: EventScreen) -> bool:
+    """Confirm the typed term inside the search field despite faint glyphs."""
+    entered = normalized(' '.join(item.text for item in screen.items
+                                  if item.score >= .75
+                                  and 300 <= item.center[0] <= 640
+                                  and 110 <= item.center[1] <= 165))
+    for expected, mistaken in (('千爱瑠', '干爱瑠'), ('千歌', '干歌')):
+        if base == expected:
+            entered = entered.replace(mistaken, expected)
+    return base in entered
+
+
 class EventFormation:
     requires_declared_build = True
     infer_costume_from_skills = False
@@ -247,8 +259,7 @@ class EventFormation:
                 s = self.ui.capture()
                 if not s.find('队伍编组', (300, 0, 650, 70)):
                     raise EventUIError('角色搜索后未处于编队页面')
-                entered = normalized(s.text((300, 110, 640, 165))).replace('干爱瑠', '千爱瑠')
-                if base in entered:
+                if search_text_confirmed(base, s):
                     break
             else:
                 self.ui.save('search_input_unconfirmed', s)

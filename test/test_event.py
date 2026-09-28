@@ -11,7 +11,7 @@ import numpy as np
 
 from pcrscript.game_ui.screen import EventScreen, TextBox, EventUIError, EventUI
 from pcrscript.tasks.event_battle import boss_cleared, boss_mode, quest_stars, EventBattles, EventCombat
-from pcrscript.tasks.event_formation import EventFormation, count_stars
+from pcrscript.tasks.event_formation import EventFormation, count_stars, search_text_confirmed
 from pcrscript.tasks.event_strategy import MemberRequirement, CharacterStatus, readiness, load_parties
 from pcrscript.tasks.task_story_event import CampaignClean
 from pcrscript.tasks.event_sweep import HardSweep
@@ -345,6 +345,21 @@ class AvatarTests(TestCase):
             screen, card, '错误头像标签', '双人角色'))
         self.assertFalse(EventFormation.search_identity_candidate(
             screen, card, '错误头像标签', '别的角色'))
+
+    def test_search_field_accepts_only_observed_name_ocr_confusion(self):
+        def field(text, score=.81049, x=350, y=135):
+            return EventScreen(np.zeros((540, 960, 3), np.uint8), [
+                TextBox(text, score, [[x-20, y-10], [x+20, y-10],
+                                      [x+20, y+10], [x-20, y+10]])])
+        # The saved run read 干歌 at 0.81049, below EventScreen.text's
+        # general 0.82 threshold, although the input and result cards showed it.
+        self.assertEqual(field('干歌').text((300, 110, 640, 165)), '')
+        self.assertTrue(search_text_confirmed('千歌', field('干歌')))
+        self.assertTrue(search_text_confirmed('千爱瑠', field('干爱瑠')))
+        self.assertFalse(search_text_confirmed('千歌', field('干爱瑠')))
+        self.assertFalse(search_text_confirmed('怜', field('干歌')))
+        self.assertFalse(search_text_confirmed('千歌', field('干歌', score=.7)))
+        self.assertFalse(search_text_confirmed('千歌', field('干歌', x=75, y=190)))
 
     def test_event_bonus_arrows_do_not_hide_cards(self):
         for number, count in ((0, 1), (2, 6)):

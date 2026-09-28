@@ -428,7 +428,11 @@ class AbyssPush(BaseTask):
             elif screen.find('商店', (40, 0, 200, 65), exact=True):
                 button=(screen.find('冒险',(475,480,590,540),exact=True)
                         or screen.find('我的主页',(30,480,130,540),exact=True))
-                if button is None:raise EventUIError('商店底栏导航未知')
+                if button is None:
+                    done=screen.find('确定',(820,440,940,530),exact=True)
+                    if done is None:raise EventUIError('商店底栏导航未知')
+                    self.ui.click(done)
+                    continue
                 self.ui.click(button)
             elif screen.find('角色强化', (40, 0, 250, 65), exact=True):
                 self.ui.click((30, 30))
