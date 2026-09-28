@@ -202,6 +202,10 @@ def buy_shards(ui,name,missing,report,save,allow_amulets):
         if amount>missing:
             s,amount=reduce_purchase_amount(ui,s,name,amount,missing)
         cost=number(s,(420,332,480,369))
+        if cost is None:
+            # The orange single-digit total can be absent from full-frame
+            # detection. Retry only the numeric cost field before purchase.
+            cost=ui.number(s,(420,332,480,369))
         if amount is None or not 1<=amount<=missing or cost is None or not 0<cost<=before:
             raise EventUIError('碎片数量/总价/余额校验未通过')
         purchase=dict(name=name,amount=amount,cost=cost,before=before,owned_before=owned,status='pending',
