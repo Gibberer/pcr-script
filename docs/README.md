@@ -4,7 +4,7 @@
 
 | 问题 | 主文档 |
 |---|---|
-| 首次安装、环境准备与设备连接 | [GUI 指南](guides/desktop.md) |
+| 图形界面安装与设备连接 | [GUI 指南](guides/desktop.md) |
 | 命令行安装与运行 | [命令行指南](guides/command-line.md) |
 | 任务如何使用与消费范围 | [任务指南](guides/tasks.md) |
 | 代码职责与任务注册 | [项目结构](project-structure.md)、[任务架构](task-architecture.md) |

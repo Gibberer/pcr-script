@@ -2,49 +2,64 @@
 
 帮你自动完成《公主连结》国服的扫荡、领奖、商店购买等日常，也可以单独运行地下城、深域和角色培养任务。
 
-在 Windows 10（1903 或更新版本）/ Windows 11 上使用。推荐雷电模拟器，分辨率设为 **960×540**。也支持连接 Android 手机，但目前只在雷电上测试过，手机上可能出现识别或点击不准的情况。
+提供两种用法，执行的是同一套任务，按自己的习惯选择：
 
-## 下载
+- [命令行](#命令行)：下载源码、修改配置，在终端运行。
+- [图形界面](#图形界面)：下载 Windows 程序，在窗口里选择任务和运行。
 
-打开 [下载页面](https://github.com/Gibberer/pcr-script/releases)，找到 `PcrDesktop-win-x64.zip`。下载后**解压整个压缩包**，再双击里面的 `PcrDesktop.exe`。
+## 运行前准备
 
-不需要先装 Python 或 Git，也不用敲命令。第一次使用需要联网，软件会下载所需文件。
+需要 Windows 电脑，以及雷电模拟器或 Android 手机。图形界面要求 Windows 10（1903 或更新版本）/ Windows 11。
 
-## 用雷电开始跑日常
+- **雷电：** 把分辨率设为 **960×540**，启动游戏并登录到首页。
+- **手机：** 开启“开发者选项”和“USB 调试”，用数据线连接电脑，在手机上允许调试。目前只在雷电上测试过，手机上可能出现识别或点击不准的情况。
 
-1. **打开游戏。** 启动雷电，把分辨率设为 960×540，登录游戏并进入首页。
-2. **选择雷电的位置。** 打开脚本，首次设置中的项目位置可以不改。点击“选择雷电目录…”，选择安装雷电的文件夹，里面应当有 `ldconsole.exe`。
-3. **等待安装完成。** 点击“一键准备运行环境”，第一次可能需要几分钟。看到“运行环境已就绪”后，点击“检查设备连接”。
-4. **挑选要做的任务。** 点击“进入任务控制台”，打开“每日日常”。里面已经列好了日常任务，不想做的取消勾选。
-5. **开始运行。** 点击“开始今日日常”。进度在“运行状态”里，结束后可以到“运行记录”查看结果。
+日程表和竞技场会使用你在游戏里保存的安排和队伍。快捷扫荡默认用预设 2；只有困难关卡掉落加倍时可能改用预设 3，运行前请检查这两个预设的内容。扫荡、调查和商店购买会消耗体力或对应货币，不需要的任务可以从执行列表中去掉。具体说明见 [任务列表](docs/guides/tasks.md)。
 
-如果找不到“一键准备运行环境”按钮，或安装时出错，请看 [安装与常见问题](docs/guides/desktop.md)。
+## 命令行
+
+先安装 [Python 3.12 x64](https://www.python.org/downloads/windows/) 和 [Git](https://git-scm.com/downloads/win)。安装 Python 时勾选“Add python.exe to PATH”，然后打开 PowerShell：
+
+```powershell
+git clone --depth 1 https://github.com/Gibberer/pcr-script.git
+cd pcr-script
+python -m venv .venv
+./.venv/Scripts/python.exe -m pip install -r requirements.txt
+Copy-Item runtime_defaults.yml daily_config.yml
+notepad daily_config.yml
+```
+
+在打开的配置文件里：
+
+- 使用雷电时，把 `Extra` 下的 `dnpath` 改成自己的雷电安装目录，例如 `'D:/leidian/LDPlayer9'`。
+- 使用手机时，`dnpath` 留空，`adb_path` 填入 `adb.exe` 的位置；ADB 的安装和多设备设置见 [命令行指南](docs/guides/command-line.md#2-配置设备和任务)。
+- `Task` 下是要执行的任务。检查列表，删去不需要的项目，保存文件。
+
+在同一个 PowerShell 窗口中运行：
+
+```powershell
+./.venv/Scripts/python.exe -X utf8 daily_task.py --config daily_config.yml
+```
+
+以后在项目文件夹里执行这条命令即可。单项任务、自定义配置等用法见 [命令行指南](docs/guides/command-line.md)。
+
+## 图形界面
+
+从 [下载页面](https://github.com/Gibberer/pcr-script/releases) 下载 `PcrDesktop-win-x64.zip`，**解压整个压缩包**，再双击 `PcrDesktop.exe`。
+
+使用中遇到问题，可以查阅 [图形界面使用说明](docs/guides/desktop.md)。
 
 ![日常任务界面](docs/guides/images/gui-daily.png)
 
-**第一次运行前，先检查这几项：**
+## 单独运行任务
 
-- 日程表、竞技场会使用你在游戏里保存的安排和队伍。
-- 快捷扫荡默认使用游戏里的预设 2；只有困难关卡掉落加倍时可能改用预设 3。请先确认这两个预设扫的是你想要的关卡。
-- 扫荡和调查会用体力，商店购买会花对应的货币。不确定要不要执行，就先取消勾选；每项任务的具体说明见 [任务列表](docs/guides/tasks.md)。
+命令行使用 `scripts/daily/task.py` 加任务名，可以单独执行一项任务。例如，只领取礼物：
 
-以后打开软件，确认游戏已登录，就可以从“每日日常”开始。不要同时开两份脚本操作同一台模拟器或手机。
+```powershell
+./.venv/Scripts/python.exe -X utf8 scripts/daily/task.py get_gift --config daily_config.yml
+```
 
-## 用手机连接
-
-首次设置中留空雷电目录，展开“手机 / ADB 设置”。ADB 是电脑连接手机用的工具，可以在这里阅读并同意许可后，点击“下载 ADB 工具”。
-
-在手机上开启“开发者选项”和“USB 调试”，用数据线连接电脑，并在手机弹出的提示中允许调试。然后点击“一键准备运行环境”，完成后点击“检查设备连接”。如果连了多台设备，从下拉框选中要用的那一台。
-
-详细步骤和连接失败的处理办法见 [手机连接说明](docs/guides/desktop.md#设备准备)。
-
-## 其他功能
-
-地下城、深域、角色强化和好感度任务都在“按需专项”里。选中任务后，先看右侧说明，再决定是否执行。
-
-- [使用说明](docs/guides/desktop.md)：修改任务、保存设置、查看记录和更新软件。
-- [任务列表](docs/guides/tasks.md)：每项任务会做什么、需要什么、会消耗什么。
-- [命令行用法](docs/guides/command-line.md)：想从终端运行时再看。
+任务名、参数和注意事项见 [任务列表](docs/guides/tasks.md)。同一台模拟器或手机不要同时运行多份脚本，包括同时从窗口和命令行启动。
 
 ## 开发
 
