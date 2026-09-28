@@ -400,6 +400,11 @@ class AbyssPush(BaseTask):
                 # Recheck material and cost on the next run rather than
                 # carrying a previously open purchase confirmation forward.
                 self.ui.expect_click('取消', (250, 440, 490, 515), exact=True)
+            elif (screen.find('★变更确认', (300, 0, 650, 75), exact=True)
+                  and screen.find('现在的★', (475, 85, 635, 135), exact=True)):
+                # An interrupted star setting is rebuilt from the character
+                # page. Only dismiss this identified, uncommitted dialog.
+                self.ui.expect_click('取消', (250, 440, 490, 515), exact=True)
             elif screen.find('记忆碎片获取方法', (250, 0, 720, 75), exact=True):
                 self.ui.expect_click('关闭', (350, 440, 620, 510), exact=True)
             elif screen.find('购买完毕', (250, 105, 710, 175), exact=True):

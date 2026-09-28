@@ -241,7 +241,7 @@ def upgrade_to_five(ui,name,report,save,*,allow_amulets=False):
             if current<5:
                 ui.click((34,98))
                 dialog=ui.wait(lambda frame:frame.find('★变更确认',(250,0,710,75),exact=True),'星级变更')
-                if not dialog.find('现在的★',(250,95,400,140),exact=True):
+                if not dialog.find('现在的★',(475,85,635,135),exact=True):
                     raise EventUIError('星级变更弹窗内容未知')
                 ui.click((780,146));dialog=ui.capture()
                 button=dialog.find('变更',(480,450,710,515),exact=True)

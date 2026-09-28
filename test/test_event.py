@@ -1,5 +1,6 @@
 """Offline replay checks. These tests never connect to the emulator."""
 from pathlib import Path
+from itertools import count
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 from unittest import TestCase, main
@@ -495,6 +496,22 @@ class WorkflowTests(TestCase):
             self.assertTrue(combat.configure_paused(None,None))
         self.assertEqual(combat.ui.click.call_count,1)
         self.assertEqual(combat.ui.click.call_args.args[0].text,'菜单')
+
+    def test_pause_retries_ignored_menu_tap_before_settings(self):
+        combat = EventCombat.__new__(EventCombat)
+        menu = frame(('菜单',900,25))
+        panel = frame(('进行中战斗',480,45),('主菜单',480,85),('返回',335,438))
+        combat.ui = Mock()
+        combat.ui.capture.side_effect = [menu]*5+[panel]*3
+        combat.ui.wait.return_value = frame(('AUTO开启',480,355))
+        combat.r = SimpleNamespace(check_deadline=Mock(),story_dialog=Mock(return_value=False))
+        combat.match = Mock(return_value=None)
+        ticks = count(0,1.5)
+        with patch('pcrscript.tasks.event_battle.time.monotonic', side_effect=lambda: next(ticks)), \
+                patch('pcrscript.tasks.event_battle.time.sleep'):
+            self.assertTrue(combat.configure_paused(None,None))
+        self.assertEqual([call.args[0].text for call in combat.ui.click.call_args_list],
+                         ['菜单']*3)
 
     def test_disabled_battle_start_is_not_clicked(self):
         combat = EventCombat.__new__(EventCombat)
