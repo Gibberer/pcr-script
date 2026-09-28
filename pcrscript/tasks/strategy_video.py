@@ -21,8 +21,9 @@ from .strategy_document import Evidence, Fact, empty_member, finalize, export_do
 from .strategy_sources import BORROW_PART, MANUAL_PART, UNVERIFIED_SETTING, discover_sources
 from .strategy_inputs import preferred_sources
 
-PARSER_VERSION = 28
+PARSER_VERSION = 29
 FRAME_OCR_VERSION = 1
+COMBAT_AUDIT_SECONDS = 20
 ELEMENTS = {'火': 'fire', '水': 'water', '风': 'wind', '光': 'light', '暗': 'dark',
             '红焰': 'fire', '苍波': 'water', '翠岚': 'wind', '珀天': 'light', '紫冥': 'dark'}
 
@@ -77,6 +78,86 @@ def frame_texts(frame: np.ndarray, image_path: Path, ocr) -> list[GuideText]:
     atomic_json(text_path, dict(frame_sha256=digest, ocr_version=FRAME_OCR_VERSION,
                                 texts=[asdict(t) for t in texts]))
     return texts
+
+
+def combat_button_texts(frame: np.ndarray, small: np.ndarray, boxes, ocr,
+                        raw_width: int, crop_left: int, crop_width: int):
+    """Recognize only the two-line SET badges and the AUTO button in combat."""
+    def recognize(rectangle):
+        x, y, w, h = rectangle
+        patch = frame[max(0,y):min(720,y+h), max(0,x):min(1280,x+w)]
+        if patch.size == 0:
+            return '', 0.0
+        result = ocr(patch, use_det=False, use_cls=False, use_rec=True)
+        if not result.txts or not result.scores:
+            return '', 0.0
+        return re.sub(r'\s+', '', result.txts[0]), float(result.scores[0])
+
+    def full_rect(x0, y0, x1, y1):
+        project_x = lambda x: round((crop_left+x*crop_width/960)*1280/raw_width)
+        x0, x1 = project_x(x0), project_x(x1)
+        y0, y1 = round(y0*4/3), round(y1*4/3)
+        return x0, y0, x1-x0, y1-y0
+
+    set_labels = []
+    for x, y, w, h in boxes:
+        # An inactive grey badge cannot establish SET=off. Skip its OCR.
+        badge = small[max(0,round(y-.16*h)):round(y+.24*h),
+                      round(x+.76*w):min(960,round(x+1.32*w))]
+        if not badge.size:
+            continue
+        hsv = cv.cvtColor(badge, cv.COLOR_BGR2HSV)
+        cyan = ((hsv[:,:,0] >= 75) & (hsv[:,:,0] <= 115)
+                & (hsv[:,:,1] > 100) & (hsv[:,:,2] > 140))
+        if float(np.mean(cyan)) < .20:
+            continue
+        x0, x1 = x+.8*w, x+1.28*w
+        top, top_score = recognize(full_rect(x0, y-.13*h, x1, y+.06*h))
+        if top != '立即' or top_score < .9:
+            continue
+        bottom, bottom_score = recognize(full_rect(x0, y+.04*h, x1, y+.22*h))
+        if bottom == '发动' and bottom_score >= .95:
+            set_labels.append(GuideText('SET', min(top_score, bottom_score),
+                              (round(x0), round(y-.13*h), round(x1-x0), round(.35*h))))
+
+    auto_labels = []
+    # The uncropped right edge also works for the supported wide layout.
+    for x0 in (1110, 1200):
+        for y0, y1 in ((505, 550), (530, 575)):
+            rectangle = (x0, y0, 65, y1-y0)
+            label, score = recognize(rectangle)
+            if label.upper() in ('自动', 'AUTO') and score >= .95:
+                auto_labels.append(GuideText(label, score, rectangle))
+                break
+        if auto_labels:
+            break
+    return set_labels, auto_labels
+
+
+def combat_caption_signature(frame: np.ndarray) -> frozenset[tuple[int, int]]:
+    """Spot changed colored guide captions without recognizing battle scenery."""
+    region = frame[round(frame.shape[0]*.14):round(frame.shape[0]*.56),
+                   round(frame.shape[1]*.06):round(frame.shape[1]*.37)]
+    hsv = cv.cvtColor(region, cv.COLOR_BGR2HSV)
+    mask = (((hsv[:,:,0] >= 10) & (hsv[:,:,0] <= 40)
+             & (hsv[:,:,1] >= 90) & (hsv[:,:,2] >= 180))*255).astype(np.uint8)
+    _, _, stats, _ = cv.connectedComponentsWithStats(mask)
+    letters = [(x, y, w, h) for x, y, w, h, area in stats[1:]
+               if 80 <= area <= 3000 and 18 <= h <= 100 and 12 <= w <= 200]
+    if not any(sum(abs(other[1]-y) <= 25 and abs(other[3]-h) <= 25
+                   for other in letters) >= 5 for _, y, _, h in letters):
+        return frozenset()
+    return frozenset(((x+w//2)//30, (y+h//2)//30) for x, y, w, h in letters)
+
+
+def combat_hud_visible(image: np.ndarray) -> bool:
+    """Keep a confirmed battle scene through brief card contour occlusion."""
+    region = image[round(image.shape[0]*.67):round(image.shape[0]*.91),
+                   round(image.shape[1]*.18):round(image.shape[1]*.82)]
+    hsv = cv.cvtColor(region, cv.COLOR_BGR2HSV)
+    cyan = ((hsv[:,:,0] >= 75) & (hsv[:,:,0] <= 105)
+            & (hsv[:,:,1] > 100) & (hsv[:,:,2] > 150))
+    return int(np.count_nonzero(cyan)) >= 6000
 
 
 def declared_abyss_element(title: str) -> str | None:
@@ -245,8 +326,15 @@ def choose_pages(source: dict, options: dict) -> list[dict]:
     limit = options.get('max_pages_per_video', 4)
     if type(limit) is not int or not 1 <= limit <= 30:
         raise ValueError('max_pages_per_video必须为1到30')
-    # Reserve at least one position for actual combat, even in large requirements collections.
-    return requirements[:max(0, limit-1)]+targets[:max(1, limit-len(requirements[:max(0, limit-1)]))]
+    # Reserve a combat slot; a stage part mentioning training uses one CID.
+    selected = list({p['cid']: p for p in requirements[:max(0, limit-1)]}.values())
+    for page in targets:
+        duplicate = next((i for i, saved in enumerate(selected) if saved['cid'] == page['cid']), None)
+        if duplicate is not None:
+            selected[duplicate] = page
+        elif len(selected) < limit:
+            selected.append(page)
+    return selected
 
 
 def declared_region(text: str) -> str:
@@ -396,6 +484,10 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
         seconds_list = sample_seconds(duration, options.get('max_frames_per_page', 50), wide=wide)
         previous = None
         last_scope = ({}, False)
+        combat_seen = 0
+        last_combat_audit = float('-inf')
+        last_combat_box = float('-inf')
+        last_caption = frozenset()
         try:
             for seconds in seconds_list:
                 check()
@@ -422,7 +514,39 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
                     continue
                 previous = (digest, previous[1]+1) if previous and previous[0] == digest else (digest, 1)
                 image_path = root/f'{page["cid"]}_{seconds:.3f}.jpg'
-                texts = frame_texts(frame, image_path, ocr)
+                # Five verified cyan card borders distinguish combat from
+                # formation/table pages even when an avatar is still unknown.
+                combat_boxes = battle_rectangles(small, relaxed=wide_crop)
+                found = combat_team(small, index, relaxed=wide_crop)
+                combat_scene = bool(combat_boxes) or (
+                    seconds-last_combat_box <= 8 and combat_hud_visible(small))
+                if combat_boxes:
+                    if seconds-last_combat_box > 8:
+                        combat_seen = 0
+                    last_combat_box = seconds
+                if combat_scene:
+                    combat_seen += 1
+                else:
+                    combat_seen = 0
+                    last_caption = frozenset()
+                caption = combat_caption_signature(frame) if combat_scene else frozenset()
+                if not caption:
+                    last_caption = frozenset()
+                caption_changed = bool(caption) and (
+                    len(caption & last_caption)/max(1, len(caption | last_caption)) < .5)
+                full_ocr = (not combat_scene or combat_seen <= 2
+                            or seconds-last_combat_audit >= COMBAT_AUDIT_SECONDS
+                            or caption_changed)
+                if full_ocr:
+                    texts = frame_texts(frame, image_path, ocr)
+                    page_record['full_ocr_frames'] = page_record.get('full_ocr_frames', 0)+1
+                    if combat_scene:
+                        last_combat_audit = seconds
+                        last_caption = caption
+                else:
+                    texts = []
+                    cv.imencode('.jpg', frame, [cv.IMWRITE_JPEG_QUALITY, 95])[1].tofile(image_path)
+                    page_record['combat_fast_frames'] = page_record.get('combat_fast_frames', 0)+1
                 page_record['frames'] += 1
                 proof = Evidence(source['url'], int(page['cid']), float(seconds), str(image_path), method='video_ocr')
                 detected_region = declared_region('\n'.join(t.text for t in texts if t.score >= .95))
@@ -474,7 +598,6 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
                 for row in (formation_fields(frame, texts, index, badges) if not wide_crop else []):
                     evidence = Evidence(**{**asdict(proof), 'text': row['text'], 'rectangle': row['rectangle'], 'method': 'formation_badge', 'confidence': row['confidence']})
                     character_facts[row['name']].append((row['field'], row['value'], evidence, field_scope))
-                found = combat_team(small, index, relaxed=wide_crop)
                 formation_found = False
                 if not found:
                     found = formation_team(small, texts, index)
@@ -519,10 +642,21 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
                 scaled_texts = texts_in_view(texts, raw.shape[1],
                                              crop_left if wide_crop else 0,
                                              crop_width if wide_crop else raw.shape[1])
+                button_auto_texts = texts
+                if not full_ocr and combat_boxes:
+                    set_labels, auto_labels = combat_button_texts(
+                        frame, small, combat_boxes, ocr, raw.shape[1],
+                        crop_left if wide_crop else 0,
+                        crop_width if wide_crop else raw.shape[1])
+                    page_record['button_ocr_frames'] = page_record.get('button_ocr_frames', 0)+1
+                    scaled_texts += set_labels
+                    button_auto_texts = auto_labels
+                    if not wide_crop:
+                        scaled_texts += texts_in_view(auto_labels, raw.shape[1], 0, raw.shape[1])
                 if not row:
                     # The wide video's combat cards need a central 16:9 crop,
                     # but its AUTO button remains visible on the uncropped edge.
-                    team['auto_observations'].append((combat_auto(frame, texts) if wide_crop
+                    team['auto_observations'].append((combat_auto(frame, button_auto_texts) if wide_crop
                                                       else combat_auto(small, scaled_texts),
                         Evidence(**{**asdict(proof), 'method':'combat_auto_button'})))
                 for member, match in zip(team['members'], found):
