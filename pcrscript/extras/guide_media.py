@@ -64,18 +64,29 @@ def fetch_video(api, bvid: str, page: dict, directory: Path, *, http=requests,
             temporary = path.with_suffix('.'+uuid4().hex+'.part')
             try:
                 size = 0
+                progress_size = 0
+                progress_at = time.monotonic()
+                # Leave a CDN that sends only a trickle before it consumes the
+                # whole multi-video search window.
+                idle_limit = min(60, max_seconds*.4)
                 with http.get(url, headers=headers, timeout=(min(timeout, 15), timeout), stream=True) as response:
                     response.raise_for_status()
                     length = int(response.headers.get('Content-Length', 0))
                     if length > max_bytes:
                         raise ValueError('视频超出下载大小限制')
+                    progress_step = min(65536, length) if length > 0 else 65536
                     with temporary.open('wb') as output:
                         # Small reads let the deadline and cooperative stop
                         # run while a CDN sends data slowly.
                         for chunk in response.iter_content(8192):
                             check()
+                            now = time.monotonic()
                             size += len(chunk)
-                            if size > max_bytes or time.monotonic() > phase_end:
+                            if size-progress_size >= progress_step:
+                                progress_size, progress_at = size, now
+                            elif now-progress_at > idle_limit:
+                                raise ValueError('视频下载长时间无有效进展')
+                            if size > max_bytes or now > phase_end:
                                 raise ValueError('视频下载达到时间/大小边界')
                             output.write(chunk)
                     if length and size != length:
