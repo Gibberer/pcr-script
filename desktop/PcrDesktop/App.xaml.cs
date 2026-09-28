@@ -13,6 +13,18 @@ public partial class App : Application
     protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+        if (e.Args.Length == 3 && e.Args[0] == "--bootstrap-smoke")
+        {
+            ShutdownMode = ShutdownMode.OnExplicitShutdown;
+            try { await BootstrapChecks.Online(e.Args[1], Path.GetFullPath(e.Args[2])); Shutdown(0); }
+            catch (Exception error)
+            {
+                Directory.CreateDirectory(e.Args[1]);
+                File.WriteAllText(Path.Combine(e.Args[1], "error.txt"), error.ToString());
+                Shutdown(1);
+            }
+            return;
+        }
         if (e.Args.Length >= 4 && e.Args[0] == "--live-check")
         {
             ShutdownMode = ShutdownMode.OnExplicitShutdown;

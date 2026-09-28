@@ -169,6 +169,51 @@ class DesktopTests(unittest.TestCase):
             self.assertIn('领取礼物', state['current_step'][1])
             self.assertNotIn('\\u', state['current_step'][1])
 
+    def test_device_check_reports_adb_states_without_game_operations(self):
+        cases = [
+            ('', '', False, '未发现可用'),
+            ('phone unauthorized\n', '', False, '手机尚未授权'),
+            ('phone offline\n', '', False, '设备离线'),
+            ('phone device\n', '', True, 'ADB 连接正常'),
+            ('phone device\nsecond device\n', '', False, '多个'),
+            ('phone device\nsecond unauthorized\n', 'second', False, '手机尚未授权'),
+            ('phone device\nsecond device\n', 'phone', True, 'ADB 连接正常'),
+            ('phone device\n', 'absent', False, '未找到指定'),
+            ('phone recovery\n', '', False, '未发现可用'),
+        ]
+        for output, serial, ready, message in cases:
+            with self.subTest(output=output, serial=serial), \
+                 patch('pcrscript.simulator.subprocess.run', return_value=Mock(stdout='List of devices attached\n' + output)) as run:
+                result = desktop.device_report({'adb_path': 'synthetic-adb.exe', 'adb_serial': serial})
+                self.assertEqual(result['ready'], ready)
+                self.assertIn(message, result['message'])
+                run.assert_called_once_with(['synthetic-adb.exe', 'devices'], capture_output=True, text=True, check=True, timeout=15)
+
+    def test_device_check_respects_busy_workspace(self):
+        with patch.object(desktop, 'ensure_idle', side_effect=ValueError('有任务仍在运行')), \
+             patch('pcrscript.simulator.subprocess.run') as run:
+            with self.assertRaisesRegex(ValueError, '仍在运行'):
+                desktop.device_report({})
+            run.assert_not_called()
+
+    def test_device_check_uses_leidian_without_adb_fallback(self):
+        emulator = self.root / 'emulator'
+        emulator.mkdir()
+        (emulator / 'ldconsole.exe').touch()
+        with patch('pcrscript.simulator.subprocess.check_output', return_value='0,synthetic,100,200,1,300,400,960,540\n') as run, \
+             patch('pcrscript.simulator.GeneralSimulator.get_device_states') as adb:
+            result = desktop.device_report({'dnpath': str(emulator)})
+            self.assertTrue(result['ready'])
+            self.assertIn('在线实例：0', result['message'])
+            self.assertEqual(run.call_args.args[0], [str(emulator / 'ldconsole.exe'), 'list2'])
+            adb.assert_not_called()
+        with patch('pcrscript.simulator.subprocess.check_output', side_effect=OSError('synthetic failure')), \
+             patch('pcrscript.simulator.GeneralSimulator.get_device_states') as adb:
+            result = desktop.device_report({'dnpath': str(emulator)})
+            self.assertFalse(result['ready'])
+            self.assertIn('synthetic failure', result['message'])
+            adb.assert_not_called()
+
     def test_run_id_cannot_escape_run_root(self):
         with self.assertRaises(ValueError):
             desktop.run_folder('../outside')

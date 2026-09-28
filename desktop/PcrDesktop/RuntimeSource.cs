@@ -15,19 +15,40 @@ public static class RuntimeSource
             throw new IOException("目标目录已有文件，请选择空目录");
         var parent = Path.GetDirectoryName(target) ?? throw new IOException("不能使用磁盘根目录");
         Directory.CreateDirectory(parent);
-        await Backend.Command("git", ["check-ref-format", "--branch", branch], parent);
+        var stage = Path.Combine(parent, ".pcr-download-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            await DownloadCore(repository, branch, stage, log, coreOnly);
+            if (Directory.Exists(target)) Directory.Delete(target); // Empty only; fail if files appeared during download.
+            Directory.Move(stage, target);
+        }
+        finally
+        {
+            if (Directory.Exists(stage))
+            {
+                foreach (var file in Directory.GetFiles(stage, "*", SearchOption.AllDirectories)) File.SetAttributes(file, FileAttributes.Normal);
+                Directory.Delete(stage, true);
+            }
+        }
+    }
+
+    private static async Task DownloadCore(string repository, string branch, string target, Action<string>? log, bool coreOnly)
+    {
+        var parent = Path.GetDirectoryName(target)!;
+        var git = await PortableTools.EnsureGit(parent, log);
+        await Backend.Command(git, ["check-ref-format", "--branch", branch], parent);
         if (!coreOnly)
         {
-            await Backend.Command("git", ["clone", "--depth=1", "--single-branch", "--branch", branch, "--", repository, target],
+            await Backend.Command(git, ["clone", "--depth=1", "--single-branch", "--branch", branch, "--", repository, target],
                 parent, log: log, timeoutSeconds: 600);
             Validate(target);
             return;
         }
         // No initial checkout: otherwise clone downloads every blob before sparsity applies.
-        await Backend.Command("git", ["clone", "--filter=blob:none", "--depth=1", "--no-checkout",
+        await Backend.Command(git, ["clone", "--filter=blob:none", "--depth=1", "--no-checkout",
             "--single-branch", "--branch", branch, "--", repository, target], parent, log: log, timeoutSeconds: 600);
-        await Backend.Command("git", ["sparse-checkout", "set", "--no-cone", "--stdin"], target, Patterns, log);
-        await Backend.Command("git", ["checkout", branch], target, log: log, timeoutSeconds: 600);
+        await Backend.Command(git, ["sparse-checkout", "set", "--no-cone", "--stdin"], target, Patterns, log);
+        await Backend.Command(git, ["checkout", branch], target, log: log, timeoutSeconds: 600);
         // The repository .gitignore is intentionally outside the download allowlist.
         File.AppendAllText(Path.Combine(target, ".git", "info", "exclude"),
             "\n/cache/\n/.venv/\n/daily_config.yml\n/daily_config.yml.bak\n*.pyc\n__pycache__/\n");
@@ -36,9 +57,10 @@ public static class RuntimeSource
 
     public static async Task IncludeRootDefaultsForUpdate(string target)
     {
-        var sparse = (await Backend.Command("git", ["config", "--bool", "--default=false", "core.sparseCheckout"], target)).Trim();
+        var git = await PortableTools.EnsureGit(target);
+        var sparse = (await Backend.Command(git, ["config", "--bool", "--default=false", "core.sparseCheckout"], target)).Trim();
         if (sparse == "true")
-            await Backend.Command("git", ["sparse-checkout", "add", "/runtime_defaults.yml"], target);
+            await Backend.Command(git, ["sparse-checkout", "add", "/runtime_defaults.yml"], target);
     }
 
     private static void Validate(string target)

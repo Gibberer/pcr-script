@@ -131,6 +131,7 @@ public partial class MainWindow
         EmulatorLabel.Text = DeviceLabel(settings);
         RefreshConfigChoices();
         await LoadPreferredConfig();
+        _environmentReady = true;
     });
 
     private async Task SaveAs()

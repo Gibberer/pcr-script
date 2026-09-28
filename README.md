@@ -1,50 +1,33 @@
 # PCR 日常脚本
 
-这是一个用于《公主连结》国服的本地自动化项目。打开 Windows GUI，完成工程、Python 和设备连接的基础设置后，就能运行预设的日常任务；也可以按需单独执行地下城、深域等专项。喜欢命令行的话，同一套任务也能从终端运行。
+用于《公主连结》国服的 Windows 本地自动化工具。新用户推荐使用 GUI：下载运行文件、准备 Python、创建虚拟环境和安装依赖都可在界面内完成，无需先安装 Git、Python 或输入命令。
 
-## 用 GUI 跑日常
+## 第一次运行
 
-1. 从 [GitHub Releases](https://github.com/Gibberer/pcr-script/releases) 下载 `PcrDesktop-win-x64.zip`，完整解压后打开 `PcrDesktop.exe`。
-2. 跟随首次引导选择工程目录，必要时下载运行文件，即可进入控制台。执行任务前再准备 Python、依赖和设备连接；下载源码需要 Git。使用雷电时填写安装目录；使用 ADB 时留空雷电目录，并先让 Android 设备完成授权。游戏需要事先登录。
-3. 进入“每日日常”，点击“开始今日日常”。运行进度和结果可在“运行状态 / 运行记录”查看。
+需要 Windows 10 1903+ / Windows 11、可联网下载依赖，以及已安装的雷电模拟器或已连接的 Android 手机。**目前游戏流程只在雷电 960×540 下完成实机验证；手机能连接不代表其布局已适配。**
+
+1. 从 [Releases](https://github.com/Gibberer/pcr-script/releases) 下载 `PcrDesktop-win-x64.zip`，完整解压到文件夹，打开 `PcrDesktop.exe`。保留旁边的 DLL 和配置文件。
+2. 首次设置保留默认项目位置，或选择一个空文件夹。已有工程也可直接选择。
+3. 选择设备：**雷电**填写包含 `ldconsole.exe` 的安装目录，启动模拟器，设置为 **960×540**；**手机**留空雷电目录，展开“手机 / ADB 设置”，选择已有 ADB 或阅读许可后点击“下载 ADB 工具”，开启 USB 调试并在手机上允许电脑调试。
+4. 点击 **“一键准备运行环境”**，等待“运行环境已就绪”，再点击 **“检查设备连接”**。缺少 Git/Python 会自动下载；失败后可查看详情并重试。多个手机设备需从序列号下拉框选择一个。
+5. 登录游戏，停在首页，进入任务控制台。先核对“每日日常”的任务和消费选项，再点击 **“开始今日日常”**；到“运行状态 / 运行记录”查看结果。
+
+本页对应当前源码。旧版 GUI 若没有“一键准备运行环境”，需要更换包含此功能的新 GUI 包；仅更新 Python 源码不会更新界面。构建产物入口及详细步骤见 [GUI 指南](docs/guides/desktop.md)。
 
 ![每日日常界面（示例配置）](docs/guides/images/gui-daily.png)
 
-默认列表包含日程、竞技场、调查、活动日常、快捷扫荡、商店和领奖等任务。它会使用游戏里已有的日程安排和扫荡预设，其中快捷扫荡默认使用预设 2；想调整执行内容或顺序时，再到“每日日常”编辑。已有的 `daily_config.yml` 或上次选过的配置会继续优先加载，不会被默认列表覆盖。
+日程表和竞技场沿用游戏中已保存的设置；快捷扫荡默认使用游戏预设 2，仅困难掉落活动时可能使用预设 3。请先在游戏内确认这些预设；尚未设置或不想执行的任务可取消勾选。商店购买、调查、扫荡等会消耗现有货币或体力，具体范围见 [任务指南](docs/guides/tasks.md)。
 
-地下城首通、深域推进和角色培养在“按需专项”中运行。首次设置和配置编辑的细节见 [GUI 指南](docs/guides/desktop.md)，各任务的执行范围见 [任务指南](docs/guides/tasks.md)。
+无需新建 YAML：新工程自带日常列表，已有配置会优先加载。地下城、深域和角色培养在“按需专项”中运行。
 
-## 命令行
+## 更多用法
 
-安装 Windows x64 Python 3.12+ 和 Git 后，在终端准备环境：
+- [GUI 指南](docs/guides/desktop.md)：首次设置、手机授权、环境修复、配置、更新和常见问题。
+- [任务指南](docs/guides/tasks.md)：每项任务的前置条件、消费范围与当前能力。
+- [命令行指南](docs/guides/command-line.md)：完整源码、虚拟环境和配置命令；GUI 用户无需执行这些步骤。
 
-```powershell
-git clone --depth 1 https://github.com/Gibberer/pcr-script.git
-cd pcr-script
-python -m venv .venv
-./.venv/Scripts/python.exe -m pip install -r requirements.txt
-```
-
-命令行与 GUI 共用根目录的 `runtime_defaults.yml`。先在其中配置 `Extra.dnpath`（雷电），或留空并连接已授权的 ADB 设备；连接多个 ADB 设备时填写 `Extra.adb_serial`。然后运行日常：
-
-```powershell
-./.venv/Scripts/python.exe -X utf8 daily_task.py
-```
-
-如果已有 `daily_config.yml`，程序会优先使用它。也可以用 `--config <文件>` 指定自己的配置；[示例配置](docs/guides/examples/daily.example.yml)适合用来了解参数。
-
-单独运行已注册的任务，例如领取礼物：
-
-```powershell
-./.venv/Scripts/python.exe -X utf8 scripts/daily/task.py get_gift
-```
-
-## 运行范围
-
-目前游戏任务在 **Windows 雷电、960×540 画面**下有实机验证。项目也支持 ADB 连接，但其他 Android 设备、分辨率和界面布局仍需要逐项验证。地下城与深域的攻略搜索和部分视频解析已接入正式程序；遇到无法确认的角色、培养或路线时，任务会留下证据并停止不确定的战斗。[任务指南中的适用范围](docs/guides/tasks.md#地下城与深域的来源处理)记录了当前边界。
-
-账号配置、头像、攻略和运行证据留在本地，不要提交到仓库。
+账号配置、头像、攻略和运行证据留在本地，不要提交到仓库。同一设备同时只运行一个自动化进程。
 
 ## 开发
 
-本项目对 AI Agent 友好。把常用 AI Agent 的工作目录设为本项目目录，直接描述要开发的新任务或需要适配的设备即可；仓库已整理游戏知识和工程约定，供 Agent 接续工作。使用 GUI 下载项目时选择“完整仓库”，即可在同一目录中边开发边使用 GUI。
+将 AI Agent 的工作目录设为本项目目录即可接续开发，工程说明从 [文档索引](docs/README.md) 查找。GUI 下载时选择“完整仓库”，可在同一目录中开发并继续使用 GUI。构建和发布见 [发布指南](docs/releases.md)。

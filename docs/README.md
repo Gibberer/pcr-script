@@ -1,10 +1,12 @@
 # Agent 文档索引
 
-根目录 [README](../README.md) 只引导使用；面向人的说明集中在 [guides/](guides/desktop.md)。本索引用于定位工程和游戏知识的唯一维护页。
+根目录 [README](../README.md) 只引导使用；面向人的说明集中在 [guides/](guides/desktop.md)。本索引用于定位工程和游戏知识的唯一维护页。按问题只读对应专题与测试，不通读目录。
 
 | 问题 | 主文档 |
 |---|---|
-| GUI 与任务如何使用 | [GUI 指南](guides/desktop.md)、[任务指南](guides/tasks.md) |
+| 首次安装、环境准备与设备连接 | [GUI 指南](guides/desktop.md) |
+| 命令行安装与运行 | [命令行指南](guides/command-line.md) |
+| 任务如何使用与消费范围 | [任务指南](guides/tasks.md) |
 | 代码职责与任务注册 | [项目结构](project-structure.md)、[任务架构](task-architecture.md) |
 | 运行异常与控制 | [运行诊断](run-diagnostics.md) |
 | 视频来源、头像与解析边界 | [视频解析](video-strategies.md) |
@@ -18,5 +20,5 @@
 
 - guides/：供人使用的安装、操作和任务说明；截图与示例配置也在该目录。
 - game-knowledge/：只写游戏页面关系、可观察状态和机制；不写代码、测试、运行编号、开发经过或任务授权。按专题写当前结论、适用服区/版本及验证状态。自然出现才可核实的游戏状态放其 pending-validation.md。
-- 其他 docs/ 页面：Agent 使用的架构、实现边界、诊断与发布知识。真实环境尚待验收的实现放本目录 pending-validation.md。
+- 其他 docs/ 页面：Agent 使用的架构、实现边界、诊断与发布知识。未完成工程事项只记在本目录 pending-validation.md：写事项与验收条件，完成后删除，不保留完成记录。
 - 未完成工作的临时分析放忽略的 cache/agent/work-notes/<task>/；完成后清除。可复用结论归入唯一专题，原始截图、运行日志和构建产物留在忽略目录，不写流水账。

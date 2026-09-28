@@ -18,6 +18,10 @@ class GeneralSimulator():
         self.adb_path = adb_path
 
     def get_devices(self) -> List[str]:
+        return [serial for serial, state in self.get_device_states().items() if state == 'device']
+
+    def get_device_states(self) -> dict[str, str]:
+        """Read connection states without capturing or sending input to any device."""
         try:
             result = subprocess.run([self.adb_path, "devices"], capture_output=True,
                                     text=True, check=True, timeout=15)
@@ -25,11 +29,11 @@ class GeneralSimulator():
             raise RuntimeError("未找到 ADB 程序；请在环境设置中选择 adb.exe 或将其加入 PATH") from error
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
             raise RuntimeError("ADB 设备列表读取失败；请检查 adb.exe 和设备连接") from error
-        devices = []
+        devices = {}
         for line in result.stdout.splitlines():
             parts = line.split()
-            if len(parts) >= 2 and parts[1] == "device":
-                devices.append(parts[0])
+            if len(parts) >= 2 and parts[1] in ('device', 'unauthorized', 'offline', 'recovery', 'sideload', 'bootloader', 'no'):
+                devices[parts[0]] = parts[1]
         return devices
 
     def get_dirvers(self) -> List[Driver]:

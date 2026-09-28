@@ -116,6 +116,41 @@ def catalog() -> list[dict[str, Any]]:
     return result
 
 
+def device_report(options: dict[str, Any]) -> dict[str, Any]:
+    """Connection check only; reuse production discovery, never capture/start a game."""
+    from contextlib import redirect_stdout
+    import io
+    from pcrscript.simulator import DNSimulator, GeneralSimulator
+    ensure_idle()
+    emulator = str(options.get('dnpath') or '').strip()
+    if emulator:
+        if not (Path(emulator) / 'ldconsole.exe').is_file():
+            raise ValueError('此目录没有 ldconsole.exe，请选择雷电安装目录，而非桌面快捷方式。')
+        diagnostics = io.StringIO()
+        with redirect_stdout(diagnostics):
+            devices = DNSimulator(emulator, useADB=False).get_devices() or []
+        message = ('雷电连接正常，在线实例：' + '、'.join(devices) + '。请登录游戏首页，并确认分辨率为 960×540。') if devices else (
+            '未发现已启动的雷电实例，请先启动模拟器，等待 Android 桌面显示后重试。' + diagnostics.getvalue().strip())
+        return dict(protocol=PROTOCOL, ready=bool(devices), devices=[], message=message)
+    states = GeneralSimulator(str(options.get('adb_path') or 'adb')).get_device_states()
+    devices = [serial for serial, state in states.items() if state == 'device']
+    serial = str(options.get('adb_serial') or '').strip()
+    ready = serial in devices if serial else len(devices) == 1
+    if ready:
+        message = 'ADB 连接正常：' + (serial or devices[0]) + '。请登录游戏；手机布局尚需实机验证。'
+    elif serial and serial not in states:
+        message = '未找到指定序列号，请从列表重新选择目标设备。'
+    elif states.get(serial) == 'unauthorized' or (not serial and 'unauthorized' in states.values()):
+        message = '手机尚未授权：解锁手机，勾选并允许此电脑进行 USB 调试，然后重新检查。'
+    elif states.get(serial) == 'offline' or (not serial and not devices and 'offline' in states.values()):
+        message = '设备离线：请重新连接数据线，确认 USB 调试已开启后重试。'
+    elif len(devices) > 1:
+        message = '发现多个已授权设备，请在 ADB 设备序列号下拉框选择本次使用的设备。'
+    else:
+        message = '未发现可用设备：检查 USB 调试、数据线和手机厂商 USB 驱动；手机需要处于正常 Android 系统。'
+    return dict(protocol=PROTOCOL, ready=ready, devices=devices, message=message)
+
+
 def read_config(path: Path) -> dict[str, Any]:
     import yaml
     value = yaml.safe_load(path.read_text(encoding='utf-8'))
@@ -361,7 +396,7 @@ def execute(path: Path, request: dict[str, Any], run_id: str) -> None:
 def main() -> None:
     os.chdir(ROOT)
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('command', choices=['environment', 'catalog', 'new', 'load', 'save', 'idle', 'control', 'run'])
+    parser.add_argument('command', choices=['environment', 'devices', 'catalog', 'new', 'load', 'save', 'idle', 'control', 'run'])
     parser.add_argument('--config', default='daily_config.yml')
     parser.add_argument('--run-id')
     parser.add_argument('--action', choices=['pause', 'resume', 'snapshot', 'stop'])
@@ -369,6 +404,8 @@ def main() -> None:
     try:
         if args.command == 'environment':
             result = environment_report()
+        elif args.command == 'devices':
+            result = device_report(json.load(sys.stdin))
         elif args.command == 'catalog':
             result = dict(protocol=PROTOCOL, catalog=catalog())
         elif args.command == 'new':
