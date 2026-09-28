@@ -29,3 +29,15 @@ GUI、每日命令和单项命令共用 `pcrscript/tasks/` 中的 Task 注册表
 单项任务在运行记录中显示 0/1 到 1/1 的任务级进度；日常列表沿用逐项计数。任务内部的 OCR 业务阶段和旧图片动作共用第二行进度，每次任务结束都会清除该行，避免下一项显示上项的进度。进度仅表示执行位置；最终业务状态仍以任务报告为准。
 
 单项异常向调用方抛出；每日列表记录错误并继续后续项。消费后不递归重放整任务；恢复必须先核对实际结果。旧任务中尚未有界的等待和缺少业务结果核验的场景见[待验证清单](pending-validation.md)。
+
+## 回归测试
+
+按功能定位 `test/test_<功能>.py`；跨入口调度见 `test_task_integration.py`，登录见 `test_home_login.py`，设备与启动见 `test_device_adaptation.py`，状态控制见 `test_run_session.py`，GUI 配置协议见 `test_desktop.py`。
+
+先运行受影响测试；共享入口或测试组织变更再运行完整离线集：
+
+```powershell
+./.venv/Scripts/python.exe -X utf8 -m unittest discover -s test -p 'test_*.py'
+```
+
+回归应经过被修复的入口、分支与结果判定，只替换设备、网络、时间或消费边界；把目标逻辑本身 mock 掉只能验证调用关系。合成测试不替代真实布局与冷启动验收，缺口只保留在[工程待办](pending-validation.md)，验证后删除。
