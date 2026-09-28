@@ -308,7 +308,9 @@ class EventFormation:
             raise EventUIError("当前队伍未能清空")
         self.ui.expect_click("全部", (30, 65, 115, 108), exact=True)
         for _ in range(10):
-            self.ui.swipe((670, 145), (670, 353))
+            # Drag beside the cards. A drag starting on a portrait can open
+            # character details instead of scrolling the roster.
+            self.ui.swipe((914, 200), (914, 340))
         pending = {normalized(m.name): m for m in party.members}
         scanned = set()
         previous = None
@@ -367,7 +369,7 @@ class EventFormation:
             if not pending or signature == previous:
                 break
             previous = signature
-            self.ui.swipe((660, 330), (660, 220))
+            self.ui.swipe((914, 340), (914, 200))
         if pending or failures:
             return False, {"missing": list(pending), "unready": failures}
         actual_party = self.inspect_current()

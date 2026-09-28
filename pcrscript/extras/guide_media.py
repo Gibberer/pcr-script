@@ -70,7 +70,9 @@ def fetch_video(api, bvid: str, page: dict, directory: Path, *, http=requests,
                     if length > max_bytes:
                         raise ValueError('视频超出下载大小限制')
                     with temporary.open('wb') as output:
-                        for chunk in response.iter_content(65536):
+                        # Small reads let the deadline and cooperative stop
+                        # run while a CDN sends data slowly.
+                        for chunk in response.iter_content(8192):
                             check()
                             size += len(chunk)
                             if size > max_bytes or time.monotonic() > phase_end:

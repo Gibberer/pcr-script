@@ -324,6 +324,20 @@ class StrategyTests(TestCase):
 
 
 class AvatarTests(TestCase):
+    def test_fallback_roster_scan_drags_beside_cards(self):
+        formation = EventFormation.__new__(EventFormation)
+        formation.ui = Mock()
+        formation.ui.capture.return_value = frame(('队伍编组', 480, 42))
+        formation.avatars = SimpleNamespace(names=[], query=lambda patches: [])
+        formation.occupied_slots = lambda screen: []
+        party = SimpleNamespace(members=[SimpleNamespace(name='目标角色')])
+        ready, details = formation._select_by_scrolling(party)
+        self.assertFalse(ready)
+        self.assertEqual(details['missing'], ['目标角色'])
+        self.assertEqual(formation.ui.swipe.call_count, 11)
+        self.assertTrue(all(call.args[0][0] == call.args[1][0] == 914
+                            for call in formation.ui.swipe.call_args_list))
+
     def test_search_card_name_recovers_from_wrong_avatar_match(self):
         card = (60, 177, 100, 99)
         screen = frame(('双人角色', 94, 189), ('别的角色', 420, 189))
@@ -511,6 +525,12 @@ class WorkflowTests(TestCase):
 
 
 class DriverTests(TestCase):
+    def test_leidian_background_input_advertises_chinese_search(self):
+        with patch.object(DNDriver, '_init_window_info'):
+            driver = DNDriver('0', 'D:/synthetic-leidian', 0, click_by_mouse=True)
+        self.assertTrue(driver.supports_unicode_input)
+        self.assertFalse(ADBDriver('synthetic-adb').supports_unicode_input)
+
     def test_no_adb_fallback_for_both_screenshot_formats(self):
         d = DNDriver.__new__(DNDriver)
         d.click_by_mouse = True

@@ -154,7 +154,8 @@ class AbyssPush(BaseTask):
         options = validate_options(config.get(cls.config_section, {}))
         if options['prepare_only']:
             emit('progress', scope='action', label='获取并解析深域攻略', unit='task')
-            return (), {}, acquire_strategies(task_source_options('abyss', options))
+            return (), {}, acquire_strategies(task_source_options('abyss', options),
+                                               check=checkpoint)
         return (), {}, None
 
     def __init__(self, robot, options: dict | None = None) -> None:
@@ -354,6 +355,11 @@ class AbyssPush(BaseTask):
                 self.ui.click(result_button)
                 continue
             if self.login_bonus_dialog(screen):
+                continue
+            if (screen.find(r'\d+月团队战最终日[！!]?', (300, 55, 670, 115), exact=True)
+                    and screen.find('团队战活动期间结束', (350, 250, 620, 315), exact=True)):
+                self.ui.save('abyss_clan_battle_final_day_notice', screen)
+                self.ui.expect_click('关闭', (365, 395, 590, 475), exact=True)
                 continue
             if self.story_dialog(screen):
                 continue

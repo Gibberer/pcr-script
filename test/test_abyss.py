@@ -31,6 +31,15 @@ def map_screen(number=1):
 
 
 class AbyssTests(TestCase):
+    def test_prepare_only_obeys_cooperative_stop_during_parsing(self):
+        def acquire(options, *, check):
+            check()
+        with patch('pcrscript.tasks.task_abyss.acquire_strategies', side_effect=acquire), \
+                patch('pcrscript.tasks.task_abyss.checkpoint', side_effect=RunCancelled('stop')):
+            with self.assertRaises(RunCancelled):
+                AbyssPush.prepare({'Abyss': {'prepare_only': True,
+                                             'sources': {'stage': '4-1', 'element': 'fire'}}})
+
     def test_deep_area_story_requires_portrait_text_and_skip_control(self):
         task=object.__new__(AbyssPush);task.ui=Mock()
         icon=cv.imread('images/btn_skip.png')
@@ -61,6 +70,15 @@ class AbyssTests(TestCase):
         task.ui.wait.return_value=map_screen()
         self.assertEqual(next_stage(task.enter('fire'))[0],AbyssStage('fire',3,1))
         task.ui.click.assert_called_once_with((898.5,42.0))
+
+    def test_enter_closes_clan_battle_final_day_notice(self):
+        task=object.__new__(AbyssPush);task.deadline=float('inf');task.ui=Mock()
+        notice=screen(('9月团队战最终日！',475,88),
+                      ('团队战活动期间结束',480,288),('关闭',477,434))
+        task.ui.capture.side_effect=[notice,map_screen()]
+        task.ui.wait.return_value=map_screen()
+        self.assertEqual(next_stage(task.enter('fire'))[0],AbyssStage('fire',3,1))
+        task.ui.expect_click.assert_called_once_with('关闭',(365,395,590,475),exact=True)
 
     def test_enter_closes_android_keyboard_before_formation(self):
         task=object.__new__(AbyssPush);task.deadline=float('inf');task.ui=Mock()

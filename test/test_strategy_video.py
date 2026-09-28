@@ -593,7 +593,7 @@ class VideoStrategyTests(TestCase):
                 parsed_dir=folder,skip_manual_media=True),index,api=Mock(),ocr=Mock(),media_fetcher=fetch)
             fetch.assert_not_called()
             self.assertEqual(report['manual_actions'][0]['text'],'2-10（半自动剩80万血）')
-            self.assertEqual(report['pages'][0]['skipped'],'标题要求手动操作或未核实TP+2，自动任务不下载此分P')
+            self.assertEqual(report['pages'][0]['skipped'],'标题要求手动操作、借角或未核实TP+2，自动任务不下载此分P')
             source['pages'][0]['part']='2-10（有TP+2，稳轴）'
             report=parse_video_source(source,dict(task_type='abyss',stage='2-10',element='wind',
                 parsed_dir=folder,skip_manual_media=True),index,api=Mock(),ocr=Mock(),media_fetcher=fetch)
@@ -604,6 +604,11 @@ class VideoStrategyTests(TestCase):
                 parsed_dir=folder,skip_manual_media=True),index,api=Mock(),ocr=Mock(),media_fetcher=fetch)
             fetch.assert_not_called()
             self.assertEqual(report['manual_actions'][0]['text'],'2-10（简易1押）')
+            source['pages'][0]['part']='风2-10 借els'
+            report=parse_video_source(source,dict(task_type='abyss',stage='2-10',element='wind',
+                parsed_dir=folder,skip_manual_media=True),index,api=Mock(),ocr=Mock(),media_fetcher=fetch)
+            fetch.assert_not_called()
+            self.assertEqual(report['manual_actions'][0]['text'],'风2-10 借els')
 
     def test_automatic_abyss_skips_long_media_before_download(self):
         self.assertTrue(task_source_options('abyss',dict(elements=['wind'],sources=dict(stage='2-10')))

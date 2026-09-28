@@ -18,7 +18,7 @@ from ..extras.guide_media import fetch_video
 from ..game_ui.avatar_assets import ensure_avatar_index, atomic_json, read_json
 from ..game_ui.guide_vision import GuideText, combat_team, formation_team, wide_special_equipment_team, combat_set, combat_auto, battle_rectangles, match_portrait, read_text, requirement_cells, labeled_fields, formation_fields
 from .strategy_document import Evidence, Fact, empty_member, finalize, export_document
-from .strategy_sources import MANUAL_PART, UNVERIFIED_SETTING, discover_sources
+from .strategy_sources import BORROW_PART, MANUAL_PART, UNVERIFIED_SETTING, discover_sources
 from .strategy_inputs import preferred_sources
 
 PARSER_VERSION = 28
@@ -181,7 +181,7 @@ def exact_full_set_claim(source: dict, scope: dict, kind: str) -> bool:
     title = source.get('title', '')
     declared = page_scope({'part': title}, kind)
     return (bool(re.search(r'全\s*SET', title, re.I))
-            and not MANUAL_PART.search(title)
+            and not MANUAL_PART.search(title) and not BORROW_PART.search(title)
             and declared.get('element') == scope.get('element')
             and declared.get('stage') == scope.get('stage'))
 
@@ -360,13 +360,13 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
         page_name = page.get('part', page.get('title', ''))
         requirements_page = bool(re.search(r'练度|培养|角色需求|配置要求', page_name))
         original_part = page.get('original_part', page_name)
-        manual_part = bool(MANUAL_PART.search(original_part))
+        manual_part = bool(MANUAL_PART.search(original_part) or BORROW_PART.search(original_part))
         if manual_part:
             manual.append(dict(text=original_part, evidence=asdict(Evidence(
                 source['url'], int(page['cid']), method='part_title', text=original_part))))
             if options.get('skip_manual_media'):
                 pages_report.append(dict(cid=page['cid'], title=page_name,
-                                         skipped='标题要求手动操作或未核实TP+2，自动任务不下载此分P'))
+                                         skipped='标题要求手动操作、借角或未核实TP+2，自动任务不下载此分P'))
                 continue
         if source_setting and options.get('skip_manual_media'):
             pages_report.append(dict(cid=page['cid'], title=page_name,
@@ -659,7 +659,7 @@ def acquire_strategies(options: dict, *, api=None, index=None, ocr=None, check=l
             candidates.extend(p for p in preferred if p.get('user_provided', True))
             report['errors'].extend(errors)
         if options.get('search', True):
-            catalog = discover_sources(options, api=api)
+            catalog = discover_sources(options, api=api, check=bounded_check)
             report['search'] = catalog
             candidates.extend(catalog.get('candidates', []))
             candidates.extend(p for p in preferred if not p.get('user_provided', True))
