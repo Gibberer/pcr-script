@@ -1,4 +1,7 @@
 from enum import Enum
+from datetime import timedelta, timezone
+
+SERVER_TIMEZONE = timezone(timedelta(hours=8))
 
 class Difficulty(Enum):
     NORMAL = 0

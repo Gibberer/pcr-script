@@ -9,7 +9,7 @@ from unittest.mock import Mock, patch
 from pcrscript import Robot
 from pcrscript.tasks import BaseTask, Caravan, GetGift, CampaignClean, RevivalEventOnce, find_taskclass
 from pcrscript.tasks.registry import registered_tasks
-from pcrscript.run_session import RunSession
+from pcrscript.run_session import RunSession, ResumeUnsafe
 from pcrscript.runtime import run_task_from_config
 
 
@@ -78,6 +78,25 @@ class TaskIntegrationTests(TestCase):
             run.assert_called_once()
         self.assertEqual(robot.task_results[-1]['status'],'error')
         self.assertIsNone(robot._task_output)
+
+    def test_unsafe_resume_stops_daily_list_and_records_task_error(self):
+        class UnsafeTask(BaseTask):
+            def run(self):
+                raise ResumeUnsafe('screen changed during pause')
+
+        with TemporaryDirectory() as root:
+            with self.assertRaises(ResumeUnsafe):
+                with RunSession('unsafe-resume', root=root) as session:
+                    robot = self.robot()
+                    robot._first_enter_check = Mock()
+                    with patch('pcrscript.robot.find_taskclass', return_value=UnsafeTask):
+                        robot.work([['first'], ['must-not-run']])
+            self.assertEqual(len(robot.task_results), 1)
+            record = json.loads(next(session.path.glob('tasks/*/result.json')).read_text(encoding='utf-8'))
+            self.assertEqual(record['status'], 'error')
+            self.assertIn('screen changed', record['error'])
+            self.assertIsNone(robot._task_output)
+            self.assertEqual(json.loads((session.path/'status.json').read_text(encoding='utf-8'))['state'], 'failed')
 
     def test_cli_uses_registry_options_and_arguments(self):
         robot=self.robot()

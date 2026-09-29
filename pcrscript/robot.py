@@ -4,7 +4,7 @@ import copy
 import sys
 from typing import Any
 from pathlib import Path
-from .run_session import clock as time, wrap_driver, emit, failure, task_directory, task_result, RunCancelled
+from .run_session import clock as time, wrap_driver, emit, failure, task_directory, task_result, RunCancelled, ResumeUnsafe
 from tqdm import tqdm
 
 from .driver import Driver
@@ -221,7 +221,7 @@ class Robot:
         except RunCancelled:
             record['status'] = 'cancelled'
             raise
-        except Exception as error:
+        except (Exception, ResumeUnsafe) as error:
             record.update(status='error', error=str(error))
             failure(error)
             raise

@@ -5,6 +5,7 @@ from unittest import TestCase
 from unittest.mock import Mock, call, patch
 
 import subprocess
+import os
 
 import cv2 as cv
 import numpy as np
@@ -14,10 +15,33 @@ from pcrscript.driver import ADBDriver
 from pcrscript.game_ui.screen import EventUI
 from pcrscript.robot import Robot
 from pcrscript.runtime import open_leidian_emulator, select_driver
-from pcrscript.simulator import GeneralSimulator
+from pcrscript.simulator import DNSimulator, GeneralSimulator
 
 
 class DeviceAdaptationTests(TestCase):
+    def test_leidian_start_preserves_spaces_in_installation_path(self):
+        path = 'C:/Program Files/LDPlayer9'
+        with patch.object(DNSimulator, '_get_process_descriptions', return_value=[]), \
+                patch('pcrscript.simulator.subprocess.Popen') as start:
+            DNSimulator(path).start()
+        start.assert_called_once_with([os.path.join(path, 'dnplayer.exe')])
+
+    def test_leidian_open_app_returns_actual_process_result(self):
+        path = 'C:/Program Files/LDPlayer9'
+        with patch('pcrscript.simulator.subprocess.run', return_value=Mock(returncode=7)) as run, \
+                patch('pcrscript.simulator.os.system', return_value=7):
+            result = DNSimulator(path).open_app('com.bilibili.priconne', device=2)
+        self.assertEqual(result, 7)
+        run.assert_called_once_with([os.path.join(path, 'ldconsole.exe'), 'runapp',
+                                     '--index', '2', '--packagename', 'com.bilibili.priconne'], timeout=30)
+
+    def test_failed_process_discovery_reports_an_actionable_error(self):
+        with patch.object(DNSimulator, '_get_process_descriptions', return_value=None), \
+                patch('pcrscript.simulator.subprocess.Popen') as start:
+            with self.assertRaisesRegex(RuntimeError, '进程'):
+                DNSimulator('C:/synthetic').start()
+        start.assert_not_called()
+
     def test_transport_selection_is_explicit_and_rejects_ambiguous_adb(self):
         with patch('pcrscript.runtime.GeneralSimulator.get_devices', return_value=['phone-1', 'phone-2']):
             with self.assertRaisesRegex(RuntimeError, '多个 ADB'):

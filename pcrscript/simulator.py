@@ -63,7 +63,8 @@ class DNSimulator(GeneralSimulator):
                 capture_output=True,
                 text=True,
                 check=True,
-                encoding='utf-8' 
+                encoding='utf-8',
+                timeout=15
             )
 
             raw_output = result.stdout
@@ -86,24 +87,23 @@ class DNSimulator(GeneralSimulator):
             return None
         
     def start(self):
-        if "dnplayer.exe" not in DNSimulator._get_process_descriptions():
-            subprocess.Popen(f"{self.path}\dnplayer.exe", shell=True)
+        processes = DNSimulator._get_process_descriptions()
+        if processes is None:
+            raise RuntimeError('无法读取雷电模拟器进程列表，请检查 PowerShell 是否可用')
+        if "dnplayer.exe" not in processes:
+            subprocess.Popen([os.path.join(self.path, 'dnplayer.exe')])
     
     def open_app(self, packagename, device = None):
         if self.path:
-            if not device:
+            if device is None:
                 device = 0
-            os.system(
-                f"{self.path}\ldconsole.exe runapp --index {device} --packagename {packagename}"
-            )
-            return 0
+            command = [os.path.join(self.path, 'ldconsole.exe'), 'runapp',
+                       '--index', str(device), '--packagename', packagename]
         else:
-            if not device:
+            if device is None:
                 device = self.get_devices()[0]
-            os.system(
-                f'adb -s {device} shell monkey -p {packagename} 1'
-            )
-            return 1
+            command = [self.adb_path, '-s', str(device), 'shell', 'monkey', '-p', packagename, '1']
+        return subprocess.run(command, timeout=30).returncode
 
     def online(self)->bool:
         if self.path:
