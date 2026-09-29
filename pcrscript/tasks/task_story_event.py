@@ -114,6 +114,9 @@ class CampaignClean(TimeLimitTask):
             item = s.find("跳过", (460, 300, 720, 500), exact=True)
         elif s.find("语音|声音数据"):
             item = s.find("不下载|无语音|不含语音")
+        elif s.battle_dialogue():
+            self.ui.click((898, 40))
+            return True
         elif s.find("全文显示|快进|记录", (680, 70, 960, 380)):
             item = s.find("跳过", (700, 70, 960, 220), exact=True)
             if s.gray_story_control(item):

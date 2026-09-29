@@ -97,6 +97,19 @@ class EventScreen:
                 and float(np.mean(self.image[500:530])) < 8
                 and float(np.mean(self.image[90:450])) > 30)
 
+    def battle_dialogue(self):
+        """In-battle story overlay: pink speaker tab over a pale text panel."""
+        if (self.find('主菜单|队伍编组|取消|确认|跳过这个剧情')
+                or not self.find('.+', (180, 390, 380, 418))
+                or not self.find('.+', (180, 418, 795, 505))):
+            return False
+        hsv = cv.cvtColor(self.image, cv.COLOR_BGR2HSV)
+        tab = hsv[393:412, 190:365]
+        panel = hsv[420:490, 185:790]
+        return (float(np.mean((tab[:, :, 0] > 145) & (tab[:, :, 1] > 70)
+                              & (tab[:, :, 2] > 140))) > .4
+                and float(np.mean((panel[:, :, 1] < 65) & (panel[:, :, 2] > 180))) > .65)
+
     def counter_badge(self, roi):
         """Pink numeric badges remain visible when OCR misses a single digit."""
         x1, y1, x2, y2 = roi

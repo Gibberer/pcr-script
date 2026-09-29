@@ -5,11 +5,20 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase
 from unittest.mock import Mock, patch
-from pcrscript.extras.bilibili_browser import BilibiliBrowserSession
+from pcrscript.extras.bilibili_browser import BilibiliBrowserSession, video_results
 from pcrscript.extras.bilibili_api import BilibiliApi
 
 
 class BrowserSessionTests(TestCase):
+    def test_search_uses_heading_not_shorter_thumbnail_statistics(self):
+        url='https://www.bilibili.com/video/BV1234567890/'
+        for links in ([dict(url=url,text='172\n0\n04:49'),
+                       dict(url=url,heading='公主连结 测试活动 SP作业',text='截断标题')],
+                      [dict(url=url,title='公主连结 测试活动 SP作业'),
+                       dict(url=url,text='稍后再看172004:49')]):
+            self.assertEqual(video_results(links),[dict(bvid='BV1234567890',title='公主连结 测试活动 SP作业')])
+        self.assertEqual(video_results([dict(url=url,text='172\n0\n04:49')]),[])
+
     def test_only_fresh_bilibili_cookies_with_applicable_scope(self):
         with TemporaryDirectory() as folder:
             session=BilibiliBrowserSession(folder)

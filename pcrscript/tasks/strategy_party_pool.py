@@ -15,7 +15,8 @@ def boss_parties(options: dict, *, kind: str, area: str, difficulty: str,
                  mode: int, default_path: str, check=lambda: None) -> tuple[list[EventParty], dict | None]:
     """Search by default; a legacy local plan is an explicit fallback only."""
     for key, default in (('discover_sources', True), ('use_local_teams', False),
-                         ('allow_local_trials', True)):
+                         ('allow_local_trials', True), ('allow_party_variants', True),
+                         ('require_source_settings', False)):
         if type(options.get(key, default)) is not bool:
             raise ValueError(f'{key}必须为布尔值')
     report = None
@@ -25,9 +26,10 @@ def boss_parties(options: dict, *, kind: str, area: str, difficulty: str,
                                     difficulty=difficulty, mode=mode), check=check)
         found = event_parties(report, area, difficulty, mode)
         if options.get('allow_local_trials', True):
-            seeds = event_trial_parties(report, area, difficulty, mode)
+            seeds = event_trial_parties(report, area, difficulty, mode,
+                                       require_settings=options.get('require_source_settings', False))
             found.extend(seeds)
-            if seeds:
+            if seeds and options.get('allow_party_variants', True):
                 avatar_options = options.get('sources', {}).get('avatars') or {}
                 try:
                     index = AvatarIndex(avatar_options.get('directory', 'cache/game/avatars/reference'))
@@ -52,6 +54,7 @@ def boss_parties(options: dict, *, kind: str, area: str, difficulty: str,
                             [MemberRequirement(name, 1, 1, 1, None, None,
                                 settings.get(name, True), 1) for name in names], max_attempts=1,
                             build_basis='local_trial',
+                            auto=seed.auto,
                             assumptions=seed.assumptions+[variant['reason'],
                                 f"替换 {variant['outgoing']} → {variant['incoming']}；账号实时核验可用性"]))
     if options.get('use_local_teams', False):

@@ -10,6 +10,8 @@ StoryEvent:
   source_urls: []
   discover_sources: true
   allow_local_trials: true
+  allow_party_variants: false
+  require_source_settings: true
   use_local_teams: false
   first_clear: false
   max_first_clear_stamina: 200

@@ -75,8 +75,11 @@ def missing_fields(party: dict) -> list[str]:
     if party.get('manual_actions'):
         reasons.append('来源包含尚不支持的手动操作/轴')
     auto = party.get('auto', {})
-    if auto.get('value') is not True or not auto.get('evidence') or auto.get('conflicts'):
-        reasons.append('来源未确认全程AUTO开启或存在切换；当前执行器只支持固定AUTO开启')
+    fixed_event = party.get('scope', {}).get('difficulty') in ('special', 'special_plus', 'very_hard')
+    valid_auto = type(auto.get('value')) is bool if fixed_event else auto.get('value') is True
+    if not valid_auto or not auto.get('evidence') or auto.get('conflicts'):
+        reasons.append('来源未确认固定AUTO设置或存在切换' if fixed_event
+                       else '来源未确认全程AUTO开启或存在切换；当前执行器只支持固定AUTO开启')
     return reasons
 
 
@@ -98,7 +101,8 @@ def to_event_party(party: dict) -> EventParty:
     if reasons:
         raise ValueError('攻略未满足自动执行条件：'+'；'.join(reasons))
     return EventParty(party['id'], party['source'], [MemberRequirement(
-        member['name'], **{key: member[key]['value'] for key in BUILD_FIELDS}) for member in party['members']])
+        member['name'], **{key: member[key]['value'] for key in BUILD_FIELDS}) for member in party['members']],
+        auto=party['auto']['value'])
 
 
 def export_document(path: Path, report: dict) -> None:
@@ -134,13 +138,21 @@ def event_parties(report: dict, area: str, difficulty: str, mode: int) -> list[E
     return result
 
 
-def event_trial_parties(report: dict, area: str, difficulty: str, mode: int) -> list[EventParty]:
+def event_trial_parties(report: dict, area: str, difficulty: str, mode: int, *, require_settings: bool = False) -> list[EventParty]:
     """Keep incomplete guide builds as clearly marked account-trial seeds."""
     result = []
     for party in report.get('parties', []):
         scope = party.get('scope', {})
         members = party.get('members', [])
         names = [m.get('name') for m in members]
+        if require_settings and (party.get('region') != 'cn'
+                or party.get('global_requirements') or party.get('manual_actions')
+                or type(party.get('auto', {}).get('value')) is not bool
+                or not party.get('auto', {}).get('evidence') or party.get('auto', {}).get('conflicts')
+                or any(type(m.get('instant', {}).get('value')) is not bool
+                       or not m.get('instant', {}).get('evidence') or m.get('instant', {}).get('conflicts')
+                       for m in members)):
+            continue
         if (scope.get('area') != area or scope.get('difficulty') != difficulty
                 or scope.get('mode') != mode or not party.get('scope_verified')
                 or party.get('region') not in ('cn', 'unknown')
@@ -157,7 +169,8 @@ def event_trial_parties(report: dict, area: str, difficulty: str, mode: int) -> 
             requirements.append(MemberRequirement(member['name'], 1, 1, 1,
                 None, None, instant, 1))
         result.append(EventParty(party['id']+'-trial', party['source'], requirements,
-            max_attempts=1, build_basis='local_trial', assumptions=assumptions))
+            max_attempts=1, build_basis='local_trial', assumptions=assumptions,
+            auto=party.get('auto', {}).get('value') if type(party.get('auto', {}).get('value')) is bool else True))
     return result
 
 

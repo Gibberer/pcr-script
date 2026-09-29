@@ -21,7 +21,7 @@ from .strategy_document import Evidence, Fact, empty_member, finalize, export_do
 from .strategy_sources import BORROW_PART, MANUAL_PART, UNVERIFIED_SETTING, discover_sources
 from .strategy_inputs import preferred_sources
 
-PARSER_VERSION = 29
+PARSER_VERSION = 35
 FRAME_OCR_VERSION = 1
 COMBAT_AUDIT_SECONDS = 20
 ELEMENTS = {'火': 'fire', '水': 'water', '风': 'wind', '光': 'light', '暗': 'dark',
@@ -228,6 +228,18 @@ def task_source_options(kind: str, options: dict, *, stage=None,
     return result
 
 
+def event_page_difficulty(title: str) -> str | None:
+    if re.search(r'特别(?:战斗)?\s*[＋+]|SP\s*[＋+]', title, re.I):
+        return 'special_plus'
+    if re.search(r'特别(?:战斗)?(?!装备)|(?<![a-z0-9])SP(?![a-z0-9＋+])', title, re.I):
+        return 'special'
+    if re.search(r'高难|VERY\s*HARD|(?<![a-z0-9])VH(?![a-z0-9])', title, re.I):
+        return 'very_hard'
+    if re.search(r'剧本模式|SCENARIO|^Sce$', title, re.I):
+        return 'scenario'
+    return None
+
+
 def page_scope(page: dict, kind: str) -> dict:
     title = page.get('part', page.get('title', ''))
     if kind == 'abyss':
@@ -245,10 +257,7 @@ def page_scope(page: dict, kind: str) -> dict:
         if phase:
             return dict(floor=5, phase=phase[0])
     if kind in ('event', 'revival'):
-        difficulty = ('special_plus' if re.search(r'特别战斗\s*[＋+]|SP\s*\+', title, re.I)
-                      else 'special' if re.search(r'特别战斗|(?:^|\W)SP(?:\W|$)', title, re.I)
-                      else 'very_hard' if re.search(r'高难|VERY\s*HARD|(?:^|\W)VH(?:\W|$)', title, re.I)
-                      else None)
+        difficulty = event_page_difficulty(title)
         phase = re.search(r'(?:模式|MODE|阶段)\s*([123])', title, re.I)
         if difficulty and phase:
             return dict(difficulty=difficulty, mode=int(phase[1]))
@@ -320,7 +329,8 @@ def choose_pages(source: dict, options: dict) -> list[dict]:
         # An unlabeled page can still prove its scope from visible battle text.
         chosen_cids = {p.get('cid') for p in targets}
         targets += [p for p in pages if p not in requirements and p.get('cid') not in chosen_cids
-                    and not page_scope(p, kind)]
+                    and not page_scope(p, kind)
+                    and event_page_difficulty(p.get('part', p.get('title', ''))) in (None, wanted['difficulty'])]
     else:
         targets = [p for p in pages if p not in requirements]
     limit = options.get('max_pages_per_video', 4)
@@ -338,6 +348,9 @@ def choose_pages(source: dict, options: dict) -> list[dict]:
 
 
 def declared_region(text: str) -> str:
+    # Creator overlays can recruit for several servers. A guild advert does
+    # not declare the server in which the demonstrated battle was recorded.
+    text = re.sub(r'(?:国服|國服|日服|台服|臺服)\s*(?:公会|公會|行会|行會)', '', text)
     values = {code for code, pattern in [('cn', '国服|國服'), ('jp', '日服'), ('tw', '台服|臺服')]
               if re.search(pattern, text)}
     return next(iter(values)) if len(values) == 1 else 'conflict' if values else 'unknown'
@@ -372,6 +385,16 @@ def observed_scope(texts, page: dict, kind: str) -> tuple[dict, bool]:
     if kind in ('event', 'revival'):
         scopes = [page_scope({'part': t.text}, kind) for t in texts if t.score >= .94]
         scopes.append(page_scope({'part': '\n'.join(t.text for t in texts if t.score >= .94)}, kind))
+        difficulty = event_page_difficulty(page.get('part', page.get('title', '')))
+        if difficulty in ('special', 'special_plus', 'very_hard'):
+            # The part names the difficulty; the battle HUD supplies the
+            # starting/current phase. Neither alone establishes both fields.
+            phases = {int(m[1]) for t in texts if t.score >= .94
+                      for m in re.finditer(r'(?:模式|MODE|阶段)\s*([123])', t.text, re.I)}
+            if len(phases) > 1:
+                return {'conflict': True}, False
+            if phases:
+                scopes.append(dict(difficulty=difficulty, mode=next(iter(phases))))
         scopes = [s for s in scopes if s]
         if metadata and any(s != metadata for s in scopes):
             return {'conflict': True}, False
@@ -407,6 +430,30 @@ def text_constraints(texts, proof: Evidence) -> tuple[list[dict], list[dict]]:
     return global_requirements, manual
 
 
+def event_record_rows(frame, texts, index):
+    """Read explicit starting modes and five portraits from battle records."""
+    headings = [t for t in texts if t.score >= .95 and '战斗记录' in t.text
+                and t.center[1] < 110]
+    if len(headings) != 1:
+        return []
+    difficulty = event_page_difficulty(headings[0].text)
+    if difficulty not in ('special', 'special_plus'):
+        return []
+    rows = []
+    for label in texts:
+        mode = re.fullmatch(r'MODE([123])', label.text, re.I)
+        if not mode or label.score < .95 or not (label.center[0] < 250 and 180 < label.center[1] < 540):
+            continue
+        if not any(t.score >= .95 and re.fullmatch(r'挑战第\d+次', t.text)
+                   and 240 < t.center[0] < 450 and abs(t.center[1]-label.center[1]) < 25 for t in texts):
+            continue
+        top = round(label.center[1]-10)
+        matches = [match_portrait(frame, (602+108*i, top, 96, 96), index, margin=.04) for i in range(5)]
+        if all(matches) and len({m['name'] for m in matches}) == 5:
+            rows.append(dict(difficulty=difficulty, mode=int(mode[1]), members=matches))
+    return rows
+
+
 def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None,
                        media_fetcher=fetch_video, check=lambda: None) -> dict:
     """Return candidates plus field evidence, including incomplete/contradictory ones."""
@@ -433,6 +480,7 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
     teams = {}
     character_facts = defaultdict(list)
     globals_, manual = [], []
+    records = []
     errors, pages_report = [], []
     source_region = declared_region(source.get('title', '')+' '+source.get('description', ''))
     text_source = '\n'.join([source.get('description', '')]+[r.get('text', '') for r in source.get('author_comments', [])])
@@ -482,6 +530,10 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
         duration = min(float(page.get('duration') or media['duration']), float(options.get('max_video_seconds', 180)))
         wide = media.get('height', 0) > 0 and 1.9 < media.get('width', 0)/media['height'] <= 2.4
         seconds_list = sample_seconds(duration, options.get('max_frames_per_page', 50), wide=wide)
+        if options['task_type'] in ('event', 'revival') and duration > 5 and len(seconds_list) >= 4:
+            # Results often appear only in the final seconds. Retain two
+            # observations within the existing frame budget for mode evidence.
+            seconds_list = sorted(set(seconds_list[:-2]+[duration-1.5, duration-.5]))
         previous = None
         last_scope = ({}, False)
         combat_seen = 0
@@ -549,6 +601,8 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
                     page_record['combat_fast_frames'] = page_record.get('combat_fast_frames', 0)+1
                 page_record['frames'] += 1
                 proof = Evidence(source['url'], int(page['cid']), float(seconds), str(image_path), method='video_ocr')
+                if options['task_type'] in ('event', 'revival') and not wide_crop:
+                    records.extend(dict(row, evidence=asdict(proof)) for row in event_record_rows(frame, texts, index))
                 detected_region = declared_region('\n'.join(t.text for t in texts if t.score >= .95))
                 if detected_region != 'unknown':
                     source_region = detected_region if source_region == 'unknown' else source_region if source_region == detected_region else 'conflict'
@@ -746,6 +800,21 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
         team['recommendations'] = list({r['text']: r for r in globals_ if r['advisory']}.values())
         team['manual_actions'] = list({r['text']: r for r in manual}.values())
         parties.append(finalize(team))
+    from ..game_ui.screen import normalized
+    for party in list(parties):
+        if not party.get('scope_verified'):
+            continue
+        scope = party['scope']
+        names = [normalized(m['name']) for m in party['members']]
+        proofs = defaultdict(list)
+        for row in records:
+            if (row['difficulty'] == scope.get('difficulty')
+                    and [normalized(m['name']) for m in row['members']] == names
+                    and row['evidence']['cid'] in {p['cid'] for p in party['frames']}):
+                proofs[row['mode']].append(row['evidence'])
+        for mode, evidence in proofs.items():
+            if mode != scope.get('mode') and len({(p['cid'], p['seconds']) for p in evidence}) >= 2:
+                parties.append(finalize(dict(party, scope=dict(scope, mode=mode), mode_evidence=evidence)))
     report = dict(parser_version=PARSER_VERSION, fingerprint=fingerprint, parsed_at=time.time(),
                   source=source['url'], source_metadata=source, cache_hit=False, pages=pages_report, parties=parties,
                   character_requirements={name: [dict(field=k, value=v, evidence=asdict(p), chapters=c)

@@ -36,6 +36,75 @@ def complete_party():
 
 
 class VideoStrategyTests(TestCase):
+    def test_event_record_requires_mode_heading_and_five_verified_portraits(self):
+        from pcrscript.tasks.strategy_video import event_record_rows
+        with TemporaryDirectory() as directory:
+            index = AvatarIndex(directory, load_existing=False)
+            image = np.zeros((720,1280,3),dtype=np.uint8)
+            names = [f'合成角色{i}' for i in range(5)]
+            for i,name in enumerate(names):
+                x,y,w,h = 602+108*i,230,96,96
+                patch = np.random.default_rng(i+101).integers(0,256,(48,62,3),dtype=np.uint8)
+                image[y+round(h*.23):y+round(h*.73), x+round(w*.18):x+round(w*.82)] = patch
+                index.add(name,patch,persist=False)
+            labels = [GuideText('特别战斗+战斗记录',1,(500,40,280,30)),
+                      GuideText('MODE3',1,(120,225,90,30)),GuideText('挑战第2次',1,(260,225,140,30))]
+            rows=event_record_rows(image,labels,index)
+            self.assertEqual([(r['mode'],[m['name'] for m in r['members']]) for r in rows],[(3,names)])
+            self.assertEqual(event_record_rows(image,labels[1:],index),[])
+            image[230:326,1034:1130]=0
+            self.assertEqual(event_record_rows(image,labels,index),[])
+
+    def test_event_difficulty_filters_parts_without_inventing_mode(self):
+        source=dict(title='公主连结 合成活动',pages=[dict(cid=1,part='Sce'),
+            dict(cid=2,part='SP全SET一刀'),dict(cid=3,part='SP+全SET两刀')])
+        options=dict(task_type='event',difficulty='special',mode=1,max_pages_per_video=1)
+        self.assertEqual([p['cid'] for p in choose_pages(source,options)],[2])
+        self.assertEqual([p['cid'] for p in choose_pages(source,dict(options,difficulty='special_plus'))],[3])
+        self.assertFalse(observed_scope([], source['pages'][1], 'event')[1])
+        scope, verified=observed_scope([GuideText('阶段1',1,(60,80,100,25))],source['pages'][1],'event')
+        self.assertTrue(verified)
+        self.assertEqual(scope,dict(difficulty='special',mode=1))
+
+    def test_guild_advert_does_not_override_video_server(self):
+        from pcrscript.tasks.strategy_video import declared_region
+        self.assertEqual(declared_region('日服公会招募 国服公会招募'), 'unknown')
+        self.assertEqual(declared_region('公主连结国服活动攻略 日服公会招募'), 'cn')
+        self.assertEqual(declared_region('国服及日服活动攻略'), 'conflict')
+
+    def test_source_trial_requires_known_settings_and_no_unsupported_actions(self):
+        from copy import deepcopy
+        party = complete_party()
+        party['scope'] = dict(area='合成活动', difficulty='special', mode=1)
+        party['members'][0]['rank']['value'] = None
+        def candidates(p):
+            return event_trial_parties(dict(parties=[p]), '合成活动', 'special', 1, require_settings=True)
+        self.assertEqual(len(candidates(party)), 1)
+        for key, value in [('region', 'unknown'), ('manual_actions', [{'text':'手动'}]),
+                           ('global_requirements', [{'text':'未核验要求'}])]:
+            self.assertEqual(candidates(dict(party, **{key:value})), [])
+        changed = deepcopy(party)
+        changed['members'][0]['instant']['value'] = None
+        self.assertEqual(candidates(changed), [])
+        changed = deepcopy(party)
+        changed['auto']['conflicts'] = [{'value':False}]
+        self.assertEqual(candidates(changed), [])
+        changed = deepcopy(party)
+        changed['auto']['value'] = False
+        self.assertFalse(candidates(changed)[0].auto)
+
+    def test_source_only_trial_pool_does_not_substitute_members(self):
+        party = complete_party()
+        party['scope'] = dict(area='合成活动', difficulty='special', mode=1)
+        party['members'][0]['rank']['value'] = None
+        with patch('pcrscript.tasks.strategy_party_pool.acquire_strategies', return_value=dict(parties=[party])), \
+             patch('pcrscript.tasks.strategy_party_pool.alternatives') as variants:
+            found, _ = boss_parties(dict(allow_party_variants=False, require_source_settings=True),
+                kind='event', area='合成活动', difficulty='special', mode=1, default_path='unused.yml')
+        self.assertEqual(len(found), 1)
+        self.assertEqual([m.name for m in found[0].members], [m['name'] for m in party['members']])
+        variants.assert_not_called()
+
     def test_decorated_element_part_selects_exact_abyss_stage(self):
         source=dict(title='公主连结 5属性深域4~5图自动作业合集',pages=[
             dict(cid=1,part='个人公主骑士练度参考'),
@@ -87,6 +156,16 @@ class VideoStrategyTests(TestCase):
             x=258+93*i
             cv.rectangle(image,(x,377),(x+70,460),(255,200,0),4)
         self.assertEqual(len(battle_rectangles(image)),5)
+
+    def test_compressed_card_widths_do_not_accumulate_spacing_error(self):
+        image=np.zeros((540,960,3),np.uint8)
+        for i,(x,w) in enumerate([(196,97),(317,87),(437,90),(556,90),(677,89)]):
+            cv.rectangle(image,(x,396),(x+w,485),(255,200,0),-1 if i==2 else 4)
+            if i==2:
+                cv.rectangle(image,(x+70,379),(x+116,410),(255,200,0),-1)
+        boxes=battle_rectangles(image)
+        self.assertEqual(len(boxes),5)
+        self.assertTrue(all(abs((x+w/2)-(244+120*i))<8 for i,(x,y,w,h) in enumerate(boxes)))
 
     def test_combat_button_regions_use_recognition_without_text_detection(self):
         frame=np.zeros((720,1280,3),np.uint8)

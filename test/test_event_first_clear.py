@@ -11,6 +11,67 @@ from pcrscript.game_ui.screen import EventUIError
 
 
 class FirstEntryTests(TestCase):
+    def test_in_battle_dialogue_uses_visible_overlay_before_background_menu(self):
+        r = CampaignClean.__new__(CampaignClean)
+        r.ui = ReplayUI([])
+        s = frame(('测试角色', 280, 403), ('测试台词', 300, 435), ('菜单', 900, 25))
+        self.assertFalse(s.battle_dialogue())
+        s.image[393:412, 190:365] = (150, 70, 245)
+        s.image[420:490, 185:790] = (240, 240, 240)
+        self.assertTrue(s.battle_dialogue())
+        self.assertTrue(r.story_dialog(s))
+        self.assertEqual(r.ui.clicks, [(898, 40)])
+        s.items.extend(frame(('跳过这个剧情', 480, 200)).items)
+        self.assertFalse(s.battle_dialogue())
+
+    def test_equipment_navigation_reselects_source_party_before_battle(self):
+        from pcrscript.tasks.event_strategy import CharacterStatus
+        from dataclasses import replace
+        b = EventBattles.__new__(EventBattles)
+        b.ui = Mock()
+        b.ui.wait.return_value = frame(('BOSS详情', 150, 30), ('模式1', 800, 50))
+        b.r = Mock(report={})
+        members = [CharacterStatus(f'角色{i}', level=100, rank=10, stars=5,
+            unique=None if i == 0 else True, unique2=None if i == 0 else False,
+            skill_level=100, identity_verified=True) for i in range(5)]
+        refreshed = [replace(m) for m in members]
+        b.formation = Mock(observed={m.name: m for m in members})
+        order = [m.name for m in members]
+        def reselect(party):
+            b.formation.observed = {m.name: m for m in refreshed}
+            return True, {'order': order}
+        b.formation.select.side_effect = reselect
+        b.formation.inspect_current.return_value = refreshed
+        party = SimpleNamespace(name='synthetic', source='https://example.com', members=members)
+        with patch('pcrscript.game_ui.character_equipment.inspect_unreleased_equipment', return_value='proof'), \
+                patch('pcrscript.tasks.task_home.ToHomePage'):
+            b.audit_source_trial(party, {'order': order}, '特别', 1)
+        b.formation.select.assert_called_once_with(party)
+        self.assertEqual(len(b.r.report['source_trial_audits']), 1)
+        self.assertIs(b.r.report['source_trial_audits'][0]['observed'][0]['unique'], False)
+
+    def test_source_trial_audit_blocks_unknown_build_and_changed_lineup(self):
+        from pcrscript.tasks.event_strategy import CharacterStatus
+        b = EventBattles.__new__(EventBattles)
+        b.ui = Mock()
+        b.r = SimpleNamespace(report={})
+        members = [CharacterStatus(f'角色{i}', level=100, rank=10, stars=5,
+            unique=True, unique2=False, skill_level=100, identity_verified=True) for i in range(5)]
+        b.formation = Mock()
+        b.formation.observed = {m.name:m for m in members}
+        b.formation.inspect_current.return_value = members
+        party = SimpleNamespace(name='synthetic', source='https://example.com', members=members)
+        selection = dict(order=[m.name for m in members])
+        b.audit_source_trial(party, selection, '特别', 1)
+        members[0].skill_level = None
+        with self.assertRaisesRegex(EventUIError, '培养或专武'):
+            b.audit_source_trial(party, selection, '特别', 1)
+        members[0].skill_level = 100
+        b.formation.inspect_current.return_value = members[::-1]
+        with self.assertRaisesRegex(EventUIError, '编队'):
+            b.audit_source_trial(party, selection, '特别', 1)
+        b.ui.click.assert_not_called()
+
     def test_special_chapter_reads_new_then_returns_when_mark_clears(self):
         r = CampaignClean.__new__(CampaignClean)
         r.check_deadline = Mock()

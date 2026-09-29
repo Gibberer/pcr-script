@@ -7,7 +7,7 @@ from ..game_ui.screen import EventScreen, TextBox
 if TYPE_CHECKING:
     from .task_story_event import CampaignClean
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 import re
 from pcrscript.run_session import clock as time
 
@@ -117,7 +117,7 @@ class EventCombat:
 
     def configure_paused(self, party: EventParty, order: Sequence[str]) -> bool:
         """Pause during setup so animations and stage stories cannot race SET."""
-        pause_deadline = time.monotonic()+45
+        pause_deadline = time.monotonic()+120
         stable = 0
         menu_attempts = 0
         last_menu_request = 0.0
@@ -137,6 +137,11 @@ class EventCombat:
             stable = 0
             if s.find('WIN|战斗胜利|战斗失败|TIMEUP|伤害报告'):
                 return False
+            if (s.battle_dialogue() or s.find('跳过这个剧情')) and self.r.story_dialog(s):
+                # A first-entry or phase story can close an already requested
+                # menu. After skipping it, obtain a fresh menu observation.
+                menu_attempts = 0
+                continue
             menu = s.find('菜单', (840, 0, 960, 60), exact=True) or self.match('btn_menu_text', s)
             if (menu and not s.find('返回', (285, 415, 385, 460), exact=True)
                     and menu_attempts < 3
@@ -168,9 +173,12 @@ class EventCombat:
                     if self.paused_instant(s, index) != required[normalized(name)]:
                         raise EventUIError('暂停菜单内SET状态核验失败，保留暂停状态')
         s = self.ui.capture()
-        if s.find('AUTO关闭', (400, 330, 550, 385)):
+        desired_auto = getattr(party, 'auto', True)
+        expected_auto = 'AUTO开启' if desired_auto else 'AUTO关闭'
+        opposite_auto = 'AUTO关闭' if desired_auto else 'AUTO开启'
+        if s.find(opposite_auto, (400, 330, 550, 385)):
             self.ui.click((480, 358))
-        s = self.ui.wait(lambda frame: frame.find('AUTO开启', (400, 330, 550, 385)), 'AUTO开启', timeout=5)
+        s = self.ui.wait(lambda frame: frame.find(expected_auto, (400, 330, 550, 385)), expected_auto, timeout=5)
         self.ui.save('battle_after_settings'+suffix, s)
         self.ui.expect_click('返回', (260, 405, 410, 465), exact=True)
         return True
@@ -194,6 +202,8 @@ class EventCombat:
             if observe:
                 observe(s)
             if getattr(self.r, 'combat_pre_dialog', lambda frame: False)(s):
+                continue
+            if (s.battle_dialogue() or s.find('跳过这个剧情')) and self.r.story_dialog(s):
                 continue
             if s.find("体力回复|体力恢复|购买体力"):
                 self.ui.expect_click("取消", (200, 300, 800, 510), exact=True)
@@ -263,6 +273,54 @@ class EventBattles:
         self.formation = TrialFormation(self.ui)
         self.combat = EventCombat(runner)
         self.source_pools = {}
+
+    def audit_source_trial(self, party, selection, label, mode):
+        """Check the live build without pretending it was specified by a guide."""
+        from ..game_ui.character_equipment import inspect_unreleased_equipment
+        from .task_home import ToHomePage
+        members = [self.formation.observed.get(normalized(m.name)) for m in party.members]
+        if any(m is None for m in members):
+            raise EventUIError('本期作业队伍的实时培养观察不完整，未开战')
+        unknown = [m for m in members if m.identity_verified and m.unique is None and m.unique2 is None]
+        if unknown:
+            getattr(self.r, 'report_progress', lambda message: None)('活动首领 · 人物页核验专武')
+            self.r.home()
+            for member in unknown:
+                proof = inspect_unreleased_equipment(self.ui, member.name)
+                if proof:
+                    member.unique = member.unique2 = False
+                    member.equipment_evidence = proof
+                ToHomePage(self.r.robot).run(timeout=60)
+            self.r.enter()
+            self.r.quests(bosses=True)
+            self.ui.expect_click(label, (740, 200, 930, 400), exact=True)
+            detail = self.ui.wait(lambda s: s.find('BOSS详情', (0, 0, 730, 70)), '首领详情')
+            if boss_mode(detail) != mode:
+                raise EventUIError('专武核验后首领模式发生变化，未开战')
+            self.ui.expect_click('挑战', (740, 430, 945, 515), exact=True)
+            self.ui.wait(lambda s: s.find('队伍编组', (250, 0, 730, 70)), '首领编队')
+            # Leaving an unstarted formation restores the previously saved
+            # team. Rebuild the source party; never start that restored team.
+            getattr(self.r, 'report_progress', lambda message: None)('活动首领 · 返回后重新核验来源队伍')
+            ready, refreshed = self.formation.select(party)
+            if not ready:
+                raise EventUIError('专武核验后重新编队未通过，未开战')
+            selection.update(refreshed)
+            for prior in members:
+                current = self.formation.observed.get(normalized(prior.name))
+                if (current is None or not current.identity_verified or any(
+                        getattr(current, key) != getattr(prior, key)
+                        for key in ('level', 'rank', 'stars', 'skill_level'))):
+                    raise EventUIError('重新编队时培养状态变化，未开战')
+        confirmed = self.formation.inspect_current(full=False, expected_names=[m.name for m in party.members], verify_skills=False)
+        if ([normalized(m.name) for m in confirmed] != selection.get('order')
+                or not all(m.identity_verified for m in confirmed)):
+            raise EventUIError('战前编队与核验队伍不一致，未开战')
+        self.r.report.setdefault('source_trial_audits', []).append(dict(
+            party=party.name, source=party.source, mode=mode, observed=[asdict(m) for m in members]))
+        if any(not m.identity_verified or any(getattr(m, key) is None for key in
+                ('level', 'rank', 'stars', 'skill_level', 'unique', 'unique2')) for m in members):
+            raise EventUIError('本期作业队伍身份、培养或专武状态未确认，未开战')
 
     def quest_catalog(self):
         self.r.quests()
@@ -436,7 +494,10 @@ class EventBattles:
                             "build_basis": party.build_basis, "assumptions": party.assumptions, "unready": selection})
                         self.r.home()
                         continue
+                    if party.build_basis == 'local_trial' and self.r.options.get('require_source_settings', False):
+                        self.audit_source_trial(party, selection, label, mode)
                     attempts[(mode, party.name)] += 1
+                self.r.report_progress(f'活动首领 · {difficulty} 模式{mode}战斗与结算')
                 result = self.combat.run(party, selection.get("order"))
                 total += 1
                 self.r.report["battles"].append({"boss": difficulty, "mode": mode,

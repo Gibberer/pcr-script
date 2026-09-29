@@ -21,6 +21,27 @@ def allowed_cookie(cookie: dict) -> bool:
     return domain == 'bilibili.com' or domain.endswith('.bilibili.com')
 
 
+def video_results(links: list[dict]) -> list[dict]:
+    """Prefer the card heading over the thumbnail's views/duration overlay."""
+    videos = {}
+    for link in links:
+        match = re.fullmatch(r'https://www\.bilibili\.com/video/(BV[0-9A-Za-z]{10})/?(?:\?.*)?', link.get('url', ''))
+        if not match:
+            continue
+        for priority, key in enumerate(('heading', 'title', 'text')):
+            title = (link.get(key) or '').strip()
+            if not title:
+                continue
+            # A thumbnail without a heading is not evidence of a video title.
+            if key == 'text' and re.fullmatch(r'[\d\s.,:万亿]+|稍后再看[\d\s.,:万亿]*', title):
+                continue
+            saved = videos.get(match[1])
+            if saved is None or priority < saved[0]:
+                videos[match[1]] = (priority, title)
+            break
+    return [dict(bvid=bvid, title=value[1]) for bvid, value in videos.items()]
+
+
 class BilibiliBrowserSession:
     def __init__(self, directory='cache/game/strategies/bilibili_browser', *, channel='msedge', timeout=20):
         self.directory = Path(directory)
@@ -83,21 +104,15 @@ class BilibiliBrowserSession:
                     self.save(context, page)
                     raise BrowserVerificationRequired('浏览器未得到公开视频结果，可能需要人工验证；已保存现场，未自动解验证码') from None
                 links = page.locator('a[href*="/video/BV"]').evaluate_all(
-                    '(links) => links.map(a => ({url:a.href,title:a.innerText || a.getAttribute("title") || ""}))')
-                videos = {}
-                for link in links:
-                    match = re.fullmatch(r'https://www\.bilibili\.com/video/(BV[0-9A-Za-z]{10})/?(?:\?.*)?', link['url'])
-                    if not match:
-                        continue
-                    bvid = match[1]
-                    title = link['title'].strip()
-                    if title and (bvid not in videos or len(title) < len(videos[bvid]['title'])):
-                        videos[bvid] = dict(bvid=bvid, title=title)
+                    '''(links) => links.map(a => ({url:a.href,
+                        heading:a.querySelector('h3')?.getAttribute('title') || a.querySelector('h3')?.innerText || '',
+                        title:a.getAttribute('title') || '', text:a.innerText || ''}))''')
+                videos = video_results(links)
                 if not videos:
                     raise BrowserVerificationRequired('浏览器搜索没有可核验的BV结果，未生成攻略')
                 self.save(context, page)
                 # Return only public search results, never the saved state.
-                return {'code': 0, 'data': {'result': [{'result_type': 'video', 'data': list(videos.values())}]},
+                return {'code': 0, 'data': {'result': [{'result_type': 'video', 'data': videos}]},
                         'transport': 'browser', 'session_saved': True}
             finally:
                 browser.close()
