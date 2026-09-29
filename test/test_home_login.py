@@ -52,10 +52,14 @@ class LoginStampTests(TestCase):
         if start in ('btn_close', 'btn_close_2', 'btn_cancel'):
             modal_icon = cv.imread(f'images/{start}.png')
             modal[240:240+modal_icon.shape[0], 450:450+modal_icon.shape[1]] = modal_icon
-        state = {'page': start, 'seen': []}
+        state = {'page': start, 'seen': [], 'elapsed': 0}
+        def monotonic():
+            state['elapsed'] += 10 if start in ('loading', 'unknown') else 1
+            return state['elapsed']
         driver = Mock(get_screen_size=Mock(return_value=(960, 540)))
         def capture():
-            if state['page'] == 'loading' and state['seen']:
+            # A cold launch stays on the loading screen for seven minutes.
+            if state['page'] == 'loading' and state['elapsed'] >= 420:
                 state['page'] = 'title'
             page = state['page']
             state['seen'].append(page)
@@ -75,7 +79,7 @@ class LoginStampTests(TestCase):
         with patch('pcrscript.runtime.select_driver', return_value=driver), \
                 patch('pcrscript.runtime.fetch_event_news', return_value=EventNews()), \
                 patch('pcrscript.run_session.clock.sleep'), \
-                patch('pcrscript.run_session.clock.monotonic', side_effect=iter(range(1, 1000, 10 if start == 'unknown' else 1))), \
+                patch('pcrscript.run_session.clock.monotonic', side_effect=monotonic), \
                 patch.object(NormalGacha, 'run', side_effect=task) as consume:
             if start == 'unknown':
                 with self.assertRaisesRegex(RuntimeError, '未能在时限内进入游戏首页'):
