@@ -36,6 +36,16 @@ def complete_party():
 
 
 class VideoStrategyTests(TestCase):
+    def test_event_retry_scope_requires_phase_remaining_count_and_retry_button(self):
+        labels = [GuideText('阶段2',1,(80,55,90,25)),
+                  GuideText('【剩余挑战次数9/10】',1,(200,55,210,25)),
+                  GuideText('再次挑战',1,(840,610,150,35))]
+        self.assertEqual(observed_scope(labels,dict(part='EX'),'event'),
+                         (dict(difficulty='special_plus',mode=2),True))
+        for missing in range(3):
+            self.assertFalse(observed_scope(labels[:missing]+labels[missing+1:],dict(part='EX'),'event')[1])
+        self.assertEqual(observed_scope(labels,dict(part='SP模式1'),'event'),({'conflict':True},False))
+
     def test_event_record_requires_mode_heading_and_five_verified_portraits(self):
         from pcrscript.tasks.strategy_video import event_record_rows
         with TemporaryDirectory() as directory:

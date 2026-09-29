@@ -20,7 +20,7 @@ class FirstEntryTests(TestCase):
         s.image[420:490, 185:790] = (240, 240, 240)
         self.assertTrue(s.battle_dialogue())
         self.assertTrue(r.story_dialog(s))
-        self.assertEqual(r.ui.clicks, [(898, 40)])
+        self.assertEqual(r.ui.clicks, [(779, 493)])
         s.items.extend(frame(('跳过这个剧情', 480, 200)).items)
         self.assertFalse(s.battle_dialogue())
 
@@ -81,7 +81,15 @@ class FirstEntryTests(TestCase):
         home.notification = Mock(return_value=True)
         new = frame(('章节一览', 480, 40), ('小沙月敬启', 465, 165), ('新内容', 290, 130))
         read = frame(('章节一览', 480, 40), ('小沙月敬启', 465, 165))
-        r.ui = ReplayUI([frame(('章节一览', 480, 40)), new, read, read, read])
+        transition = frame(('活动剧情', 790, 380), ('报酬兑换', 280, 380))
+        class LoadingUI(ReplayUI):
+            def wait(self, predicate, *args, **kwargs):
+                for _ in range(8):
+                    s = self.capture()
+                    if predicate(s):
+                        return s
+                raise AssertionError('chapter did not open')
+        r.ui = LoadingUI([transition, frame(('章节一览', 480, 40)), new, read, read, read])
         r.ui.expect_click = Mock()
         with patch('pcrscript.tasks.task_story_event.time.sleep'):
             r.special_chapter(home)
@@ -191,7 +199,7 @@ class FirstEntryTests(TestCase):
             return frame((title, 470, 400), ('举办时间:09/29~10/22', 480, 446), ('帮助', 920, 50))
         help_screen = frame(('帮助', 480, 40), ('合成活动的标题名称', 320, 173))
         r.ui.capture.return_value = help_screen
-        r.home = Mock(side_effect=[home('合成活动的标题名祢'), home('合成活动的标题名祢')])
+        r.home = Mock(side_effect=[home('合成活动的标题名祢'), home('合成活动的标题名弥')])
         with patch('pcrscript.tasks.task_story_event.time.sleep'):
             self.assertEqual(r.event_identity(), '合成活动的标题名称')
         r.home = Mock(side_effect=[home('合成活动的标题名称'), home('另一个合成活动名称')])

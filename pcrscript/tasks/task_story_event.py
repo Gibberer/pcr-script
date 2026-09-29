@@ -115,7 +115,9 @@ class CampaignClean(TimeLimitTask):
         elif s.find("语音|声音数据"):
             item = s.find("不下载|无语音|不含语音")
         elif s.battle_dialogue():
-            self.ui.click((898, 40))
+            # Some boss lines keep the skip icon visible but ignore it.
+            # The dialogue panel's next arrow remains usable on those lines.
+            self.ui.click((779, 493))
             return True
         elif s.find("全文显示|快进|记录", (680, 70, 960, 380)):
             item = s.find("跳过", (700, 70, 960, 220), exact=True)
@@ -253,7 +255,7 @@ class CampaignClean(TimeLimitTask):
             names.append(normalized(lines[0].text))
             self.ui.save('event_identity_' + str(len(names)), s)
             time.sleep(.5)
-        if names[0] != names[1]:
+        if SequenceMatcher(None, names[0], names[1]).ratio() < .8:
             raise EventUIError('当前活动标题多帧不一致')
         # Decorative title fonts can produce the same wrong OCR twice. Read
         # the plain heading in this event's help and cross-check the two views.
@@ -261,9 +263,16 @@ class CampaignClean(TimeLimitTask):
         if not help_button:
             raise EventUIError('当前活动帮助入口未确认')
         self.ui.click(help_button)
+        help_attempts = 0
+        def retry_help(frame):
+            nonlocal help_attempts
+            button = frame.find('帮助', (850, 0, 960, 85), exact=True)
+            if frame.event_home and button and help_attempts < 2:
+                help_attempts += 1
+                self.ui.click((button.center[0], max(20, button.center[1]-25)), delay=1.5)
         self.ui.wait(lambda f: f.find('帮助', (300, 0, 700, 70), exact=True)
                      and len(f.all(r'^[\u4e00-\u9fff·]{6,30}$', (180, 145, 720, 205))) == 1,
-                     '活动帮助标题加载')
+                     '活动帮助标题加载', handle=retry_help)
         headings = []
         for _ in range(2):
             help_screen = self.ui.capture()
@@ -273,7 +282,7 @@ class CampaignClean(TimeLimitTask):
             headings.append(normalized(titles[0].text))
             self.ui.save('event_help_identity_' + str(len(headings)), help_screen)
             time.sleep(.5)
-        if headings[0] != headings[1] or SequenceMatcher(None, headings[0], names[0]).ratio() < .8:
+        if headings[0] != headings[1] or any(SequenceMatcher(None, headings[0], name).ratio() < .8 for name in names):
             raise EventUIError('当前活动帮助标题与首页不一致')
         self.ui.expect_click('关闭', (350, 440, 615, 515), exact=True)
         self.report['event_identity'] = {'name': headings[0], 'home_title': names[0], 'basis': 'live_help_and_home'}
@@ -342,7 +351,16 @@ class CampaignClean(TimeLimitTask):
             self.log("活动任务入口无可领取提示，跳过")
             return
         self.ui.click(s.find("任务", (700, 0, 840, 85), exact=True))
-        self.ui.wait(lambda s: s.find("活动任务", (0, 0, 280, 65)), "活动任务")
+        attempts = 0
+        def open_missions(frame):
+            nonlocal attempts
+            if self.entry_dialog(frame):
+                return
+            button = frame.find('任务', (700, 0, 840, 85), exact=True)
+            if frame.event_home and button and attempts < 2:
+                attempts += 1
+                self.ui.click((button.center[0], max(20, button.center[1]-25)), delay=1.5)
+        self.ui.wait(lambda s: s.find("活动任务", (0, 0, 280, 65)), "活动任务", handle=open_missions)
         for tab in ("每日", "普通", "特别", "称号"):
             self.ui.expect_click(tab, (300, 0, 950, 50), exact=True)
             s = self.ui.capture()
@@ -424,6 +442,7 @@ class CampaignClean(TimeLimitTask):
     def special_chapter(self, home: EventScreen) -> None:
         """Read the verified letter-style extra chapter without mini-game inputs."""
         self.ui.click(home.find('小沙月', (0, 250, 170, 355)))
+        self.ui.wait(lambda s: s.find('章节一览', (300, 0, 700, 70), exact=True), '特别章节入口加载')
         opened = 0
         idle = 0
         for _ in range(180):

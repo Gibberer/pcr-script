@@ -21,7 +21,7 @@ from .strategy_document import Evidence, Fact, empty_member, finalize, export_do
 from .strategy_sources import BORROW_PART, MANUAL_PART, UNVERIFIED_SETTING, discover_sources
 from .strategy_inputs import preferred_sources
 
-PARSER_VERSION = 35
+PARSER_VERSION = 36
 FRAME_OCR_VERSION = 1
 COMBAT_AUDIT_SECONDS = 20
 ELEMENTS = {'火': 'fire', '水': 'water', '风': 'wind', '光': 'light', '暗': 'dark',
@@ -385,6 +385,18 @@ def observed_scope(texts, page: dict, kind: str) -> tuple[dict, bool]:
     if kind in ('event', 'revival'):
         scopes = [page_scope({'part': t.text}, kind) for t in texts if t.score >= .94]
         scopes.append(page_scope({'part': '\n'.join(t.text for t in texts if t.score >= .94)}, kind))
+        # SP+ result pages explicitly pair the current phase with remaining
+        # run attempts. Regular SP shows a challenge ordinal instead. This
+        # establishes the scope of a following retry in the same video part.
+        remaining = [t for t in texts if t.score >= .94 and t.center[1] < 130
+                     and re.search(r'剩余挑战次数\s*\d+\s*/\s*\d+', t.text)]
+        result_phases = {int(m[1]) for t in texts if t.score >= .94 and t.center[1] < 130
+                         for m in re.finditer(r'阶段\s*([123])', t.text)}
+        if remaining and len(result_phases) == 1 and any(
+                t.score >= .94 and '再次挑战' in t.text for t in texts):
+            if event_page_difficulty(page.get('part', page.get('title', ''))) not in (None, 'special_plus'):
+                return {'conflict': True}, False
+            scopes.append(dict(difficulty='special_plus', mode=next(iter(result_phases))))
         difficulty = event_page_difficulty(page.get('part', page.get('title', '')))
         if difficulty in ('special', 'special_plus', 'very_hard'):
             # The part names the difficulty; the battle HUD supplies the
