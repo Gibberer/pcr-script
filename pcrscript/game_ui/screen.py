@@ -89,6 +89,21 @@ class EventScreen:
         return float(np.mean((hsv[:, :, 1] < 90) & (hsv[:, :, 2] > 75)
                              & (hsv[:, :, 2] < 190))) > .65
 
+    def letterboxed_movie(self):
+        """The event ending fills the centre with black bands above and below."""
+        if self.find('菜单|帮助|关卡|队伍编组|活动剧情|取消|关闭|加载|下载'):
+            return False
+        return (float(np.mean(self.image[:42])) < 8
+                and float(np.mean(self.image[500:530])) < 8
+                and float(np.mean(self.image[90:450])) > 30)
+
+    def counter_badge(self, roi):
+        """Pink numeric badges remain visible when OCR misses a single digit."""
+        x1, y1, x2, y2 = roi
+        hsv = cv.cvtColor(self.image[y1:y2, x1:x2], cv.COLOR_BGR2HSV)
+        mask = cv.inRange(hsv, np.array([145, 70, 140]), np.array([179, 255, 255]))
+        return float(np.mean(mask > 0)) > .25
+
     @property
     def event_home(self):
         return bool(self.find("活动剧情", (650, 280, 960, 465)) and self.find("报酬[交兑]换", (0, 280, 400, 465)))

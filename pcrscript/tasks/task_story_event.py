@@ -44,6 +44,21 @@ class CampaignClean(TimeLimitTask):
         if s.find('帮助', (300, 0, 700, 70), exact=True) and s.find('剧情活动', (50, 90, 250, 150)):
             self.ui.expect_click('关闭', (350, 440, 615, 515), exact=True)
             return True
+        if (s.find('收取报酬', (300, 0, 700, 70), exact=True)
+                and s.find('收取了以下道具', (250, 55, 730, 105))):
+            self.ui.save('mission_receipt', s)
+            self.ui.expect_click('关闭', (350, 440, 615, 515), exact=True)
+            return True
+        if (s.find('章节一览', (300, 0, 700, 70), exact=True)
+                and s.find('小沙月敬启', (350, 100, 700, 250), exact=True)):
+            self.ui.expect_click('关闭', (350, 440, 615, 515), exact=True)
+            return True
+        if (s.find('报酬[交兑]换', (0, 0, 300, 65))
+                and s.find('获得的报酬将会直接增加到持有道具中', (250, 360, 780, 410))
+                and s.find('重置报酬', (480, 390, 720, 470), exact=True)):
+            self.ui.save('exchange_receipt', s)
+            self.ui.expect_click('取消', (250, 390, 480, 470), exact=True)
+            return True
         from .event_first_clear import auto_advance_result
         result = auto_advance_result(self.ui, s)
         if result:
@@ -119,7 +134,7 @@ class CampaignClean(TimeLimitTask):
         if item:
             self.ui.click(item)
             return True
-        if s.find("Cygames|アニメーション|エンディング") or (len(s.items) < 8 and s.find(".+", (250, 440, 860, 525))
+        if s.letterboxed_movie() or s.find("Cygames|アニメーション|エンディング") or (len(s.items) < 8 and s.find(".+", (250, 440, 860, 525))
                 and not s.find("加载中|下载中|连接|取消|确认|关闭|获得|报酬|确定|新内容")
                 and not s.find(".+", (0, 0, 960, 100))):
             # Movie captions with no page chrome. The game's top-right skip
@@ -318,7 +333,9 @@ class CampaignClean(TimeLimitTask):
 
     def missions(self) -> None:
         s = self.home()
-        if not s.notification((787, 3, 832, 45)):
+        if not (s.notification((787, 3, 832, 45))
+                or s.counter_badge((787, 3, 832, 30))
+                or s.find(r'[1-9]\d*', (787, 0, 832, 35), exact=True)):
             self.log("活动任务入口无可领取提示，跳过")
             return
         self.ui.click(s.find("任务", (700, 0, 840, 85), exact=True))
@@ -330,19 +347,22 @@ class CampaignClean(TimeLimitTask):
             if not s.blue_button(item):
                 continue
             self.ui.click(item)
-            def dismiss(frame):
-                item = frame.find("关闭|确认|确定", (250, 350, 750, 525), exact=True)
-                if item:
-                    self.ui.click(item)
+            receipt = self.ui.wait(lambda frame: frame.find('收取报酬', (300, 0, 700, 70), exact=True)
+                                   and frame.find('收取了以下道具', (250, 55, 730, 105)),
+                                   '活动任务领取回执')
+            self.entry_dialog(receipt)
             self.ui.wait(lambda s: s.find("活动任务", (0, 0, 280, 65))
+                         and not s.find('收取报酬', (300, 0, 700, 70), exact=True)
                          and not s.blue_button(s.find("全部收取", (700, 405, 955, 475))),
-                         "领取活动任务", handle=dismiss)
+                         "领取活动任务")
         self.home()
         self.log("已检查四类活动任务奖励")
 
     def memoirs(self) -> None:
         """This event's optional side stories; other mini-games stay untouched."""
         s = self.home()
+        if s.find('小沙月', (0, 250, 170, 355)) and s.find('敬启', (0, 250, 170, 355)):
+            return self.special_chapter(s)
         entry = s.find("回忆录", (0, 220, 170, 355))
         if not entry:
             return
@@ -397,6 +417,48 @@ class CampaignClean(TimeLimitTask):
             else:
                 time.sleep(.6)
         raise EventUIError("回忆录达到步骤上限，已保存当前进度")
+
+    def special_chapter(self, home: EventScreen) -> None:
+        """Read the verified letter-style extra chapter without mini-game inputs."""
+        self.ui.click(home.find('小沙月', (0, 250, 170, 355)))
+        opened = 0
+        idle = 0
+        for _ in range(180):
+            self.check_deadline()
+            s = self.ui.capture()
+            if s.find('章节一览', (300, 0, 700, 70), exact=True):
+                chapter = s.find('小沙月敬启', (350, 100, 700, 250), exact=True)
+                if not chapter:
+                    s = self.ui.wait(lambda f: f.find('章节一览', (300, 0, 700, 70), exact=True)
+                                     and f.find('小沙月敬启', (350, 100, 700, 250), exact=True),
+                                     '特别章节列表加载')
+                    chapter = s.find('小沙月敬启', (350, 100, 700, 250), exact=True)
+                if s.find('新内容|NEW', (240, 100, 360, 175)):
+                    if opened >= 2:
+                        raise EventUIError('特别章节阅读后仍标为未读')
+                    self.ui.click(chapter)
+                    opened += 1
+                else:
+                    idle += 1
+                    if idle < 3:
+                        time.sleep(.7)
+                        continue
+                    self.ui.expect_click('关闭', (350, 440, 615, 515), exact=True)
+                    self.home()
+                    self.log('特别章节已核对读完')
+                    return
+                idle = 0
+            elif self.story_dialog(s) or s.find('加载中|下载中|数据连接'):
+                idle = 0
+            elif s.event_home and not s.notification((78, 253, 120, 301)):
+                self.log('特别章节提示已清除')
+                return
+            else:
+                idle += 1
+                if idle > 12:
+                    raise EventUIError('特别章节出现未知页面')
+            time.sleep(.7)
+        raise EventUIError('特别章节读取达到步骤上限')
 
     def sweep(self, hard: bool = True) -> None:
         if hard:
@@ -555,6 +617,8 @@ class CampaignClean(TimeLimitTask):
         for _ in range(80):
             self.check_deadline()
             s = self.ui.capture()
+            if self.entry_dialog(s):
+                continue
             if s.find("一键交换完毕|交换结果|获得报酬", (200, 100, 780, 250)):
                 self.ui.expect_click("确认|确定|关闭", (250, 300, 730, 480), exact=True)
                 continue

@@ -11,6 +11,77 @@ from pcrscript.game_ui.screen import EventUIError
 
 
 class FirstEntryTests(TestCase):
+    def test_special_chapter_reads_new_then_returns_when_mark_clears(self):
+        r = CampaignClean.__new__(CampaignClean)
+        r.check_deadline = Mock()
+        r.log = Mock()
+        r.home = Mock()
+        home = frame(('小沙月', 60, 322), ('敬启', 60, 337))
+        home.notification = Mock(return_value=True)
+        new = frame(('章节一览', 480, 40), ('小沙月敬启', 465, 165), ('新内容', 290, 130))
+        read = frame(('章节一览', 480, 40), ('小沙月敬启', 465, 165))
+        r.ui = ReplayUI([frame(('章节一览', 480, 40)), new, read, read, read])
+        r.ui.expect_click = Mock()
+        with patch('pcrscript.tasks.task_story_event.time.sleep'):
+            r.special_chapter(home)
+        self.assertEqual(r.ui.clicks, ['小沙月', '小沙月敬启'])
+        r.ui.expect_click.assert_called_once_with('关闭', (350, 440, 615, 515), exact=True)
+
+    def test_counter_badge_is_visible_without_ocr_digits(self):
+        s = frame(('任务', 785, 52))
+        self.assertFalse(s.counter_badge((787, 3, 832, 30)))
+        s.image[3:30, 787:832] = (150, 70, 245)
+        self.assertTrue(s.counter_badge((787, 3, 832, 30)))
+
+    def test_mission_receipt_is_closed_before_switching_tabs(self):
+        class MissionUI(ReplayUI):
+            def expect_click(self, pattern, roi, exact=False):
+                self.click(pattern)
+            def wait(self, predicate, *args, **kwargs):
+                for s in self.frames:
+                    if predicate(s):
+                        return s
+                raise AssertionError('expected reward state missing')
+        r = CampaignClean.__new__(CampaignClean)
+        r.home = Mock(return_value=frame(('任务', 785, 52), ('16', 806, 15)))
+        r.log = Mock()
+        ready = frame(('活动任务', 120, 30), ('全部收取', 840, 440))
+        ready.image[420:460, 800:880] = (255, 150, 50)
+        faded = frame(('活动任务', 120, 30), ('全部收取', 840, 440))
+        receipt = frame(('收取报酬', 480, 40), ('收取了以下道具。', 480, 78), ('关闭', 480, 478))
+        r.ui = MissionUI([ready, ready, faded, receipt, faded, faded, faded, faded])
+        r.missions()
+        self.assertEqual(r.ui.clicks, ['任务', '每日', '全部收取', '关闭', '普通', '特别', '称号'])
+
+    def test_exchange_receipt_returns_without_resetting_rewards(self):
+        r = CampaignClean.__new__(CampaignClean)
+        r.ui = Mock()
+        s = frame(('报酬交换', 130, 30), ('获得的报酬将会直接增加到持有道具中。', 480, 385),
+                  ('取消', 370, 425), ('重置报酬', 590, 425))
+        self.assertTrue(r.entry_dialog(s))
+        r.ui.expect_click.assert_called_once_with('取消', (250, 390, 480, 470), exact=True)
+
+    def test_numeric_mission_badge_opens_reward_tabs(self):
+        r = CampaignClean.__new__(CampaignClean)
+        r.home = Mock(return_value=frame(('任务', 785, 52), ('16', 806, 15)))
+        r.ui = Mock()
+        r.ui.capture.return_value = frame(('全部收取', 835, 440))
+        r.log = Mock()
+        r.missions()
+        self.assertEqual(r.ui.click.call_args.args[0].text, '任务')
+        self.assertEqual([call.args[0] for call in r.ui.expect_click.call_args_list],
+                         ['每日', '普通', '特别', '称号'])
+
+    def test_ending_movie_with_credits_needs_no_bottom_caption(self):
+        r = CampaignClean.__new__(CampaignClean)
+        r.ui = ReplayUI([])
+        s = frame(('合成片尾字幕', 300, 90))
+        s.image[50:490] = (90, 120, 160)
+        self.assertTrue(r.story_dialog(s))
+        self.assertEqual(r.ui.clicks, [(898, 45)])
+        s.items.extend(frame(('帮助', 480, 40), ('关闭', 480, 478)).items)
+        self.assertFalse(s.letterboxed_movie())
+
     def test_disabled_boss_story_skip_advances_visible_dialogue(self):
         r = CampaignClean.__new__(CampaignClean)
         r.ui = ReplayUI([])
