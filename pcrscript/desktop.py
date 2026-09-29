@@ -70,7 +70,7 @@ DESCRIPTIONS = {
     'get_quest_reward': '依次检查首页任务页面的每日、普通、称号标签并领取已完成任务奖励（含体力）。示例日常先领体力供扫荡使用，最后再补领新完成任务的奖励。',
     'luna_tower_clean': '在露娜塔开放且已完成对应进度时扫荡回廊。配置列表会根据活动情报筛选。',
     'team_battle': '团队战开放期间，在扫荡后使用现有挑战次数。优先选择满血且可连续击杀的首领；高级推荐队伍必须五人齐全并装备特别装备，每次实战前先通过模拟战。不会购买体力或重置次数。',
-    'clear_campaign_first_time': '保留的活动首通兼容入口，复用剧情活动流程。是否真正推进首通仍取决于 StoryEvent.first_clear；当前默认关闭，首日连续流程仍待实测。',
+    'clear_campaign_first_time': '核对保存队伍并按 StoryEvent.max_first_clear_stamina 上限自动推进普通、困难关卡，随后扫荡和领奖。需允许 allow_local_trials；首领由 bosses 独立控制。',
 }
 
 

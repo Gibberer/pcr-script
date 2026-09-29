@@ -12,6 +12,8 @@ StoryEvent:
   allow_local_trials: true
   use_local_teams: false
   first_clear: false
+  max_first_clear_stamina: 200
+  first_clear_timeout: 900
   bosses: false
   stories: true
   memoirs: true

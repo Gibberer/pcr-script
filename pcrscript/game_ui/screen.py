@@ -79,6 +79,16 @@ class EventScreen:
         return any(10 <= w <= 22 and 10 <= h <= 22 and 60 <= area <= 250
                    and .35 <= area/(w*h) <= .75 for _, _, w, h, area in stats[1:])
 
+    def gray_story_control(self, item):
+        """Recognize the disabled gray fill of an opened story-menu control."""
+        if not item:
+            return False
+        x, y = item.center
+        patch = self.image[max(0, y-18):min(540, y+12), max(0, x-35):min(960, x+35)]
+        hsv = cv.cvtColor(patch, cv.COLOR_BGR2HSV)
+        return float(np.mean((hsv[:, :, 1] < 90) & (hsv[:, :, 2] > 75)
+                             & (hsv[:, :, 2] < 190))) > .65
+
     @property
     def event_home(self):
         return bool(self.find("活动剧情", (650, 280, 960, 465)) and self.find("报酬[交兑]换", (0, 280, 400, 465)))
