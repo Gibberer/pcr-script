@@ -90,10 +90,10 @@ class Event:
     extras: dict[str, Any] = field(default_factory=dict)
 
     def __str__(self) -> str:
-        start = time.localtime(self.startTimestamp)
-        end = time.localtime(self.endTimestamp)
+        start = datetime.fromtimestamp(self.startTimestamp, SERVER_TIMEZONE)
+        end = datetime.fromtimestamp(self.endTimestamp, SERVER_TIMEZONE)
         return (
-            f"{self.name}:{start.tm_mon}/{start.tm_mday} - {end.tm_mon}/{end.tm_mday}"
+            f"{self.name}:{start.month}/{start.day} - {end.month}/{end.day}"
         )
 
 

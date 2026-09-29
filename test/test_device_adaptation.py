@@ -10,6 +10,7 @@ import os
 import cv2 as cv
 import numpy as np
 
+import daily_task
 from pcrscript.actions import ClickAction, SwipeAction
 from pcrscript.driver import ADBDriver
 from pcrscript.game_ui.screen import EventUI
@@ -19,6 +20,22 @@ from pcrscript.simulator import DNSimulator, GeneralSimulator
 
 
 class DeviceAdaptationTests(TestCase):
+    def test_daily_cli_only_runs_tasks_after_zero_launch_status(self):
+        config = {'Extra': {'dnpath': 'C:/synthetic'}, 'Task': {1: [['normal_gacha']]}}
+        for code in (-1, 1, 7, 0):
+            with self.subTest(code=code), \
+                    patch('sys.argv', ['daily_task.py', '--config', 'synthetic.yml']), \
+                    patch.object(daily_task, 'load_config', return_value=config), \
+                    patch.object(daily_task, 'open_leidian_emulator', return_value=code), \
+                    patch.object(daily_task, 'run_script') as run:
+                if code:
+                    with self.assertRaisesRegex(RuntimeError, '雷电启动失败'):
+                        daily_task.main()
+                    run.assert_not_called()
+                else:
+                    daily_task.main()
+                    run.assert_called_once_with(config)
+
     def test_leidian_start_preserves_spaces_in_installation_path(self):
         path = 'C:/Program Files/LDPlayer9'
         with patch.object(DNSimulator, '_get_process_descriptions', return_value=[]), \

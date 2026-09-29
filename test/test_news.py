@@ -18,6 +18,15 @@ TOKYO = timezone(timedelta(hours=9))
 
 
 class NewsScheduleTests(TestCase):
+    def test_event_display_keeps_server_dates_across_host_timezones(self):
+        event = Event(news._event_timestamp('2026/09/29 00:30:00'),
+                      news._event_timestamp('2026/09/30 23:30:00'), 'synthetic')
+        for host in (TOKYO, timezone.utc, timezone(timedelta(hours=-7))):
+            with self.subTest(host=host), \
+                    patch('pcrscript.tasks.base.time.localtime',
+                          side_effect=lambda stamp: datetime.fromtimestamp(stamp, host).timetuple()):
+                self.assertEqual(str(event), 'synthetic:9/29 - 9/30')
+
     def test_all_schedules_use_server_time_on_a_tokyo_computer(self):
         start, end = '2026/09/29 05:00:00', '2026/09/29 06:00:00'
         with closing(sqlite3.connect(':memory:')) as conn:
