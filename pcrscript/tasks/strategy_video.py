@@ -21,7 +21,7 @@ from .strategy_document import Evidence, Fact, empty_member, finalize, export_do
 from .strategy_sources import BORROW_PART, MANUAL_PART, UNVERIFIED_SETTING, discover_sources
 from .strategy_inputs import preferred_sources
 
-PARSER_VERSION = 36
+PARSER_VERSION = 37
 FRAME_OCR_VERSION = 1
 COMBAT_AUDIT_SECONDS = 20
 ELEMENTS = {'火': 'fire', '水': 'water', '风': 'wind', '光': 'light', '暗': 'dark',
@@ -356,7 +356,7 @@ def declared_region(text: str) -> str:
     return next(iter(values)) if len(values) == 1 else 'conflict' if values else 'unknown'
 
 
-def observed_scope(texts, page: dict, kind: str) -> tuple[dict, bool]:
+def observed_scope(texts, page: dict, kind: str, *, battle_scope: dict | None = None) -> tuple[dict, bool]:
     metadata = page_scope(page, kind)
     if kind == 'abyss':
         scopes = [page_scope({'part': t.text}, kind) for t in texts if t.score >= .94]
@@ -399,14 +399,21 @@ def observed_scope(texts, page: dict, kind: str) -> tuple[dict, bool]:
             scopes.append(dict(difficulty='special_plus', mode=next(iter(result_phases))))
         difficulty = event_page_difficulty(page.get('part', page.get('title', '')))
         if difficulty in ('special', 'special_plus', 'very_hard'):
-            # The part names the difficulty; the battle HUD supplies the
-            # starting/current phase. Neither alone establishes both fields.
+            # A HUD phase may advance within one challenge. Its settings
+            # still belong to the challenge's starting mode, not a new party.
             phases = {int(m[1]) for t in texts if t.score >= .94
+                      and not page_scope({'part': t.text}, kind)
                       for m in re.finditer(r'(?:模式|MODE|阶段)\s*([123])', t.text, re.I)}
             if len(phases) > 1:
                 return {'conflict': True}, False
             if phases:
-                scopes.append(dict(difficulty=difficulty, mode=next(iter(phases))))
+                phase = next(iter(phases))
+                start = metadata or battle_scope or {}
+                if start.get('difficulty') == difficulty and start.get('mode'):
+                    if phase < start['mode']:
+                        return {'conflict': True}, False
+                    phase = start['mode']
+                scopes.append(dict(difficulty=difficulty, mode=phase))
         scopes = [s for s in scopes if s]
         if metadata and any(s != metadata for s in scopes):
             return {'conflict': True}, False
@@ -627,7 +634,8 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
                         evidence = Evidence(**{**asdict(proof), 'text': row['text'], 'rectangle': row['rectangle'],
                                                'confidence': row['confidence'], 'method': 'avatar_labeled_cell'})
                         character_facts[row['name']].append((row['field'], row['value'], evidence, chapter_scope))
-                scope, verified = observed_scope(texts, page, options['task_type'])
+                scope, verified = observed_scope(texts, page, options['task_type'],
+                    battle_scope=last_scope[0] if combat_scene and combat_seen > 1 else None)
                 if scope and not verified:
                     # Conflicting visible stage labels must invalidate the frame.
                     last_scope = ({}, False)

@@ -55,8 +55,14 @@ class EventFirstClear:
             raise EventUIError('首通需要已选的完整五人队伍')
         formation.avatars, assets = ensure_avatar_index(
             self.r.options.get('sources', {}).get('avatars'), check=self.r.check_deadline)
-        formation.infer_costume_from_skills = True
-        members = formation.inspect_current(full=True)
+        previous_inference = formation.infer_costume_from_skills
+        try:
+            formation.infer_costume_from_skills = True
+            members = formation.inspect_current(full=True)
+        finally:
+            # Boss selection shares this object and needs fresh skill levels
+            # for source members absent from the first-clear roster.
+            formation.infer_costume_from_skills = previous_inference
         unknown = [m for m in members if m.identity_verified and m.unique is None]
         if unknown:
             from ..game_ui.character_equipment import inspect_unreleased_equipment
@@ -209,11 +215,15 @@ class EventFirstClear:
             if balance is None:
                 raise EventUIError('首通后体力余额无法核对')
             remaining = int(re.search(r'(\d+)/\d+', normalized(balance.text))[1])
-            spent = plan['stamina_before'] - remaining
-            if not 0 < spent <= plan['max_cost']:
-                raise EventUIError('首通后的体力变化与计划不符')
-            if spent != plan['result']['spent']:
-                raise EventUIError('首通体力余额变化与结算回执不符')
+            spent = plan['result']['spent']
+            if not 0 < spent <= plan['max_cost'] or self.spent + spent > self.budget:
+                raise EventUIError('首通结算消耗超出预览或首通体力上限')
+            recovered = remaining - (plan['stamina_before'] - spent)
+            if recovered < 0:
+                raise EventUIError('首通体力余额低于结算预期，存在未解释的额外消耗')
+            # Natural/level-up recovery changes the balance, not the amount
+            # consumed. Keep its inferred delta separate from the budget.
             self.spent += spent
-            plan.update(stamina_after=remaining, spent=spent)
+            plan.update(stamina_after=remaining, spent=spent,
+                        stamina_recovered_inferred=recovered)
         raise EventUIError('首次过图达到步骤上限')

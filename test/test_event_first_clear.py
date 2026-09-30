@@ -242,6 +242,95 @@ class FirstEntryTests(TestCase):
 
 
 class FirstClearTests(TestCase):
+    def test_first_clear_then_new_boss_members_read_skills_on_shared_formation(self):
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+        from pcrscript.tasks.strategy_trial import TrialFormation
+        from pcrscript.tasks.event_strategy import CharacterStatus
+        run = self.make_runner()
+        run.r.options['allow_local_trials'] = True
+        first = [CharacterStatus(f'首通角色{i}', level=100, rank=10, stars=5,
+            unique=True, unique2=False, skill_level=100, identity_verified=True) for i in range(5)]
+        formation = TrialFormation.__new__(TrialFormation)
+        formation.occupied_slots = Mock(return_value=list(range(5)))
+        formation.observed = {m.name: m for m in first}
+        formation.badges = Mock()
+        formation.badges.observe.return_value = ((True, False), None)
+        run.b.formation = formation
+        run.ui.capture = Mock(return_value=frame(('队伍编组', 480, 40)))
+        index = Mock()
+        with patch.object(formation, 'inspect_current', return_value=first), \
+                patch('pcrscript.tasks.event_first_clear.ensure_avatar_index', return_value=(index, {})):
+            run.audit_party()
+        self.assertFalse(formation.infer_costume_from_skills)
+        skills = frame(*[(name, 660, y) for name, y in [('技能甲', 220), ('技能乙', 280), ('技能丙', 340)]],
+                       *[(text, x, y) for y in (220, 280, 340) for text, x in [('等级', 815), ('100', 865)]])
+        boss = []
+        with TemporaryDirectory() as folder, \
+                patch('pcrscript.tasks.event_formation.count_stars', return_value=5), \
+                patch('pcrscript.tasks.event_formation.skill_names', return_value={
+                    'main_skill_1': '技能甲', 'main_skill_2': '技能乙'}):
+            for i in range(5):
+                name = f'首领角色{i}'
+                detail = frame(('角色详情', 480, 30), (name, 600, 80),
+                               ('100', 560, 115), ('10', 790, 115), ('技能', 680, 150))
+                ui = Mock(output=Path(folder))
+                ui.capture.side_effect = [frame(), skills, skills]
+                ui.wait.side_effect = [detail, frame(('队伍编组', 480, 40))]
+                index.query.return_value = [name]
+                formation.ui = ui
+                actual = formation.inspect((200, 200), rectangle=(150, 150, 100, 100),
+                                           expected_name=name, verify_skills=False)
+                self.assertTrue(actual.identity_verified)
+                self.assertEqual(actual.skill_level, 100)
+                self.assertEqual(ui.click.call_args.args[0].text, '技能')
+                boss.append(actual)
+        b = EventBattles.__new__(EventBattles)
+        b.r, b.ui, b.formation = run.r, run.ui, formation
+        party = SimpleNamespace(name='合成首领队', source='https://example.com/synthetic', members=boss)
+        with patch.object(formation, 'inspect_current', return_value=boss):
+            b.audit_source_trial(party, {'order': [m.name for m in boss]}, '特别', 1)
+        self.assertEqual(len(run.r.report['source_trial_audits']), 1)
+
+    def test_first_clear_restores_inference_setting_even_when_inspection_fails(self):
+        for previous in (False, True):
+            run = self.make_runner()
+            run.r.options['allow_local_trials'] = True
+            run.ui.capture = Mock(return_value=frame(('队伍编组', 480, 40)))
+            run.b.formation = Mock(infer_costume_from_skills=previous)
+            run.b.formation.occupied_slots.return_value = list(range(5))
+            run.b.formation.inspect_current.side_effect = EventUIError('合成读取失败')
+            with patch('pcrscript.tasks.event_first_clear.ensure_avatar_index', return_value=(Mock(), {})):
+                with self.assertRaisesRegex(EventUIError, '合成读取失败'):
+                    run.audit_party()
+            self.assertIs(run.b.formation.infer_costume_from_skills, previous)
+
+    def test_receipt_budget_survives_natural_and_level_up_stamina_recovery(self):
+        for remaining, recovered in [(40, 0), (41, 1), (453, 413)]:
+            with self.subTest(remaining=remaining):
+                run = self.make_runner()
+                run.b.quest_catalog.side_effect = [{'活动关卡N-1': 0}, {'活动关卡N-1': 3, '活动关卡H-3': 3}]
+                run.r.quests = Mock(return_value=frame((f'{remaining}/413', 720, 25)))
+                plan = {'stamina_before': 200, 'max_cost': 160, 'result': {'spent': 160}}
+                with patch.object(run, 'open_formation'), patch.object(run, 'advance', return_value=plan) as advance:
+                    run.run()
+                advance.assert_called_once()
+                self.assertEqual(run.spent, 160)
+                self.assertEqual(plan['stamina_recovered_inferred'], recovered)
+                with self.assertRaisesRegex(EventUIError, '上限'):
+                    run.plan(self.plan_frame(cost='50', stamina='500'))
+
+    def test_extra_stamina_loss_or_receipt_over_preview_stops_continuation(self):
+        for remaining, receipt in [(39, 160), (40, 161), (40, 0)]:
+            run = self.make_runner()
+            run.b.quest_catalog.return_value = {'活动关卡N-1': 0}
+            run.r.quests = Mock(return_value=frame((f'{remaining}/413', 720, 25)))
+            with patch.object(run, 'open_formation'), patch.object(run, 'advance', return_value={
+                    'stamina_before': 200, 'max_cost': 160, 'result': {'spent': receipt}}) as advance:
+                with self.assertRaises(EventUIError):
+                    run.run()
+            advance.assert_called_once()
+
     def test_current_team_requires_explicit_trial_opt_in(self):
         run = self.make_runner()
         with self.assertRaisesRegex(EventUIError, '未允许'):

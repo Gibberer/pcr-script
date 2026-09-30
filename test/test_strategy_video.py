@@ -36,6 +36,61 @@ def complete_party():
 
 
 class VideoStrategyTests(TestCase):
+    def test_event_starting_mode_caption_can_coexist_with_later_hud_phase(self):
+        labels = [GuideText('SP模式1', 1, (10, 180, 150, 25)),
+                  GuideText('阶段2', 1, (60, 50, 100, 25))]
+        self.assertEqual(observed_scope(labels, {'part': 'SP模式1'}, 'event'),
+                         ({'difficulty': 'special', 'mode': 1}, True))
+        self.assertEqual(observed_scope(labels, {'part': 'SP模式3'}, 'event'),
+                         ({'conflict': True}, False))
+
+    def test_event_cross_phase_settings_remain_in_starting_challenge(self):
+        for kind in ('event', 'revival'):
+            for part in ('SP模式1', 'SP'):
+                for changed in (None, 'auto', 'instant'):
+                    with self.subTest(kind=kind, part=part, changed=changed), TemporaryDirectory() as folder:
+                        boxes = [(190+i*120, 390, 100, 100) for i in range(5)]
+                        members = [dict(name=f'角色{i}', rectangle=list(box), score=.99)
+                                   for i, box in enumerate(boxes)]
+                        fields = [GuideText(m['name']+':5星Lv100Rank10技能100专武1有专武2无',
+                                            1, (0, 150+i*30, 500, 20)) for i, m in enumerate(members)]
+                        texts = [fields+[GuideText(f'阶段{phase}', 1, (60, 50, 100, 25))]
+                                 for phase in (1, 1, 2, 2)]
+                        capture = Mock()
+                        capture.read.side_effect = [(True, np.full((540,960,3), value, np.uint8))
+                                                    for value in (30, 50, 70, 90)]
+                        source = dict(bvid='BVSYNTHETIC', url='https://example.com/synthetic',
+                            title='公主连结 国服 合成活动', pages=[dict(cid=1, part=part, duration=4)])
+                        index = SimpleNamespace(names=[m['name'] for m in members], matrix=np.ones((5,1728),np.float32))
+                        auto = [True, True, changed != 'auto', changed != 'auto']
+                        sets = [True]*10+[changed != 'instant']*10
+                        with patch('pcrscript.tasks.strategy_video.cv.VideoCapture', return_value=capture), \
+                             patch('pcrscript.tasks.strategy_video.sample_seconds', return_value=[.5,1.5,2.5,3.5]), \
+                             patch('pcrscript.tasks.strategy_video.COMBAT_AUDIT_SECONDS', 0), \
+                             patch('pcrscript.tasks.strategy_video.frame_texts', side_effect=texts), \
+                             patch('pcrscript.tasks.strategy_video.battle_rectangles', return_value=boxes), \
+                             patch('pcrscript.tasks.strategy_video.combat_team', return_value=members), \
+                             patch('pcrscript.tasks.strategy_video.combat_auto', side_effect=auto) as read_auto, \
+                             patch('pcrscript.tasks.strategy_video.combat_set', side_effect=sets) as read_set:
+                            report = parse_video_source(source, dict(task_type=kind, area='合成活动',
+                                difficulty='special', mode=1, parsed_dir=folder), index, api=Mock(), ocr=Mock(),
+                                media_fetcher=lambda *a, **k: (Path(folder)/'synthetic.avi', dict(duration=4)))
+                        self.assertEqual(read_auto.call_count, 4)
+                        self.assertEqual(read_set.call_count, 20)
+                        self.assertEqual(len(report['parties']), 1)
+                        party = report['parties'][0]
+                        self.assertEqual(party['scope']['mode'], 1)
+                        self.assertEqual(len(party['frames']), 4)
+                        expected = 0 if changed else 1
+                        self.assertEqual(len(event_parties(report, '合成活动', 'special', 1)), expected)
+                        self.assertEqual(len(event_trial_parties(report, '合成活动', 'special', 1,
+                                                                require_settings=True)), expected)
+                        if changed:
+                            fact = party['auto'] if changed == 'auto' else party['members'][0]['instant']
+                            self.assertTrue(fact['conflicts'])
+                        self.assertEqual(event_trial_parties(report, '合成活动', 'special', 2,
+                                                            require_settings=True), [])
+
     def test_event_retry_scope_requires_phase_remaining_count_and_retry_button(self):
         labels = [GuideText('阶段2',1,(80,55,90,25)),
                   GuideText('【剩余挑战次数9/10】',1,(200,55,210,25)),
