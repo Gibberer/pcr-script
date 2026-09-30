@@ -1,11 +1,13 @@
 from abc import ABCMeta, abstractmethod
 import copy
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import TYPE_CHECKING, Any, ClassVar, NotRequired, Optional, TypeAlias, TypedDict
 import numpy as np
 from numpy.typing import NDArray
 from ..run_session import clock as time
 from ..run_session import emit
+from ..constants import SERVER_TIMEZONE
 if TYPE_CHECKING:
     from pcrscript import Robot
 
@@ -88,10 +90,10 @@ class Event:
     extras: dict[str, Any] = field(default_factory=dict)
 
     def __str__(self) -> str:
-        start = time.localtime(self.startTimestamp)
-        end = time.localtime(self.endTimestamp)
+        start = datetime.fromtimestamp(self.startTimestamp, SERVER_TIMEZONE)
+        end = datetime.fromtimestamp(self.endTimestamp, SERVER_TIMEZONE)
         return (
-            f"{self.name}:{start.tm_mon}/{start.tm_mday} - {end.tm_mon}/{end.tm_mday}"
+            f"{self.name}:{start.month}/{start.day} - {end.month}/{end.day}"
         )
 
 
@@ -128,10 +130,10 @@ class TimeLimitTask(BaseTask):
         if not event:
             return False
         current_time = time.time()
-        if current_time > event.startTimestamp:
+        if event.startTimestamp <= current_time <= event.endTimestamp:
             return (
-                time.localtime(current_time).tm_mday
-                == time.localtime(event.startTimestamp).tm_mday
+                datetime.fromtimestamp(current_time, SERVER_TIMEZONE).date()
+                == datetime.fromtimestamp(event.startTimestamp, SERVER_TIMEZONE).date()
             )
         return False
 

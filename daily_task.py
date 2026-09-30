@@ -14,8 +14,8 @@ def main():
     dnpath = str(config.get("Extra", {}).get("dnpath") or "").strip()
     if dnpath:
         return_code = open_leidian_emulator(dnpath)
-        if return_code < 0:
-            raise RuntimeError("雷电启动失败")
+        if return_code != 0:
+            raise RuntimeError(f"雷电启动失败（退出码 {return_code}）")
         else:
             print("leidian emulator install path is configured, use leidian console.")
             run_script(config)
