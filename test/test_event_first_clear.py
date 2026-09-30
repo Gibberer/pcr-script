@@ -1,0 +1,455 @@
+"""Synthetic first-entry and first-clear safety checks; no account data."""
+from types import SimpleNamespace
+from unittest import TestCase
+from unittest.mock import Mock, patch
+
+from test_event import frame, fixture, ReplayUI
+from pcrscript.tasks.task_story_event import CampaignClean
+from pcrscript.tasks.event_first_clear import EventFirstClear
+from pcrscript.tasks.event_battle import EventBattles, boss_locked
+from pcrscript.game_ui.screen import EventUIError
+
+
+class FirstEntryTests(TestCase):
+    def test_in_battle_dialogue_uses_visible_overlay_before_background_menu(self):
+        r = CampaignClean.__new__(CampaignClean)
+        r.ui = ReplayUI([])
+        s = frame(('测试角色', 280, 403), ('测试台词', 300, 435), ('菜单', 900, 25))
+        self.assertFalse(s.battle_dialogue())
+        s.image[393:412, 190:365] = (150, 70, 245)
+        s.image[420:490, 185:790] = (240, 240, 240)
+        self.assertTrue(s.battle_dialogue())
+        self.assertTrue(r.story_dialog(s))
+        self.assertEqual(r.ui.clicks, [(779, 493)])
+        s.items.extend(frame(('跳过这个剧情', 480, 200)).items)
+        self.assertFalse(s.battle_dialogue())
+
+    def test_equipment_navigation_reselects_source_party_before_battle(self):
+        from pcrscript.tasks.event_strategy import CharacterStatus
+        from dataclasses import replace
+        b = EventBattles.__new__(EventBattles)
+        b.ui = Mock()
+        b.ui.wait.return_value = frame(('BOSS详情', 150, 30), ('模式1', 800, 50))
+        b.r = Mock(report={})
+        members = [CharacterStatus(f'角色{i}', level=100, rank=10, stars=5,
+            unique=None if i == 0 else True, unique2=None if i == 0 else False,
+            skill_level=100, identity_verified=True) for i in range(5)]
+        refreshed = [replace(m) for m in members]
+        b.formation = Mock(observed={m.name: m for m in members})
+        order = [m.name for m in members]
+        def reselect(party):
+            b.formation.observed = {m.name: m for m in refreshed}
+            return True, {'order': order}
+        b.formation.select.side_effect = reselect
+        b.formation.inspect_current.return_value = refreshed
+        party = SimpleNamespace(name='synthetic', source='https://example.com', members=members)
+        with patch('pcrscript.game_ui.character_equipment.inspect_unreleased_equipment', return_value='proof'), \
+                patch('pcrscript.tasks.task_home.ToHomePage'):
+            b.audit_source_trial(party, {'order': order}, '特别', 1)
+        b.formation.select.assert_called_once_with(party)
+        self.assertEqual(len(b.r.report['source_trial_audits']), 1)
+        self.assertIs(b.r.report['source_trial_audits'][0]['observed'][0]['unique'], False)
+
+    def test_source_trial_audit_blocks_unknown_build_and_changed_lineup(self):
+        from pcrscript.tasks.event_strategy import CharacterStatus
+        b = EventBattles.__new__(EventBattles)
+        b.ui = Mock()
+        b.r = SimpleNamespace(report={})
+        members = [CharacterStatus(f'角色{i}', level=100, rank=10, stars=5,
+            unique=True, unique2=False, skill_level=100, identity_verified=True) for i in range(5)]
+        b.formation = Mock()
+        b.formation.observed = {m.name:m for m in members}
+        b.formation.inspect_current.return_value = members
+        party = SimpleNamespace(name='synthetic', source='https://example.com', members=members)
+        selection = dict(order=[m.name for m in members])
+        b.audit_source_trial(party, selection, '特别', 1)
+        members[0].skill_level = None
+        with self.assertRaisesRegex(EventUIError, '培养或专武'):
+            b.audit_source_trial(party, selection, '特别', 1)
+        members[0].skill_level = 100
+        b.formation.inspect_current.return_value = members[::-1]
+        with self.assertRaisesRegex(EventUIError, '编队'):
+            b.audit_source_trial(party, selection, '特别', 1)
+        b.ui.click.assert_not_called()
+
+    def test_special_chapter_reads_new_then_returns_when_mark_clears(self):
+        r = CampaignClean.__new__(CampaignClean)
+        r.check_deadline = Mock()
+        r.log = Mock()
+        r.home = Mock()
+        home = frame(('小沙月', 60, 322), ('敬启', 60, 337))
+        home.notification = Mock(return_value=True)
+        new = frame(('章节一览', 480, 40), ('小沙月敬启', 465, 165), ('新内容', 290, 130))
+        read = frame(('章节一览', 480, 40), ('小沙月敬启', 465, 165))
+        transition = frame(('活动剧情', 790, 380), ('报酬兑换', 280, 380))
+        class LoadingUI(ReplayUI):
+            def wait(self, predicate, *args, **kwargs):
+                for _ in range(8):
+                    s = self.capture()
+                    if predicate(s):
+                        return s
+                raise AssertionError('chapter did not open')
+        r.ui = LoadingUI([transition, frame(('章节一览', 480, 40)), new, read, read, read])
+        r.ui.expect_click = Mock()
+        with patch('pcrscript.tasks.task_story_event.time.sleep'):
+            r.special_chapter(home)
+        self.assertEqual(r.ui.clicks, ['小沙月', '小沙月敬启'])
+        r.ui.expect_click.assert_called_once_with('关闭', (350, 440, 615, 515), exact=True)
+
+    def test_counter_badge_is_visible_without_ocr_digits(self):
+        s = frame(('任务', 785, 52))
+        self.assertFalse(s.counter_badge((787, 3, 832, 30)))
+        s.image[3:30, 787:832] = (150, 70, 245)
+        self.assertTrue(s.counter_badge((787, 3, 832, 30)))
+
+    def test_mission_receipt_is_closed_before_switching_tabs(self):
+        class MissionUI(ReplayUI):
+            def expect_click(self, pattern, roi, exact=False):
+                self.click(pattern)
+            def wait(self, predicate, *args, **kwargs):
+                for s in self.frames:
+                    if predicate(s):
+                        return s
+                raise AssertionError('expected reward state missing')
+        r = CampaignClean.__new__(CampaignClean)
+        r.home = Mock(return_value=frame(('任务', 785, 52), ('16', 806, 15)))
+        r.log = Mock()
+        ready = frame(('活动任务', 120, 30), ('全部收取', 840, 440))
+        ready.image[420:460, 800:880] = (255, 150, 50)
+        faded = frame(('活动任务', 120, 30), ('全部收取', 840, 440))
+        receipt = frame(('收取报酬', 480, 40), ('收取了以下道具。', 480, 78), ('关闭', 480, 478))
+        r.ui = MissionUI([ready, ready, faded, receipt, faded, faded, faded, faded])
+        r.missions()
+        self.assertEqual(r.ui.clicks, ['任务', '每日', '全部收取', '关闭', '普通', '特别', '称号'])
+
+    def test_exchange_receipt_returns_without_resetting_rewards(self):
+        r = CampaignClean.__new__(CampaignClean)
+        r.ui = Mock()
+        s = frame(('报酬交换', 130, 30), ('获得的报酬将会直接增加到持有道具中。', 480, 385),
+                  ('取消', 370, 425), ('重置报酬', 590, 425))
+        self.assertTrue(r.entry_dialog(s))
+        r.ui.expect_click.assert_called_once_with('取消', (250, 390, 480, 470), exact=True)
+
+    def test_numeric_mission_badge_opens_reward_tabs(self):
+        r = CampaignClean.__new__(CampaignClean)
+        r.home = Mock(return_value=frame(('任务', 785, 52), ('16', 806, 15)))
+        r.ui = Mock()
+        r.ui.capture.return_value = frame(('全部收取', 835, 440))
+        r.log = Mock()
+        r.missions()
+        self.assertEqual(r.ui.click.call_args.args[0].text, '任务')
+        self.assertEqual([call.args[0] for call in r.ui.expect_click.call_args_list],
+                         ['每日', '普通', '特别', '称号'])
+
+    def test_ending_movie_with_credits_needs_no_bottom_caption(self):
+        r = CampaignClean.__new__(CampaignClean)
+        r.ui = ReplayUI([])
+        s = frame(('合成片尾字幕', 300, 90))
+        s.image[50:490] = (90, 120, 160)
+        self.assertTrue(r.story_dialog(s))
+        self.assertEqual(r.ui.clicks, [(898, 45)])
+        s.items.extend(frame(('帮助', 480, 40), ('关闭', 480, 478)).items)
+        self.assertFalse(s.letterboxed_movie())
+
+    def test_disabled_boss_story_skip_advances_visible_dialogue(self):
+        r = CampaignClean.__new__(CampaignClean)
+        r.ui = ReplayUI([])
+        s = frame(('菜单', 918, 45), ('记录', 775, 140), ('跳过', 885, 140),
+                  ('合成角色', 280, 403))
+        s.image[110:155, 845:925] = (145, 140, 130)
+        self.assertTrue(r.story_dialog(s))
+        self.assertEqual(r.ui.clicks, ['菜单', (780, 488)])
+
+    def test_loading_home_badges_are_not_movie_captions(self):
+        r = CampaignClean.__new__(CampaignClean)
+        r.ui = ReplayUI([])
+        self.assertFalse(r.story_dialog(frame(('新内容', 400, 490))))
+        self.assertEqual(r.ui.clicks, [])
+
+    def test_interrupted_native_settlement_returns_to_list_without_replaying_battle(self):
+        class SettlementUI(ReplayUI):
+            def expect_click(self, pattern, roi, exact=False):
+                s = self.capture()
+                item = s.find(pattern, roi, exact=exact)
+                assert item is not None
+                self.click(item)
+        r = CampaignClean.__new__(CampaignClean)
+        r.report = {}
+        r.check_deadline = Mock()
+        r.log = Mock()
+        end = frame(('自动推进结束', 480, 148), ('由于是最终关卡，自动推进停止。', 480, 238),
+                    ('13', 555, 200), ('160', 677, 311), ('确认', 480, 370))
+        loot = frame(('获得道具', 480, 150), ('初次通关', 120, 235), ('下一步', 840, 480))
+        summary = frame(('自动推进报酬一览', 480, 40), ('关闭', 480, 480))
+        unlock = frame(('自动推进解锁内容一览', 480, 148), ('关闭', 480, 370))
+        quests = frame(('活动关卡·首领', 150, 30))
+        summary.items.extend(quests.items)
+        unlock.items.extend(quests.items)
+        r.ui = SettlementUI([end, end, loot, summary, summary, unlock, unlock, quests])
+        self.assertTrue(r.enter())
+        self.assertEqual(r.ui.clicks, ['确认', '下一步', '关闭', '关闭'])
+        self.assertEqual(r.report['recovered_first_clear']['spent'], 160)
+        self.assertEqual(r.report['recovered_first_clear']['cleared'], 13)
+
+    def test_live_event_identity_requires_consistent_title_and_dates(self):
+        r = CampaignClean.__new__(CampaignClean)
+        r.report = {}
+        r.ui = Mock()
+        def home(title):
+            return frame((title, 470, 400), ('举办时间:09/29~10/22', 480, 446), ('帮助', 920, 50))
+        help_screen = frame(('帮助', 480, 40), ('合成活动的标题名称', 320, 173))
+        r.ui.capture.return_value = help_screen
+        r.home = Mock(side_effect=[home('合成活动的标题名祢'), home('合成活动的标题名弥')])
+        with patch('pcrscript.tasks.task_story_event.time.sleep'):
+            self.assertEqual(r.event_identity(), '合成活动的标题名称')
+        r.home = Mock(side_effect=[home('合成活动的标题名称'), home('另一个合成活动名称')])
+        with patch('pcrscript.tasks.task_story_event.time.sleep'), self.assertRaisesRegex(EventUIError, '多帧'):
+            r.event_identity()
+        r.home = Mock(return_value=frame(('合成活动的标题名称', 470, 400)))
+        with self.assertRaisesRegex(EventUIError, '举办时间'):
+            r.event_identity()
+
+    def test_tutorials_precede_home_recognition_and_login_receipt(self):
+        pages = [
+            ('活动限定剧情登场！', '在活动中，可以观看特别的剧情。'),
+            ('挑战剧情关卡和首领战吧！', '试试挑战活动关卡和首领战吧。'),
+            ('在公会管理协会可以使用活动奖励券', '在奖励兑换处，可以使用活动奖励券交换各种道具。'),
+            ('分为3种难度的首领战！', '首领战共设有三种难度。'),
+        ]
+        for method in ('enter', 'home'):
+            r = CampaignClean.__new__(CampaignClean)
+            r.check_deadline = Mock()
+            r.log = Mock()
+            screens = []
+            for title, body in pages:
+                s = frame((title, 340, 55), ('可可萝', 280, 403), (body, 460, 434))
+                s.items.extend(fixture('event_home').items)
+                screens.append(s)
+            r.ui = ReplayUI(screens + [fixture('event_login_reward'), fixture('event_home'), fixture('event_home')])
+            self.assertTrue(getattr(r, method)())
+            self.assertEqual(r.ui.clicks, [(780, 488)] * 4 + ['关闭'])
+
+    def test_incomplete_or_unrelated_tutorial_is_not_clicked(self):
+        r = CampaignClean.__new__(CampaignClean)
+        r.ui = ReplayUI([])
+        for items in (
+            [('活动限定剧情登场！', 340, 55)],
+            [('可可萝', 280, 403), ('购买体力', 460, 434)],
+            [('活动限定剧情登场！', 340, 55), ('可可萝', 280, 403)],
+        ):
+            self.assertFalse(r.entry_dialog(frame(*items)))
+        self.assertEqual(r.ui.clicks, [])
+
+
+class FirstClearTests(TestCase):
+    def test_first_clear_then_new_boss_members_read_skills_on_shared_formation(self):
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+        from pcrscript.tasks.strategy_trial import TrialFormation
+        from pcrscript.tasks.event_strategy import CharacterStatus
+        run = self.make_runner()
+        run.r.options['allow_local_trials'] = True
+        first = [CharacterStatus(f'首通角色{i}', level=100, rank=10, stars=5,
+            unique=True, unique2=False, skill_level=100, identity_verified=True) for i in range(5)]
+        formation = TrialFormation.__new__(TrialFormation)
+        formation.occupied_slots = Mock(return_value=list(range(5)))
+        formation.observed = {m.name: m for m in first}
+        formation.badges = Mock()
+        formation.badges.observe.return_value = ((True, False), None)
+        run.b.formation = formation
+        run.ui.capture = Mock(return_value=frame(('队伍编组', 480, 40)))
+        index = Mock()
+        with patch.object(formation, 'inspect_current', return_value=first), \
+                patch('pcrscript.tasks.event_first_clear.ensure_avatar_index', return_value=(index, {})):
+            run.audit_party()
+        self.assertFalse(formation.infer_costume_from_skills)
+        skills = frame(*[(name, 660, y) for name, y in [('技能甲', 220), ('技能乙', 280), ('技能丙', 340)]],
+                       *[(text, x, y) for y in (220, 280, 340) for text, x in [('等级', 815), ('100', 865)]])
+        boss = []
+        with TemporaryDirectory() as folder, \
+                patch('pcrscript.tasks.event_formation.count_stars', return_value=5), \
+                patch('pcrscript.tasks.event_formation.skill_names', return_value={
+                    'main_skill_1': '技能甲', 'main_skill_2': '技能乙'}):
+            for i in range(5):
+                name = f'首领角色{i}'
+                detail = frame(('角色详情', 480, 30), (name, 600, 80),
+                               ('100', 560, 115), ('10', 790, 115), ('技能', 680, 150))
+                ui = Mock(output=Path(folder))
+                ui.capture.side_effect = [frame(), skills, skills]
+                ui.wait.side_effect = [detail, frame(('队伍编组', 480, 40))]
+                index.query.return_value = [name]
+                formation.ui = ui
+                actual = formation.inspect((200, 200), rectangle=(150, 150, 100, 100),
+                                           expected_name=name, verify_skills=False)
+                self.assertTrue(actual.identity_verified)
+                self.assertEqual(actual.skill_level, 100)
+                self.assertEqual(ui.click.call_args.args[0].text, '技能')
+                boss.append(actual)
+        b = EventBattles.__new__(EventBattles)
+        b.r, b.ui, b.formation = run.r, run.ui, formation
+        party = SimpleNamespace(name='合成首领队', source='https://example.com/synthetic', members=boss)
+        with patch.object(formation, 'inspect_current', return_value=boss):
+            b.audit_source_trial(party, {'order': [m.name for m in boss]}, '特别', 1)
+        self.assertEqual(len(run.r.report['source_trial_audits']), 1)
+
+    def test_first_clear_restores_inference_setting_even_when_inspection_fails(self):
+        for previous in (False, True):
+            run = self.make_runner()
+            run.r.options['allow_local_trials'] = True
+            run.ui.capture = Mock(return_value=frame(('队伍编组', 480, 40)))
+            run.b.formation = Mock(infer_costume_from_skills=previous)
+            run.b.formation.occupied_slots.return_value = list(range(5))
+            run.b.formation.inspect_current.side_effect = EventUIError('合成读取失败')
+            with patch('pcrscript.tasks.event_first_clear.ensure_avatar_index', return_value=(Mock(), {})):
+                with self.assertRaisesRegex(EventUIError, '合成读取失败'):
+                    run.audit_party()
+            self.assertIs(run.b.formation.infer_costume_from_skills, previous)
+
+    def test_receipt_budget_survives_natural_and_level_up_stamina_recovery(self):
+        for remaining, recovered in [(40, 0), (41, 1), (453, 413)]:
+            with self.subTest(remaining=remaining):
+                run = self.make_runner()
+                run.b.quest_catalog.side_effect = [{'活动关卡N-1': 0}, {'活动关卡N-1': 3, '活动关卡H-3': 3}]
+                run.r.quests = Mock(return_value=frame((f'{remaining}/413', 720, 25)))
+                plan = {'stamina_before': 200, 'max_cost': 160, 'result': {'spent': 160}}
+                with patch.object(run, 'open_formation'), patch.object(run, 'advance', return_value=plan) as advance:
+                    run.run()
+                advance.assert_called_once()
+                self.assertEqual(run.spent, 160)
+                self.assertEqual(plan['stamina_recovered_inferred'], recovered)
+                with self.assertRaisesRegex(EventUIError, '上限'):
+                    run.plan(self.plan_frame(cost='50', stamina='500'))
+
+    def test_extra_stamina_loss_or_receipt_over_preview_stops_continuation(self):
+        for remaining, receipt in [(39, 160), (40, 161), (40, 0)]:
+            run = self.make_runner()
+            run.b.quest_catalog.return_value = {'活动关卡N-1': 0}
+            run.r.quests = Mock(return_value=frame((f'{remaining}/413', 720, 25)))
+            with patch.object(run, 'open_formation'), patch.object(run, 'advance', return_value={
+                    'stamina_before': 200, 'max_cost': 160, 'result': {'spent': receipt}}) as advance:
+                with self.assertRaises(EventUIError):
+                    run.run()
+            advance.assert_called_once()
+
+    def test_current_team_requires_explicit_trial_opt_in(self):
+        run = self.make_runner()
+        with self.assertRaisesRegex(EventUIError, '未允许'):
+            run.audit_party()
+        self.assertEqual(run.ui.clicks, [])
+
+    def test_auto_advance_leaves_combat_controls_to_game_and_checks_end_reason(self):
+        for reason, succeeds in [('由于是最终关卡，自动推进结束', True), ('战斗失败，自动推进结束', False)]:
+            run = self.make_runner()
+            settings = self.plan_frame()
+            settings.items.extend(frame(('立即发动', 365, 293), ('战斗开始', 590, 480)).items)
+            settings.image[279:306, 274:301] = (255, 150, 50)
+            settings.image[460:501, 540:641] = (255, 150, 50)
+            battle = frame(('菜单', 900, 30), ('1:20', 800, 30))
+            end = frame(('自动推进结束', 480, 148), (reason, 480, 238), ('确认', 480, 370),
+                        ('13', 555, 200), ('160', 677, 311))
+            run.ui = ReplayUI([settings, settings, battle, end])
+            run.ui.expect_click = Mock()
+            run.b.combat = SimpleNamespace(match=lambda key, screen: screen.find('菜单'))
+            run.r.entry_dialog = Mock(return_value=False)
+            run.r.story_dialog = Mock(return_value=False)
+            with patch.object(run, 'audit_party'), patch('pcrscript.tasks.event_first_clear.time.sleep'):
+                if succeeds:
+                    self.assertIn('最终关卡', run.advance()['end_reason'])
+                else:
+                    with self.assertRaisesRegex(EventUIError, '提前停止'):
+                        run.advance()
+            self.assertEqual(run.ui.clicks, ['立即发动', '战斗开始'])
+            run.r.story_dialog.assert_not_called()
+
+    def make_runner(self, budget=200):
+        r = SimpleNamespace(options={'max_first_clear_stamina': budget}, report={},
+                            check_deadline=Mock(), report_progress=Mock(), log=Mock(), home=Mock())
+        ui = ReplayUI([])
+        b = SimpleNamespace(r=r, ui=ui, quest_catalog=Mock())
+        return EventFirstClear(b)
+
+    def plan_frame(self, cost='160', stamina='834', target='H-3'):
+        return frame(('自动推进设定', 480, 40),
+                     (f'自动推进至活动关卡{target}时，最多消耗以下的体力。', 400, 125),
+                     (cost, 455, 157), (stamina, 685, 157))
+
+    def test_plan_checks_endpoint_and_remaining_budget(self):
+        run = self.make_runner()
+        self.assertEqual(run.plan(self.plan_frame()), {'target': 'H-3', 'max_cost': 160, 'stamina_before': 834})
+        run.spent = 50
+        with self.assertRaisesRegex(EventUIError, '上限'):
+            run.plan(self.plan_frame())
+        run.spent = 0
+        with self.assertRaisesRegex(EventUIError, '终点发生变化'):
+            run.plan(self.plan_frame(target='H-4'))
+
+    def test_recovered_partial_receipt_counts_toward_budget(self):
+        run = self.make_runner()
+        run.r.report['recovered_first_clear'] = {'spent': 60, 'cleared': 6, 'final': False}
+        recovered = EventFirstClear(run.b)
+        with self.assertRaisesRegex(EventUIError, '上限'):
+            recovered.plan(self.plan_frame())
+        self.assertEqual(recovered.ui.clicks, [])
+
+    def test_missing_numbers_or_insufficient_stamina_never_click(self):
+        for cost, stamina in [('?', '834'), ('160', '?'), ('160', '100'), ('0', '834')]:
+            run = self.make_runner()
+            with self.assertRaises(EventUIError):
+                run.plan(self.plan_frame(cost, stamina))
+            self.assertEqual(run.ui.clicks, [])
+
+    def test_already_cleared_catalog_never_starts_battle(self):
+        run = self.make_runner()
+        run.b.quest_catalog.return_value = {'活动关卡N-1': 3, '活动关卡H-3': 3}
+        run.run()
+        self.assertEqual(run.ui.clicks, [])
+
+    def test_no_progress_never_starts_second_attempt(self):
+        run = self.make_runner()
+        run.b.quest_catalog.return_value = {'活动关卡N-1': 0, '活动关卡N-2': 0}
+        run.r.quests = Mock(return_value=frame(('824/413', 720, 25)))
+        with patch.object(run, 'open_formation'), patch.object(run, 'advance', return_value={
+                'stamina_before': 834, 'max_cost': 160, 'result': {'spent': 10}}) as advance:
+            with self.assertRaisesRegex(EventUIError, '进度未变化'):
+                run.run()
+            advance.assert_called_once()
+
+    def test_missing_final_stage_is_not_complete(self):
+        run = self.make_runner()
+        run.target = 'H-3'
+        run.b.quest_catalog.return_value = {'活动关卡N-1': 3, '活动关卡H-1': 3}
+        with self.assertRaisesRegex(EventUIError, '最终关卡'):
+            run.run()
+
+
+class ScenarioSupportTests(TestCase):
+    def test_boss_lock_does_not_borrow_neighbouring_row(self):
+        s = frame(('特别', 825, 302), ('特别战斗+', 825, 371))
+        s.image[342:370, 731:759] = (30, 180, 230)
+        self.assertFalse(boss_locked(s, s.items[0]))
+        self.assertTrue(boss_locked(s, s.items[1]))
+
+    def test_fixed_support_requires_two_matching_identifications(self):
+        initial = frame(('队伍编组', 480, 40), ('支援', 585, 88))
+        screen = frame(('队伍编组', 480, 40), ('在首领战（剧本模式）中，最多可编入5名', 780, 490),
+                       ('支援角色。此外，也不会消耗玛那。', 780, 505))
+        for second, valid in [(['角色甲', '角色乙', '角色丙', '角色丁', '角色戊'], True),
+                              (['角色甲', '角色乙', '角色丙', '角色丁', None], False),
+                              (['角色甲', '角色乙', '角色丙', '角色丁', '角色己'], False)]:
+            b = EventBattles.__new__(EventBattles)
+            b.r = SimpleNamespace(options={}, report={}, check_deadline=Mock())
+            b.ui = ReplayUI([initial, screen, screen, screen])
+            b.formation = SimpleNamespace(occupied_slots=lambda s: list(range(5)),
+                                          slots=[(96+109*i, 452) for i in range(5)], slot_top=405)
+            index = Mock()
+            index.query.side_effect = [['角色甲', '角色乙', '角色丙', '角色丁', '角色戊'], second]
+            with patch('pcrscript.game_ui.avatar_assets.ensure_avatar_index', return_value=(index, {})), \
+                    patch('pcrscript.tasks.event_battle.time.sleep'):
+                if valid:
+                    party, selection = b.scenario_support()
+                    self.assertEqual(party.build_basis, 'fixed_support')
+                    self.assertEqual(selection['order'], second)
+                else:
+                    with self.assertRaises(EventUIError):
+                        b.scenario_support()
+            self.assertEqual(b.ui.clicks, ['支援'])

@@ -77,6 +77,7 @@ class EventParty:
     allow_deaths: int = 0
     build_basis: str = 'source'
     assumptions: list[str] = field(default_factory=list)
+    auto: bool = True
 
 
 def load_parties(path: str | Path, event_title: str, difficulty: str, mode: int) -> list[EventParty]:

@@ -38,7 +38,9 @@ def read_text(image, ocr) -> list[GuideText]:
 def battle_rectangles(image, *, relaxed=False) -> list[tuple[int, int, int, int]]:
     """Find a regular five-card cyan combat row; no character-specific coordinates."""
     height, width = image.shape[:2]
-    hsv = cv.cvtColor(image, cv.COLOR_BGR2HSV)
+    # Smooth codec speckles before tracing thin cyan borders. Identity is
+    # still matched against the original, unfiltered image below.
+    hsv = cv.cvtColor(cv.GaussianBlur(image, (3, 3), 0), cv.COLOR_BGR2HSV)
     mask = (((hsv[:, :, 0] >= 75) & (hsv[:, :, 0] <= 105)
              & (hsv[:, :, 1] > 100) & (hsv[:, :, 2] > 150))*255).astype(np.uint8)
     mask[:round(height*.65)] = 0
@@ -68,7 +70,13 @@ def battle_rectangles(image, *, relaxed=False) -> list[tuple[int, int, int, int]
     if not 1.1*size < step < 1.5*size:
         return []
     positions = np.rint((centers-centers[0])/step).astype(int)
-    if np.max(np.abs(centers-(centers[0]+positions*step))) > size*.08 or positions[-1] > 4:
+    if len(set(positions)) != len(positions) or positions[-1] > 4:
+        return []
+    # Compression and a merged SET badge shift individual contour centers.
+    # Fit all anchors; using the smallest gap accumulates that error at slot 5.
+    step, origin = np.polyfit(positions, centers, 1)
+    if (not 1.1*size < step < 1.5*size
+            or np.max(np.abs(centers-(origin+positions*step))) > size*.08):
         return []
     top = float(np.median([r[1] for r in anchors]))
     if max(abs(r[1]-top) for r in anchors) > size*tolerance:
@@ -77,8 +85,9 @@ def battle_rectangles(image, *, relaxed=False) -> list[tuple[int, int, int, int]
     # A SET bubble can merge with a card outline and hide that card from the
     # contour list. Infer its slot only if all five real cyan borders exist.
     for first_slot in range(5-int(positions[-1])):
-        origin = centers[0]-first_slot*step
-        result = [(round(origin+i*step-size/2), round(top), round(size), round(card_height))
+        first_center = origin-first_slot*step
+        observed = {int(p)+first_slot:r for p,r in zip(positions, anchors)}
+        result = [observed.get(i, (round(first_center+i*step-size/2), round(top), round(size), round(card_height)))
                   for i in range(5)]
         borders = []
         for x, y, w, h in result:

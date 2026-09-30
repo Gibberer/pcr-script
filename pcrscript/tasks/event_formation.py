@@ -65,6 +65,7 @@ class EventFormation:
 
     @staticmethod
     def search_identity_candidate(screen, rectangle, identity, wanted):
+        identity = normalized(identity) if identity is not None else None
         if identity is None or identity == wanted:
             return True
         x, y, w, _ = rectangle
@@ -93,6 +94,7 @@ class EventFormation:
                      if r[0] <= pos[0] <= r[0]+r[2] and r[1] <= pos[1] <= r[1]+r[3]), None)
         face = face_crop(before.image, rect).copy() if rect else None
         identity = self.avatars.query([face])[0] if face is not None else None
+        identity = normalized(identity) if identity is not None else None
         equipment, evidence = self.badges.observe(self.ui, rect) if full and rect else (None, None)
         self.ui.swipe(pos, pos, 900)
         s = self.ui.wait(lambda s: s.find("角色详情", (300, 0, 650, 70)), "角色详情")
@@ -254,7 +256,7 @@ class EventFormation:
             input_failed = False
             for _ in range(3):
                 self.ui.click((691, 135))  # Reset only the text-search field.
-                self.ui.click((480, 136), delay=.3)
+                self.ui.click((480, 136), delay=1)
                 try:
                     self.ui.driver.input(base)
                 except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):
@@ -263,11 +265,19 @@ class EventFormation:
                     # a blind retry could append the same name twice.
                     input_failed = True
                     continue
-                time.sleep(1)  # ldconsole queues input asynchronously.
+                # ldconsole acknowledges before Android applies the input.
+                # Keep focus until the field itself confirms the text;
+                # defocusing early can discard a queued single-character name.
+                until = time.monotonic()+8
+                while True:
+                    time.sleep(.5)
+                    s = self.ui.capture()
+                    if not s.find('队伍编组', (300, 0, 650, 70)):
+                        raise EventUIError('角色搜索后未处于编队页面')
+                    if search_text_confirmed(base, s) or time.monotonic() >= until:
+                        break
                 self.ui.click(self.defocus, delay=1)
                 s = self.ui.capture()
-                if not s.find('队伍编组', (300, 0, 650, 70)):
-                    raise EventUIError('角色搜索后未处于编队页面')
                 if search_text_confirmed(base, s):
                     break
             else:
@@ -280,7 +290,8 @@ class EventFormation:
             if not s.find("队伍编组", (300, 0, 650, 70)):
                 raise EventUIError("角色搜索后未处于编队页面")
             rects = self.search_rectangles(s.image)
-            identities = self.avatars.query([face_crop(s.image, rect) for rect in rects])
+            identities = [normalized(name) if name is not None else None for name in
+                          self.avatars.query([face_crop(s.image, rect) for rect in rects])]
             wanted = normalized(member.name)
             ranked = sorted(zip(rects, identities), key=lambda pair: pair[1] != wanted)
             found = False

@@ -2,12 +2,12 @@
 from __future__ import annotations
 from typing import TYPE_CHECKING, Sequence
 from .base import Point
-from .event_strategy import EventParty
+from .event_strategy import EventParty, MemberRequirement
 from ..game_ui.screen import EventScreen, TextBox
 if TYPE_CHECKING:
     from .task_story_event import CampaignClean
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 import re
 from pcrscript.run_session import clock as time
 
@@ -30,6 +30,14 @@ def quest_stars(screen: EventScreen, row: TextBox) -> int:
 
 def boss_cleared(screen: EventScreen, row: TextBox) -> bool:
     return bool(screen.find("通关", (730, row.center[1]-30, 785, row.center[1]-5)))
+
+
+def boss_locked(screen: EventScreen, row: TextBox) -> bool:
+    """The gold padlock is anchored to the upper-left of its own boss row."""
+    y = row.center[1]
+    hsv = cv.cvtColor(screen.image[y-30:y, 730:760], cv.COLOR_BGR2HSV)
+    gold = cv.inRange(hsv, np.array([12, 90, 140]), np.array([40, 255, 255]))
+    return float(np.mean(gold > 0)) > .3
 
 
 def boss_mode(screen: EventScreen) -> int | None:
@@ -109,7 +117,7 @@ class EventCombat:
 
     def configure_paused(self, party: EventParty, order: Sequence[str]) -> bool:
         """Pause during setup so animations and stage stories cannot race SET."""
-        pause_deadline = time.monotonic()+45
+        pause_deadline = time.monotonic()+120
         stable = 0
         menu_attempts = 0
         last_menu_request = 0.0
@@ -129,6 +137,11 @@ class EventCombat:
             stable = 0
             if s.find('WIN|战斗胜利|战斗失败|TIMEUP|伤害报告'):
                 return False
+            if (s.battle_dialogue() or s.find('跳过这个剧情')) and self.r.story_dialog(s):
+                # A first-entry or phase story can close an already requested
+                # menu. After skipping it, obtain a fresh menu observation.
+                menu_attempts = 0
+                continue
             menu = s.find('菜单', (840, 0, 960, 60), exact=True) or self.match('btn_menu_text', s)
             if (menu and not s.find('返回', (285, 415, 385, 460), exact=True)
                     and menu_attempts < 3
@@ -160,9 +173,12 @@ class EventCombat:
                     if self.paused_instant(s, index) != required[normalized(name)]:
                         raise EventUIError('暂停菜单内SET状态核验失败，保留暂停状态')
         s = self.ui.capture()
-        if s.find('AUTO关闭', (400, 330, 550, 385)):
+        desired_auto = getattr(party, 'auto', True)
+        expected_auto = 'AUTO开启' if desired_auto else 'AUTO关闭'
+        opposite_auto = 'AUTO关闭' if desired_auto else 'AUTO开启'
+        if s.find(opposite_auto, (400, 330, 550, 385)):
             self.ui.click((480, 358))
-        s = self.ui.wait(lambda frame: frame.find('AUTO开启', (400, 330, 550, 385)), 'AUTO开启', timeout=5)
+        s = self.ui.wait(lambda frame: frame.find(expected_auto, (400, 330, 550, 385)), expected_auto, timeout=5)
         self.ui.save('battle_after_settings'+suffix, s)
         self.ui.expect_click('返回', (260, 405, 410, 465), exact=True)
         return True
@@ -186,6 +202,8 @@ class EventCombat:
             if observe:
                 observe(s)
             if getattr(self.r, 'combat_pre_dialog', lambda frame: False)(s):
+                continue
+            if (s.battle_dialogue() or s.find('跳过这个剧情')) and self.r.story_dialog(s):
                 continue
             if s.find("体力回复|体力恢复|购买体力"):
                 self.ui.expect_click("取消", (200, 300, 800, 510), exact=True)
@@ -256,6 +274,54 @@ class EventBattles:
         self.combat = EventCombat(runner)
         self.source_pools = {}
 
+    def audit_source_trial(self, party, selection, label, mode):
+        """Check the live build without pretending it was specified by a guide."""
+        from ..game_ui.character_equipment import inspect_unreleased_equipment
+        from .task_home import ToHomePage
+        members = [self.formation.observed.get(normalized(m.name)) for m in party.members]
+        if any(m is None for m in members):
+            raise EventUIError('本期作业队伍的实时培养观察不完整，未开战')
+        unknown = [m for m in members if m.identity_verified and m.unique is None and m.unique2 is None]
+        if unknown:
+            getattr(self.r, 'report_progress', lambda message: None)('活动首领 · 人物页核验专武')
+            self.r.home()
+            for member in unknown:
+                proof = inspect_unreleased_equipment(self.ui, member.name)
+                if proof:
+                    member.unique = member.unique2 = False
+                    member.equipment_evidence = proof
+                ToHomePage(self.r.robot).run(timeout=60)
+            self.r.enter()
+            self.r.quests(bosses=True)
+            self.ui.expect_click(label, (740, 200, 930, 400), exact=True)
+            detail = self.ui.wait(lambda s: s.find('BOSS详情', (0, 0, 730, 70)), '首领详情')
+            if boss_mode(detail) != mode:
+                raise EventUIError('专武核验后首领模式发生变化，未开战')
+            self.ui.expect_click('挑战', (740, 430, 945, 515), exact=True)
+            self.ui.wait(lambda s: s.find('队伍编组', (250, 0, 730, 70)), '首领编队')
+            # Leaving an unstarted formation restores the previously saved
+            # team. Rebuild the source party; never start that restored team.
+            getattr(self.r, 'report_progress', lambda message: None)('活动首领 · 返回后重新核验来源队伍')
+            ready, refreshed = self.formation.select(party)
+            if not ready:
+                raise EventUIError('专武核验后重新编队未通过，未开战')
+            selection.update(refreshed)
+            for prior in members:
+                current = self.formation.observed.get(normalized(prior.name))
+                if (current is None or not current.identity_verified or any(
+                        getattr(current, key) != getattr(prior, key)
+                        for key in ('level', 'rank', 'stars', 'skill_level'))):
+                    raise EventUIError('重新编队时培养状态变化，未开战')
+        confirmed = self.formation.inspect_current(full=False, expected_names=[m.name for m in party.members], verify_skills=False)
+        if ([normalized(m.name) for m in confirmed] != selection.get('order')
+                or not all(m.identity_verified for m in confirmed)):
+            raise EventUIError('战前编队与核验队伍不一致，未开战')
+        self.r.report.setdefault('source_trial_audits', []).append(dict(
+            party=party.name, source=party.source, mode=mode, observed=[asdict(m) for m in members]))
+        if any(not m.identity_verified or any(getattr(m, key) is None for key in
+                ('level', 'rank', 'stars', 'skill_level', 'unique', 'unique2')) for m in members):
+            raise EventUIError('本期作业队伍身份、培养或专武状态未确认，未开战')
+
     def quest_catalog(self):
         self.r.quests()
         for _ in range(6):
@@ -277,45 +343,51 @@ class EventBattles:
         return catalog
 
     def first_clear(self) -> None:
-        attempts = defaultdict(int)
-        for _ in range(30):
-            catalog = self.quest_catalog()
-            missing = [name for name, stars in catalog.items() if not stars]
-            if not missing:
-                self.r.log(f"已检查 {len(catalog)} 个活动关卡，均已通过")
-                return
-            name = min(missing, key=lambda n: ("H-" in n, int(n.split("-")[-1])))
-            if attempts[name] >= 2:
-                self.r.report["pending"].append(f"{name} 首通未成功，已停止重复挑战")
-                return
-            attempts[name] += 1
-            for _ in range(12):
-                s = self.ui.capture()
-                row = s.find(re.escape(name), (580, 150, 850, 450), exact=True)
-                if row:
-                    self.ui.click(row)
-                    break
-                self.ui.swipe((840, 180), (840, 430))
-            else:
-                raise EventUIError(f"找不到待首通关卡 {name}")
-            s = self.ui.wait(lambda s: s.find("挑战|未解锁|体力不足", (300, 100, 950, 525)), "首通关卡详情")
-            challenge = s.find("挑战", (720, 380, 950, 510), exact=True)
-            if not challenge or not s.blue_button(challenge):
-                self.r.report["pending"].append(name+" 尚未解锁或体力不足")
-                self.r.home()
-                return
-            self.ui.click(challenge)
-            self.ui.wait(lambda s: s.find("队伍编组", (250, 0, 700, 70)), "首通编队")
-            result = self.combat.run()
-            self.r.report["battles"].append({"quest": name, **vars(result)})
-            self.r.home()
-        raise EventUIError("首次过图达到步骤上限")
+        from .event_first_clear import EventFirstClear
+        EventFirstClear(self).run()
+
+    def scenario_support(self):
+        """Verify the game's saved fixed-support team, never assume own units."""
+        from ..game_ui.avatar_assets import ensure_avatar_index
+        from ..game_ui.avatars import face_crop
+        index, _ = ensure_avatar_index(self.r.options.get('sources', {}).get('avatars'),
+                                       check=self.r.check_deadline)
+        s = self.ui.capture()
+        support = s.find('支援', (540, 65, 625, 110), exact=True)
+        if not s.find('队伍编组', (250, 0, 730, 70)) or not support:
+            raise EventUIError('剧本模式支援标签未确认，未开战')
+        self.ui.click(support)
+        self.ui.wait(lambda frame: frame.find('不会消耗玛那', (600, 465, 945, 525)),
+                     '剧本模式固定支援说明')
+        orders = []
+        for _ in range(2):
+            s = self.ui.capture()
+            if (not s.find('队伍编组', (250, 0, 730, 70))
+                    or not s.find(r'首领战[（(]剧本模式[）)]', (600, 465, 945, 525))
+                    or not s.find('不会消耗玛那', (600, 465, 945, 525))
+                    or len(self.formation.occupied_slots(s)) != 5):
+                raise EventUIError('剧本模式固定支援五人编队未确认，未开战')
+            rects = [(pos[0]-48, self.formation.slot_top, 96, 96) for pos in self.formation.slots]
+            names = index.query([face_crop(s.image, rect) for rect in rects])
+            if any(not name or name.startswith('unit:') for name in names) or len(set(names)) != 5:
+                raise EventUIError('剧本模式固定支援身份未确认，未开战')
+            orders.append(names)
+            self.ui.save('scenario_support_' + str(len(orders)), s)
+            time.sleep(.5)
+        if orders[0] != orders[1]:
+            raise EventUIError('剧本模式固定支援多帧身份不一致')
+        party = EventParty('游戏固定支援', '游戏内剧本模式固定支援',
+                           [MemberRequirement(name, 1, 1, 1, None, None, True) for name in orders[0]],
+                           max_attempts=1, build_basis='fixed_support')
+        self.r.report['scenario_support'] = {'order': orders[0], 'basis': 'game_fixed_support', 'mana_cost': 0}
+        return party, {'order': orders[0]}
 
     def bosses(self) -> None:
         title = self.r.home().text((0, 160, 940, 460))
         self.r.report["event"] = title
         source_area = None
         source_identity_checked = False
+        unlock_attempts = 0
         for difficulty, label in (("scenario", "剧本模式"), ("special", "特别"), ("special_plus", "特别战斗\\+")):
             attempts = defaultdict(int)
             total = 0
@@ -323,12 +395,27 @@ class EventBattles:
             while total < self.r.options.get("max_boss_attempts", 10):
                 getattr(self.r, 'check_deadline', lambda: None)()
                 s = self.r.quests(bosses=True)
+                unlock = s.find('解锁', (500, 390, 710, 465), exact=True)
+                if unlock:
+                    if unlock_attempts >= 2:
+                        raise EventUIError('首领解锁后入口未变化，停止重复操作')
+                    unlock_attempts += 1
+                    self.ui.click(unlock)
+                    dialog = self.ui.wait(lambda f: f.find('首领战解锁确认', (300, 100, 650, 185), exact=True), '首领解锁确认')
+                    self.r.entry_dialog(dialog)
+                    continue
                 row = s.find(label, (740, 200, 930, 400), exact=True)
                 if not row:
                     self.r.report["pending"].append(difficulty+" 入口未解锁/无法识别")
                     break
                 if boss_cleared(s, row):
                     self.r.log(f"{row.text} 已通关，本轮跳过")
+                    break
+                if boss_locked(s, row):
+                    self.r.report['pending'].append(difficulty+' 入口带锁，尚未解锁')
+                    break
+                if difficulty == 'scenario' and total:
+                    self.r.report['pending'].append('剧本模式本次挑战未确认通关，停止重复开战')
                     break
                 self.ui.click(row)
                 detail = self.ui.wait(lambda s: s.find("BOSS详情", (0, 0, 730, 70)), "首领详情")
@@ -342,6 +429,8 @@ class EventBattles:
                         break
                 mode = boss_mode(detail)
                 if difficulty == "scenario":
+                    if not detail.find('固定支援角色'):
+                        raise EventUIError('剧本模式未显示固定支援角色，不能沿用当前队伍开战')
                     mode = mode or 1
                     party = None
                 else:
@@ -357,11 +446,19 @@ class EventBattles:
                         except (OSError, ValueError, KeyError, TypeError, AttributeError) as error:
                             self.r.report.setdefault('source_errors', []).append('活动名称核验失败：'+str(error)[:160])
                     if source_area is None:
-                        self.r.report['pending'].append('当前活动名称未与活动情报核对，不能据此搜索首领作业')
+                        try:
+                            source_area = self.r.event_identity()
+                        except EventUIError as error:
+                            self.r.report['pending'].append(str(error))
+                        # Identity navigation leaves the boss detail. Reopen
+                        # and re-read its state before searching or spending.
                         self.r.home()
-                        break
+                        if source_area is None:
+                            break
+                        continue
                     key = (source_area, difficulty, mode)
                     if key not in self.source_pools:
+                        self.r.report_progress(f'活动首领 · 搜索{source_area} {difficulty} 模式{mode}作业')
                         found, search = boss_parties(self.r.options, kind='event', area=source_area,
                             difficulty=difficulty, mode=mode,
                             default_path='cache/game/strategies/event_teams.yml',
@@ -375,7 +472,7 @@ class EventBattles:
                                     self.r.options.get('sources', {}).get('avatars'), check=self.r.check_deadline)
                     party = next_boss_party(self.source_pools[key], attempts, mode)
                     if party is None:
-                        self.r.report["pending"].append(f"{difficulty} 模式{mode} 无可用达标队伍；请查看 roster.json/作业配置")
+                        self.r.report["pending"].append(f"{difficulty} 模式{mode} 无可用达标队伍；见来源与编队核验报告")
                         self.r.home()
                         break
                 state = normalized(detail.text((40, 65, 930, 440)))
@@ -387,7 +484,9 @@ class EventBattles:
                 self.ui.expect_click("挑战", (740, 430, 945, 515), exact=True)
                 self.ui.wait(lambda s: s.find("队伍编组", (250, 0, 730, 70)), "首领编队")
                 selection = {}
-                if party:
+                if difficulty == 'scenario':
+                    party, selection = self.scenario_support()
+                elif party:
                     ready, selection = self.formation.select(party)
                     if not ready:
                         attempts[(mode, party.name)] = party.max_attempts
@@ -395,7 +494,10 @@ class EventBattles:
                             "build_basis": party.build_basis, "assumptions": party.assumptions, "unready": selection})
                         self.r.home()
                         continue
+                    if party.build_basis == 'local_trial' and self.r.options.get('require_source_settings', False):
+                        self.audit_source_trial(party, selection, label, mode)
                     attempts[(mode, party.name)] += 1
+                self.r.report_progress(f'活动首领 · {difficulty} 模式{mode}战斗与结算')
                 result = self.combat.run(party, selection.get("order"))
                 total += 1
                 self.r.report["battles"].append({"boss": difficulty, "mode": mode,

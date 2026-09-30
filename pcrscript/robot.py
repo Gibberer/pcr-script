@@ -134,7 +134,9 @@ class Robot:
                 ClickAction(pos=(50, 300)).do(screenshot, self)
             time.sleep(3)
 
-    def _first_enter_check(self, timeout=60):
+    def _first_enter_check(self, timeout=600):
+        # Cold emulator/game startup can take several minutes; finish as soon
+        # as home is confirmed instead of imposing a fixed startup sleep.
         pos = random.choice(((199, 300), (400, 300), (590, 300), (790, 300)))
         action = MatchAction(ImageTemplate('shop', consecutive_hit=3), unmatch_actions=(
             ClickAction(template = ImageTemplate('btn_close') | ImageTemplate('btn_close_2')

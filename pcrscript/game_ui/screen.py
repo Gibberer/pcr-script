@@ -79,6 +79,44 @@ class EventScreen:
         return any(10 <= w <= 22 and 10 <= h <= 22 and 60 <= area <= 250
                    and .35 <= area/(w*h) <= .75 for _, _, w, h, area in stats[1:])
 
+    def gray_story_control(self, item):
+        """Recognize the disabled gray fill of an opened story-menu control."""
+        if not item:
+            return False
+        x, y = item.center
+        patch = self.image[max(0, y-18):min(540, y+12), max(0, x-35):min(960, x+35)]
+        hsv = cv.cvtColor(patch, cv.COLOR_BGR2HSV)
+        return float(np.mean((hsv[:, :, 1] < 90) & (hsv[:, :, 2] > 75)
+                             & (hsv[:, :, 2] < 190))) > .65
+
+    def letterboxed_movie(self):
+        """The event ending fills the centre with black bands above and below."""
+        if self.find('菜单|帮助|关卡|队伍编组|活动剧情|取消|关闭|加载|下载'):
+            return False
+        return (float(np.mean(self.image[:42])) < 8
+                and float(np.mean(self.image[500:530])) < 8
+                and float(np.mean(self.image[90:450])) > 30)
+
+    def battle_dialogue(self):
+        """In-battle story overlay: pink speaker tab over a pale text panel."""
+        if (self.find('主菜单|队伍编组|取消|确认|跳过这个剧情')
+                or not self.find('.+', (180, 390, 380, 418))
+                or not self.find('.+', (180, 418, 795, 505))):
+            return False
+        hsv = cv.cvtColor(self.image, cv.COLOR_BGR2HSV)
+        tab = hsv[393:412, 190:365]
+        panel = hsv[420:490, 185:790]
+        return (float(np.mean((tab[:, :, 0] > 145) & (tab[:, :, 1] > 70)
+                              & (tab[:, :, 2] > 140))) > .4
+                and float(np.mean((panel[:, :, 1] < 65) & (panel[:, :, 2] > 180))) > .65)
+
+    def counter_badge(self, roi):
+        """Pink numeric badges remain visible when OCR misses a single digit."""
+        x1, y1, x2, y2 = roi
+        hsv = cv.cvtColor(self.image[y1:y2, x1:x2], cv.COLOR_BGR2HSV)
+        mask = cv.inRange(hsv, np.array([145, 70, 140]), np.array([179, 255, 255]))
+        return float(np.mean(mask > 0)) > .25
+
     @property
     def event_home(self):
         return bool(self.find("活动剧情", (650, 280, 960, 465)) and self.find("报酬[交兑]换", (0, 280, 400, 465)))

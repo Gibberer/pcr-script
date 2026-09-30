@@ -2,6 +2,7 @@
 from __future__ import annotations
 from .registry import register
 import json
+from difflib import SequenceMatcher
 from typing import TYPE_CHECKING, Any
 from .base import BaseTask, TimeLimitTask, EventNews, TaskOptions, TaskReport
 from ..game_ui.screen import EventScreen
@@ -39,7 +40,62 @@ class CampaignClean(TimeLimitTask):
             raise EventUIError("活动任务达到总运行时间上限")
 
     def entry_dialog(self, s: EventScreen) -> bool:
-        """Dismiss the daily event login receipt, not an arbitrary reward modal."""
+        """Advance verified event tutorials or dismiss the daily login receipt."""
+        if s.find('帮助', (300, 0, 700, 70), exact=True) and s.find('剧情活动', (50, 90, 250, 150)):
+            self.ui.expect_click('关闭', (350, 440, 615, 515), exact=True)
+            return True
+        if (s.find('收取报酬', (300, 0, 700, 70), exact=True)
+                and s.find('收取了以下道具', (250, 55, 730, 105))):
+            self.ui.save('mission_receipt', s)
+            self.ui.expect_click('关闭', (350, 440, 615, 515), exact=True)
+            return True
+        if (s.find('章节一览', (300, 0, 700, 70), exact=True)
+                and s.find('小沙月敬启', (350, 100, 700, 250), exact=True)):
+            self.ui.expect_click('关闭', (350, 440, 615, 515), exact=True)
+            return True
+        if (s.find('报酬[交兑]换', (0, 0, 300, 65))
+                and s.find('获得的报酬将会直接增加到持有道具中', (250, 360, 780, 410))
+                and s.find('重置报酬', (480, 390, 720, 470), exact=True)):
+            self.ui.save('exchange_receipt', s)
+            self.ui.expect_click('取消', (250, 390, 480, 470), exact=True)
+            return True
+        from .event_first_clear import auto_advance_result
+        result = auto_advance_result(self.ui, s)
+        if result:
+            self.report['recovered_first_clear'] = result
+            self.ui.expect_click('确认', (350, 340, 615, 410), exact=True)
+            self.log('已读取中断前的自动推进结算，重新核对关卡，不重复开战')
+            return True
+        if s.find('获得道具', (0, 0, 960, 220)) and s.find('初次通关', (0, 80, 960, 400)):
+            button = s.find('下一步', (730, 420, 950, 525), exact=True)
+            if button:
+                self.ui.save('first_clear_rewards', s)
+                self.ui.click(button)
+                return True
+        if s.find('自动推进报酬一览|自动推进解锁内容一览', (250, 0, 710, 185), exact=True):
+            self.ui.save('first_clear_reward_summary', s)
+            self.ui.expect_click('关闭', (350, 340, 615, 515), exact=True)
+            return True
+        if s.find('首领战解锁确认', (300, 100, 650, 185), exact=True):
+            if not s.find('活动剧情的剧透|自动解锁首领战'):
+                raise EventUIError('首领解锁确认内容未核实')
+            label, roi = ('解锁', (410, 340, 550, 410)) if self.options.get('bosses', False) else ('取消', (260, 340, 410, 410))
+            self.ui.expect_click(label, roi, exact=True)
+            self.ui.wait(lambda f: not f.find('首领战解锁确认', (300, 100, 650, 185), exact=True), '首领解锁确认结束')
+            return True
+        tutorials = (
+            ("活动限定剧情登场[!！]?", "在活动中.*可以观看特别的剧情"),
+            ("挑战剧情关卡和首领战吧[!！]?", "试试挑战活动关卡和首领战吧"),
+            ("在公会管理协会可以使用活动奖励券", "在奖励兑换处.*活动奖励券.*交换各种道具"),
+            ("分为3种难度的首领战[!！]?", "首领战共设有三种难度"),
+        )
+        if s.find("可可萝", (180, 380, 400, 430), exact=True):
+            for title, description in tutorials:
+                if (s.find(title, (25, 20, 670, 90), exact=True)
+                        and s.find(description, (180, 420, 780, 505))):
+                    self.ui.save("event_entry_tutorial", s)
+                    self.ui.click((780, 488))
+                    return True
         title_roi = (240, 110, 720, 185)
         if not s.find("获得活动登录奖励", title_roi, exact=True):
             return False
@@ -58,8 +114,22 @@ class CampaignClean(TimeLimitTask):
             item = s.find("跳过", (460, 300, 720, 500), exact=True)
         elif s.find("语音|声音数据"):
             item = s.find("不下载|无语音|不含语音")
+        elif s.battle_dialogue():
+            # Some boss lines keep the skip icon visible but ignore it.
+            # The dialogue panel's next arrow remains usable on those lines.
+            self.ui.click((779, 493))
+            return True
         elif s.find("全文显示|快进|记录", (680, 70, 960, 380)):
             item = s.find("跳过", (700, 70, 960, 220), exact=True)
+            if s.gray_story_control(item):
+                menu = s.find('菜单', (840, 0, 960, 100), exact=True)
+                if menu and s.find('.+', (180, 380, 780, 505)):
+                    # Scenario-boss dialogue can disable skip. Close the
+                    # menu and advance its visible dialogue, not the gray item.
+                    self.ui.click(menu)
+                    self.ui.click((780, 488))
+                    return True
+                return False
         elif s.find("菜单", (840, 0, 960, 100)) and not s.find("主菜单"):
             item = s.find("菜单", (840, 0, 960, 100), exact=True)
         elif s.find("报酬确认|获得报酬|获得奖励|剧情解锁|解锁了|新剧情"):
@@ -69,8 +139,8 @@ class CampaignClean(TimeLimitTask):
         if item:
             self.ui.click(item)
             return True
-        if s.find("Cygames|アニメーション|エンディング") or (len(s.items) < 8 and s.find(".+", (250, 440, 860, 525))
-                and not s.find("加载中|下载中|连接|取消|确认|关闭|获得|报酬|确定")
+        if s.letterboxed_movie() or s.find("Cygames|アニメーション|エンディング") or (len(s.items) < 8 and s.find(".+", (250, 440, 860, 525))
+                and not s.find("加载中|下载中|连接|取消|确认|关闭|获得|报酬|确定|新内容")
                 and not s.find(".+", (0, 0, 960, 100))):
             # Movie captions with no page chrome. The game's top-right skip
             # hotspot opens a confirmation even while its overlay is hidden.
@@ -147,7 +217,9 @@ class CampaignClean(TimeLimitTask):
                 self.ui.click((32, 30))
             elif s.find("关卡一览", (300, 0, 700, 70)):
                 self.ui.expect_click("取消", (460, 440, 710, 520), exact=True)
-            elif s.find("BOSS详情|关卡详情|队伍编组", (0, 0, 730, 70)):
+            elif s.find('自动推进设定', (200, 0, 750, 80), exact=True):
+                self.ui.expect_click('取消', (250, 420, 480, 520), exact=True)
+            elif s.find(r"BOSS详情|关卡详情|队伍编组|活动关卡[HN]-\d+", (0, 0, 730, 85)):
                 self.ui.expect_click("取消", (550, 420, 950, 520), exact=True)
             elif not self.story_dialog(s):
                 time.sleep(.7)
@@ -163,8 +235,58 @@ class CampaignClean(TimeLimitTask):
             self.ui.click(item)
             self.ui.wait(lambda s: s.event_quests, "活动关卡入口")
         self.ui.expect_click("首领战" if bosses else "活动关卡", (450, 55, 950, 95), exact=True)
-        return self.ui.wait(lambda s: bool(s.find("剧本模式|特别", (700, 150, 940, 440))) if bosses
-                            else bool(s.find(r"活动关卡[HN]-\d", (460, 140, 920, 465))), "关卡列表")
+        def ready(frame):
+            if self.entry_dialog(frame):
+                return False
+            return bool(frame.find("剧本模式|特别", (700, 150, 940, 440))) if bosses else bool(
+                frame.find(r"活动关卡[HN]-\d", (460, 140, 920, 465)))
+        return self.ui.wait(ready, "关卡列表")
+
+    def event_identity(self) -> str:
+        """Read the list-layout event's own title when calendars lag behind."""
+        names = []
+        for _ in range(2):
+            s = self.home()
+            if not s.find(r'举办时间.*\d+/\d+', (300, 420, 680, 465)):
+                raise EventUIError('当前活动举办时间未确认')
+            lines = s.all(r'^[\u4e00-\u9fff·]{6,30}$', (310, 350, 645, 425))
+            if len(lines) != 1:
+                raise EventUIError('当前活动中文标题未能唯一确认')
+            names.append(normalized(lines[0].text))
+            self.ui.save('event_identity_' + str(len(names)), s)
+            time.sleep(.5)
+        if SequenceMatcher(None, names[0], names[1]).ratio() < .8:
+            raise EventUIError('当前活动标题多帧不一致')
+        # Decorative title fonts can produce the same wrong OCR twice. Read
+        # the plain heading in this event's help and cross-check the two views.
+        help_button = s.find('帮助', (850, 0, 960, 85), exact=True)
+        if not help_button:
+            raise EventUIError('当前活动帮助入口未确认')
+        self.ui.click(help_button)
+        help_attempts = 0
+        def retry_help(frame):
+            nonlocal help_attempts
+            button = frame.find('帮助', (850, 0, 960, 85), exact=True)
+            if frame.event_home and button and help_attempts < 2:
+                help_attempts += 1
+                self.ui.click((button.center[0], max(20, button.center[1]-25)), delay=1.5)
+        self.ui.wait(lambda f: f.find('帮助', (300, 0, 700, 70), exact=True)
+                     and len(f.all(r'^[\u4e00-\u9fff·]{6,30}$', (180, 145, 720, 205))) == 1,
+                     '活动帮助标题加载', handle=retry_help)
+        headings = []
+        for _ in range(2):
+            help_screen = self.ui.capture()
+            titles = help_screen.all(r'^[\u4e00-\u9fff·]{6,30}$', (180, 145, 720, 205))
+            if len(titles) != 1:
+                raise EventUIError('活动帮助中的当前标题未能唯一确认')
+            headings.append(normalized(titles[0].text))
+            self.ui.save('event_help_identity_' + str(len(headings)), help_screen)
+            time.sleep(.5)
+        if headings[0] != headings[1] or any(SequenceMatcher(None, headings[0], name).ratio() < .8 for name in names):
+            raise EventUIError('当前活动帮助标题与首页不一致')
+        self.ui.expect_click('关闭', (350, 440, 615, 515), exact=True)
+        self.report['event_identity'] = {'name': headings[0], 'home_title': names[0], 'basis': 'live_help_and_home'}
+        return headings[0]
 
     def stories(self) -> None:
         s = self.home()
@@ -223,11 +345,22 @@ class CampaignClean(TimeLimitTask):
 
     def missions(self) -> None:
         s = self.home()
-        if not s.notification((787, 3, 832, 45)):
+        if not (s.notification((787, 3, 832, 45))
+                or s.counter_badge((787, 3, 832, 30))
+                or s.find(r'[1-9]\d*', (787, 0, 832, 35), exact=True)):
             self.log("活动任务入口无可领取提示，跳过")
             return
         self.ui.click(s.find("任务", (700, 0, 840, 85), exact=True))
-        self.ui.wait(lambda s: s.find("活动任务", (0, 0, 280, 65)), "活动任务")
+        attempts = 0
+        def open_missions(frame):
+            nonlocal attempts
+            if self.entry_dialog(frame):
+                return
+            button = frame.find('任务', (700, 0, 840, 85), exact=True)
+            if frame.event_home and button and attempts < 2:
+                attempts += 1
+                self.ui.click((button.center[0], max(20, button.center[1]-25)), delay=1.5)
+        self.ui.wait(lambda s: s.find("活动任务", (0, 0, 280, 65)), "活动任务", handle=open_missions)
         for tab in ("每日", "普通", "特别", "称号"):
             self.ui.expect_click(tab, (300, 0, 950, 50), exact=True)
             s = self.ui.capture()
@@ -235,19 +368,22 @@ class CampaignClean(TimeLimitTask):
             if not s.blue_button(item):
                 continue
             self.ui.click(item)
-            def dismiss(frame):
-                item = frame.find("关闭|确认|确定", (250, 350, 750, 525), exact=True)
-                if item:
-                    self.ui.click(item)
+            receipt = self.ui.wait(lambda frame: frame.find('收取报酬', (300, 0, 700, 70), exact=True)
+                                   and frame.find('收取了以下道具', (250, 55, 730, 105)),
+                                   '活动任务领取回执')
+            self.entry_dialog(receipt)
             self.ui.wait(lambda s: s.find("活动任务", (0, 0, 280, 65))
+                         and not s.find('收取报酬', (300, 0, 700, 70), exact=True)
                          and not s.blue_button(s.find("全部收取", (700, 405, 955, 475))),
-                         "领取活动任务", handle=dismiss)
+                         "领取活动任务")
         self.home()
         self.log("已检查四类活动任务奖励")
 
     def memoirs(self) -> None:
         """This event's optional side stories; other mini-games stay untouched."""
         s = self.home()
+        if s.find('小沙月', (0, 250, 170, 355)) and s.find('敬启', (0, 250, 170, 355)):
+            return self.special_chapter(s)
         entry = s.find("回忆录", (0, 220, 170, 355))
         if not entry:
             return
@@ -302,6 +438,49 @@ class CampaignClean(TimeLimitTask):
             else:
                 time.sleep(.6)
         raise EventUIError("回忆录达到步骤上限，已保存当前进度")
+
+    def special_chapter(self, home: EventScreen) -> None:
+        """Read the verified letter-style extra chapter without mini-game inputs."""
+        self.ui.click(home.find('小沙月', (0, 250, 170, 355)))
+        self.ui.wait(lambda s: s.find('章节一览', (300, 0, 700, 70), exact=True), '特别章节入口加载')
+        opened = 0
+        idle = 0
+        for _ in range(180):
+            self.check_deadline()
+            s = self.ui.capture()
+            if s.find('章节一览', (300, 0, 700, 70), exact=True):
+                chapter = s.find('小沙月敬启', (350, 100, 700, 250), exact=True)
+                if not chapter:
+                    s = self.ui.wait(lambda f: f.find('章节一览', (300, 0, 700, 70), exact=True)
+                                     and f.find('小沙月敬启', (350, 100, 700, 250), exact=True),
+                                     '特别章节列表加载')
+                    chapter = s.find('小沙月敬启', (350, 100, 700, 250), exact=True)
+                if s.find('新内容|NEW', (240, 100, 360, 175)):
+                    if opened >= 2:
+                        raise EventUIError('特别章节阅读后仍标为未读')
+                    self.ui.click(chapter)
+                    opened += 1
+                else:
+                    idle += 1
+                    if idle < 3:
+                        time.sleep(.7)
+                        continue
+                    self.ui.expect_click('关闭', (350, 440, 615, 515), exact=True)
+                    self.home()
+                    self.log('特别章节已核对读完')
+                    return
+                idle = 0
+            elif self.story_dialog(s) or s.find('加载中|下载中|数据连接'):
+                idle = 0
+            elif s.event_home and not s.notification((78, 253, 120, 301)):
+                self.log('特别章节提示已清除')
+                return
+            else:
+                idle += 1
+                if idle > 12:
+                    raise EventUIError('特别章节出现未知页面')
+            time.sleep(.7)
+        raise EventUIError('特别章节读取达到步骤上限')
 
     def sweep(self, hard: bool = True) -> None:
         if hard:
@@ -460,6 +639,8 @@ class CampaignClean(TimeLimitTask):
         for _ in range(80):
             self.check_deadline()
             s = self.ui.capture()
+            if self.entry_dialog(s):
+                continue
             if s.find("一键交换完毕|交换结果|获得报酬", (200, 100, 780, 250)):
                 self.ui.expect_click("确认|确定|关闭", (250, 300, 730, 480), exact=True)
                 continue
@@ -567,4 +748,6 @@ class ClearCampaignFirstTime(TimeLimitTask):
         return ClearCampaignFirstTime, args
 
     def run(self, exhaust_power: bool = False) -> TaskReport:
-        return CampaignClean(self.robot).run(True, exhaust_power)
+        runner = CampaignClean(self.robot)
+        runner.options['first_clear'] = True
+        return runner.run(True, exhaust_power)

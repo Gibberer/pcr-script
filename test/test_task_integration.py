@@ -123,6 +123,21 @@ class TaskIntegrationTests(TestCase):
             self.assertEqual(task.run(only='missions')['status'],'complete')
         task.missions.assert_called_once()
 
+    def test_explicit_first_clear_entry_enables_only_its_own_first_clear(self):
+        robot = self.robot()
+        robot.configure({'StoryEvent': {'first_clear': False, 'bosses': False,
+                                      'allow_local_trials': True}})
+        seen = []
+        def run(task, hard, exhaust):
+            seen.append((task.options.copy(), hard, exhaust))
+            return {'status': 'complete'}
+        with patch.object(CampaignClean, 'run', run):
+            robot.run_task('clear_campaign_first_time')
+        self.assertTrue(seen[0][0]['first_clear'])
+        self.assertFalse(seen[0][0]['bosses'])
+        self.assertEqual(seen[0][1:], (True, False))
+        self.assertFalse(robot.task_config['StoryEvent']['first_clear'])
+
 
 if __name__ == '__main__':
     main()

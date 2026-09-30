@@ -326,6 +326,39 @@ class StrategyTests(TestCase):
 
 
 class AvatarTests(TestCase):
+    def test_search_waits_for_queued_input_before_defocusing(self):
+        formation = EventFormation.__new__(EventFormation)
+        formation.ui = Mock()
+        formation.requires_declared_build = False
+        formation.occupied_slots = Mock(return_value=[])
+        formation.search_rectangles = Mock(return_value=[(60, 177, 100, 99)])
+        formation.avatars = Mock()
+        formation.avatars.query.return_value = ['纯']
+        actual = SimpleNamespace(name='纯', identity_verified=True)
+        formation.inspect = Mock(return_value=actual)
+        formation.inspect_current = Mock(return_value=[actual])
+        formation.member_readiness = Mock(return_value=[])
+        queued = False
+        polls = 0
+        def input_text(text):
+            nonlocal queued
+            queued = True
+        def capture(**kwargs):
+            nonlocal polls
+            polls += int(queued)
+            return frame(('队伍编组', 480, 42), ('重置', 690, 135),
+                         ('纯' if polls >= 3 else '用角色名搜索', 470, 135))
+        def click(position, **kwargs):
+            if position == formation.defocus:
+                self.assertGreaterEqual(polls, 3)
+        formation.ui.driver.input.side_effect = input_text
+        formation.ui.capture.side_effect = capture
+        formation.ui.click.side_effect = click
+        with patch('pcrscript.tasks.event_formation.time.sleep'):
+            ready, _ = formation.select(SimpleNamespace(members=[SimpleNamespace(name='纯')]))
+        self.assertTrue(ready)
+        formation.ui.driver.input.assert_called_once_with('纯')
+
     def test_failed_background_search_resets_field_and_stops_safely(self):
         formation = EventFormation.__new__(EventFormation)
         formation.ui = Mock()
@@ -362,6 +395,8 @@ class AvatarTests(TestCase):
             screen, card, '错误头像标签', '双人角色'))
         self.assertFalse(EventFormation.search_identity_candidate(
             screen, card, '错误头像标签', '别的角色'))
+        self.assertTrue(EventFormation.search_identity_candidate(
+            screen, card, '涅妃＝涅菈', '涅妃=涅菈'))
 
     def test_search_field_accepts_only_observed_name_ocr_confusion(self):
         def field(text, score=.81049, x=350, y=135):
@@ -496,6 +531,22 @@ class WorkflowTests(TestCase):
             self.assertTrue(combat.configure_paused(None,None))
         self.assertEqual(combat.ui.click.call_count,1)
         self.assertEqual(combat.ui.click.call_args.args[0].text,'菜单')
+
+    def test_source_auto_off_is_preserved_in_pause_menu(self):
+        combat = EventCombat.__new__(EventCombat)
+        panel = frame(('进行中战斗',480,45),('主菜单',480,85),('返回',335,438),('AUTO开启',480,355))
+        combat.ui = Mock()
+        combat.ui.capture.return_value = panel
+        off = frame(('AUTO关闭',480,355))
+        combat.ui.wait.side_effect = lambda predicate, *a, **k: off if predicate(off) else self.fail('wrong AUTO target')
+        combat.r = SimpleNamespace(check_deadline=Mock())
+        combat.paused_defeated = Mock(return_value=False)
+        combat.paused_instant = Mock(return_value=True)
+        members = [SimpleNamespace(name=f'角色{i}', instant=True) for i in range(5)]
+        party = SimpleNamespace(auto=False, members=members, allow_deaths=0)
+        with patch('pcrscript.tasks.event_battle.time.sleep'):
+            self.assertTrue(combat.configure_paused(party, [m.name for m in members]))
+        combat.ui.click.assert_called_once_with((480,358))
 
     def test_pause_retries_ignored_menu_tap_before_settings(self):
         combat = EventCombat.__new__(EventCombat)
