@@ -551,19 +551,67 @@ def _boss_clauses(description):
     return headers, clauses
 
 
-def known_boss_description_part(description):
-    """Every visible bullet must fit a contiguous portion of the known profile."""
+def _boss_description_window(description):
     headers, clauses = _boss_clauses(description)
-    if any(header not in _BOSS_HEADERS+('【物理】',) for header, _ in headers):
-        return False
+    positions = dict(_BOSS_HEADER_POSITIONS)
+    labels = [header for header, _ in headers]
+    if (any(header not in positions and header != '【物理】' for header in labels)
+            or len(set(labels)) != len(labels)):
+        return None
+
+    def headers_match(start):
+        return all((header == '【物理】' and start == index == 0)
+                   or positions.get(header) == start+index for header, index in headers)
+
     if not clauses:
-        return True  # Lore-only view; never sufficient to authorize combat.
-    for start in range(len(_BOSS_SKILLS)-len(clauses)+1):
-        if all(clause and (clause == _BOSS_SKILLS[start+offset]
-                           or (offset == len(clauses)-1 and _BOSS_SKILLS[start+offset].startswith(clause)))
-               for offset, clause in enumerate(clauses)):
-            return True
-    return False
+        starts = {positions[header]-index for header, index in headers if header in positions}
+        if len(starts) > 1:
+            return None
+        start = next(iter(starts), 0 if labels else None)
+        return (start, clauses, headers) if start is None or headers_match(start) else None
+    starts = [start for start in range(len(_BOSS_SKILLS)-len(clauses)+1)
+              if headers_match(start)
+              and all(clause and (clause == _BOSS_SKILLS[start+offset]
+                                  or (offset == len(clauses)-1
+                                      and _BOSS_SKILLS[start+offset].startswith(clause)))
+                      for offset, clause in enumerate(clauses))]
+    return (starts[0], clauses, headers) if len(starts) == 1 else None
+
+
+def known_boss_description_part(description):
+    """A page must identify one contiguous portion of the known profile."""
+    return _boss_description_window(description) is not None
+
+
+def merge_boss_descriptions(parts):
+    """Join verified overlapping pages; never infer unseen clauses or headers."""
+    observed = {}
+    observed_headers = set()
+    previous = None
+    for part in parts:
+        window = _boss_description_window(part)
+        if window is None:
+            return None
+        start, clauses, headers = window
+        if clauses:
+            end = start+len(clauses)
+            if previous and (start < previous[0] or start >= previous[1] or end < previous[1]):
+                return None
+            previous = start, end
+            for offset, clause in enumerate(clauses):
+                index = start+offset
+                if clause == _BOSS_SKILLS[index]:
+                    observed[index] = clause
+        elif previous is not None:
+            return None
+        observed_headers.update((header, start+index) for header, index in headers
+                                if header != '【物理】')
+    if (set(observed) != set(range(len(_BOSS_SKILLS)))
+            or observed_headers != set(_BOSS_HEADER_POSITIONS)):
+        return None
+    headers_by_index = {index: header for header, index in observed_headers}
+    return ''.join(headers_by_index.get(index, '')+'·'+observed[index]
+                   for index in range(len(_BOSS_SKILLS)))
 
 
 def supported_boss(name, level, maximum_hp, effects, description):

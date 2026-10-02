@@ -524,6 +524,66 @@ class FirstClearTaskTests(TestCase):
         self.assertEqual(self.clicks(), [(176, 316), '关闭'])
         self.assertEqual(self.task.ui.swipe.call_count, 2)
 
+    def test_boss_profile_is_reconstructed_when_final_page_contains_only_the_tail(self):
+        stage = screen(('首领战格子', 138, 56), ('挑战', 817, 457))
+        full = boss_description()
+        first = boss_enemy_detail(full[:full.index('·降低敌方全体生命值吸收量')])
+        last = boss_enemy_detail(full[full.index('·对进行魔法攻击的敌方全体赋予烧伤状态'):])
+        self.frames([first, last, last, stage])
+        with patch.object(maze, 'enemy_information', return_value=[(176, 316)]):
+            enemies, returned = self.task.inspect_enemies(stage)
+        self.assertIs(returned, stage)
+        self.assertTrue(maze.supported_boss('暗黑滴水嘴兽', 350, 60000000,
+                                            '坦克型物防下降魔防下降', enemies[0]['description']))
+        self.assertEqual(len(enemies[0]['description_evidence']), 2)
+        self.assertEqual(self.clicks(), [(176, 316), '关闭'])
+        self.assertEqual(self.task.ui.swipe.call_count, 2)
+
+    def test_boss_profile_joins_three_overlapping_pages_with_clipped_last_bullets(self):
+        stage = screen(('首领战格子', 138, 56), ('挑战', 817, 457))
+        full = boss_description()
+        first = full[:full.index('·对进行魔法攻击的敌方全体赋予烧伤状态')]
+        first += '·对进行魔法攻击的敌方全体赋予烧'
+        middle = full[full.index('·自身的物理防御力越高'):full.index('【技能1】')]
+        middle += '【技能1】·对敌方全体造成魔法'
+        last = full[full.index('·自身的魔法防御力越高'):]
+        pages = [boss_enemy_detail(part) for part in (first, middle, last)]
+        self.frames([*pages, pages[-1], stage])
+        with patch.object(maze, 'enemy_information', return_value=[(176, 316)]):
+            enemies, returned = self.task.inspect_enemies(stage)
+        self.assertIs(returned, stage)
+        self.assertTrue(maze.supported_boss('暗黑滴水嘴兽', 350, 60000000,
+                                            '坦克型物防下降魔防下降', enemies[0]['description']))
+        self.assertEqual(len(enemies[0]['description_evidence']), 3)
+        self.assertEqual(self.clicks(), [(176, 316), '关闭'])
+        self.assertEqual(self.task.ui.swipe.call_count, 3)
+
+    def test_boss_disconnected_reordered_or_unknown_scroll_pages_stop_before_challenge(self):
+        stage = screen(('首领战格子', 138, 56), ('挑战', 817, 457))
+        full = boss_description()
+        first = full[:full.index('·降低敌方全体生命值吸收量')]
+        tail = full[full.index('·对进行魔法攻击的敌方全体赋予烧伤状态'):]
+        scenarios = (
+            (full[:full.index('·对进行魔法攻击的敌方全体赋予烧伤状态')], tail),
+            (first, tail, first),
+            (first, tail+'·降低敌方全体行动速度'),
+            (first, tail.replace('·降低敌方全体生命值吸收量【技能1】',
+                                 '【技能1】·降低敌方全体生命值吸收量')),
+        )
+        for descriptions in scenarios:
+            with self.subTest(descriptions=descriptions):
+                self.task.ui.click.reset_mock()
+                self.task.exploration_verified = True
+                pages = [boss_enemy_detail(part) for part in descriptions]
+                self.frames([*pages, pages[-1], stage, screen(('队伍编组', 480, 42))])
+                with patch.object(maze, 'enemy_information', return_value=[(176, 316)]), \
+                        patch.object(self.task, 'get_formation', side_effect=EventUIError('未在战前拦截')) as formation:
+                    with self.assertRaises(EventUIError):
+                        self.task.fight(stage)
+                self.assertNotIn('挑战', self.clicks())
+                formation.assert_not_called()
+                self.assertNotIn('pending_battle', self.task.report)
+
     def test_extra_boss_clause_on_an_earlier_page_cannot_be_discarded(self):
         stage = screen(('首领战格子', 138, 56), ('挑战', 817, 457))
         initial = boss_enemy_detail('【特殊效果】·对后方一名敌人造成物理伤害')

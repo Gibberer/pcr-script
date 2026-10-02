@@ -414,11 +414,14 @@ class DawnLabyrinthFirstClear(DawnLabyrinth):
             current, maximum = map(int, normalized(hp.text).split('/'))
             text = normalized(detail.text((260, 205, 700, 435)))
             enemy_name = normalized(name.text)
+            description_evidence = []
             if boss_stage and enemy_name == '暗黑滴水嘴兽':
                 effects = normalized(detail.text((275, 220, 675, 275)))
                 text = maze.normal_enemy_description(detail)
                 if text is None or not maze.known_boss_description_part(text):
                     raise EventUIError('首领技能说明有未知或缺失证据，未开战')
+                parts = [text]
+                description_evidence.append(str(self.ui.save(f'enemy_{index:02d}_page_00', detail)))
                 x1, y1, x2, y2 = maze.NORMAL_ENEMY_DESCRIPTION_ROI
                 for _ in range(4):
                     viewport = detail.image[y1:y2, x1:x2].copy()
@@ -431,8 +434,13 @@ class DawnLabyrinthFirstClear(DawnLabyrinth):
                     if part == text and (detail.image[y1:y2, x1:x2] == viewport).all():
                         break
                     text = part
+                    parts.append(part)
+                    description_evidence.append(str(self.ui.save(f'enemy_{index:02d}_page_{len(parts)-1:02d}', detail)))
                 else:
                     raise EventUIError('首领技能末尾尚未核对，未开战')
+                text = maze.merge_boss_descriptions(parts)
+                if text is None:
+                    raise EventUIError('首领完整技能说明无法连续核对，未开战')
                 supported = maze.supported_boss(enemy_name, level, maximum, effects, text)
             else:
                 text = maze.normal_enemy_description(detail)
@@ -455,6 +463,8 @@ class DawnLabyrinthFirstClear(DawnLabyrinth):
             proof = self.ui.save(f'enemy_{index:02d}', detail)
             enemies.append(dict(name=enemy_name, level=level,
                                 hp=current, maximum_hp=maximum, description=text, evidence=str(proof)))
+            if description_evidence:
+                enemies[-1]['description_evidence'] = description_evidence
             close = detail.find('关闭', (320, 430, 650, 515), exact=True)
             if not close:
                 raise EventUIError('魔物详情无法安全关闭')
