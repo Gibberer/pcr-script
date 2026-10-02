@@ -47,6 +47,24 @@ DawnLabyrinthFirstClear: # 按需运行 [dawn_labyrinth_first_clear]，每次至
   timeout: 1800
   max_battles: 30
   retry_failed_boss: false
+Recollection:
+  claim_rewards: true
+  sweep_dominion: true
+  max_sweeps: 9 # 所有已通关霸领域合计；会消费首通可用的本周次数
+  preview_only: false
+  timeout: 600
+  areas: [霸瞳皇帝的领域, 泽恩的领域, 米洛克的领域]
+RecollectionFirstClear: # 按需运行 recollection_first_clear，不加入普通日常
+  areas: [记忆领域, 霸瞳皇帝的领域, 泽恩的领域, 米洛克的领域]
+  max_battles: 30
+  max_attempts_per_stage: 2
+  timeout: 3600
+  battle_timeout: 220
+  discover_sources: true
+  allow_local_trials: false
+  auto_equip: false
+  source_urls: []
+  sources: {}
 TeamBattle:
   timeout: 1800
   battle_timeout: 220
@@ -68,6 +86,8 @@ Task: #配置执行任务,配置任务名称，如果需要传入参数在下面
       - research #圣迹和神殿调查
     -
       - adventure_daily
+    -
+      - recollection # 普通报酬及已通关霸扫荡；先推进首通可保留本周霸次数
     -
       - get_quest_reward #领取任务奖励（获取赠送的体力）
     -

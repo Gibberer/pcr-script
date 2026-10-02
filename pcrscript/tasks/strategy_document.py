@@ -75,10 +75,11 @@ def missing_fields(party: dict) -> list[str]:
     if party.get('manual_actions'):
         reasons.append('来源包含尚不支持的手动操作/轴')
     auto = party.get('auto', {})
-    fixed_event = party.get('scope', {}).get('difficulty') in ('special', 'special_plus', 'very_hard')
-    valid_auto = type(auto.get('value')) is bool if fixed_event else auto.get('value') is True
+    fixed_auto = (party.get('scope', {}).get('difficulty') in ('special', 'special_plus', 'very_hard')
+                  or party.get('task_type') == 'recollection')
+    valid_auto = type(auto.get('value')) is bool if fixed_auto else auto.get('value') is True
     if not valid_auto or not auto.get('evidence') or auto.get('conflicts'):
-        reasons.append('来源未确认固定AUTO设置或存在切换' if fixed_event
+        reasons.append('来源未确认固定AUTO设置或存在切换' if fixed_auto
                        else '来源未确认全程AUTO开启或存在切换；当前执行器只支持固定AUTO开启')
     return reasons
 

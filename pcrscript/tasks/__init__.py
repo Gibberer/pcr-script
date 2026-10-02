@@ -16,6 +16,8 @@ from .task_revival_event import RevivalEventOnce
 from .task_caravan import Caravan
 from .task_dawn_labyrinth import DawnLabyrinth
 from .task_dawn_labyrinth_first_clear import DawnLabyrinthFirstClear
+from .task_recollection import Recollection
+from .task_recollection_first_clear import RecollectionFirstClear
 from .task_team_battle import TeamBattle
 from .task_dungeon import DungeonFirstClear
 

@@ -11,7 +11,7 @@ from ..extras.bilibili_api import BilibiliApi
 from ..run_session import clock as time
 from .strategy_inputs import preferred_sources,validate_urls
 
-PARSER_VERSION = 19
+PARSER_VERSION = 23
 
 MANUAL_PART = re.compile(r'半自动|手动|目押|卡轴|(?:\d+|[一二三四五六七八九十])押|改星|调星|切星|降星|星级变更|TP\s*\+\s*2|大师点', re.I)
 BORROW_PART = re.compile(r'借(?:人|角|用|好友|支援|[A-Za-z]|[\u4e00-\u9fff])|使用支援')
@@ -28,11 +28,33 @@ def abyss_chapter_collection(text: str, stage: str) -> bool:
                re.findall(r'(?<!\d)(\d+)\s*[-－~～至]\s*(\d+)\s*图', text))
 
 
+def recollection_ranges(text: str, area: str) -> list[tuple[int, int]]:
+    from ..game_ui.recollection import AREAS, ALIASES
+    key = next((key for key, name in AREAS.items() if name == area), None)
+    if key is None:
+        return []
+    return [(int(a), int(b)) for name in ALIASES[key] for a, b in re.findall(
+        re.escape(name)+r'\s*(?:第)?(\d+)\s*(?:层|阶)?\s*[-－~～至到]\s*(\d+)', text)]
+
+
+def recollection_collection(text: str, area: str, stage: str) -> bool:
+    """A same-domain floor range nominates media, never an executable scope."""
+    return bool(re.fullmatch(r'[1-9]\d?', stage)) and any(
+        a <= int(stage) <= b for a, b in recollection_ranges(text, area))
+
+
 def source_queries(terms: list[str], stage: str, effort: str, *, kind: str,
                    element: str | None = None) -> list[str]:
     queries = ['公主连结 '+term+' '+stage+' 攻略' for term in terms[:3]]
     if stage:
         queries.append('公主连结 '+terms[min(1, len(terms)-1)]+' 攻略')
+    if kind == 'recollection':
+        queries.extend(['公主连结 追忆战 全SET', '公主连结 追忆战 攻略合集'])
+        if effort == 'high':
+            queries.extend(['公主连结 追忆的战场 AUTO', '公主连结 追忆战场 全自动',
+                            '公主连结 追忆的战场 全制霸参考'])
+            if stage:
+                queries.extend(f'公主连结 {term}{stage}层 全自动' for term in terms[:3])
     if kind == 'abyss' and stage and effort == 'high':
         short = ABYSS_ELEMENT_LABELS.get(element, terms[-1].replace('属性', ''))
         chapter = stage.split('-')[0]
@@ -54,6 +76,13 @@ def source_queries(terms: list[str], stage: str, effort: str, *, kind: str,
 def publication_time(candidate: dict) -> float:
     published = candidate.get('published_at', candidate.get('pubdate'))
     return float(published) if type(published) in (int, float) and published > 0 else 0.0
+
+
+def recollection_candidate_priority(candidate: dict, area: str, stage: str) -> tuple:
+    from ..game_ui.recollection import text_scope
+    exact = any(text_scope(p['title']) == dict(area=area, floor=int(stage))
+                for p in candidate.get('pages', [])) if re.fullmatch(r'[1-9]\d?', stage) else False
+    return (not exact, -publication_time(candidate))
 
 
 def abyss_candidate_priority(candidate: dict, stage: str, element: str | None) -> tuple:
@@ -180,6 +209,25 @@ def discover_sources(options: dict, *, api=None, check=lambda: None) -> dict:
                 if isinstance(bvid, str) and re.fullmatch(r'BV[0-9A-Za-z]{10}', bvid):
                     found[bvid] = dict(bvid=bvid, queries=['recent_verified_catalog'],
                                        search_rank=rank-len(prior))
+    if kind == 'recollection':
+        # Compilations often name domains only in their parts. Revisit recent
+        # public IDs from other domains, then re-fetch and filter metadata.
+        for catalog_path in path.parent.glob('*.json'):
+            check()
+            try:
+                other = json.loads(catalog_path.read_text(encoding='utf-8'))
+                if (other.get('scope', {}).get('task_type') != kind
+                        or not 0 <= now-other.get('fetched_at', 0) < ttl*3600):
+                    continue
+                for item in other.get('candidates', []):
+                    text = ' '.join([item.get('title', ''), item.get('description', '')]
+                                    +[p.get('title', p.get('part', '')) for p in item.get('pages', [])])
+                    bvid = item.get('bvid', '')
+                    if (re.fullmatch(r'BV[0-9A-Za-z]{10}', bvid) and relevant(text, terms)
+                            and bvid not in found):
+                        found[bvid] = dict(bvid=bvid, queries=['recent_compilation_catalog'], search_rank=-1)
+            except (OSError, ValueError, TypeError, AttributeError):
+                continue
     errors = []
     check()
     preferred,preferred_errors=preferred_sources(urls,api,timeout=timeout)
@@ -210,6 +258,8 @@ def discover_sources(options: dict, *, api=None, check=lambda: None) -> dict:
     candidates = []
     excluded = []
     high_abyss = kind == 'abyss' and effort == 'high'
+    high_recollection = kind == 'recollection' and effort == 'high'
+    high_search = high_abyss or high_recollection
     if high_abyss:
         target = re.compile(r'(?<!\d)'+re.escape(stage)+r'(?!\d)')
         # Search ranks restart for each query. Inspect exact-stage teasers first
@@ -220,10 +270,10 @@ def discover_sources(options: dict, *, api=None, check=lambda: None) -> dict:
             -publication_time(pair[1]), pair[1]['search_rank']))
     else:
         items = sorted(found.items(), key=lambda pair: pair[1]['search_rank'])
-    metadata_limit = max(72, limit*8) if high_abyss else max(24, limit*4)
+    metadata_limit = max(72, limit*8) if high_search else max(24, limit*4)
     for bvid,item in items[:metadata_limit]:
         check()
-        if not high_abyss and len(candidates) >= limit: break
+        if not high_search and len(candidates) >= limit: break
         try:
             response = api.getVideoInfo(bvid=bvid)
             data = response.get('data',{})
@@ -240,8 +290,8 @@ def discover_sources(options: dict, *, api=None, check=lambda: None) -> dict:
                 excluded.append(dict(bvid=bvid,reason='视频详情与目标玩法/区域不匹配'))
                 continue
             if stage and not re.search(r'(?<!\d)'+re.escape(stage)+r'(?!\d)', detail_text):
-                if not (kind == 'abyss' and effort == 'high'
-                        and abyss_chapter_collection(detail_text, stage)):
+                if not ((kind == 'abyss' and effort == 'high' and abyss_chapter_collection(detail_text, stage))
+                        or (kind == 'recollection' and recollection_collection(detail_text, area, stage))):
                     excluded.append(dict(bvid=bvid,reason='视频详情未明确目标关卡或所在章节合集'))
                     continue
             if kind == 'abyss' and stage:
@@ -266,8 +316,9 @@ def discover_sources(options: dict, *, api=None, check=lambda: None) -> dict:
         except (requests.RequestException, ValueError, KeyError, TypeError, RuntimeError, AttributeError) as error:
             errors.append(dict(stage='metadata',bvid=bvid,error=type(error).__name__+': '+str(error)[:240]))
     deferred = []
-    if high_abyss:
-        candidates.sort(key=lambda item: abyss_candidate_priority(item, stage, options.get('element')))
+    if high_search:
+        candidates.sort(key=lambda item: (abyss_candidate_priority(item, stage, options.get('element'))
+                        if high_abyss else recollection_candidate_priority(item, area, stage)))
         deferred = [dict(bvid=item['bvid'], title=item['title']) for item in candidates[limit:]]
         candidates = candidates[:limit]
     report = dict(status='complete' if candidates and not errors else 'partial' if candidates else 'blocked',

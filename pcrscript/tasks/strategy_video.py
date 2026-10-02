@@ -21,11 +21,88 @@ from .strategy_document import Evidence, Fact, empty_member, finalize, export_do
 from .strategy_sources import BORROW_PART, MANUAL_PART, UNVERIFIED_SETTING, discover_sources
 from .strategy_inputs import preferred_sources
 
-PARSER_VERSION = 37
+PARSER_VERSION = 50
 FRAME_OCR_VERSION = 1
 COMBAT_AUDIT_SECONDS = 20
+RECOLLECTION_UNSUPPORTED = re.compile(
+    r'特别装备|特別裝備|特装|粉装|属性等级|属性技能|公主骑士|大师点|大師點|\bMP\d|突破|TP\s*\+\s*2|'
+    r'(?:Rank|R)\s*\d+\s*[-－]\s*[0-6]|满装|穿\s*\d+\s*件', re.I)
 ELEMENTS = {'火': 'fire', '水': 'water', '风': 'wind', '光': 'light', '暗': 'dark',
             '红焰': 'fire', '苍波': 'water', '翠岚': 'wind', '珀天': 'light', '紫冥': 'dark'}
+
+
+def recollection_client_region(texts):
+    """Fixed game controls, rather than creator captions, identify the client."""
+    labels = [(t.text, t.rectangle[0]+t.rectangle[2]/2, t.rectangle[1]+t.rectangle[3]/2)
+              for t in texts if t.score >= .95]
+    for region, title, start, difficulty, first in (
+            ('cn', '队伍编组', '战斗开始', '难度变更', '初次通关'),
+            ('tw', '隊伍編組', '戰鬥開始', '難度變更', '初次通關')):
+        formation = (any(text == title and 300 <= x <= 950 and y < 100 for text, x, y in labels)
+                     and any(text == start and x > 850 and y > 530 for text, x, y in labels))
+        detail = (any(text == difficulty and x > 900 and 60 < y < 180 for text, x, y in labels)
+                  and any(text == first and 100 < x < 600 and 380 < y < 640 for text, x, y in labels))
+        if formation or detail:
+            return region
+    return 'unknown'
+
+
+class RecollectionScopeContext:
+    """Link a visible detail to its fight, requiring matching boss HP and time."""
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        self.scope, self.maximum, self.proof = {}, None, None
+        self.detail_at, self.timer = float('-inf'), None
+
+    def resolve(self, scope, verified, texts, seconds, combat_scene, proof):
+        labels = [t.text.replace(' ', '') for t in texts if t.score >= .94]
+        maxima = {int(m[2]) for text in labels
+                  if (m := re.fullmatch(r'(\d{7,11})/(\d{7,11})', text))
+                  and 0 <= int(m[1]) <= int(m[2])}
+        maximum = next(iter(maxima)) if len(maxima) == 1 else None
+        timers = {int(m[1])*60+int(m[2]) for text in labels
+                  if (m := re.fullmatch(r'(\d{1,2}):(\d{2})', text)) and int(m[2]) < 60}
+        timer = next(iter(timers)) if len(timers) == 1 else None
+        if scope:
+            self.reset()
+            if verified and not combat_scene and maximum and '难度变更' in labels:
+                self.scope, self.maximum, self.proof = dict(scope), maximum, dict(proof)
+                self.detail_at = seconds
+            return scope, verified, None
+        if any(re.search(r'WIN|战斗胜利|战斗失败|战斗结果|伤害报告', label, re.I) for label in labels):
+            self.reset()
+            return {}, False, None
+        if combat_scene:
+            if not maximum or timer is None:
+                return {}, False, None
+            if (not self.scope or maximum != self.maximum
+                    or self.timer is None and seconds-self.detail_at > 15
+                    or self.timer is not None and timer > self.timer):
+                self.reset()
+                return {}, False, None
+            self.timer = timer
+            evidence = dict(self.proof, method='detail_to_combat',
+                            text=f'{self.scope}: boss HP {maximum}; continuous countdown')
+            return dict(self.scope), True, evidence
+        formation = ('队伍编组' in labels
+                     and ('战斗开始' in labels or {'当前的成员', '取消'} <= set(labels)))
+        if (formation and self.scope
+                and self.timer is None and seconds-self.detail_at <= 15):
+            return dict(self.scope), True, dict(self.proof, method='detail_to_formation')
+        special_equipment = {'特别装备设定', '可变更队伍角色的特别装备。',
+                             '取消', '装备确定'} <= set(labels)
+        preparation = (('角色详情' in labels and '确认' in labels)
+                       or ('★变更确认' in labels and '取消' in labels and '变更' in labels)
+                       or special_equipment
+                       or any(t.score >= .9 and t.text.startswith('加载中')
+                              and t.rectangle[0] > 850 and t.rectangle[1] > 550 for t in texts))
+        if preparation and self.scope and self.timer is None and seconds-self.detail_at <= 15:
+            return {}, False, None
+        if '正在进行数据连接' not in labels:
+            self.reset()
+        return {}, False, None
 
 
 def texts_in_view(texts, raw_width: int, crop_left: int, crop_width: int):
@@ -223,6 +300,17 @@ def task_source_options(kind: str, options: dict, *, stage=None,
         result.pop('element', None)
         result.update(area=area, difficulty=difficulty, mode=mode,
                       category_terms=[], aliases=[])
+    elif kind == 'recollection':
+        from ..game_ui.recollection import AREAS, ALIASES
+        if area not in AREAS.values() or type(stage) is not int or not 1 <= stage <= 99:
+            raise ValueError('追忆战攻略必须明确领域与层数')
+        key = next(key for key, name in AREAS.items() if name == area)
+        result.update(area=area, stage=str(stage), category_terms=['追忆', '追憶'],
+                      aliases=list(ALIASES[key]), search=options.get('discover_sources', True))
+        result.pop('element', None)
+        result.setdefault('max_video_seconds', 600)
+        result.setdefault('max_frames_per_page', 96)
+        result.setdefault('max_pages_per_video', 8)
     else:
         raise ValueError('未知攻略任务类型')
     return result
@@ -242,6 +330,9 @@ def event_page_difficulty(title: str) -> str | None:
 
 def page_scope(page: dict, kind: str) -> dict:
     title = page.get('part', page.get('title', ''))
+    if kind == 'recollection':
+        from ..game_ui.recollection import text_scope
+        return text_scope(title)
     if kind == 'abyss':
         match = re.search(r'(红焰|苍波|翠岚|珀天|紫冥|火|水|风|光|暗)(?:属性|深域)?[】\]）)]?\s*(\d+)\s*[-－]\s*(\d+)(?!\d|图)', title)
         if match:
@@ -321,6 +412,62 @@ def choose_pages(source: dict, options: dict) -> list[dict]:
             # frames, but never infer the requested stage from that label.
             targets = [p for p in pages if not page_scope(p, kind)
                        and (not element or declared_abyss_element(p.get('part', p.get('title', ''))) in (None, element))]
+    elif kind == 'recollection':
+        from ..game_ui.recollection import AREAS, ALIASES
+        area = options.get('area')
+        from .strategy_sources import recollection_ranges
+        names = ALIASES[next(key for key, value in AREAS.items() if value == area)]
+        wanted = dict(area=area, floor=int(options['stage']))
+        def declared_areas(label):
+            # "追忆战·霸" names the mode, not the ordinary memory domain.
+            areas = {AREAS[key] for key, aliases in ALIASES.items()
+                     if any(name in label for name in aliases if name != '追忆战')}
+            if re.search(r'追忆战\s*(?:第)?[1-9]\d?(?!\d)', label):
+                areas.add(AREAS['memory'])
+            return areas
+        source_areas = declared_areas(source.get('title', ''))
+        def bare_ranges(label):
+            return [(int(a), int(b)) for a, b in re.findall(
+                r'(?<!\d)([1-9]\d?)(?:层)?\s*[~～至到\-－]\s*(?:第)?([1-9]\d?)(?:层)?(?!\d)', label)]
+        def relevant_requirement(page):
+            label = page.get('part', page.get('title', ''))
+            scope = page_scope(page, kind)
+            if scope:
+                return scope == wanted
+            labeled_areas = declared_areas(label)
+            if labeled_areas and area not in labeled_areas:
+                return False
+            ranges = recollection_ranges(label, area)
+            # Preserve the existing exclusion for a leading floor range.
+            # Additional prefixed ranges are reviewed only within a title
+            # naming exactly one domain; they never establish battle scope.
+            leading = re.match(r'^(?:第)?([1-9]\d?)(?:层)?\s*[~～至到\-－]\s*(?:第)?([1-9]\d?)', label)
+            if leading:
+                ranges.append((int(leading[1]), int(leading[2])))
+            if not labeled_areas and source_areas == {area}:
+                ranges.extend(bare_ranges(label))
+            return not ranges or any(a <= wanted['floor'] <= b for a, b in ranges)
+        requirements = [p for p in requirements if relevant_requirement(p)]
+        targets = [p for p in pages if page_scope(p, kind) == wanted]
+        if not targets and len(pages) == 1 and page_scope({'part': source.get('title', '')}, kind) == wanted:
+            targets = [dict(pages[0], part=source['title'])]
+        if (not targets and len(pages) == 1 and any(a <= wanted['floor'] <= b
+                for a, b in recollection_ranges(source.get('title', ''), area))):
+            # A timestamp-like part name cannot discard a same-domain
+            # collection. Its unchanged label still needs exact frame scope.
+            targets = [pages[0]]
+        # A range/collection is only a candidate: frames must establish an exact floor.
+        targets += [p for p in pages if p not in requirements and p not in targets
+                    and not page_scope(p, kind)
+                    and (any(name in p.get('part', p.get('title', '')) for name in names)
+                         or (source_areas == {area}
+                             and (re.fullmatch(r'(?:第)?'+str(wanted['floor'])+r'层(?:\s.*)?',
+                                               p.get('part', p.get('title', '')))
+                                  or any(a <= wanted['floor'] <= b for a, b in
+                                         bare_ranges(p.get('part', p.get('title', '')))))))
+                    and relevant_requirement(p)
+                    and (not (ranges := recollection_ranges(p.get('part', p.get('title', '')), area))
+                         or any(a <= wanted['floor'] <= b for a, b in ranges))]
     elif kind in ('event', 'revival'):
         wanted = {'difficulty': options.get('difficulty'), 'mode': options.get('mode')}
         targets = [p for p in pages if (scope := page_scope(p, kind)) == wanted]
@@ -358,6 +505,13 @@ def declared_region(text: str) -> str:
 
 def observed_scope(texts, page: dict, kind: str, *, battle_scope: dict | None = None) -> tuple[dict, bool]:
     metadata = page_scope(page, kind)
+    if kind == 'recollection':
+        scopes = [page_scope({'part': t.text}, kind) for t in texts if t.score >= .94]
+        scopes = [s for s in scopes if s]
+        if ((metadata and any(s != metadata for s in scopes))
+                or scopes and any(s != scopes[0] for s in scopes)):
+            return {'conflict': True}, False
+        return (scopes[0], True) if scopes else (metadata, bool(metadata))
     if kind == 'abyss':
         scopes = [page_scope({'part': t.text}, kind) for t in texts if t.score >= .94]
         scopes = [s for s in scopes if s]
@@ -503,6 +657,11 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
     errors, pages_report = [], []
     source_region = declared_region(source.get('title', '')+' '+source.get('description', ''))
     text_source = '\n'.join([source.get('description', '')]+[r.get('text', '') for r in source.get('author_comments', [])])
+    if options['task_type'] == 'recollection':
+        unsupported = source.get('title', '')+'\n'+text_source
+        if RECOLLECTION_UNSUPPORTED.search(unsupported):
+            globals_.append(dict(text=unsupported[:500], advisory=False, evidence=asdict(Evidence(
+                source['url'], method='source_requirements', text=unsupported[:500]))))
     title_setting = UNVERIFIED_SETTING.search(source.get('title') or '')
     source_setting = title_setting or UNVERIFIED_SETTING.search(source.get('description') or '')
     if source_setting:
@@ -513,6 +672,9 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
     for page in pages:
         check()
         page_name = page.get('part', page.get('title', ''))
+        if options['task_type'] == 'recollection' and RECOLLECTION_UNSUPPORTED.search(page_name):
+            globals_.append(dict(text=page_name, advisory=False, evidence=asdict(Evidence(
+                source['url'], int(page['cid']), method='part_requirements', text=page_name))))
         requirements_page = bool(re.search(r'练度|培养|角色需求|配置要求', page_name))
         original_part = page.get('original_part', page_name)
         manual_part = bool(MANUAL_PART.search(original_part) or BORROW_PART.search(original_part))
@@ -555,6 +717,7 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
             seconds_list = sorted(set(seconds_list[:-2]+[duration-1.5, duration-.5]))
         previous = None
         last_scope = ({}, False)
+        recollection_scope = RecollectionScopeContext()
         combat_seen = 0
         last_combat_audit = float('-inf')
         last_combat_box = float('-inf')
@@ -623,11 +786,17 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
                 if options['task_type'] in ('event', 'revival') and not wide_crop:
                     records.extend(dict(row, evidence=asdict(proof)) for row in event_record_rows(frame, texts, index))
                 detected_region = declared_region('\n'.join(t.text for t in texts if t.score >= .95))
+                if options['task_type'] == 'recollection' and detected_region == 'unknown':
+                    detected_region = recollection_client_region(texts)
                 if detected_region != 'unknown':
                     source_region = detected_region if source_region == 'unknown' else source_region if source_region == detected_region else 'conflict'
                 global_rows, manual_rows = text_constraints(texts, proof)
                 globals_.extend(global_rows)
                 manual.extend(manual_rows)
+                if options['task_type'] == 'recollection':
+                    globals_.extend(dict(text=t.text, advisory=False, evidence=asdict(proof)) for t in texts
+                                    if t.score >= .94 and RECOLLECTION_UNSUPPORTED.search(t.text)
+                                    and t.text not in ('特别装备设定', '可变更队伍角色的特别装备。'))
                 if not wide_crop and (requirements_page or any('角色需求' in t.text or '练度' in t.text for t in texts)):
                     chapter_scope = requirement_scope(texts)
                     for row in requirement_cells(frame, texts, index):
@@ -636,12 +805,19 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
                         character_facts[row['name']].append((row['field'], row['value'], evidence, chapter_scope))
                 scope, verified = observed_scope(texts, page, options['task_type'],
                     battle_scope=last_scope[0] if combat_scene and combat_seen > 1 else None)
+                scope_evidence = None
+                if options['task_type'] == 'recollection' and not page_scope(page, 'recollection'):
+                    scope, verified, scope_evidence = recollection_scope.resolve(
+                        scope, verified, texts, seconds, combat_scene, asdict(proof))
                 if scope and not verified:
                     # Conflicting visible stage labels must invalidate the frame.
                     last_scope = ({}, False)
                     continue
                 if verified:
                     last_scope = scope, verified
+                elif options['task_type'] == 'recollection':
+                    # Unlinked compilation frames cannot inherit a floor.
+                    scope, verified = {}, False
                 elif options['task_type'] != 'abyss' or page_scope(page, options['task_type']):
                     scope, verified = last_scope
                 if options['task_type'] == 'dungeon':
@@ -653,6 +829,9 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
                 elif options['task_type'] == 'abyss' and scope and options.get('stage'):
                     if (scope.get('element') != options.get('element')
                             or scope.get('stage') not in (None, options['stage'])):
+                        continue
+                elif options['task_type'] == 'recollection':
+                    if scope != dict(area=options.get('area'), floor=int(options['stage'])):
                         continue
                 elif options['task_type'] in ('event', 'revival'):
                     area = options.get('area', '')
@@ -702,13 +881,15 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
                 page_record['recognized_teams'] += 1
                 key = json.dumps([scope, [m['name'] for m in found]], ensure_ascii=False, sort_keys=True)
                 if key not in teams:
-                    teams[key] = dict(source=source['url'], scope=scope, scope_verified=verified,
+                    teams[key] = dict(task_type=options['task_type'], source=source['url'], scope=scope, scope_verified=verified,
                                       members=[empty_member(m['name']) for m in found], frames=[], observations=defaultdict(list),
                                       identity_evidence=[],
                                       auto=Fact(), auto_observations=[],
                                       notes=text_source, excluded_stages=[],
                                       global_requirements=[], manual_actions=[])
                 team = teams[key]
+                if scope_evidence and scope_evidence not in team.setdefault('scope_evidence', []):
+                    team['scope_evidence'].append(scope_evidence)
                 if row:
                     team['notes'] = '\n'.join(filter(None,(text_source,row.get('notes',''))))
                     team['excluded_stages'] = sorted(set(team['excluded_stages']) | set(row.get('excluded_stages',[])))
@@ -849,8 +1030,8 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
 def acquire_strategies(options: dict, *, api=None, index=None, ocr=None, check=lambda: None) -> dict:
     """The shared GUI/CLI task path from public sources to evidence-backed files."""
     options = dict(options)
-    if options.get('task_type') not in ('abyss', 'dungeon', 'event', 'revival'):
-        raise ValueError('视频解析task_type必须为abyss、dungeon、event或revival')
+    if options.get('task_type') not in ('abyss', 'dungeon', 'event', 'revival', 'recollection'):
+        raise ValueError('视频解析task_type必须为abyss、dungeon、event、revival或recollection')
     for key, default, upper in [('max_videos', 4, 30), ('max_frames_per_page', 50, 300),
                                 ('max_video_seconds', 180, 3600),
                                 ('max_download_seconds', 180, 900),

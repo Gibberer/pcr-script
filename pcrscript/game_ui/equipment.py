@@ -1,6 +1,6 @@
 """Read the rotating equipment badge on a live party portrait.
 
-Only two shared sword icons and five small orb references are matched. This
+Only two shared equipment markers and five small orb references are matched. This
 does not scan a character-image library or infer equipment from skill names.
 """
 from pathlib import Path
@@ -20,13 +20,23 @@ class EquipmentBadges:
     def read(self, image, rectangle):
         x, y, w, h = rectangle
         card = cv.resize(image[y:y+h, x:x+w], (100, 100), interpolation=cv.INTER_AREA)
-        area = card[69:100, 0:37]
-        scores = [float(np.nan_to_num(cv.matchTemplate(area, template, cv.TM_CCOEFF_NORMED,
-                          mask=self.mask), nan=-1, posinf=-1).max()) for template in self.swords]
-        best = int(np.argmax(scores))
-        if scores[best] >= .88 and scores[best]-scores[1-best] >= .06:
-            return True, bool(best)
-        # No sword is only confirmed during the orb-information frame. During
+        candidates = [card]
+        # Fixed search cells include a few pixels outside their thumbnail.
+        # Match the visible 97x96 card as well, retaining the confidence and
+        # separation thresholds. This does not treat a missing badge as off.
+        if (w, h) == (100, 99):
+            candidates.append(cv.resize(image[y:y+h-3, x:x+w-3], (100, 100), interpolation=cv.INTER_AREA))
+        confirmed = set()
+        for candidate in candidates:
+            area = candidate[69:100, 0:37]
+            scores = [float(np.nan_to_num(cv.matchTemplate(area, template, cv.TM_CCOEFF_NORMED,
+                              mask=self.mask), nan=-1, posinf=-1).max()) for template in self.swords]
+            best = int(np.argmax(scores))
+            if scores[best] >= .88 and scores[best]-scores[1-best] >= .06:
+                confirmed.add((True, bool(best)))
+        if confirmed:
+            return confirmed.pop() if len(confirmed) == 1 else None
+        # Absence is only confirmed during the orb-information frame. During
         # the alternating numeric-star frame, the correct answer is unknown.
         gray = cv.cvtColor(card, cv.COLOR_BGR2GRAY)
         orb_scores = []

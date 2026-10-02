@@ -16,6 +16,29 @@ def fake_api():
  return a
 
 class SourceTests(TestCase):
+ def test_recollection_high_search_finds_recent_exact_auto_part_beyond_normal_window(self):
+  queries=source_queries(['泽恩的领域','泽恩'],'4','high',kind='recollection')
+  self.assertIn('公主连结 追忆的战场 AUTO',queries)
+  self.assertIn('公主连结 追忆的战场 全制霸参考',queries)
+  self.assertIn('公主连结 泽恩4层 全自动',queries)
+  with TemporaryDirectory() as folder:
+   api=fake_api();ids=[f'BV{i:010d}' for i in range(51)]
+   api.search.return_value={'code':0,'data':{'result':[{'result_type':'video','data':[
+    {'bvid':bvid,'title':'公主连结 追忆战 泽恩4层'} for bvid in ids]}]}}
+   def info(*,bvid):
+    valid=bvid in (ids[0],ids[-1])
+    return {'code':0,'data':{'bvid':bvid,
+     'title':'公主连结 国服 追忆的战场 AUTO 泽恩4层' if valid else '其他游戏 泽恩4层',
+     'pubdate':100 if bvid==ids[-1] else 1,
+     'pages':[{'cid':1,'page':1,'part':'泽恩4层','duration':90}]}}
+   api.getVideoInfo.side_effect=info
+   base=dict(task_type='recollection',area='泽恩的领域',aliases=['泽恩'],stage='4',
+    category_terms=['追忆战','追忆的战场'],max_videos=1,cache_dir=folder)
+   self.assertEqual(discover_sources(base,api=api)['candidates'][0]['bvid'],ids[0])
+   high=discover_sources(dict(base,search_effort='high'),api=api)
+   self.assertEqual(high['candidates'][0]['bvid'],ids[-1])
+   self.assertEqual(high['deferred_candidates'][0]['bvid'],ids[0])
+
  def test_high_effort_queries_more_phrasings_and_reviews_chapter_collection(self):
   queries=source_queries(['珀天深域','深域 光','光属性'],'4-6','high',kind='abyss',element='light')
   self.assertGreater(len(queries),4)
