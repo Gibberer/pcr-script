@@ -364,6 +364,83 @@ class RecollectionTests(TestCase):
             self.assertEqual(game.commits,1)
             self.assertIn('pending_sweep',again.state)
 
+    def test_pending_sweep_recovers_when_new_sweeps_are_disabled(self):
+        for preview in (False, True):
+            with self.subTest(preview=preview), TemporaryDirectory() as root:
+                game=Game();game.lose_receipt=True
+                task=self.make_task(root,game,max_sweeps=1)
+                self.assertEqual(task.run()['status'],'blocked')
+                game.page='index';game.lose_receipt=False
+                again=self.make_task(root,game,claim_rewards=False,sweep_dominion=False,
+                                     preview_only=preview,areas=['zen'])
+                report=again.run()
+                self.assertEqual(report['status'],'prepared' if preview else 'complete',report)
+                self.assertEqual(report['spent'],1)
+                self.assertEqual(report['history'][0]['targets'],
+                                 [dict(area=field.AREAS['kaiser'],floor=2,remaining=3)])
+                self.assertEqual((game.claims,game.commits,game.tickets),(0,1,99))
+                self.assertFalse(again.state)
+                game.cleared[field.AREAS['memory']]=game.max_floor[field.AREAS['memory']]
+                first_clear=self.make_task(root,game,RecollectionFirstClear)
+                self.assertEqual(first_clear.run()['status'],'already_complete')
+
+    def test_disabled_sweeps_keep_pending_when_attempts_or_tickets_disagree(self):
+        for mismatch in ('attempts', 'tickets'):
+            with self.subTest(mismatch=mismatch), TemporaryDirectory() as root:
+                game=Game();game.lose_receipt=True
+                task=self.make_task(root,game,max_sweeps=1)
+                self.assertEqual(task.run()['status'],'blocked')
+                pending=deepcopy(task.state['pending_sweep'])
+                game.page='index';game.lose_receipt=False
+                if mismatch=='attempts':game.remaining[field.AREAS['kaiser']]+=1
+                else:game.tickets+=1
+                before=(deepcopy(game.remaining),game.tickets)
+                again=self.make_task(root,game,claim_rewards=False,sweep_dominion=False,preview_only=True)
+                report=again.run()
+                self.assertEqual(report['status'],'blocked',report)
+                self.assertEqual(again.state['pending_sweep'],pending)
+                self.assertEqual((game.remaining,game.tickets),before)
+                self.assertEqual(game.commits,1)
+                self.assertEqual(json.loads(again.state_path.read_text(encoding='utf-8'))['pending_sweep'],pending)
+
+    def test_pending_claim_recovers_when_new_claims_are_disabled(self):
+        for preview in (False, True):
+            with self.subTest(preview=preview), TemporaryDirectory() as root:
+                game=Game();game.claim=True
+                original_capture=game.capture
+                game.capture=lambda **kw: (screen(('未知状态',480,40)) if game.page=='claim_receipt'
+                                          else original_capture(**kw))
+                task=self.make_task(root,game,sweep_dominion=False)
+                self.assertEqual(task.run()['status'],'blocked')
+                self.assertIn('pending_claim',task.state)
+                game.capture=original_capture
+                again=self.make_task(root,game,claim_rewards=False,sweep_dominion=False,preview_only=preview)
+                report=again.run()
+                self.assertEqual(report['status'],'prepared' if preview else 'complete',report)
+                self.assertEqual(report['rewards'],'recovered_claim')
+                self.assertEqual((game.claims,game.commits,game.tickets),(1,0,100))
+                self.assertFalse(self.make_task(root,game).state)
+
+    def test_pending_claim_with_nonempty_box_blocks_disabled_and_preview_modes(self):
+        for preview in (False, True):
+            with self.subTest(preview=preview), TemporaryDirectory() as root:
+                game=Game();game.claim=True
+                original_click=game.click
+                def click(value, **kwargs):
+                    if isinstance(value,TextBox) and value.text=='领取':
+                        raise RunCancelled('synthetic interruption before claim input')
+                    return original_click(value, **kwargs)
+                game.click=click
+                task=self.make_task(root,game,sweep_dominion=False)
+                with self.assertRaises(RunCancelled):task.run()
+                pending=deepcopy(task.state['pending_claim'])
+                game.click=original_click
+                again=self.make_task(root,game,claim_rewards=False,sweep_dominion=False,preview_only=preview)
+                report=again.run()
+                self.assertEqual(report['status'],'blocked',report)
+                self.assertEqual(again.state['pending_claim'],pending)
+                self.assertEqual((game.claims,game.commits,game.tickets),(0,0,100))
+
     def test_daily_interruption_preserves_pending_spend_and_reports_terminal_state(self):
         for error, status in ((RunCancelled, 'cancelled'), (ResumeUnsafe, 'blocked')):
             with self.subTest(error=error.__name__), TemporaryDirectory() as root:

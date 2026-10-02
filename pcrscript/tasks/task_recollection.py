@@ -29,11 +29,11 @@ class Recollection(RecollectionTask):
                                                   after=str(self.ui.save('claim_recovered', s))))
             self.save()
             return
+        if self.state.get('pending_claim'):
+            raise RecollectionBlocked('上次追忆战领奖尚未核对，未重复领取')
         if self.options['preview_only']:
             self.report['rewards'] = 'available'
             return
-        if self.state.get('pending_claim'):
-            raise RecollectionBlocked('上次追忆战领奖尚未核对，未重复领取')
         self.state['pending_claim'] = dict(evidence=str(self.ui.save('claim_before', s)))
         self.save()
         self.click(s, '领取', (580, 395, 685, 460))
@@ -210,7 +210,10 @@ class Recollection(RecollectionTask):
             if self.enter() is None:
                 self.report['status'] = 'unavailable'
                 return self.finish()
-            if self.options['claim_rewards']:
+            if self.state.get('pending_sweep'):
+                self.report_progress('核对上次追忆战扫荡结果')
+                self.reconcile_sweep()
+            if self.state.get('pending_claim') or self.options['claim_rewards']:
                 self.collect_rewards()
             if self.options['sweep_dominion']:
                 self.sweep()
