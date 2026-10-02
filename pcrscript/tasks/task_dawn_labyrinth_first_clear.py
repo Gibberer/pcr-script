@@ -241,8 +241,10 @@ class DawnLabyrinthFirstClear(DawnLabyrinth):
                 screen = self.verify_exploration(screen)
                 continue
             if maze.boss_failure(screen):
-                if not self.options['retry_failed_boss'] or self.report.get('boss_retry'):
+                if not self.options['retry_failed_boss']:
                     raise EventUIError('首领失败已保留；未启用本次首领重新挑战，不自动重试')
+                if self.report.get('boss_retry'):
+                    raise EventUIError('本次首领重新挑战已使用，失败现场已保留')
                 self.report['boss_retry'] = True
                 self.save_report()
                 self.ui.click(screen.find('重新挑战', (700, 470, 930, 535), exact=True))
@@ -459,6 +461,11 @@ class DawnLabyrinthFirstClear(DawnLabyrinth):
             screen = self.capture()
             if maze.selected_boss_team(screen) != 1:
                 raise EventUIError('首领第一队无法核对，未开战')
+            # Inspect the roster and validate the complete replacement plan
+            # before removing any member from the saved boss teams.
+            ready, roles = formation.audit_boss_roster()
+            names = formation.plan_boss_parties(ready, roles)
+            self.report['boss_roster'] = {n: vars(s) for n, s in ready.items()}
             screen = formation.clear_current()
             for number in (2, 3):
                 next_team = screen.find('队伍'+str(number), (775, 405, 930, 500), exact=True)
@@ -468,10 +475,7 @@ class DawnLabyrinthFirstClear(DawnLabyrinth):
                 self.wait(lambda s: maze.selected_boss_team(s) == number, '首领队伍'+str(number))
                 screen = formation.clear_current()
             self.ui.click(screen.find('队伍1', (40, 65, 160, 110), exact=True))
-            self.wait(lambda s: maze.selected_boss_team(s) == 1, '首领伙伴盘点')
-            ready, roles = formation.audit_boss_roster()
-            names = formation.plan_boss_parties(ready, roles)
-            self.report['boss_roster'] = {n: vars(s) for n, s in ready.items()}
+            self.wait(lambda s: maze.selected_boss_team(s) == 1, '首领第一队编组')
             teams = []
             for number, members in enumerate(names, 1):
                 party, screen = formation.select_members(members, max(levels), boss=True)
@@ -506,6 +510,8 @@ class DawnLabyrinthFirstClear(DawnLabyrinth):
                 proof = self.ui.save('battle_failed', screen)
                 self.report['history'].append(dict(self.report.pop('pending_battle'), outcome='failed', result=str(proof)))
                 self.save_report()
+                if boss_stage:
+                    return screen
                 raise EventUIError('迷宫战斗未获胜，保留进度且不自动重试')
             if screen.find('WIN|战斗胜利|胜利') or combat.match('btn_next_step', screen):
                 self.report['battles'] += 1

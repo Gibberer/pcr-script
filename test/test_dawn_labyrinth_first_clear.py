@@ -52,6 +52,23 @@ def ready_character(name, **changes):
                                        equipment_evidence='synthetic-equipment'), **changes))
 
 
+def boss_formation(selected):
+    action = '队伍'+str(selected+1) if selected < 3 else '战斗开始'
+    value = screen(('队伍编组', 480, 42), ('队伍1', 98, 89),
+                   ('队伍2', 216, 89), ('队伍3', 334, 89),
+                   ('取消', 712, 453), (action, 851, 453), blue=(action,))
+    left = 69+118*(selected-1)
+    cv.rectangle(value.image, (left, 82), (left+59, 97), (40, 190, 245), -1)
+    return value
+
+
+def boss_roster():
+    names = ('佩可莉姆', '可可萝', '凯露')+tuple(f'合成伙伴{i}' for i in range(12))
+    ready = {name: ready_character(name) for name in names}
+    roles = {name: dict(role=1, kind=1, score=50, single=1) for name in names}
+    return ready, roles
+
+
 class FirstClearRecognitionTests(TestCase):
     def test_three_boss_team_tabs_require_one_gold_selection(self):
         value = screen(('队伍编组', 480, 42), ('队伍1', 98, 89),
@@ -541,6 +558,99 @@ class FirstClearTaskTests(TestCase):
         self.assertNotIn('pending_battle', self.task.report)
         self.assertEqual(self.task.report['history'][0]['outcome'], 'failed')
         self.assertEqual(self.clicks(), ['挑战', '战斗开始'])
+
+    def test_current_boss_failure_obeys_retry_option_and_retries_only_once(self):
+        stage = screen(('首领战格子', 138, 56), ('挑战', 817, 457), blue=('挑战',))
+        failure = screen(('战斗失败', 480, 64), ('第1战', 122, 140),
+                         ('结束', 577, 507), ('重新挑战', 808, 507))
+        teams = [boss_formation(number) for number in (1, 2, 3)]
+        ready, roles = boss_roster()
+        names = LabyrinthFormation.plan_boss_parties(ready, roles)
+        for retry in (False, True):
+            with self.subTest(retry=retry):
+                self.task = DawnLabyrinthFirstClear(self.robot)
+                self.task.ui = Mock(output=self.folder, last=None)
+                self.task.ui.save.return_value = self.folder/'synthetic.png'
+                self.task.options['retry_failed_boss'] = retry
+                self.task.exploration_verified = True
+                self.task.report.update(entries=1, pending_spend=dict(before=11, after=10, cost=1))
+                formation = Mock(spec=LabyrinthFormation)
+                formation.audit_boss_roster.return_value = (ready, roles)
+                formation.plan_boss_parties.side_effect = LabyrinthFormation.plan_boss_parties
+                formation.clear_current.side_effect = teams*2
+                formation.select_members.side_effect = [
+                    ([vars(ready[name]) for name in members], page)
+                    for members, page in zip(names, teams)]*2
+                fight_frames = [teams[0], teams[0], teams[1], teams[2],
+                                teams[0], teams[1], teams[2], failure]
+                self.frames([stage]+fight_frames+([teams[0], teams[0], stage]+fight_frames if retry else []))
+
+                def click(button):
+                    if getattr(button, 'text', '') == '重新挑战':
+                        saved = json.loads((self.folder/'report.json').read_text(encoding='utf-8'))
+                        self.assertTrue(saved['boss_retry'])
+                        self.assertEqual(saved['battles'], 1)
+                        self.assertNotIn('pending_battle', saved)
+                        self.assertEqual(saved['history'][-1]['outcome'], 'failed')
+                self.task.ui.click.side_effect = click
+                with patch.object(self.task, 'inspect_enemies', return_value=([dict(level=350)], stage)), \
+                        patch.object(self.task, 'get_formation', return_value=formation), \
+                        patch('pcrscript.tasks.task_dawn_labyrinth_first_clear.EventCombat'):
+                    report = self.task.run()
+                fights = 2 if retry else 1
+                self.assertEqual(report['status'], 'partial')
+                self.assertEqual(report['battles'], fights)
+                self.assertEqual([battle['outcome'] for battle in report['history']], ['failed']*fights)
+                self.assertNotIn('pending_battle', report)
+                self.assertNotIn('boss_defeated', report)
+                self.assertEqual(self.clicks().count('战斗开始'), fights)
+                self.assertEqual(self.clicks().count('重新挑战'), int(retry))
+                self.assertEqual((report['entries'], report['spent']), (1, 0))
+                self.assertEqual(report['pending_spend'], dict(before=11, after=10, cost=1))
+                self.assertNotIn('出发', self.clicks())
+                self.assertNotIn('结束', self.clicks())
+                self.assertEqual(formation.audit_boss_roster.call_count, fights)
+                self.assertEqual(formation.plan_boss_parties.call_count, fights)
+                self.assertEqual(formation.clear_current.call_count, 3*fights)
+                self.assertEqual(formation.select_members.call_count, 3*fights)
+                self.assertEqual([call[0] for call in formation.method_calls[:3]],
+                                 ['audit_boss_roster', 'plan_boss_parties', 'clear_current'])
+                self.assertIn('已使用' if retry else '未启用', report['pending'][-1])
+
+    def test_boss_preflight_failures_preserve_all_saved_teams(self):
+        stage = screen(('首领战格子', 138, 56), ('挑战', 817, 457), blue=('挑战',))
+        teams = [boss_formation(number) for number in (1, 2, 3)]
+        for cause in ('assets', 'audit', 'equipment', 'roles', 'too_few'):
+            with self.subTest(cause=cause):
+                self.task.ui.click.reset_mock()
+                self.task.exploration_verified = True
+                self.frames([teams[0], teams[0], teams[1], teams[2], teams[0]])
+                ready, roles = boss_roster()
+                formation = Mock(spec=LabyrinthFormation)
+                formation.audit_boss_roster.return_value = (ready, roles)
+                formation.plan_boss_parties.side_effect = LabyrinthFormation.plan_boss_parties
+                formation.clear_current.side_effect = teams
+                if cause == 'audit':
+                    formation.audit_boss_roster.side_effect = EventUIError('合成伙伴盘点失败')
+                elif cause == 'equipment':
+                    ready['合成伙伴0'].equipment = None
+                elif cause == 'roles':
+                    roles.clear()
+                elif cause == 'too_few':
+                    for name in list(ready)[9:]:
+                        ready.pop(name)
+                with patch.object(self.task, 'inspect_enemies', return_value=([dict(level=350)], stage)), \
+                        patch.object(self.task, 'get_formation', return_value=formation,
+                                     side_effect=EventUIError('合成头像准备失败') if cause == 'assets' else None), \
+                        patch('pcrscript.tasks.task_dawn_labyrinth_first_clear.EventCombat') as combat:
+                    with self.assertRaises((EventUIError, KeyError)):
+                        self.task.fight(stage)
+                self.assertEqual(self.clicks(), ['挑战'])
+                formation.clear_current.assert_not_called()
+                formation.select_members.assert_not_called()
+                combat.assert_not_called()
+                self.assertEqual(self.task.report['battles'], 0)
+                self.assertNotIn('pending_battle', self.task.report)
 
     def test_shop_is_closed_once_and_exit_confirmed_without_purchase(self):
         self.task.exploration_verified = True
