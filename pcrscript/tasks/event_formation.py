@@ -52,7 +52,6 @@ class EventFormation:
     infer_costume_from_skills = False
     detail_close_pattern = '确认'
     formation_title_pattern = '队伍编组'
-    inspect_equipment = True
     slots = [(96+109*i, 452) for i in range(5)]
     slot_top = 405
     search_top = 177
@@ -98,7 +97,7 @@ class EventFormation:
         face = face_crop(before.image, rect).copy() if rect else None
         identity = self.avatars.query([face])[0] if face is not None else None
         identity = normalized(identity) if identity is not None else None
-        equipment, evidence = self.badges.observe(self.ui, rect) if full and rect and self.inspect_equipment else (None, None)
+        equipment, evidence = self.badges.observe(self.ui, rect) if full and rect else (None, None)
         self.ui.swipe(pos, pos, 900)
         s = self.ui.wait(lambda s: s.find("角色详情", (300, 0, 650, 70)), "角色详情")
         if s.find('检测到手柄'):

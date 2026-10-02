@@ -164,6 +164,7 @@ class DawnLabyrinthFirstClear(DawnLabyrinth):
             raise SweepBlocked('迷宫首通出发按钮不可用')
         path = self.ui.save('departure_preview', screen)
         self.report['pending_spend'] = dict(before=before, after=preview[1], cost=1, preview=str(path))
+        self.report['exploration_context'] = dict(difficulty=1, guild='美食殿堂', departure=str(path))
         self.report['entries'] = 1
         self.save_report()
         self.ui.click(button)
@@ -197,6 +198,13 @@ class DawnLabyrinthFirstClear(DawnLabyrinth):
         return None
 
     def verify_exploration(self, screen):
+        # Only the current run's verified departure identifies both guild and
+        # difficulty. The menu's difficulty icon cannot identify a saved guild.
+        if self.exploration_verified:
+            return screen
+        if (screen.find('角色选择|出发奖励', (240, 0, 720, 75), exact=True)
+                or maze.invitation_animation(screen)):
+            raise EventUIError('接续探索的难度与同行公会无法核验，已保留伙伴选择')
         if not maze.exploration_menu(screen):
             menu = screen.find('菜单', (880, 0, 960, 85), exact=True)
             if not menu:
@@ -208,14 +216,13 @@ class DawnLabyrinthFirstClear(DawnLabyrinth):
         if difficulty != 1:
             raise EventUIError('当前探索不是已核验的难度1，已保留进度')
         self.report['difficulty_evidence'] = str(self.ui.save('current_difficulty', screen))
-        self.exploration_verified = True
-        menu = screen.find('菜单', (880, 0, 960, 85), exact=True)
-        if not menu:
-            raise EventUIError('当前探索菜单无法关闭')
-        self.ui.click(menu)
-        return self.wait(lambda s: not maze.exploration_menu(s), '关闭当前探索菜单')
+        raise EventUIError('当前探索同行公会无法核验，不能仅凭难度1接续；已保留进度')
 
     def explore(self, screen):
+        if (not self.exploration_verified and not maze.settlement_screen(screen)
+                and not (maze.home(screen) and (self.report.get('boss_defeated')
+                                               or self.report.get('settlement_resumed')))):
+            screen = self.verify_exploration(screen)
         if screen.find('出发奖励', (240, 0, 720, 75), exact=True):
             self.ui.click(screen.find('关闭', (320, 450, 650, 515), exact=True))
             screen = self.wait(lambda s: s.find('角色选择', (300, 0, 650, 70), exact=True), '初始伙伴选择')
@@ -228,6 +235,11 @@ class DawnLabyrinthFirstClear(DawnLabyrinth):
         unknown_since = time.monotonic()
         for _ in range(300):
             handled = True
+            if (not self.exploration_verified and not maze.settlement_screen(screen)
+                    and not (maze.home(screen) and (self.report.get('boss_defeated')
+                                                   or self.report.get('settlement_resumed')))):
+                screen = self.verify_exploration(screen)
+                continue
             if maze.boss_failure(screen):
                 if not self.options['retry_failed_boss'] or self.report.get('boss_retry'):
                     raise EventUIError('首领失败已保留；未启用本次首领重新挑战，不自动重试')
@@ -260,12 +272,6 @@ class DawnLabyrinthFirstClear(DawnLabyrinth):
                     self.report['history'].append(dict(self.report.pop('pending_spend'), outcome='cleared'))
                 self.report.update(status='complete', remaining_passes=remaining)
                 return
-            if (not self.exploration_verified and not self.report.get('settlement_resumed')
-                    and (maze.exploration_menu(screen) or maze.exploration_map(screen)
-                         or maze.battle_detail(screen) or maze.relic_reward(screen)
-                         or maze.event_screen(screen) or maze.invitation_reward(screen))):
-                screen = self.verify_exploration(screen)
-                continue
             if maze.invitation_animation(screen):
                 self.ui.click((480, 270))
             elif maze.invitation_reward(screen):

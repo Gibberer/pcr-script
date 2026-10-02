@@ -16,10 +16,20 @@ class LabyrinthFormation(EventFormation):
     infer_costume_from_skills = True
     detail_close_pattern = '确认|关闭'
     formation_title_pattern = '角色选择|队伍编组'
-    inspect_equipment = False
+
+    @staticmethod
+    def require_equipment(status):
+        # Rank does not prove its six ordinary items are equipped. Never turn
+        # a missing badge observation or unspecified build into an allowed one.
+        if (type(status.equipment) is not int or status.equipment != 6
+                or type(status.unique) is not bool or type(status.unique2) is not bool
+                or not status.equipment_evidence
+                or (status.unique2 and not status.unique)):
+            raise EventUIError(status.name+'的完整装备与专武状态尚未核验，未邀请或开战')
 
     @staticmethod
     def require_build(status, enemy_level=0):
+        LabyrinthFormation.require_equipment(status)
         if (not status.identity_verified or status.level is None or status.level < 365 or enemy_level > 380
                 or status.rank is None or status.rank < 38 or status.stars != 6
                 or status.skill_level is None or status.skill_level < 365):
@@ -43,6 +53,7 @@ class LabyrinthFormation(EventFormation):
 
     @staticmethod
     def require_boss_build(status):
+        LabyrinthFormation.require_equipment(status)
         if (not status.identity_verified or status.level is None or status.level < 350
                 or status.rank is None or status.rank < 38 or status.stars is None or status.stars < 3
                 or status.skill_level is None or status.skill_level < 350):
@@ -135,6 +146,8 @@ class LabyrinthFormation(EventFormation):
 
     @staticmethod
     def plan_boss_parties(ready, roles):
+        for status in ready.values():
+            LabyrinthFormation.require_boss_build(status)
         core = ('佩可莉姆', '可可萝', '凯露')
         for name in core:
             if name not in ready:

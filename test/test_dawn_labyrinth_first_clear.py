@@ -46,6 +46,12 @@ def score_result(clear=True):
                   ('分数明细', 175, 236), ('难度奖励', 390, 425), ('关闭', 480, 497))
 
 
+def ready_character(name, **changes):
+    return CharacterStatus(**dict(dict(name=name, level=365, rank=38, stars=6, skill_level=365,
+                                       identity_verified=True, equipment=6, unique=True, unique2=False,
+                                       equipment_evidence='synthetic-equipment'), **changes))
+
+
 class FirstClearRecognitionTests(TestCase):
     def test_three_boss_team_tabs_require_one_gold_selection(self):
         value = screen(('队伍编组', 480, 42), ('队伍1', 98, 89),
@@ -58,11 +64,9 @@ class FirstClearRecognitionTests(TestCase):
 
     def test_boss_pool_requires_verified_build_and_distinct_full_teams(self):
         core = ('佩可莉姆', '可可萝', '凯露')
-        ready = {n: CharacterStatus(n, level=365, rank=38, stars=6, skill_level=365,
-                                   identity_verified=True) for n in core}
+        ready = {n: ready_character(n) for n in core}
         others = [f'合成伙伴{i}' for i in range(12)]
-        ready.update({n: CharacterStatus(n, level=350, rank=38, stars=5, skill_level=350,
-                                        identity_verified=True) for n in others})
+        ready.update({n: ready_character(n, level=350, stars=5, skill_level=350) for n in others})
         roles = {n: dict(role=7 if i == 0 else 1, score=50-i, single=1) for i, n in enumerate(others)}
         groups = LabyrinthFormation.plan_boss_parties(ready, roles)
         self.assertEqual(list(map(len, groups)), [5, 5, 5])
@@ -78,8 +82,7 @@ class FirstClearRecognitionTests(TestCase):
         core = ('佩可莉姆', '可可萝', '凯露')
         names = core+('合成魔法破防', '合成魔法辅助', '合成物理辅助', '合成挑衅坦克',
                       '合成物理输出1', '合成物理输出2', '合成物理输出3', '合成物理输出4')
-        ready = {n: CharacterStatus(n, level=365, rank=38, stars=6, skill_level=365,
-                                   identity_verified=True) for n in names}
+        ready = {n: ready_character(n) for n in names}
         roles = {n: dict(kind=1, damage=2, role=1, score=100, single=2) for n in names[3:]}
         roles['合成魔法破防'].update(kind=2, role=4, description='降低敌方魔防，提升我方魔法攻击力')
         roles['合成魔法辅助'].update(kind=2, role=5, description='提升我方魔法攻击力并回复技能值')
@@ -202,12 +205,30 @@ class FirstClearRecognitionTests(TestCase):
             maze.departure_preview(ui, value)
 
     def test_unknown_identity_or_underleveled_partner_blocks_trial(self):
-        valid = dict(name='合成伙伴', identity_verified=True, level=365, rank=38, stars=6, skill_level=365)
+        valid = vars(ready_character('合成伙伴'))
         LabyrinthFormation.require_build(CharacterStatus(**valid), 360)
         for change in ({'identity_verified': False}, {'level': None}, {'level': 359},
                        {'rank': None}, {'stars': 5}, {'skill_level': None}):
             with self.subTest(change=change), self.assertRaises(EventUIError):
                 LabyrinthFormation.require_build(CharacterStatus(**dict(valid, **change)), 360)
+
+    def test_normal_and_boss_builds_reject_unverified_or_incomplete_equipment(self):
+        for check in (LabyrinthFormation.require_build, LabyrinthFormation.require_boss_build):
+            for change in ({'equipment': None}, {'equipment': 0}, {'equipment': 5},
+                           {'equipment': True}, {'unique': None}, {'unique2': None},
+                           {'unique': 1}, {'equipment_evidence': ''},
+                           {'unique': False, 'unique2': True}):
+                with self.subTest(check=check.__name__, change=change), self.assertRaisesRegex(EventUIError, '装备'):
+                    check(ready_character('合成伙伴', **change))
+            for unique, unique2 in ((False, False), (True, False), (True, True)):
+                check(ready_character('合成伙伴', unique=unique, unique2=unique2))
+
+    def test_boss_planner_rechecks_equipment_of_non_core_members(self):
+        names = ('佩可莉姆', '可可萝', '凯露')+tuple(f'合成伙伴{i}' for i in range(7))
+        ready = {name: ready_character(name) for name in names}
+        ready[names[-1]].unique2 = None
+        with self.assertRaisesRegex(EventUIError, '装备'):
+            LabyrinthFormation.plan_boss_parties(ready, {})
 
     def test_invitation_animation_is_not_a_character_selection_button(self):
         self.assertTrue(maze.invitation_animation(screen(('合成伙伴', 790, 435))))
@@ -240,8 +261,7 @@ class LabyrinthFormationTests(TestCase):
         formation.observed = {}
         formation.clear_current = Mock(return_value=value)
         formation.occupied_slots = Mock(return_value=[(96, 452), (205, 452), (314, 452)])
-        formation.inspect = Mock(side_effect=lambda pos, **kwargs: CharacterStatus(
-            kwargs['expected_name'], level=365, rank=38, stars=6, skill_level=365, identity_verified=True))
+        formation.inspect = Mock(side_effect=lambda pos, **kwargs: ready_character(kwargs['expected_name']))
         rectangles = [(60+106*i, 177, 100, 99) for i in range(8)]
         with patch('pcrscript.tasks.dawn_labyrinth_party.card_rectangles', return_value=rectangles):
             party, result = formation.select_standard(360)
@@ -251,6 +271,42 @@ class LabyrinthFormationTests(TestCase):
             formation.occupied_slots.return_value.pop()
             with self.assertRaises(EventUIError):
                 formation.select_standard(360)
+
+    def test_unknown_equipment_is_rejected_before_member_selection(self):
+        for boss in (False, True):
+            with self.subTest(boss=boss):
+                formation = object.__new__(LabyrinthFormation)
+                value = screen(('队伍编组', 480, 42))
+                formation.ui = Mock(capture=Mock(return_value=value))
+                formation.clear_current = Mock(return_value=value)
+                formation.visible_cards = Mock(return_value=[(60, 177, 100, 99)])
+                formation.avatars = Mock(query=Mock(return_value=['合成伙伴']))
+                formation.observed = {}
+                formation.inspect = Mock(return_value=ready_character('合成伙伴', equipment=None))
+                with self.assertRaisesRegex(EventUIError, '装备'):
+                    formation.select_members(('合成伙伴',), 350, boss=boss)
+                formation.ui.click.assert_not_called()
+
+    def test_inspection_observes_badges_without_inventing_ordinary_equipment_count(self):
+        folder = TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        formation = object.__new__(LabyrinthFormation)
+        detail = screen(('角色详情', 480, 42), ('合成伙伴', 610, 80),
+                        ('365', 555, 115), ('38', 790, 115), ('关闭', 480, 480))
+        formation.ui = Mock(output=Path(folder.name), capture=Mock(return_value=screen()),
+                            wait=Mock(return_value=detail),
+                            save=Mock(return_value=Path('synthetic.png')))
+        formation.avatars = Mock(query=Mock(return_value=['合成伙伴']))
+        formation.badges = Mock(observe=Mock(return_value=((True, False), detail)))
+        formation.observed = {}
+        value = formation.inspect((110, 220), rectangle=(60, 177, 100, 99),
+                                  expected_name='合成伙伴', verify_skills=False)
+        formation.badges.observe.assert_called_once_with(formation.ui, (60, 177, 100, 99))
+        self.assertEqual((value.unique, value.unique2), (True, False))
+        self.assertTrue(value.equipment_evidence)
+        self.assertIsNone(value.equipment)
+        with self.assertRaisesRegex(EventUIError, '装备'):
+            formation.require_build(value)
 
 
 class FirstClearTaskTests(TestCase):
@@ -442,6 +498,7 @@ class FirstClearTaskTests(TestCase):
         failure = screen(('战斗失败', 480, 64), ('第1战', 122, 140),
                          ('结束', 577, 507), ('重新挑战', 808, 507))
         self.task.options['retry_failed_boss'] = True
+        self.task.exploration_verified = True
         self.frames([failure])
         with patch.object(self.task, 'wait', side_effect=EventUIError('合成的未知消费窗口')):
             report = self.task.run()
@@ -486,6 +543,7 @@ class FirstClearTaskTests(TestCase):
         self.assertEqual(self.clicks(), ['挑战', '战斗开始'])
 
     def test_shop_is_closed_once_and_exit_confirmed_without_purchase(self):
+        self.task.exploration_verified = True
         shop = screen(('商店', 480, 42), ('可使用阿尔法金币购买道具。', 480, 78),
                       ('购买', 240, 260), ('用300更新', 330, 485), ('关闭', 818, 475))
         confirm = screen(('商店', 480, 42), ('可使用阿尔法金币购买道具。', 480, 78),
@@ -557,9 +615,89 @@ class FirstClearTaskTests(TestCase):
                            ('玩法', x, y+110), ('1', x, y-20), ('菜单', 894, 72))
             stage = screen(('战斗格子（普通）', 138, 56), ('挑战', 817, 457))
             self.frames([stage])
-            self.assertIs(self.task.verify_exploration(value), stage)
-            self.assertTrue(self.task.exploration_verified)
+            with self.assertRaisesRegex(EventUIError, '同行公会无法核验'):
+                self.task.verify_exploration(value)
+            self.assertFalse(self.task.exploration_verified)
+            self.task.ui.click.assert_not_called()
             self.task.ui.number.assert_called_with(value, (x-8, y-30, x+11, y-4))
+
+    def test_resumed_initial_selection_never_prepares_or_changes_partners(self):
+        for count in ('0/3', '2/3'):
+            with self.subTest(count=count):
+                value = screen(('角色选择', 480, 42), (count, 910, 80), ('去邀请', 817, 475),
+                               ('难度2', 700, 120), ('其他公会', 700, 150), blue=('去邀请',))
+                self.frames([value])
+                with patch.object(self.task, 'get_formation') as formation:
+                    report = self.task.run()
+                self.assertEqual(report['status'], 'partial')
+                self.assertIn('难度与同行公会无法核验', report['pending'][-1])
+                self.assertFalse(self.task.exploration_verified)
+                formation.assert_not_called()
+                self.task.ui.click.assert_not_called()
+                self.assertEqual((report['entries'], report['battles']), (0, 0))
+
+    def test_resumed_departure_reward_is_not_closed_before_context_validation(self):
+        self.frames([screen(('出发奖励', 480, 42), ('关闭', 480, 475))])
+        self.assertEqual(self.task.run()['status'], 'partial')
+        self.task.ui.click.assert_not_called()
+
+    def test_settlement_resume_flag_cannot_authorize_initial_partner_selection(self):
+        self.task.report['settlement_resumed'] = True
+        value = screen(('角色选择', 480, 42), ('0/3', 910, 80), ('去邀请', 817, 475))
+        with patch.object(self.task, 'get_formation') as formation:
+            with self.assertRaisesRegex(EventUIError, '同行公会'):
+                self.task.explore(value)
+        formation.assert_not_called()
+        self.task.ui.click.assert_not_called()
+
+    def test_difficulty_one_and_other_guild_never_authorize_a_saved_run(self):
+        value = screen(('战斗格子（普通）', 138, 56), ('挑战', 817, 457),
+                       ('难度详情', 742, 220), ('设定', 818, 220), ('玩法', 742, 330),
+                       ('1', 743, 200), ('菜单', 915, 40), ('同行公会', 300, 150),
+                       ('其他公会', 430, 150), ('确认', 590, 370), ('选择', 202, 464))
+        self.frames([value])
+        with patch.object(self.task, 'get_formation') as formation, patch.object(self.task, 'fight') as fight:
+            self.assertEqual(self.task.run()['status'], 'partial')
+        self.assertIn('同行公会无法核验', self.task.report['pending'][-1])
+        self.assertIn('difficulty_evidence', self.task.report)
+        self.assertFalse(self.task.exploration_verified)
+        self.task.ui.click.assert_not_called()
+        formation.assert_not_called()
+        fight.assert_not_called()
+
+    def test_unverified_shop_or_boss_failure_is_not_changed(self):
+        self.task.options['retry_failed_boss'] = True
+        for value in (screen(('商店', 480, 42), ('可使用阿尔法金币购买道具。', 480, 78),
+                             ('关闭', 818, 475)),
+                      screen(('战斗失败', 480, 64), ('第1战', 122, 140),
+                             ('结束', 577, 507), ('重新挑战', 808, 507))):
+            with self.subTest(page=value.text()):
+                self.frames([value])
+                self.assertEqual(self.task.run()['status'], 'partial')
+                self.task.ui.click.assert_not_called()
+                self.assertNotIn('boss_retry', self.task.report)
+
+    def test_verified_fresh_departure_authorizes_initial_selection(self):
+        value = screen(('角色选择', 480, 42), ('0/3', 910, 80), ('去邀请', 817, 475))
+        self.frames([self.guild(), difficulty(), self.guild(), self.locked(), self.guild(), departure(), value])
+        self.assertIs(self.task.start(home(11)), value)
+        self.assertTrue(self.task.exploration_verified)
+        self.assertEqual(self.task.report['exploration_context']['guild'], '美食殿堂')
+        self.assertEqual(self.task.report['exploration_context']['difficulty'], 1)
+        formation = Mock(choose_initial=Mock(return_value=[vars(ready_character('合成伙伴'))]))
+        with patch.object(self.task, 'get_formation', return_value=formation), \
+                patch.object(self.task, 'capture', side_effect=EventUIError('合成后续停止')):
+            with self.assertRaisesRegex(EventUIError, '合成后续停止'):
+                self.task.explore(value)
+        formation.choose_initial.assert_called_once_with(value)
+
+    def test_saved_departure_report_is_not_reused_as_current_guild_proof(self):
+        self.task.report['exploration_context'] = dict(difficulty=1, guild='美食殿堂')
+        value = screen(('角色选择', 480, 42), ('0/3', 910, 80))
+        with self.assertRaisesRegex(EventUIError, '同行公会'):
+            self.task.explore(value)
+        self.assertFalse(self.task.exploration_verified)
+        self.task.ui.click.assert_not_called()
 
     def test_difficulty_one_scrolls_back_when_unlock_selected_difficulty_two(self):
         hidden = screen(('难度变更', 480, 42), ('难度2', 330, 90),
