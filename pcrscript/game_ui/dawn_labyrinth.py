@@ -136,6 +136,36 @@ def sweep_choices(screen: EventScreen) -> list:
     return []
 
 
+def sweep_guild_evidence(screen: EventScreen, name: str):
+    """Bind a cleared guild to its sweep row, card control, or popup body."""
+    wanted = normalized(name)
+    if sweep_catalogue(screen):
+        return next((guild for guild in catalogue_guilds(screen)
+                     if normalized(guild.text) == wanted), None)
+    if bulk_confirmation(screen):
+        guild = bulk_guild(screen)
+        return guild if guild and normalized(guild.text) == wanted else None
+    pattern = '^'+re.escape(wanted)+'$'
+    if sweep_confirmation(screen):
+        # Exclude the ordinary guild cards behind the confirmation popup.
+        body = (240, 100, 720, 300)
+        if screen.find(LOCKED, body):
+            return None
+        return next((guild for guild in screen.all(pattern, body) if guild.score >= .95), None)
+    if sweep_guild_selection(screen):
+        for button in sweep_choices(screen):
+            if button.score < .95 or not screen.blue_button(button):
+                continue
+            x, y = button.center
+            card = (max(20, x-125), max(100, y-110), min(940, x+125), y-25)
+            if screen.find(LOCKED, card):
+                continue
+            guild = next((label for label in screen.all(pattern, card) if label.score >= .95), None)
+            if guild:
+                return guild
+    return None
+
+
 def locked_notice(screen: EventScreen):
     hint = screen.find(r'通关1次难度\d+后可解锁')
     if hint:

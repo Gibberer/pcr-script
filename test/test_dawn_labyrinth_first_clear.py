@@ -18,7 +18,7 @@ from pcrscript.tasks import DawnLabyrinthFirstClear
 from pcrscript.tasks.dawn_labyrinth_party import LabyrinthFormation
 from pcrscript.tasks.event_strategy import CharacterStatus
 from pcrscript.tasks.party_variants import character_roles
-from test_dawn_labyrinth import screen, home, guild, preview, catalogue, mission_home, missions, mission_receipt
+from test_dawn_labyrinth import screen, home, guild, preview, catalogue, bulk, mission_home, missions, mission_receipt
 
 
 def difficulty(selected=1):
@@ -34,6 +34,22 @@ def departure(before=11, after=10):
                   ('将消耗1张迷宫通行证和【美食殿堂】一同出发。确定吗？', 480, 85),
                   ('持有迷宫通行证', 350, 427), (str(before), 565, 427), (str(after), 692, 427),
                   ('取消', 255, 475), ('出发', 705, 475), blue=('出发',))
+
+
+def cleared_preview(before=11, after=10, guild_name='美食殿堂'):
+    value = preview(before, after)
+    if guild_name is not None:
+        value.items.extend(screen((guild_name, 480, 200)).items)
+    return value
+
+
+def sweep_guild_choice(guild_name='美食殿堂', enabled=True):
+    value = screen(('黎明界迷宫', 130, 30), ('请选择要跳过的公会', 480, 88),
+                   (guild_name, 144, 352), ('跳过', 144, 422),
+                   ('合成公会', 413, 352), ('跳过', 413, 422), ('取消', 480, 505))
+    for x in ((144, 413) if enabled else (413,)):
+        cv.rectangle(value.image, (x-50, 398), (x+50, 446), (230, 155, 25), -1)
+    return value
 
 
 def inventory_result():
@@ -70,6 +86,32 @@ def boss_roster():
 
 
 class FirstClearRecognitionTests(TestCase):
+    def test_clear_guild_evidence_covers_each_sweep_layout(self):
+        for value in (catalogue(selected=False), cleared_preview(),
+                      sweep_guild_choice(), bulk()):
+            with self.subTest(page=value.text()):
+                proof = maze.sweep_guild_evidence(value, '美食殿堂')
+                self.assertIsNotNone(proof)
+                self.assertEqual(proof.text, '美食殿堂')
+                self.assertIsNone(maze.sweep_guild_evidence(value, '未通关公会'))
+
+    def test_clear_guild_evidence_rejects_background_names_and_unavailable_cards(self):
+        background = cleared_preview(guild_name='合成公会')
+        background.items.extend(screen(('美食殿堂', 144, 352)).items)
+        unknown = cleared_preview(guild_name=None)
+        low_confidence = cleared_preview()
+        low_confidence.items[-1].score = .94
+        locked_card = sweep_guild_choice()
+        locked_card.items.extend(screen(('未通关', 144, 320)).items)
+        low_button = sweep_guild_choice()
+        low_button.find('跳过', (100, 400, 200, 440), exact=True).score = .94
+        for value in (background, unknown, low_confidence, locked_card,
+                      low_button, sweep_guild_choice(enabled=False),
+                      sweep_guild_choice(guild_name='合成公会'), cleared_preview(guild_name='美食殿堂未通关'),
+                      guild(('美食殿堂', 144, 352))):
+            with self.subTest(page=value.text()):
+                self.assertIsNone(maze.sweep_guild_evidence(value, '美食殿堂'))
+
     def test_three_boss_team_tabs_require_one_gold_selection(self):
         value = screen(('队伍编组', 480, 42), ('队伍1', 98, 89),
                        ('队伍2', 216, 89), ('队伍3', 334, 89))
@@ -381,6 +423,65 @@ class FirstClearTaskTests(TestCase):
         self.assertNotIn('一键扫荡', self.clicks())
         self.assertNotIn('选择', self.clicks())
 
+    def test_target_guild_unlock_proof_completes_each_layout_without_consuming(self):
+        for value in (catalogue(0, selected=False), cleared_preview(0, 0),
+                      sweep_guild_choice(), bulk(guild_name='美食殿堂')):
+            with self.subTest(page=value.text()):
+                self.task = DawnLabyrinthFirstClear(self.robot)
+                self.task.ui = Mock(output=self.folder, last=None)
+                self.task.ui.save.return_value = self.folder/'synthetic.png'
+                self.frames([home(0), home(0), self.guild(), difficulty(), self.guild(),
+                             value, self.guild(), home(0)])
+                report = self.task.run()
+                self.assertEqual(report['status'], 'complete')
+                self.assertTrue(report['already_cleared'])
+                self.assertEqual((report['spent'], report['entries'], report['battles']), (0, 0, 0))
+                self.assertNotIn('pending_spend', report)
+                self.assertEqual(self.clicks().count('跳过'), 1)
+                self.assertEqual(self.clicks().count('出发'), 1)
+                self.assertNotIn('选择', self.clicks())
+                self.assertNotIn('一键扫荡', self.clicks())
+                self.assertNotIn('挑战', self.clicks())
+
+    def test_wrong_or_unknown_unlock_guild_never_completes_or_departures(self):
+        wrong_catalogue = catalogue(selected=False)
+        wrong_catalogue.items[1].text = '合成公会'
+        low_preview = cleared_preview()
+        low_preview.items[-1].score = .94
+        for value in (wrong_catalogue, cleared_preview(guild_name='合成公会'),
+                      cleared_preview(guild_name=None), low_preview,
+                      sweep_guild_choice(guild_name='合成公会'), sweep_guild_choice(enabled=False),
+                      bulk(guild_name='合成公会')):
+            with self.subTest(page=value.text()):
+                self.task = DawnLabyrinthFirstClear(self.robot)
+                self.task.ui = Mock(output=self.folder, last=None)
+                self.task.ui.save.return_value = self.folder/'synthetic.png'
+                self.frames([home(11), home(11), self.guild(), difficulty(), self.guild(),
+                             value, self.guild(), home(11)])
+                with patch.object(self.task, 'collect_mission_rewards') as missions:
+                    report = self.task.run()
+                self.assertEqual(report['status'], 'blocked')
+                self.assertIn('未确认美食殿堂已通关难度1', report['pending'][-1])
+                self.assertNotIn('already_cleared', report)
+                self.assertNotIn('clear_evidence', report)
+                self.assertNotIn('pending_spend', report)
+                self.assertEqual((report['spent'], report['entries'], report['battles']), (0, 0, 0))
+                self.assertEqual(self.clicks(), ['出发', '难度变更', '取消', '跳过'])
+                self.assertIs(self.task.ui.last, value)
+                missions.assert_not_called()
+
+    def test_settlement_unlock_for_other_guild_does_not_finalize_pass_spend(self):
+        self.task.report.update(entries=1, pending_spend=dict(before=11, after=10, cost=1))
+        self.frames([score_result(), home(10), self.guild(), difficulty(), self.guild(),
+                     cleared_preview(guild_name='合成公会'), self.guild(), home(10)])
+        report = self.task.run()
+        self.assertEqual(report['status'], 'partial')
+        self.assertNotIn('already_cleared', report)
+        self.assertEqual(report['spent'], 0)
+        self.assertEqual(report['pending_spend'], dict(before=11, after=10, cost=1))
+        self.assertNotIn('选择', self.clicks())
+        self.assertNotIn('挑战', self.clicks())
+
     def test_already_cleared_first_clear_claims_missions_with_zero_passes(self):
         self.frames([home(0), home(0), self.guild(), difficulty(), self.guild(),
                      catalogue(0, selected=False), self.guild(), mission_home(), mission_home(),
@@ -405,7 +506,7 @@ class FirstClearTaskTests(TestCase):
 
     def test_unlocked_difficulty_does_not_consume_another_entry(self):
         self.frames([home(11), home(11), self.guild(), difficulty(), self.guild(),
-                     preview(11, 10), self.guild(), home(11)])
+                     cleared_preview(11, 10), self.guild(), home(11)])
         report = self.task.run()
         self.assertEqual(report['status'], 'complete')
         self.assertTrue(report['already_cleared'])
@@ -424,7 +525,7 @@ class FirstClearTaskTests(TestCase):
 
     def test_resumed_result_requires_unlock_proof_and_never_spends_a_new_pass(self):
         self.frames([inventory_result(), home(10), self.guild(), difficulty(), self.guild(),
-                     preview(10, 9), self.guild(), home(10)])
+                     cleared_preview(10, 9), self.guild(), home(10)])
         report = self.task.run()
         self.assertEqual(report['status'], 'complete')
         self.assertTrue(report['already_cleared'])
@@ -442,7 +543,7 @@ class FirstClearTaskTests(TestCase):
 
     def test_score_result_is_closed_and_clear_is_proven_by_game_unlock(self):
         self.frames([score_result(), home(10), self.guild(), difficulty(), self.guild(),
-                     preview(10, 9), self.guild(), home(10)])
+                     cleared_preview(10, 9), self.guild(), home(10)])
         report = self.task.run()
         self.assertEqual(report['status'], 'complete')
         self.assertTrue(report['boss_defeated'])
@@ -469,7 +570,7 @@ class FirstClearTaskTests(TestCase):
                          ('确认', 480, 480), ('黎明界迷宫', 130, 30), ('区域', 340, 30),
                          ('撤退', 680, 490), ('返回', 850, 490))
         self.frames([receipt, home(10), self.guild(), difficulty(), self.guild(),
-                     preview(10, 9), self.guild(), home(10)])
+                     cleared_preview(10, 9), self.guild(), home(10)])
         report = self.task.run()
         self.assertEqual(report['status'], 'complete')
         self.assertTrue(report['already_cleared'])
@@ -481,7 +582,7 @@ class FirstClearTaskTests(TestCase):
         notice.items.extend(screen(('难度解锁', 480, 146), ('难度2已解锁。', 480, 271),
                                    ('关闭', 480, 370)).items)
         self.frames([notice, home(10), self.guild(), difficulty(), self.guild(),
-                     preview(10, 9), self.guild(), home(10)])
+                     cleared_preview(10, 9), self.guild(), home(10)])
         report = self.task.run()
         self.assertEqual(report['status'], 'complete')
         self.assertEqual(report['entries'], 0)

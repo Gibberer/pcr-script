@@ -177,14 +177,15 @@ class DawnLabyrinthFirstClear(DawnLabyrinth):
         if not skip:
             raise SweepBlocked('难度1的首通状态无法核对，未出发')
         self.ui.click(skip)
-        screen = self.wait(lambda s: maze.locked_notice(s) or maze.sweep_confirmation(s)
+        screen = self.wait(lambda s: maze.locked_notice(s) or maze.sweep_confirmation(s) or maze.bulk_confirmation(s)
                            or maze.sweep_guild_selection(s), '难度1首通状态', timeout=15)
         if maze.locked_notice(screen):
             self.ui.save('first_clear_required', screen)
             return self.wait(lambda s: maze.guild_selection(s) and not maze.locked_notice(s), '首通提示消失')
+        if not maze.sweep_guild_evidence(screen, self.report['guild']):
+            self.ui.save('unverified_clear_guild', screen)
+            raise SweepBlocked('跳过页面未确认美食殿堂已通关难度1，已保留页面且未再次出发')
         proof = self.ui.save('already_cleared', screen)
-        if maze.sweep_catalogue(screen) and not any(g.text == '美食殿堂' for g in maze.catalogue_guilds(screen)):
-            raise SweepBlocked('可跳过列表未确认美食殿堂，未再次出发')
         cancel = screen.find('取消|关闭', (200, 395, 750, 520), exact=True)
         if not cancel:
             raise SweepBlocked('难度1已可跳过，但窗口关闭入口尚未核对；未出发')
