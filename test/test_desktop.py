@@ -161,6 +161,27 @@ class DesktopTests(unittest.TestCase):
         self.assertTrue(report['ready'])
         self.assertEqual(report['missing'], [])
 
+    def test_labyrinth_available_to_add_with_shared_resource_limits(self):
+        entry = next(row for row in desktop.catalog() if row['name'] == 'dawn_labyrinth')
+        self.assertEqual(entry['category'], 'daily')
+        self.assertEqual(entry['config_section'], 'DawnLabyrinth')
+        self.assertIn('黎明界迷宫', entry['label'])
+        self.assertEqual(entry['parameters'], [])
+        view = desktop.new_config()
+        self.assertEqual(view['options']['DawnLabyrinth'], {'timeout': 600, 'max_passes': 99})
+        view['plan'] = [dict(enabled=True, name='dawn_labyrinth', args=[])]
+        desktop.validate_plan(view['plan'])
+
+    def test_labyrinth_first_clear_is_separate_optional_task(self):
+        entry = next(row for row in desktop.catalog() if row['name'] == 'dawn_labyrinth_first_clear')
+        self.assertEqual(entry['category'], 'special')
+        self.assertEqual(entry['config_section'], 'DawnLabyrinthFirstClear')
+        view = desktop.new_config()
+        self.assertEqual(view['options']['DawnLabyrinthFirstClear'], {'timeout': 1800, 'max_battles': 30, 'retry_failed_boss': False})
+        self.assertNotIn('dawn_labyrinth_first_clear', [row['name'] for row in view['plan']])
+        desktop.validate_plan([dict(enabled=True, name='dawn_labyrinth_first_clear', args=[]),
+                               dict(enabled=True, name='dawn_labyrinth', args=[])])
+
     def test_action_status_preserves_chinese_text(self):
         with RunSession('unicode-test', root=self.root / 'cache/daily/runs') as session:
             session.event('action', name='领取礼物', target='收取确认')

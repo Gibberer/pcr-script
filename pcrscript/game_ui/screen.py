@@ -213,11 +213,11 @@ class EventUI:
                 return int(texts[0])
         return None
 
-    def read_region(self, screen, roi):
+    def read_region(self, screen, roi, *, classify=True):
         """Retry small missed labels at 3x, retaining baseline coordinates."""
         x1, y1, x2, y2 = roi
         patch = cv.resize(screen.image[y1:y2, x1:x2], None, fx=3, fy=3)
-        result = self._ocr(patch, use_det=True, use_cls=True, use_rec=True)
+        result = self._ocr(patch, use_det=True, use_cls=classify, use_rec=True)
         items = []
         if result.txts:
             items = [TextBox(t, float(score), (np.asarray(box)/3 + (x1, y1)).tolist())

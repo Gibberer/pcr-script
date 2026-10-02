@@ -23,6 +23,8 @@ public partial class MainWindow
         ["aliases"] = "搜索别名", ["region"] = "目标服区", ["max_videos"] = "候选视频数量", ["max_age_hours"] = "缓存有效小时数",
         ["request_timeout"] = "网络请求超时（秒）", ["cache_dir"] = "来源缓存目录", ["Extra"] = "运行环境", ["StoryEvent"] = "剧情活动", ["RevivalEvent"] = "复刻活动",
         ["Gift"] = "礼物领取", ["Caravan"] = "驾车游", ["dnpath"] = "雷电模拟器安装目录", ["adb_path"] = "ADB 程序", ["adb_serial"] = "ADB 设备序列号（多个设备时填写）",
+        ["DawnLabyrinth"] = "黎明界迷宫扫荡", ["max_passes"] = "本次通行证消费上限（1～99）",
+        ["DawnLabyrinthFirstClear"] = "黎明界迷宫首通", ["retry_failed_boss"] = "接续失败首领时允许一次重新挑战",
         ["teams"] = "队伍方案文件", ["first_clear"] = "推进首次通关（待实机验证）", ["bosses"] = "挑战首领",
         ["stories"] = "处理剧情", ["memoirs"] = "处理追忆", ["missions"] = "领取任务奖励", ["exchange"] = "兑换奖励",
         ["max_boss_attempts"] = "首领最大尝试次数", ["battle_timeout"] = "战斗超时（秒）", ["timeout"] = "任务超时（秒）",
