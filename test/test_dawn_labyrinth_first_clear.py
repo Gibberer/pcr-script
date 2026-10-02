@@ -53,10 +53,14 @@ def sweep_guild_choice(guild_name='美食殿堂', enabled=True):
 
 
 def normal_enemy_detail(description=None):
-    description = ('【物理】合成说明。·近身攻击·造成伤害所获得的技能值回复量降低80%'
+    description = ('【物理】【防御】住在高山上,厚实的毛皮之下拥有强韧的身体,驯鹿魔物。·近身攻击·造成伤害所获得的技能值回复量降低80%'
                    if description is None else description)
     return screen(('魔物详情', 480, 42), ('雪原山羊', 480, 80), ('370', 650, 127),
                   ('700000/700000', 590, 160), (description, 480, 300), ('关闭', 480, 480))
+
+
+def boss_intro():
+    return '【物理】侍奉着暴食君主的近卫黑铁像。徘徊于冥府,巧妙地操纵灵魂并将其奉献给主人。'
 
 
 def boss_description():
@@ -228,6 +232,24 @@ class FirstClearRecognitionTests(TestCase):
                 self.assertFalse(maze.supported_boss('暗黑滴水嘴兽', 350, 60000000,
                                                     '坦克型物防下降魔防下降', description))
 
+    def test_normal_enemy_unknown_preamble_and_changed_category_are_rejected(self):
+        description = normal_enemy_detail().items[-2].text
+        prefix, clauses = description.split('·', 1)
+        for changed in ('', '【物理】优先攻击后排。', prefix+'优先攻击后排。',
+                        prefix.replace('【防御】', '【范围】')):
+            with self.subTest(prefix=changed):
+                self.assertFalse(maze.supported_normal_enemy(700000, changed+'·'+clauses, name='雪原山羊'))
+
+    def test_boss_unknown_preamble_is_rejected_before_reconstruction(self):
+        for prefix in ('【物理】优先攻击后排。', boss_intro()+'降低敌方全体行动速度。',
+                       boss_intro()+'物防下降'):
+            with self.subTest(prefix=prefix):
+                description = prefix+boss_description()
+                self.assertFalse(maze.known_boss_description_part(description))
+                self.assertIsNone(maze.merge_boss_descriptions([description]))
+                self.assertFalse(maze.supported_boss('暗黑滴水嘴兽', 350, 60000000,
+                                                     '坦克型物防下降魔防下降', description))
+
     def test_every_enemy_info_button_is_found_when_one_level_is_unreadable(self):
         value = screen(('战斗格子（普通）', 138, 56), ('挑战', 817, 457), ('Lv.380', 350, 320))
         for x in (176, 401, 626, 851):
@@ -240,7 +262,7 @@ class FirstClearRecognitionTests(TestCase):
         self.assertEqual(maze.enemy_information(value), [])
 
     def test_normal_enemy_requires_a_known_identity_and_complete_skill_profile(self):
-        description = '【物理】合成说明。·近身攻击·造成伤害所获得的技能值回复量降低80%'
+        description = '【物理】【防御】住在高山上,厚实的毛皮之下拥有强韧的身体,驯鹿魔物。·近身攻击·造成伤害所获得的技能值回复量降低80%'
         self.assertTrue(maze.supported_normal_enemy(2200000, description, name='雪原山羊'))
         self.assertFalse(maze.supported_normal_enemy(3100000, description, name='雪原山羊'))
         self.assertFalse(maze.supported_normal_enemy(700000, description, name='合成未知魔物'))
@@ -257,7 +279,7 @@ class FirstClearRecognitionTests(TestCase):
                 self.assertFalse(maze.supported_normal_enemy(700000, description))
 
     def test_knockback_through_immunity_is_not_enemy_damage_immunity(self):
-        description = ('【物理】合成说明。·近身攻击、击退（在伤害免疫的情况下也会成功赋予）'
+        description = ('【物理】【干扰】模仿大人敲打乐器,喜欢恶作剧的兽人孩童。·近身攻击、击退（在伤害免疫的情况下也会成功赋予）'
                        '·造成伤害所获得的技能值回复量降低80%')
         self.assertTrue(maze.supported_normal_enemy(700000, description, name='快乐兽人'))
         self.assertFalse(maze.supported_normal_enemy(700000, description+'·魔物自身拥有伤害免疫', name='快乐兽人'))
@@ -495,6 +517,38 @@ class FirstClearTaskTests(TestCase):
                 self.assertNotIn('挑战', self.clicks())
                 formation.assert_not_called()
 
+    def test_unknown_enemy_preambles_stop_before_challenge(self):
+        normal = normal_enemy_detail().items[-2].text.split('·', 1)[1]
+        cases = (
+            ('战斗格子（普通）', normal_enemy_detail('【物理】优先攻击后排。·'+normal)),
+            ('首领战格子', boss_enemy_detail('【物理】优先攻击后排。'+boss_description())),
+        )
+        for label, detail in cases:
+            with self.subTest(stage=label):
+                self.task.ui.click.reset_mock()
+                self.task.exploration_verified = True
+                stage = screen((label, 138, 56), ('挑战', 817, 457))
+                self.frames([detail, detail, stage, screen(('队伍编组', 480, 42))])
+                with patch.object(maze, 'enemy_information', return_value=[(176, 316)]), \
+                        patch.object(self.task, 'get_formation', side_effect=EventUIError('未在战前拦截')) as formation:
+                    with self.assertRaises(EventUIError):
+                        self.task.fight(stage)
+                self.assertNotIn('挑战', self.clicks())
+                formation.assert_not_called()
+                self.assertNotIn('pending_battle', self.task.report)
+
+    def test_missing_boss_intro_cannot_authorize_a_battle(self):
+        stage = screen(('首领战格子', 138, 56), ('挑战', 817, 457))
+        detail = boss_enemy_detail()
+        self.frames([detail, detail, stage, screen(('队伍编组', 480, 42))])
+        self.task.exploration_verified = True
+        with patch.object(maze, 'enemy_information', return_value=[(176, 316)]), \
+                patch.object(self.task, 'get_formation', side_effect=EventUIError('未在战前拦截')) as formation:
+            with self.assertRaises(EventUIError):
+                self.task.fight(stage)
+        self.assertNotIn('挑战', self.clicks())
+        formation.assert_not_called()
+
     def test_unknown_boss_clauses_stop_before_challenge_and_saved_team_changes(self):
         stage = screen(('首领战格子', 138, 56), ('挑战', 817, 457))
         for extra in ('·对后方一名敌人造成物理伤害', '·降低敌方全体行动速度'):
@@ -513,7 +567,7 @@ class FirstClearTaskTests(TestCase):
 
     def test_complete_boss_profile_is_read_across_overlap_without_starting_combat(self):
         stage = screen(('首领战格子', 138, 56), ('挑战', 817, 457))
-        initial = boss_enemy_detail('【物理】合成首领说明。【特殊效果】·所有的技能伤害无法回复技能值'
+        initial = boss_enemy_detail(boss_intro()+'【特殊效果】·所有的技能伤害无法回复技能值'
                                     '【必杀技能】·对进行物理攻击的敌方全体赋予烧伤状态')
         final = boss_enemy_detail()
         self.frames([initial, final, final, stage])
@@ -527,7 +581,7 @@ class FirstClearTaskTests(TestCase):
     def test_boss_profile_is_reconstructed_when_final_page_contains_only_the_tail(self):
         stage = screen(('首领战格子', 138, 56), ('挑战', 817, 457))
         full = boss_description()
-        first = boss_enemy_detail(full[:full.index('·降低敌方全体生命值吸收量')])
+        first = boss_enemy_detail(boss_intro()+full[:full.index('·降低敌方全体生命值吸收量')])
         last = boss_enemy_detail(full[full.index('·对进行魔法攻击的敌方全体赋予烧伤状态'):])
         self.frames([first, last, last, stage])
         with patch.object(maze, 'enemy_information', return_value=[(176, 316)]):
@@ -542,7 +596,7 @@ class FirstClearTaskTests(TestCase):
     def test_boss_profile_joins_three_overlapping_pages_with_clipped_last_bullets(self):
         stage = screen(('首领战格子', 138, 56), ('挑战', 817, 457))
         full = boss_description()
-        first = full[:full.index('·对进行魔法攻击的敌方全体赋予烧伤状态')]
+        first = boss_intro()+full[:full.index('·对进行魔法攻击的敌方全体赋予烧伤状态')]
         first += '·对进行魔法攻击的敌方全体赋予烧'
         middle = full[full.index('·自身的物理防御力越高'):full.index('【技能1】')]
         middle += '【技能1】·对敌方全体造成魔法'
@@ -561,12 +615,15 @@ class FirstClearTaskTests(TestCase):
     def test_boss_disconnected_reordered_or_unknown_scroll_pages_stop_before_challenge(self):
         stage = screen(('首领战格子', 138, 56), ('挑战', 817, 457))
         full = boss_description()
-        first = full[:full.index('·降低敌方全体生命值吸收量')]
+        first = boss_intro()+full[:full.index('·降低敌方全体生命值吸收量')]
         tail = full[full.index('·对进行魔法攻击的敌方全体赋予烧伤状态'):]
         scenarios = (
-            (full[:full.index('·对进行魔法攻击的敌方全体赋予烧伤状态')], tail),
+            (boss_intro()+full[:full.index('·对进行魔法攻击的敌方全体赋予烧伤状态')], tail),
             (first, tail, first),
             (first, tail+'·降低敌方全体行动速度'),
+            (first, '降低敌方全体行动速度'+tail),
+            (boss_intro()+full[:full.index('【技能1】')]+'【技能1】·对敌方全体造成魔法',
+             full[full.index('·对敌方全体造成魔法伤害'):]),
             (first, tail.replace('·降低敌方全体生命值吸收量【技能1】',
                                  '【技能1】·降低敌方全体生命值吸收量')),
         )

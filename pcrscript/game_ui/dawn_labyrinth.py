@@ -506,6 +506,29 @@ _NORMAL_ENEMY_SKILLS.update({
 })
 
 
+_NORMAL_ENEMY_PREAMBLES = {
+    '雪原山羊': '【物理】【防御】住在高山上,厚实的毛皮之下拥有强韧的身体,驯鹿魔物。',
+    '啫喱怪': '【魔法】十分黏滑的胶状魔物。',
+    '丛林守护者': '【物理】【魔法防御】用看上去像一张脸的大盾威吓敌人、阻挡侵入者的丛林守护人。',
+    '野性角鹿': '【物理】【防御】用大犄角进行攻击和防御的鹿之魔物。',
+    '北海狮首领': '【物理】【防御】身体庞大,态度也很傲慢的北海首领。身上的厚重脂肪可以抵御敌人的物理攻击。',
+    '会动的战士雕像': '【物理】【防御】携带能防御所有攻击的盾牌,有生命的石像。',
+    '会动的剑士雕像': '【物理】【防御】用剑将所有攻击反弹回去,有生命的石像。',
+    '快乐兽人': '【物理】【干扰】模仿大人敲打乐器,喜欢恶作剧的兽人孩童。',
+    '气鼓蛙': '【物理】【干扰】会用带刺的肚子撞向敌人将其弹飞,有着奇妙外形的青蛙。',
+    '愤怒章鱼': '【魔法】【干扰】怒气冲冲的章鱼魔物。金属质地的锚硬度极高,但也很沉重,容易因此失去平衡而翻过来。',
+    '水獭混混': '【物理】【远距离】【干扰】扔出贝壳,趁人不备而攻击,坏心眼的北海小混混。',
+    '气球鸟': '【回复】将腹部积攒的满满魔力变为治愈波动的鸟类魔物。',
+    '洞穴蜗牛': '【回复】据说分泌出的黏滑液体有利于美容的蜗牛魔物。',
+    '狂乱花': '【物理】【远距离】【范围】尾部的花释放恶臭,但闻惯了似乎会上瘾。',
+    '魔界守门人': '【魔法】【范围】【干扰】打开地狱之门,喷吐着灼伤一切的火焰的魔界守门人。',
+}
+
+
+def _prose(text):
+    return re.sub(r'[,，:：。;；]', '', normalized(text))
+
+
 def normal_enemy_description(screen: EventScreen) -> str | None:
     """Read every description box, rejecting partial or low-confidence OCR."""
     roi = NORMAL_ENEMY_DESCRIPTION_ROI
@@ -522,11 +545,14 @@ def supported_normal_enemy(maximum_hp: int, description: str, *, name: str | Non
     text = normalized(description).replace(',', '，')
     profile = _NORMAL_ENEMY_SKILLS.get(name)
     clauses = tuple(clause.rstrip('。') for clause in text.split('·')[1:])
-    return bool(0 < maximum_hp <= 3000000 and profile and clauses == profile
+    preamble = _NORMAL_ENEMY_PREAMBLES.get(name)
+    return bool(0 < maximum_hp <= 3000000 and profile and preamble
+                and _prose(text.split('·', 1)[0]) == _prose(preamble) and clauses == profile
                 and not re.search(r'比例|百分比|即死|只(?:受|会受到)|免疫|无效|无法.*(?:魔法|物理)',
                                   text.replace(_THROUGH_IMMUNITY, '')))
 
 
+_BOSS_LORE = '侍奉着暴食君主的近卫黑铁像。徘徊于冥府,巧妙地操纵灵魂并将其奉献给主人。'
 _BOSS_HEADERS = ('【特殊效果】', '【必杀技能】', '【技能1】')
 _BOSS_HEADER_POSITIONS = tuple(zip(_BOSS_HEADERS, (0, 1, 6)))
 _BOSS_SKILLS = (
@@ -551,9 +577,21 @@ def _boss_clauses(description):
     return headers, clauses
 
 
+def _boss_preamble(description):
+    text = normalized(description).split('·', 1)[0]
+    for prefix in ('对怪物的有效效果坦克型物防下降魔防下降详情',
+                   '对怪物的有效效果详情坦克型物防下降魔防下降',
+                   '对怪物的有效效果坦克型物防下降魔防下降'):
+        if text.startswith(prefix):
+            text = text[len(prefix):]
+            break
+    return _prose(re.sub(r'【[^】]*】', '', text))
+
+
 def _boss_description_window(description):
     headers, clauses = _boss_clauses(description)
     positions = dict(_BOSS_HEADER_POSITIONS)
+    leading = _boss_preamble(description)
     labels = [header for header, _ in headers]
     if (any(header not in positions and header != '【物理】' for header in labels)
             or len(set(labels)) != len(labels)):
@@ -564,6 +602,8 @@ def _boss_description_window(description):
                    or positions.get(header) == start+index for header, index in headers)
 
     if not clauses:
+        if leading and leading not in _prose(_BOSS_LORE):
+            return None
         starts = {positions[header]-index for header, index in headers if header in positions}
         if len(starts) > 1:
             return None
@@ -571,6 +611,8 @@ def _boss_description_window(description):
         return (start, clauses, headers) if start is None or headers_match(start) else None
     starts = [start for start in range(len(_BOSS_SKILLS)-len(clauses)+1)
               if headers_match(start)
+              and (not leading or (start == 0 and _prose(_BOSS_LORE).endswith(leading))
+                   or (start > 0 and _BOSS_SKILLS[start-1].endswith(leading)))
               and all(clause and (clause == _BOSS_SKILLS[start+offset]
                                   or (offset == len(clauses)-1
                                       and _BOSS_SKILLS[start+offset].startswith(clause)))
@@ -585,6 +627,10 @@ def known_boss_description_part(description):
 
 def merge_boss_descriptions(parts):
     """Join verified overlapping pages; never infer unseen clauses or headers."""
+    parts = tuple(parts)
+    if (not parts or _boss_preamble(parts[0]) != _prose(_BOSS_LORE)
+            or '【物理】' not in normalized(parts[0]).split('·', 1)[0]):
+        return None
     observed = {}
     observed_headers = set()
     previous = None
@@ -595,9 +641,12 @@ def merge_boss_descriptions(parts):
         start, clauses, headers = window
         if clauses:
             end = start+len(clauses)
-            if previous and (start < previous[0] or start >= previous[1] or end < previous[1]):
+            complete = {start+offset for offset, clause in enumerate(clauses)
+                        if clause == _BOSS_SKILLS[start+offset]}
+            if previous and (start < previous[0] or start >= previous[1] or end < previous[1]
+                             or not complete.intersection(previous[2])):
                 return None
-            previous = start, end
+            previous = start, end, complete
             for offset, clause in enumerate(clauses):
                 index = start+offset
                 if clause == _BOSS_SKILLS[index]:
@@ -623,6 +672,7 @@ def supported_boss(name, level, maximum_hp, effects, description):
         effect_text = effect_text.replace(effect, '')
     return bool(name == '暗黑滴水嘴兽' and level == 350 and maximum_hp == 60000000
                 and effects_match and not effect_text
+                and _boss_preamble(description) in ('', _prose(_BOSS_LORE))
                 and headers in (_BOSS_HEADER_POSITIONS, (('【物理】', 0),)+_BOSS_HEADER_POSITIONS)
                 and clauses == _BOSS_SKILLS)
 
