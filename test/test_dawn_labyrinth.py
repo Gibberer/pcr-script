@@ -827,6 +827,16 @@ class LabyrinthTaskTests(TestCase):
         self.assertEqual(self.task.run()['status'], 'complete')
         self.assertEqual(self.clicks(), ['关闭'])
 
+    def test_full_card_unlock_hint_does_not_block_an_eligible_sweep(self):
+        choices = separate_guilds('合成灰显公会', '美食殿堂', disabled=('合成灰显公会',))
+        choices.items.extend(screen(('通关1次难度1后可解锁', 144, 315)).items)
+        self.frames([home(1), guild(), choices, named_preview('美食殿堂'), result(), home(0)])
+        report = self.task.run()
+        self.assertEqual((report['status'], report['spent']), ('complete', 1))
+        self.assertIsNone(maze.locked_notice(choices))
+        self.assertEqual([call.args[0].center for call in self.task.ui.click.call_args_list
+                          if getattr(call.args[0], 'center', (0, 0))[1] == 422], [(413, 422)])
+
     def test_locked_guild_card_does_not_block_an_eligible_sweep(self):
         choices = separate_guilds('美食殿堂')
         choices.items.extend(screen(('未通关', 680, 300)).items)

@@ -1,14 +1,28 @@
 """Verify partners and assemble teams for the difficulty-one exploration."""
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 
 import cv2 as cv
 import numpy as np
 
 from .event_formation import EventFormation
+from .event_strategy import EventParty, MemberRequirement, readiness
 from .party_variants import character_roles
 from ..game_ui.avatar_assets import ensure_avatar_index
 from ..game_ui.avatars import card_rectangles, search_card_rectangles, face_crop
 from ..game_ui.screen import EventUIError, normalized
+
+
+@dataclass(frozen=True)
+class LabyrinthBossStrategy:
+    server: str
+    guild: str
+    difficulty: int
+    boss: str
+    level: int
+    maximum_hp: int
+    parties: tuple[EventParty, ...]
+    evidence: str
+    verified: bool = False
 
 
 class LabyrinthFormation(EventFormation):
@@ -145,45 +159,56 @@ class LabyrinthFormation(EventFormation):
         return ready, roles
 
     @staticmethod
-    def plan_boss_parties(ready, roles):
-        for status in ready.values():
-            LabyrinthFormation.require_boss_build(status)
+    def plan_boss_parties(ready, roles, *, strategy=None):
+        """Use exact source parties; generic roles cannot authorize a battle.
+
+        Automatic acquisition of a validated labyrinth strategy is pending.
+        Production callers therefore stop here until that source is available.
+        """
+        if (not isinstance(strategy, LabyrinthBossStrategy) or strategy.verified is not True
+                or not isinstance(strategy.evidence, str) or not strategy.evidence.strip()
+                or (strategy.server, strategy.guild, strategy.difficulty, strategy.boss,
+                    strategy.level, strategy.maximum_hp)
+                != ('cn', '美食殿堂', 1, '暗黑滴水嘴兽', 350, 60000000)
+                or type(strategy.difficulty) is not int or not isinstance(strategy.parties, tuple)
+                or not 2 <= len(strategy.parties) <= 3):
+            raise EventUIError('首领配队策略来源与适用条件尚未核验，已保留保存队伍，未开战')
         core = ('佩可莉姆', '可可萝', '凯露')
+        groups, occupied = [], set()
+        for party in strategy.parties:
+            if (not isinstance(party, EventParty) or party.auto is not True
+                    or party.build_basis != 'source' or party.assumptions != []
+                    or not isinstance(party.source, str) or not party.source.strip()
+                    or not isinstance(party.modes, (list, tuple))
+                    or any(type(mode) is not int or mode not in (1, 2, 3) for mode in party.modes)
+                    or 1 not in party.modes or not isinstance(party.members, list)
+                    or len(party.members) != 5):
+                raise EventUIError('首领攻略的自动操作或完整成员要求尚未核验，未开战')
+            names = []
+            for requirement in party.members:
+                if (not isinstance(requirement, MemberRequirement)
+                        or not isinstance(requirement.name, str) or not requirement.name.strip()
+                        or any(type(getattr(requirement, key)) is not int or getattr(requirement, key) <= 0
+                               for key in ('level', 'rank', 'stars', 'skill_level'))
+                        or requirement.equipment != 6 or type(requirement.unique) is not bool
+                        or type(requirement.unique2) is not bool or requirement.instant is not True):
+                    raise EventUIError('首领攻略的培养、装备或操作要求尚未明确，未开战')
+                name = normalized(requirement.name)
+                if name in occupied or name not in ready:
+                    raise EventUIError('首领攻略伙伴缺失或跨队重复，未开战')
+                status = ready[name]
+                LabyrinthFormation.require_boss_build(status)
+                reasons = readiness(requirement, status)
+                if reasons:
+                    raise EventUIError(name+'未满足首领攻略要求：'+'；'.join(reasons))
+                occupied.add(name)
+                names.append(name)
+            groups.append(names)
+        if not set(core).issubset(groups[0]):
+            raise EventUIError('首领攻略不支持当前核心伙伴，未开战')
         for name in core:
-            if name not in ready:
-                raise EventUIError('首领核心伙伴未核对：'+name)
             LabyrinthFormation.require_build(ready[name])
-        if len(ready) < 10:
-            raise EventUIError('首领尚不足两支完整且培养已核对的队伍，未开战')
-        available = set(ready)-set(core)
-
-        def strength(name):
-            role = roles[name]
-            return role.get('score', 0)+25*role.get('single', 0)
-
-        def take(pool, count, score):
-            selected = sorted(pool, key=lambda n: (-score(n), n))[:count]
-            available.difference_update(selected)
-            return selected
-
-        # The core contains a tank and a magic attacker. Prefer magic defense
-        # reduction and magic support beside it; avoid using all tanks here.
-        def magic_support(name):
-            role = roles[name]
-            description = role.get('description', '')
-            return (100*int(role.get('kind') == 2)+strength(name)
-                    +40*(description.count('魔法攻击力')-description.count('物理攻击力')))
-
-        first = list(core)+take(available, 2, magic_support)
-        rest = []
-        tanks = [n for n in available if roles[n].get('role') == 7]
-        if tanks:
-            rest += take(tanks, 1, lambda n: 200*int(roles[n].get('tank', False))+strength(n))
-        physical = [n for n in available if roles[n].get('kind') == 1 and roles[n].get('damage', 0) > 0]
-        rest += take(physical, 5-len(rest), strength)
-        rest += take(available, 5-len(rest), strength)
-        third = take(available, 5, strength)
-        return [first, rest, third]
+        return groups+[[]]*(3-len(groups))
 
     def find_member(self, name):
         for _ in range(6):

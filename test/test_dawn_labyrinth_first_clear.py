@@ -2,6 +2,7 @@
 import json
 import sqlite3
 from contextlib import closing
+from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase
@@ -15,8 +16,8 @@ from pcrscript.game_ui.screen import EventUIError
 from pcrscript.run_session import RunCancelled
 from pcrscript.runtime import run_task_with_config
 from pcrscript.tasks import DawnLabyrinthFirstClear
-from pcrscript.tasks.dawn_labyrinth_party import LabyrinthFormation
-from pcrscript.tasks.event_strategy import CharacterStatus
+from pcrscript.tasks.dawn_labyrinth_party import LabyrinthFormation, LabyrinthBossStrategy
+from pcrscript.tasks.event_strategy import CharacterStatus, EventParty, MemberRequirement
 from pcrscript.tasks.party_variants import character_roles
 from test_dawn_labyrinth import screen, home, guild, preview, catalogue, bulk, mission_home, missions, mission_receipt
 
@@ -110,9 +111,24 @@ def boss_formation(selected):
 
 def boss_roster():
     names = ('佩可莉姆', '可可萝', '凯露')+tuple(f'合成伙伴{i}' for i in range(12))
-    ready = {name: ready_character(name) for name in names}
+    ready = {name: ready_character(name, stars=6 if name in names[:3] else 5) for name in names}
     roles = {name: dict(role=1, kind=1, score=50, single=1) for name in names}
     return ready, roles
+
+
+def synthetic_boss_strategy(groups=None):
+    core = ('佩可莉姆', '可可萝', '凯露')
+    names = list(core)+[f'合成伙伴{i}' for i in range(12)]
+    groups = groups or (names[:5], names[5:10], names[10:15])
+    parties = tuple(EventParty('合成已验证队伍'+str(index), 'synthetic://boss-source',
+                              [MemberRequirement(name, 365 if name in core else 350, 38,
+                                                 6 if name in core else 5, unique=True, unique2=False,
+                                                 skill_level=365 if name in core else 350, equipment=6,
+                                                 exact_rank=False, exact_stars=False)
+                               for name in group])
+                    for index, group in enumerate(groups))
+    return LabyrinthBossStrategy('cn', '美食殿堂', 1, '暗黑滴水嘴兽', 350, 60000000,
+                                 parties, 'synthetic-verified-source', verified=True)
 
 
 class FirstClearRecognitionTests(TestCase):
@@ -151,37 +167,66 @@ class FirstClearRecognitionTests(TestCase):
         cv.rectangle(value.image, (305, 82), (364, 97), (40, 190, 245), -1)
         self.assertIsNone(maze.selected_boss_team(value))
 
+    def test_generic_roles_without_boss_strategy_cannot_authorize_parties(self):
+        ready, roles = boss_roster()
+        with self.assertRaises(EventUIError):
+            LabyrinthFormation.plan_boss_parties(ready, roles)
+
+    def test_boss_strategy_requires_verified_context_and_complete_source_requirements(self):
+        ready, roles = boss_roster()
+        valid = synthetic_boss_strategy()
+        for fields in ({'verified': False}, {'evidence': ''}, {'server': 'tw'}, {'guild': '合成其他公会'},
+                       {'difficulty': 2}, {'boss': '合成其他首领'}, {'level': 351}, {'maximum_hp': 60000001},
+                       {'parties': None}, {'parties': ()}):
+            with self.subTest(fields=fields), self.assertRaises(EventUIError):
+                LabyrinthFormation.plan_boss_parties(ready, roles, strategy=replace(valid, **fields))
+        for field, value in (('source', ''), ('auto', False), ('assumptions', ['未知条件']),
+                             ('modes', None), ('modes', [True]), ('members', None)):
+            changed = synthetic_boss_strategy()
+            setattr(changed.parties[0], field, value)
+            with self.subTest(field=field), self.assertRaises(EventUIError):
+                LabyrinthFormation.plan_boss_parties(ready, roles, strategy=changed)
+        changed = synthetic_boss_strategy()
+        changed.parties[0].members[-1].unique = None
+        with self.assertRaises(EventUIError):
+            LabyrinthFormation.plan_boss_parties(ready, roles, strategy=changed)
+
     def test_boss_pool_requires_verified_build_and_distinct_full_teams(self):
         core = ('佩可莉姆', '可可萝', '凯露')
         ready = {n: ready_character(n) for n in core}
         others = [f'合成伙伴{i}' for i in range(12)]
         ready.update({n: ready_character(n, level=350, stars=5, skill_level=350) for n in others})
         roles = {n: dict(role=7 if i == 0 else 1, score=50-i, single=1) for i, n in enumerate(others)}
-        groups = LabyrinthFormation.plan_boss_parties(ready, roles)
+        groups = LabyrinthFormation.plan_boss_parties(ready, roles, strategy=synthetic_boss_strategy())
         self.assertEqual(list(map(len, groups)), [5, 5, 5])
         self.assertEqual(len({n for g in groups for n in g}), 15)
         self.assertEqual(groups[0][:3], list(core))
         with self.assertRaises(EventUIError):
-            LabyrinthFormation.plan_boss_parties({n:s for n,s in list(ready.items())[:9]}, roles)
+            LabyrinthFormation.plan_boss_parties({n:s for n,s in list(ready.items())[:9]}, roles, strategy=synthetic_boss_strategy())
         with self.assertRaises(EventUIError):
             LabyrinthFormation.require_boss_build(CharacterStatus('未知伙伴', level=350, rank=38,
                                                                   stars=5, skill_level=None))
 
-    def test_boss_parties_pair_magic_support_and_keep_a_tank_for_physical_members(self):
+    def test_verified_strategy_preserves_exact_parties_instead_of_generic_role_scores(self):
         core = ('佩可莉姆', '可可萝', '凯露')
         names = core+('合成魔法破防', '合成魔法辅助', '合成物理辅助', '合成挑衅坦克',
                       '合成物理输出1', '合成物理输出2', '合成物理输出3', '合成物理输出4')
-        ready = {n: ready_character(n) for n in names}
+        ready = {n: ready_character(n, stars=6 if n in core else 5) for n in names}
         roles = {n: dict(kind=1, damage=2, role=1, score=100, single=2) for n in names[3:]}
         roles['合成魔法破防'].update(kind=2, role=4, description='降低敌方魔防，提升我方魔法攻击力')
         roles['合成魔法辅助'].update(kind=2, role=5, description='提升我方魔法攻击力并回复技能值')
         roles['合成物理辅助'].update(kind=2, role=5, description='提升物理攻击力和物理攻击力')
         roles['合成挑衅坦克'].update(role=7, tank=True, damage=0, score=0)
-        groups = LabyrinthFormation.plan_boss_parties(ready, roles)
+        strategy = synthetic_boss_strategy([list(core)+['合成魔法破防', '合成魔法辅助'],
+                                            ['合成挑衅坦克', '合成物理输出1', '合成物理输出2', '合成物理输出3', '合成物理辅助']])
+        groups = LabyrinthFormation.plan_boss_parties(ready, roles, strategy=strategy)
         self.assertEqual(set(groups[0][3:]), {'合成魔法破防', '合成魔法辅助'})
         self.assertIn('合成挑衅坦克', groups[1])
         self.assertNotIn('合成物理辅助', groups[0])
-        self.assertEqual(len({n for g in groups for n in g}), len(names))
+        self.assertEqual(len({n for g in groups for n in g}), 10)
+        self.assertEqual(groups[2], [])
+        roles.clear()
+        self.assertEqual(LabyrinthFormation.plan_boss_parties(ready, roles, strategy=strategy), groups)
 
     def test_public_roles_exclude_same_named_npc_units(self):
         with TemporaryDirectory() as folder:
@@ -364,10 +409,10 @@ class FirstClearRecognitionTests(TestCase):
 
     def test_boss_planner_rechecks_equipment_of_non_core_members(self):
         names = ('佩可莉姆', '可可萝', '凯露')+tuple(f'合成伙伴{i}' for i in range(7))
-        ready = {name: ready_character(name) for name in names}
+        ready = {name: ready_character(name, stars=6 if name in names[:3] else 5) for name in names}
         ready[names[-1]].unique2 = None
         with self.assertRaisesRegex(EventUIError, '装备'):
-            LabyrinthFormation.plan_boss_parties(ready, {})
+            LabyrinthFormation.plan_boss_parties(ready, {}, strategy=synthetic_boss_strategy([list(names[:5]), list(names[5:])]))
 
     def test_invitation_animation_is_not_a_character_selection_button(self):
         self.assertTrue(maze.invitation_animation(screen(('合成伙伴', 790, 435))))
@@ -929,13 +974,38 @@ class FirstClearTaskTests(TestCase):
         self.assertEqual(self.task.report['history'][0]['outcome'], 'failed')
         self.assertEqual(self.clicks(), ['挑战', '战斗开始'])
 
+    def test_missing_boss_strategy_preserves_saved_teams_and_never_starts_combat(self):
+        stage = screen(('首领战格子', 138, 56), ('挑战', 817, 457), blue=('挑战',))
+        teams = [boss_formation(number) for number in (1, 2, 3)]
+        ready, roles = boss_roster()
+        explicit_names = [list(ready)[:5], list(ready)[5:10], list(ready)[10:15]]
+        formation = Mock(spec=LabyrinthFormation)
+        formation.audit_boss_roster.return_value = (ready, roles)
+        formation.plan_boss_parties.side_effect = LabyrinthFormation.plan_boss_parties
+        formation.clear_current.side_effect = teams
+        formation.select_members.side_effect = [
+            ([vars(ready[name]) for name in members], page)
+            for members, page in zip(explicit_names, teams)]
+        self.task.exploration_verified = True
+        self.frames([teams[0], teams[0], teams[1], teams[2], teams[0], teams[1], teams[2]])
+        with patch.object(self.task, 'inspect_enemies', return_value=([dict(level=350)], stage)), \
+                patch.object(self.task, 'get_formation', return_value=formation), \
+                patch('pcrscript.tasks.task_dawn_labyrinth_first_clear.EventCombat',
+                      side_effect=EventUIError('未拦截未核验策略')):
+            with self.assertRaises(EventUIError):
+                self.task.fight(stage)
+        formation.clear_current.assert_not_called()
+        formation.select_members.assert_not_called()
+        self.assertNotIn('战斗开始', self.clicks())
+        self.assertNotIn('pending_battle', self.task.report)
+
     def test_current_boss_failure_obeys_retry_option_and_retries_only_once(self):
         stage = screen(('首领战格子', 138, 56), ('挑战', 817, 457), blue=('挑战',))
         failure = screen(('战斗失败', 480, 64), ('第1战', 122, 140),
                          ('结束', 577, 507), ('重新挑战', 808, 507))
         teams = [boss_formation(number) for number in (1, 2, 3)]
         ready, roles = boss_roster()
-        names = LabyrinthFormation.plan_boss_parties(ready, roles)
+        names = LabyrinthFormation.plan_boss_parties(ready, roles, strategy=synthetic_boss_strategy())
         for retry in (False, True):
             with self.subTest(retry=retry):
                 self.task = DawnLabyrinthFirstClear(self.robot)
@@ -946,7 +1016,7 @@ class FirstClearTaskTests(TestCase):
                 self.task.report.update(entries=1, pending_spend=dict(before=11, after=10, cost=1))
                 formation = Mock(spec=LabyrinthFormation)
                 formation.audit_boss_roster.return_value = (ready, roles)
-                formation.plan_boss_parties.side_effect = LabyrinthFormation.plan_boss_parties
+                formation.plan_boss_parties.side_effect = lambda roster, roles: LabyrinthFormation.plan_boss_parties(roster, roles, strategy=synthetic_boss_strategy())
                 formation.clear_current.side_effect = teams*2
                 formation.select_members.side_effect = [
                     ([vars(ready[name]) for name in members], page)
@@ -990,7 +1060,7 @@ class FirstClearTaskTests(TestCase):
     def test_boss_preflight_failures_preserve_all_saved_teams(self):
         stage = screen(('首领战格子', 138, 56), ('挑战', 817, 457), blue=('挑战',))
         teams = [boss_formation(number) for number in (1, 2, 3)]
-        for cause in ('assets', 'audit', 'equipment', 'roles', 'too_few'):
+        for cause in ('assets', 'audit', 'equipment', 'strategy', 'too_few'):
             with self.subTest(cause=cause):
                 self.task.ui.click.reset_mock()
                 self.task.exploration_verified = True
@@ -998,14 +1068,15 @@ class FirstClearTaskTests(TestCase):
                 ready, roles = boss_roster()
                 formation = Mock(spec=LabyrinthFormation)
                 formation.audit_boss_roster.return_value = (ready, roles)
-                formation.plan_boss_parties.side_effect = LabyrinthFormation.plan_boss_parties
+                strategy = synthetic_boss_strategy()
+                formation.plan_boss_parties.side_effect = lambda roster, roles: LabyrinthFormation.plan_boss_parties(roster, roles, strategy=strategy)
                 formation.clear_current.side_effect = teams
                 if cause == 'audit':
                     formation.audit_boss_roster.side_effect = EventUIError('合成伙伴盘点失败')
                 elif cause == 'equipment':
                     ready['合成伙伴0'].equipment = None
-                elif cause == 'roles':
-                    roles.clear()
+                elif cause == 'strategy':
+                    strategy = replace(strategy, verified=False)
                 elif cause == 'too_few':
                     for name in list(ready)[9:]:
                         ready.pop(name)

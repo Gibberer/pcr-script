@@ -183,13 +183,13 @@ def sweep_guild_evidence(screen: EventScreen, name: str):
 
 
 def locked_notice(screen: EventScreen):
+    # Both short and full unlock hints can belong to individual cards.
+    # Eligibility is checked against each card's enabled sweep control.
+    if sweep_guild_selection(screen):
+        return None
     hint = screen.find(r'通关1次难度\d+后可解锁')
     if hint:
         return hint
-    # A sweep chooser may show "未通关" on individual guild cards while
-    # another guild is eligible. Those labels are not a global unlock failure.
-    if sweep_guild_selection(screen):
-        return None
     return screen.find(LOCKED, (230, 85, 800, 380))
 
 
