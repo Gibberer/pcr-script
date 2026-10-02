@@ -46,6 +46,25 @@ def preview(before=3, after=2):
                   ('跳过', 585, 480), ('取消', 370, 480), blue=('跳过',))
 
 
+def separate_guilds(*names, disabled=(), action='跳过'):
+    labels = [('黎明界迷宫', 130, 30), ('请选择要跳过的公会', 480, 88)]
+    for index, name in enumerate(names):
+        x = 144+269*index
+        labels.extend(((name, x, 352), (action, x, 422)))
+    value = screen(*labels)
+    for index, name in enumerate(names):
+        if name not in disabled:
+            x = 144+269*index
+            cv.rectangle(value.image, (x-50, 398), (x+50, 446), (230, 155, 25), -1)
+    return value
+
+
+def named_preview(name, before=1, after=0):
+    value = preview(before, after)
+    value.items.extend(screen((name, 480, 200)).items)
+    return value
+
+
 def result():
     return screen(('跳过结果', 480, 42), ('获得了以下报酬', 480, 130), ('确认', 480, 480))
 
@@ -512,10 +531,104 @@ class LabyrinthTaskTests(TestCase):
 
     def test_separate_sweep_selection_uses_only_enabled_sweep_control(self):
         choices = screen(('黎明界迷宫', 130, 30), ('请选择跳过的公会', 480, 88),
+                         ('美食殿堂', 144, 352), ('合成公会', 413, 352),
                          ('跳过', 144, 422), ('选择', 413, 422), blue=('跳过', '选择'))
-        self.frames([home(1), guild(), choices, preview(1, 0), result(), home(0)])
+        self.frames([home(1), guild(), choices, named_preview('美食殿堂'), result(), home(0)])
         self.assertEqual(self.task.run()['status'], 'complete')
         self.assertNotIn('选择', self.clicks())
+
+    def test_separate_selector_prefers_food_hall_over_the_leftmost_guild(self):
+        self.frames([home(1), guild(), separate_guilds('合成公会', '美食殿堂'),
+                     named_preview('美食殿堂'), result(), home(0)])
+        self.assertEqual(self.task.run()['status'], 'complete')
+        chosen = [call.args[0].center for call in self.task.ui.click.call_args_list
+                  if getattr(call.args[0], 'center', (0, 0))[1] == 422]
+        self.assertEqual(chosen, [(413, 422)])
+
+    def test_known_food_hall_can_be_selected_when_another_card_name_is_unreadable(self):
+        choices = separate_guilds('美食殿堂', '合成公会')
+        choices.items = [item for item in choices.items if item.text != '合成公会']
+        self.frames([home(1), guild(), choices, named_preview('美食殿堂'), result(), home(0)])
+        self.assertEqual(self.task.run()['status'], 'complete')
+        chosen = [call.args[0].center for call in self.task.ui.click.call_args_list
+                  if getattr(call.args[0], 'center', (0, 0))[1] == 422]
+        self.assertEqual(chosen, [(144, 422)])
+
+    def test_separate_selector_normalizes_the_preferred_guild_label(self):
+        self.frames([home(1), guild(), separate_guilds('合成公会', '美食 殿堂'),
+                     named_preview('美食殿堂'), result(), home(0)])
+        self.assertEqual(self.task.run()['status'], 'complete')
+        chosen = [call.args[0].center for call in self.task.ui.click.call_args_list
+                  if getattr(call.args[0], 'center', (0, 0))[1] == 422]
+        self.assertEqual(chosen, [(413, 422)])
+
+    def test_separate_selector_searches_later_pages_before_spending(self):
+        self.frames([home(1), guild(), separate_guilds('合成公会'),
+                     separate_guilds('合成公会二', '美食殿堂'),
+                     named_preview('美食殿堂'), result(), home(0)])
+        self.assertEqual(self.task.run()['status'], 'complete')
+        chosen = [call.args[0].center for call in self.task.ui.click.call_args_list
+                  if getattr(call.args[0], 'center', (0, 0))[1] == 422]
+        self.assertEqual(chosen, [(413, 422)])
+        self.task.ui.swipe.assert_called_once_with((830, 300), (200, 300))
+
+    def test_separate_selector_fallback_is_reacquired_after_bounded_search(self):
+        first = separate_guilds('合成公会')
+        last = separate_guilds('合成公会二', '美食殿堂', disabled=('美食殿堂',))
+        self.frames([home(1), guild(), first, last, last, first,
+                     named_preview('合成公会'), result(), home(0)])
+        self.assertEqual(self.task.run()['status'], 'complete')
+        self.assertEqual(self.task.ui.swipe.call_args_list[-1].args, ((200, 300), (830, 300)))
+        chosen = [call.args[0].center for call in self.task.ui.click.call_args_list
+                  if getattr(call.args[0], 'center', (0, 0))[1] == 422]
+        self.assertEqual(chosen, [(144, 422)])
+
+    def test_separate_selector_search_and_fallback_navigation_are_bounded(self):
+        first = separate_guilds('合成公会零')
+        pages = [first]+[separate_guilds('合成公会'+str(i)) for i in range(1, 6)]
+        self.frames([home(1), guild(), *pages, first, named_preview('合成公会零'), result(), home(0)])
+        self.assertEqual(self.task.run()['status'], 'complete')
+        directions = [call.args for call in self.task.ui.swipe.call_args_list]
+        self.assertEqual(directions, [((830, 300), (200, 300))]*5+[((200, 300), (830, 300))])
+
+    def test_separate_selector_missing_fallback_never_clicks_cached_coordinates(self):
+        first = separate_guilds('合成公会')
+        last = separate_guilds('合成公会二')
+        self.frames([home(1), guild(), first, last, last])
+        report = self.task.run()
+        self.assertEqual(report['status'], 'blocked')
+        self.assertEqual(report['spent'], 0)
+        self.assertNotIn('pending_spend', report)
+        self.assertFalse(any(getattr(call.args[0], 'center', (0, 0))[1] == 422
+                             for call in self.task.ui.click.call_args_list))
+        self.assertLessEqual(self.task.ui.swipe.call_count, 10)
+
+    def test_separate_selector_rejects_unknown_or_conflicting_card_labels(self):
+        missing = separate_guilds('美食殿堂')
+        missing.items = [item for item in missing.items if item.text != '美食殿堂']
+        low = separate_guilds('美食殿堂')
+        low.items[2].score = .94
+        conflicting = separate_guilds('美食殿堂')
+        conflicting.items.extend(screen(('合成公会', 150, 335)).items)
+        numeric = separate_guilds('123')
+        for choices in (missing, low, conflicting, numeric):
+            with self.subTest(choices=choices.text()):
+                self.task.ui.click.reset_mock()
+                self.frames([home(1), guild(), choices, named_preview('美食殿堂'), result(), home(0)])
+                report = self.task.run()
+                self.assertEqual(report['status'], 'blocked')
+                self.assertEqual(report['spent'], 0)
+                self.assertNotIn('pending_spend', report)
+                self.assertFalse(any(getattr(call.args[0], 'center', (0, 0))[1] == 422
+                                     for call in self.task.ui.click.call_args_list))
+
+    def test_separate_selector_requires_the_selected_guild_on_confirmation(self):
+        self.frames([home(1), guild(), separate_guilds('美食殿堂'),
+                     named_preview('合成公会'), result(), home(0)])
+        report = self.task.run()
+        self.assertEqual(report['status'], 'blocked')
+        self.assertEqual(report['spent'], 0)
+        self.assertNotIn('pending_spend', report)
 
     def test_invalid_options_fail_before_device_connection(self):
         for options in (None, [], {'max_passes': 0}, {'max_passes': 100}, {'max_passes': True},
@@ -526,9 +639,8 @@ class LabyrinthTaskTests(TestCase):
                 connect.assert_not_called()
 
     def test_choice_requires_explicit_sweep_instruction(self):
-        choices = screen(('黎明界迷宫', 130, 30), ('请选择要跳过的公会', 480, 88),
-                         ('选择', 144, 422), blue=('选择',))
-        self.frames([home(1), guild(), choices, preview(1, 0), result(), home(0)])
+        choices = separate_guilds('美食殿堂', action='选择')
+        self.frames([home(1), guild(), choices, named_preview('美食殿堂'), result(), home(0)])
         self.assertEqual(self.task.run()['status'], 'complete')
         self.assertEqual(self.clicks().count('选择'), 1)
 
@@ -671,10 +783,10 @@ class LabyrinthTaskTests(TestCase):
         self.assertEqual(self.clicks(), ['关闭'])
 
     def test_locked_guild_card_does_not_block_an_eligible_sweep(self):
-        choices = screen(('黎明界迷宫', 130, 30), ('请选择要跳过的公会', 480, 88),
-                         ('跳过', 144, 422), ('未通关', 680, 300), blue=('跳过',))
+        choices = separate_guilds('美食殿堂')
+        choices.items.extend(screen(('未通关', 680, 300)).items)
         self.assertIsNone(maze.locked_notice(choices))
-        self.frames([home(1), guild(), choices, preview(1, 0), result(), home(0)])
+        self.frames([home(1), guild(), choices, named_preview('美食殿堂'), result(), home(0)])
         self.assertEqual(self.task.run()['status'], 'complete')
 
     def test_options_do_not_mutate_configuration(self):

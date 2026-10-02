@@ -4,7 +4,7 @@ from __future__ import annotations
 from .base import BaseTask
 from .registry import register
 from ..game_ui import dawn_labyrinth as maze
-from ..game_ui.screen import EventUI, EventUIError
+from ..game_ui.screen import EventUI, EventUIError, normalized
 from ..run_session import RunCancelled, ResumeUnsafe, atomic_json, clock as time, emit
 
 
@@ -197,26 +197,59 @@ class DawnLabyrinth(BaseTask):
             raise SweepBlocked('当前难度尚未解锁跳过，请先完成首通；可运行 dawn_labyrinth_first_clear 首通任务')
         if maze.sweep_catalogue(screen):
             return self.prepare_catalogue(screen, budget or self.options['max_passes'])
-        # Some layouts select the guild in a separate sweep page. A "选择"
-        # button qualifies only under an explicit sweep title/instruction.
+        if maze.sweep_confirmation(screen):
+            return screen
+        return self.select_sweep_guild(screen)
+
+    def sweep_guild_controls(self, screen):
+        if not maze.sweep_guild_selection(screen) or maze.sweep_catalogue(screen):
+            raise SweepBlocked('未确认独立跳过公会选择页，未进入探索或战斗')
+        controls = maze.sweep_guild_controls(screen)
+        has_preferred = any(guild and normalized(guild.text) == '美食殿堂' for guild, _ in controls)
+        if not has_preferred and any(guild is None for guild, _ in controls):
+            raise SweepBlocked('跳过按钮对应的公会名称无法核对，未消费')
+        return [(guild, button) for guild, button in controls if guild is not None]
+
+    def confirm_sweep_guild(self, guild, button):
+        self.ui.click(button)
+        screen = self.wait(lambda s: maze.sweep_confirmation(s) or maze.locked_notice(s),
+                           '迷宫跳过确认')
+        if maze.locked_notice(screen):
+            raise SweepBlocked('所选公会未通关当前难度，请先手动首通')
+        if not maze.sweep_guild_evidence(screen, guild.text):
+            raise SweepBlocked('跳过确认的公会与已选目标不符或无法核对，未消费')
+        return screen
+
+    def select_sweep_guild(self, screen):
+        fallback = None
+        seen = set()
         for page in range(6):
-            if maze.sweep_confirmation(screen):
-                return screen
-            if not maze.sweep_guild_selection(screen):
-                raise SweepBlocked('未确认跳过公会选择页，未进入探索或战斗')
-            choices = [b for b in maze.sweep_choices(screen)
-                       if screen.blue_button(b)]
-            if choices:
-                self.ui.click(min(choices, key=lambda b: (b.center[0], b.center[1])))
-                screen = self.wait(lambda s: maze.sweep_confirmation(s) or maze.locked_notice(s),
-                                   '迷宫跳过确认')
-                if maze.locked_notice(screen):
-                    raise SweepBlocked('所选公会未通关当前难度，请先手动首通')
-                return screen
+            controls = self.sweep_guild_controls(screen)
+            preferred = next((pair for pair in controls if normalized(pair[0].text) == '美食殿堂'), None)
+            if preferred:
+                return self.confirm_sweep_guild(*preferred)
+            if fallback is None and controls:
+                fallback = normalized(controls[0][0].text)
+            signature = tuple((normalized(guild.text), tuple(button.center)) for guild, button in controls)
+            if signature in seen or page == 5:
+                break
+            seen.add(signature)
+            self.ui.swipe((830, 300), (200, 300))
+            screen = self.capture()
+        if fallback is None:
+            raise SweepBlocked('当前难度没有可用的跳过公会，请先手动首通')
+        # Re-read the fallback on the current page; cached coordinates from an
+        # earlier page cannot authorize a click after horizontal navigation.
+        for page in range(6):
+            controls = self.sweep_guild_controls(screen)
+            choice = (next((pair for pair in controls if normalized(pair[0].text) == '美食殿堂'), None)
+                      or next((pair for pair in controls if normalized(pair[0].text) == fallback), None))
+            if choice:
+                return self.confirm_sweep_guild(*choice)
             if page < 5:
-                self.ui.swipe((830, 300), (200, 300))
+                self.ui.swipe((200, 300), (830, 300))
                 screen = self.capture()
-        raise SweepBlocked('当前难度没有可用的跳过公会，请先手动首通')
+        raise SweepBlocked('翻页后无法重新核对备用公会，未消费')
 
     def prepare_catalogue(self, screen, budget):
         guilds = maze.catalogue_guilds(screen)

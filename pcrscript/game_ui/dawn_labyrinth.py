@@ -136,6 +136,30 @@ def sweep_choices(screen: EventScreen) -> list:
     return []
 
 
+def sweep_guild_controls(screen: EventScreen) -> list:
+    """Bind enabled sweep controls to one legible name on the same card.
+
+    An unbound control retains a None label so a sweep cannot silently skip an
+    unreadable eligible guild while searching for the preferred one.
+    """
+    result = []
+    for button in sweep_choices(screen):
+        if not screen.blue_button(button):
+            continue
+        x, y = button.center
+        card = (max(20, x-125), max(100, y-110), min(940, x+125), y-25)
+        if screen.find(LOCKED, card):
+            continue
+        labels = [item for item in screen.all('.+', card)
+                  if normalized(item.text) != TITLE
+                  and not re.fullmatch(r'难度[1-5]', normalized(item.text))]
+        name = (labels[0] if len(labels) == 1 and labels[0].score >= .95
+                and re.search(r'[\u4e00-\u9fffA-Za-z]', normalized(labels[0].text))
+                and button.score >= .95 else None)
+        result.append((name, button))
+    return sorted(result, key=lambda pair: (pair[1].center[0], pair[1].center[1]))
+
+
 def sweep_guild_evidence(screen: EventScreen, name: str):
     """Bind a cleared guild to its sweep row, card control, or popup body."""
     wanted = normalized(name)
@@ -153,16 +177,8 @@ def sweep_guild_evidence(screen: EventScreen, name: str):
             return None
         return next((guild for guild in screen.all(pattern, body) if guild.score >= .95), None)
     if sweep_guild_selection(screen):
-        for button in sweep_choices(screen):
-            if button.score < .95 or not screen.blue_button(button):
-                continue
-            x, y = button.center
-            card = (max(20, x-125), max(100, y-110), min(940, x+125), y-25)
-            if screen.find(LOCKED, card):
-                continue
-            guild = next((label for label in screen.all(pattern, card) if label.score >= .95), None)
-            if guild:
-                return guild
+        return next((guild for guild, _ in sweep_guild_controls(screen)
+                     if guild and normalized(guild.text) == wanted), None)
     return None
 
 
@@ -470,10 +486,45 @@ def positive_relic_choice(screen: EventScreen):
     return max(choices, key=lambda value: value[:2])[2] if choices else None
 
 
-def supported_normal_enemy(maximum_hp: int, description: str) -> bool:
-    text = normalized(description).replace('在伤害免疫的情况下也会成功赋予', '')
-    return bool(0 < maximum_hp <= 3000000
-                and not re.search(r'比例|百分比|即死|只(?:受|会受到)|免疫|无效|无法.*(?:魔法|物理)', text))
+# Known Food Hall difficulty-1 profiles, including final-boss companions.
+# Match all bullet clauses; a missing or additional mechanic is unsupported.
+NORMAL_ENEMY_DESCRIPTION_ROI = (260, 205, 700, 450)
+_TP_REDUCTION = '造成伤害所获得的技能值回复量降低80%'
+_THROUGH_IMMUNITY = '(在伤害免疫的情况下也会成功赋予)'
+_NORMAL_ENEMY_SKILLS = dict.fromkeys(
+    ('雪原山羊', '啫喱怪', '丛林守护者', '野性角鹿', '北海狮首领',
+     '会动的战士雕像', '会动的剑士雕像'), ('近身攻击', _TP_REDUCTION))
+_NORMAL_ENEMY_SKILLS.update({
+    '快乐兽人': ('近身攻击、击退'+_THROUGH_IMMUNITY, _TP_REDUCTION),
+    '气鼓蛙': ('近身攻击、撞飞、击退'+_THROUGH_IMMUNITY, _TP_REDUCTION),
+    '愤怒章鱼': ('近身攻击、降低行动速度'+_THROUGH_IMMUNITY, _TP_REDUCTION),
+    '水獭混混': ('攻击后方第二名角色，使其眩晕'+_THROUGH_IMMUNITY, _TP_REDUCTION),
+    '气球鸟': ('全体回复',),
+    '洞穴蜗牛': ('全体回复',),
+    '狂乱花': ('以后方第二名角色为中心进行范围攻击、中毒', _TP_REDUCTION, '中毒伤害不回复技能值'),
+    '魔界守门人': ('近身攻击两个目标，将其烧伤', _TP_REDUCTION, '烧伤伤害无法回复技能值'),
+})
+
+
+def normal_enemy_description(screen: EventScreen) -> str | None:
+    """Read every description box, rejecting partial or low-confidence OCR."""
+    roi = NORMAL_ENEMY_DESCRIPTION_ROI
+    items = [item for item in screen.items if item.text.strip()
+             and roi[0] <= item.center[0] <= roi[2] and roi[1] <= item.center[1] <= roi[3]]
+    if (not screen.find('魔物详情', (240, 0, 720, 100), exact=True) or not items
+            or any(item.score < .95 or any(not (roi[0] <= x <= roi[2] and roi[1] <= y <= roi[3])
+                                          for x, y in item.box) for item in items)):
+        return None
+    return normalized(''.join(item.text for item in sorted(items, key=lambda item: (item.center[1], item.center[0]))))
+
+
+def supported_normal_enemy(maximum_hp: int, description: str, *, name: str | None = None) -> bool:
+    text = normalized(description).replace(',', '，')
+    profile = _NORMAL_ENEMY_SKILLS.get(name)
+    clauses = tuple(clause.rstrip('。') for clause in text.split('·')[1:])
+    return bool(0 < maximum_hp <= 3000000 and profile and clauses == profile
+                and not re.search(r'比例|百分比|即死|只(?:受|会受到)|免疫|无效|无法.*(?:魔法|物理)',
+                                  text.replace(_THROUGH_IMMUNITY, '')))
 
 
 def supported_boss(name, level, maximum_hp, effects, description):

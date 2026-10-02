@@ -52,6 +52,13 @@ def sweep_guild_choice(guild_name='美食殿堂', enabled=True):
     return value
 
 
+def normal_enemy_detail(description=None):
+    description = ('【物理】合成说明。·近身攻击·造成伤害所获得的技能值回复量降低80%'
+                   if description is None else description)
+    return screen(('魔物详情', 480, 42), ('雪原山羊', 480, 80), ('370', 650, 127),
+                  ('700000/700000', 590, 160), (description, 480, 300), ('关闭', 480, 480))
+
+
 def inventory_result():
     return screen(('难度1', 480, 27), ('RESULT', 480, 62), ('加入的角色', 160, 103),
                   ('已获得的迷宫遗物', 200, 285), ('下一步', 480, 497))
@@ -197,12 +204,28 @@ class FirstClearRecognitionTests(TestCase):
         value.image[:] = 0
         self.assertEqual(maze.enemy_information(value), [])
 
+    def test_normal_enemy_requires_a_known_identity_and_complete_skill_profile(self):
+        description = '【物理】合成说明。·近身攻击·造成伤害所获得的技能值回复量降低80%'
+        self.assertTrue(maze.supported_normal_enemy(2200000, description, name='雪原山羊'))
+        self.assertFalse(maze.supported_normal_enemy(3100000, description, name='雪原山羊'))
+        self.assertFalse(maze.supported_normal_enemy(700000, description, name='合成未知魔物'))
+        self.assertFalse(maze.supported_normal_enemy(700000, description))
+        for text in (description+'·降低敌方防御力', description.replace('80%', '8'),
+                     description.replace('·近身攻击', ''), description+'·造成比例伤害'):
+            with self.subTest(text=text):
+                self.assertFalse(maze.supported_normal_enemy(700000, text, name='雪原山羊'))
+
+    def test_empty_or_partial_normal_enemy_description_is_not_supported(self):
+        for description in ('', ' ', '【物理】', '近身攻击', '·近身攻击',
+                            '·造成伤害所获得的技能值回复量降低80%'):
+            with self.subTest(description=description):
+                self.assertFalse(maze.supported_normal_enemy(700000, description))
+
     def test_knockback_through_immunity_is_not_enemy_damage_immunity(self):
-        self.assertTrue(maze.supported_normal_enemy(700000, '近身攻击、击退（在伤害免疫的情况下也会成功赋予）'))
-        self.assertFalse(maze.supported_normal_enemy(700000, '魔物自身拥有伤害免疫'))
-        self.assertFalse(maze.supported_normal_enemy(700000, '造成比例伤害'))
-        self.assertTrue(maze.supported_normal_enemy(2200000, '近身攻击'))
-        self.assertFalse(maze.supported_normal_enemy(3100000, '近身攻击'))
+        description = ('【物理】合成说明。·近身攻击、击退（在伤害免疫的情况下也会成功赋予）'
+                       '·造成伤害所获得的技能值回复量降低80%')
+        self.assertTrue(maze.supported_normal_enemy(700000, description, name='快乐兽人'))
+        self.assertFalse(maze.supported_normal_enemy(700000, description+'·魔物自身拥有伤害免疫', name='快乐兽人'))
 
     def test_event_requires_explicit_free_rewards_and_rejects_costs(self):
         value = screen(('触发事件！', 480, 40), ('这里是公会管理协会', 480, 88),
@@ -395,6 +418,58 @@ class FirstClearTaskTests(TestCase):
 
     def clicks(self):
         return [getattr(call.args[0], 'text', call.args[0]) for call in self.task.ui.click.call_args_list]
+
+    def test_unknown_normal_enemy_mechanics_stop_before_challenge_or_formation(self):
+        stage = screen(('战斗格子（普通）', 138, 56), ('挑战', 817, 457))
+        for description in ('', '【物理】合成说明。', '·近身攻击', '·未知效果'):
+            with self.subTest(description=description):
+                self.task.ui.click.reset_mock()
+                self.task.exploration_verified = True
+                self.frames([normal_enemy_detail(description), stage,
+                             screen(('队伍编组', 480, 42))])
+                with patch.object(maze, 'enemy_information', return_value=[(176, 316)]), \
+                        patch.object(self.task, 'get_formation', side_effect=EventUIError('未在战前拦截')) as formation:
+                    with self.assertRaises(EventUIError):
+                        self.task.fight(stage)
+                self.assertNotIn('挑战', self.clicks())
+                formation.assert_not_called()
+                self.assertNotIn('pending_battle', self.task.report)
+
+    def test_normal_enemy_hidden_or_low_confidence_content_stops_before_challenge(self):
+        stage = screen(('战斗格子（普通）', 138, 56), ('挑战', 817, 457))
+        low = normal_enemy_detail()
+        low.items[-2].score = .94
+        hidden = normal_enemy_detail('·造成比例伤害')
+        unreadable_tail = normal_enemy_detail()
+        unreadable_tail.image[330:345, 300:650] = 0
+        footer = normal_enemy_detail()
+        footer.items.extend(screen(('·未知效果', 480, 438)).items)
+        changed_identity = normal_enemy_detail()
+        changed_identity.items[1].text = '合成未知魔物'
+        for initial, tail in ((low, low), (normal_enemy_detail(), hidden),
+                              (normal_enemy_detail(), unreadable_tail), (footer, footer),
+                              (normal_enemy_detail(), changed_identity)):
+            with self.subTest(initial=initial.text(), tail=tail.text()):
+                self.task.ui.click.reset_mock()
+                self.task.exploration_verified = True
+                self.frames([initial, tail, stage, screen(('队伍编组', 480, 42))])
+                with patch.object(maze, 'enemy_information', return_value=[(176, 316)]), \
+                        patch.object(self.task, 'get_formation', side_effect=EventUIError('未在战前拦截')) as formation:
+                    with self.assertRaises(EventUIError):
+                        self.task.fight(stage)
+                self.assertNotIn('挑战', self.clicks())
+                formation.assert_not_called()
+
+    def test_complete_known_normal_enemy_is_read_without_starting_combat(self):
+        stage = screen(('战斗格子（普通）', 138, 56), ('挑战', 817, 457))
+        detail = normal_enemy_detail()
+        self.frames([detail, detail, stage])
+        with patch.object(maze, 'enemy_information', return_value=[(176, 316)]):
+            enemies, returned = self.task.inspect_enemies(stage)
+        self.assertIs(returned, stage)
+        self.assertEqual(enemies[0]['name'], '雪原山羊')
+        self.assertEqual(self.clicks(), [(176, 316), '关闭'])
+        self.task.ui.swipe.assert_called_once()
 
     def guild(self):
         value = guild(('难度变更', 843, 65), ('美食殿堂', 144, 352))

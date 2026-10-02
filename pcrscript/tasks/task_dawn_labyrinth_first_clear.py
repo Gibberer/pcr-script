@@ -429,7 +429,26 @@ class DawnLabyrinthFirstClear(DawnLabyrinth):
                 text = ''.join(dict.fromkeys(parts))
                 supported = maze.supported_boss(enemy_name, level, maximum, effects, text)
             else:
-                supported = maze.supported_normal_enemy(maximum, text)
+                text = maze.normal_enemy_description(detail)
+                if text is None or not maze.supported_normal_enemy(maximum, text, name=enemy_name):
+                    raise EventUIError('普通魔物身份或完整技能说明未核对，未开战')
+                # Only known profiles that fit entirely on one page qualify.
+                # A changed viewport reveals extra or clipped content, even
+                # when OCR misses the newly exposed hazardous clause.
+                x1, y1, x2, y2 = maze.NORMAL_ENEMY_DESCRIPTION_ROI
+                viewport = detail.image[y1:y2, x1:x2].copy()
+                self.ui.swipe((525, 425), (525, 260))
+                detail = self.capture()
+                repeated_name = detail.find('.+', (270, 60, 675, 105))
+                repeated_hp = detail.find(r'\d+/\d+', (480, 140, 700, 180), exact=True)
+                if (not repeated_name or repeated_name.score < .95 or normalized(repeated_name.text) != enemy_name
+                        or not repeated_hp or repeated_hp.score < .95
+                        or normalized(repeated_hp.text) != f'{current}/{maximum}'
+                        or self.ui.number(detail, (615, 110, 700, 145)) != level
+                        or maze.normal_enemy_description(detail) != text
+                        or not (detail.image[y1:y2, x1:x2] == viewport).all()):
+                    raise EventUIError('普通魔物技能说明尚未完整核对，未开战')
+                supported = True
             if not 0 < current <= maximum or not supported:
                 raise EventUIError('迷宫敌方有未支持的特殊机制，未开战')
             proof = self.ui.save(f'enemy_{index:02d}', detail)
