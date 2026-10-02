@@ -59,6 +59,25 @@ def normal_enemy_detail(description=None):
                   ('700000/700000', 590, 160), (description, 480, 300), ('关闭', 480, 480))
 
 
+def boss_description():
+    return ('【特殊效果】·所有的技能伤害无法回复技能值'
+            '【必杀技能】·对进行物理攻击的敌方全体赋予烧伤状态'
+            '·自身的物理防御力越高：伤害越大'
+            '·对进行魔法攻击的敌方全体赋予烧伤状态'
+            '·自身的魔法防御力越高：伤害越大'
+            '·降低敌方全体生命值吸收量'
+            '【技能1】·对敌方全体造成魔法伤害·击退敌方全体（必中）'
+            '·对前方一名敌人造成魔法固定伤害')
+
+
+def boss_enemy_detail(description=None):
+    value = screen(('魔物详情', 480, 42), ('暗黑滴水嘴兽', 480, 80), ('350', 650, 127),
+                   ('60000000/60000000', 590, 160), ('对怪物的有效效果', 480, 222),
+                   ('坦克型', 325, 250), ('物防下降', 470, 250), ('魔防下降', 605, 250),
+                   (boss_description() if description is None else description, 480, 330), ('关闭', 480, 480))
+    return value
+
+
 def inventory_result():
     return screen(('难度1', 480, 27), ('RESULT', 480, 62), ('加入的角色', 160, 103),
                   ('已获得的迷宫遗物', 200, 285), ('下一步', 480, 497))
@@ -181,10 +200,7 @@ class FirstClearRecognitionTests(TestCase):
             self.assertEqual(roles['合成坦克']['kind'], 1)
 
     def test_boss_requires_all_observed_mechanics_and_effects(self):
-        description = ('所有的技能伤害无法回复技能值，对进行物理攻击的敌方全体赋予烧伤状态，'
-                       '自身的物理防御力越高，伤害越大。自身的魔法防御力越高，伤害越大。'
-                       '降低敌方全体生命值吸收量，对敌方全体造成魔法伤害，击退敌方全体（必中），'
-                       '对前方一名敌人造成魔法固定伤害')
+        description = boss_description()
         effects = '坦克型物防下降魔防下降'
         self.assertTrue(maze.supported_boss('暗黑滴水嘴兽', 350, 60000000, effects, description))
         for change in ({'level': 351}, {'maximum_hp': 60000001}, {'effects': '物防下降'},
@@ -192,6 +208,25 @@ class FirstClearRecognitionTests(TestCase):
                        {'description': description+'物理伤害免疫'}):
             fields = dict(name='暗黑滴水嘴兽', level=350, maximum_hp=60000000, effects=effects, description=description)
             self.assertFalse(maze.supported_boss(**dict(fields, **change)))
+
+    def test_boss_extra_damage_control_or_targeting_clauses_are_rejected(self):
+        for extra in ('·对后方一名敌人造成物理伤害', '·降低敌方全体行动速度',
+                      '·优先攻击生命值最低的一名敌人', '【技能2】·对前方一名敌人造成魔法固定伤害'):
+            with self.subTest(extra=extra):
+                self.assertFalse(maze.supported_boss('暗黑滴水嘴兽', 350, 60000000,
+                                                    '坦克型物防下降魔防下降', boss_description()+extra))
+
+    def test_boss_profile_rejects_missing_reordered_or_repeated_known_clauses(self):
+        clause = '·对进行魔法攻击的敌方全体赋予烧伤状态'
+        for description in ('', boss_description().replace(clause, ''),
+                            boss_description()+clause,
+                            boss_description().replace('·降低敌方全体生命值吸收量【技能1】',
+                                                       '【技能1】·降低敌方全体生命值吸收量'),
+                            boss_description().replace('·对敌方全体造成魔法伤害·击退敌方全体（必中）',
+                                                       '·击退敌方全体（必中）·对敌方全体造成魔法伤害')):
+            with self.subTest(description=description):
+                self.assertFalse(maze.supported_boss('暗黑滴水嘴兽', 350, 60000000,
+                                                    '坦克型物防下降魔防下降', description))
 
     def test_every_enemy_info_button_is_found_when_one_level_is_unreadable(self):
         value = screen(('战斗格子（普通）', 138, 56), ('挑战', 817, 457), ('Lv.380', 350, 320))
@@ -459,6 +494,48 @@ class FirstClearTaskTests(TestCase):
                         self.task.fight(stage)
                 self.assertNotIn('挑战', self.clicks())
                 formation.assert_not_called()
+
+    def test_unknown_boss_clauses_stop_before_challenge_and_saved_team_changes(self):
+        stage = screen(('首领战格子', 138, 56), ('挑战', 817, 457))
+        for extra in ('·对后方一名敌人造成物理伤害', '·降低敌方全体行动速度'):
+            with self.subTest(extra=extra):
+                self.task.ui.click.reset_mock()
+                self.task.exploration_verified = True
+                detail = boss_enemy_detail(boss_description()+extra)
+                self.frames([detail, detail, stage, screen(('队伍编组', 480, 42))])
+                with patch.object(maze, 'enemy_information', return_value=[(176, 316)]), \
+                        patch.object(self.task, 'get_formation', side_effect=EventUIError('未在战前拦截')) as formation:
+                    with self.assertRaises(EventUIError):
+                        self.task.fight(stage)
+                self.assertNotIn('挑战', self.clicks())
+                formation.assert_not_called()
+                self.assertNotIn('pending_battle', self.task.report)
+
+    def test_complete_boss_profile_is_read_across_overlap_without_starting_combat(self):
+        stage = screen(('首领战格子', 138, 56), ('挑战', 817, 457))
+        initial = boss_enemy_detail('【物理】合成首领说明。【特殊效果】·所有的技能伤害无法回复技能值'
+                                    '【必杀技能】·对进行物理攻击的敌方全体赋予烧伤状态')
+        final = boss_enemy_detail()
+        self.frames([initial, final, final, stage])
+        with patch.object(maze, 'enemy_information', return_value=[(176, 316)]):
+            enemies, returned = self.task.inspect_enemies(stage)
+        self.assertIs(returned, stage)
+        self.assertEqual(enemies[0]['name'], '暗黑滴水嘴兽')
+        self.assertEqual(self.clicks(), [(176, 316), '关闭'])
+        self.assertEqual(self.task.ui.swipe.call_count, 2)
+
+    def test_extra_boss_clause_on_an_earlier_page_cannot_be_discarded(self):
+        stage = screen(('首领战格子', 138, 56), ('挑战', 817, 457))
+        initial = boss_enemy_detail('【特殊效果】·对后方一名敌人造成物理伤害')
+        final = boss_enemy_detail()
+        self.frames([initial, final, final, stage, screen(('队伍编组', 480, 42))])
+        self.task.exploration_verified = True
+        with patch.object(maze, 'enemy_information', return_value=[(176, 316)]), \
+                patch.object(self.task, 'get_formation', side_effect=EventUIError('未在战前拦截')) as formation:
+            with self.assertRaises(EventUIError):
+                self.task.fight(stage)
+        self.assertNotIn('挑战', self.clicks())
+        formation.assert_not_called()
 
     def test_complete_known_normal_enemy_is_read_without_starting_combat(self):
         stage = screen(('战斗格子（普通）', 138, 56), ('挑战', 817, 457))

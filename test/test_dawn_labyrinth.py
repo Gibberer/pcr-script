@@ -572,6 +572,30 @@ class LabyrinthTaskTests(TestCase):
         self.assertEqual(chosen, [(413, 422)])
         self.task.ui.swipe.assert_called_once_with((830, 300), (200, 300))
 
+    def test_disabled_middle_pages_do_not_trigger_early_fallback(self):
+        names = ('合成公会', '灰显公会一', '灰显公会二', '美食殿堂')
+        pages = [separate_guilds(name, disabled=(name,) if index in (1, 2) else ())
+                 for index, name in enumerate(names)]
+        position = 0
+        chosen = []
+        def capture():
+            value = named_preview(chosen[0]) if chosen else pages[position]
+            self.task.ui.last = value
+            return value
+        def swipe(start, end):
+            nonlocal position
+            position = min(len(pages)-1, max(0, position+(1 if start[0] > end[0] else -1)))
+        def click(button):
+            self.assertEqual(button.center[1], 422)
+            chosen.append(names[position])
+        self.task.ui.capture.side_effect = capture
+        self.task.ui.swipe.side_effect = swipe
+        self.task.ui.click.side_effect = click
+        confirmation = self.task.select_sweep_guild(pages[0])
+        self.assertEqual(chosen, ['美食殿堂'])
+        self.assertTrue(maze.sweep_guild_evidence(confirmation, '美食殿堂'))
+        self.assertEqual(self.task.ui.swipe.call_count, 3)
+
     def test_separate_selector_fallback_is_reacquired_after_bounded_search(self):
         first = separate_guilds('合成公会')
         last = separate_guilds('合成公会二', '美食殿堂', disabled=('美食殿堂',))
@@ -667,6 +691,27 @@ class LabyrinthTaskTests(TestCase):
         self.frames([home(1), guild(), preview(1, 0), result(), guild(), home(0)])
         self.assertEqual(self.task.run()['status'], 'complete')
         self.assertIn((30, 30), self.clicks())
+
+    def test_catalogue_normalizes_food_hall_and_keeps_confirmation_identity_consistent(self):
+        self.task.ui.number.side_effect = lambda value, roi: value.number(roi)
+        def multiple(selected=False):
+            value = catalogue(1, selected=selected)
+            value.items[1].text = '合成公会'
+            value.items.extend(screen(('美食 殿堂', 92, 242), ('黎明界迷宫', 115, 269)).items)
+            if selected:
+                value.image[148:180, 832:869] = 245
+                cv.rectangle(value.image, (832, 238), (868, 269), (230, 155, 25), -1)
+            return value
+        def click(position):
+            if isinstance(position, tuple) and position[0] == 849:
+                self.assertEqual(position, (849, 255))
+        self.task.ui.click.side_effect = click
+        self.frames([home(1), guild(), multiple(), multiple(), multiple(True), multiple(True),
+                     bulk(1, guild_name='美食殿堂'), result(), home(0)])
+        report = self.task.run()
+        self.assertEqual(report['status'], 'complete')
+        self.assertEqual(report['spent'], 1)
+        self.assertEqual(report['history'][0]['guild'], '美食殿堂')
 
     def test_catalogue_single_pass_clears_prior_selection_then_returns_to_balance(self):
         self.task.options['max_passes'] = 1

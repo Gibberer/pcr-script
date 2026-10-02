@@ -222,7 +222,7 @@ class DawnLabyrinth(BaseTask):
 
     def select_sweep_guild(self, screen):
         fallback = None
-        seen = set()
+        seen = {}
         for page in range(6):
             controls = self.sweep_guild_controls(screen)
             preferred = next((pair for pair in controls if normalized(pair[0].text) == '美食殿堂'), None)
@@ -230,10 +230,14 @@ class DawnLabyrinth(BaseTask):
                 return self.confirm_sweep_guild(*preferred)
             if fallback is None and controls:
                 fallback = normalized(controls[0][0].text)
-            signature = tuple((normalized(guild.text), tuple(button.center)) for guild, button in controls)
-            if signature in seen or page == 5:
+            # Disabled cards still distinguish pages. Repeated eligible
+            # controls alone cannot prove that the carousel reached its end.
+            signature = tuple((normalized(item.text), tuple(item.center))
+                              for item in screen.all('.+', (20, 170, 940, 495)))
+            viewport = screen.image[170:495, 20:940]
+            if page == 5 or (signature in seen and (seen[signature] == viewport).all()):
                 break
-            seen.add(signature)
+            seen[signature] = viewport.copy()
             self.ui.swipe((830, 300), (200, 300))
             screen = self.capture()
         if fallback is None:
@@ -255,7 +259,7 @@ class DawnLabyrinth(BaseTask):
         guilds = maze.catalogue_guilds(screen)
         if not guilds:
             raise SweepBlocked('没有已核对的迷宫跳过公会，未消费')
-        guild = next((g for g in guilds if g.text == '美食殿堂'), guilds[0])
+        guild = next((g for g in guilds if normalized(g.text) == '美食殿堂'), guilds[0])
         clear = screen.find('解除所有勾选', (745, 80, 930, 140), exact=True)
         if not clear:
             raise SweepBlocked('跳过公会的勾选清理入口无法核对')
@@ -327,9 +331,9 @@ class DawnLabyrinth(BaseTask):
                                             preview=str(path))
         if catalogue:
             self.report['pending_spend']['catalogue'] = True
-            self.report['pending_spend']['guild'] = selected[0].text
+            self.report['pending_spend']['guild'] = normalized(selected[0].text)
         elif bulk:
-            self.report['pending_spend']['guild'] = maze.bulk_guild(screen).text
+            self.report['pending_spend']['guild'] = normalized(maze.bulk_guild(screen).text)
             self.report['pending_spend']['catalogue_preview'] = previous.get('preview')
         # Persist before the one irreversible click. A timeout, error or
         # cancellation must retain this record and cannot retry the confirmation.
@@ -352,7 +356,7 @@ class DawnLabyrinth(BaseTask):
                 guild = maze.bulk_guild(screen)
                 if (preview != (before, expected)
                         or (maze.bulk_confirmation(screen)
-                            and (guild is None or guild.text != self.report['pending_spend']['guild']))):
+                            and (guild is None or normalized(guild.text) != self.report['pending_spend']['guild']))):
                     raise EventUIError('跳过二次确认与已核对预览不符，未继续消费')
                 self.confirm(screen, before, before-expected)
                 continue

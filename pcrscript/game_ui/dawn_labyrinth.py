@@ -527,15 +527,64 @@ def supported_normal_enemy(maximum_hp: int, description: str, *, name: str | Non
                                   text.replace(_THROUGH_IMMUNITY, '')))
 
 
-def supported_boss(name, level, maximum_hp, effects, description):
+_BOSS_HEADERS = ('【特殊效果】', '【必杀技能】', '【技能1】')
+_BOSS_HEADER_POSITIONS = tuple(zip(_BOSS_HEADERS, (0, 1, 6)))
+_BOSS_SKILLS = (
+    '所有的技能伤害无法回复技能值',
+    '对进行物理攻击的敌方全体赋予烧伤状态',
+    '自身的物理防御力越高伤害越大',
+    '对进行魔法攻击的敌方全体赋予烧伤状态',
+    '自身的魔法防御力越高伤害越大',
+    '降低敌方全体生命值吸收量',
+    '对敌方全体造成魔法伤害',
+    '击退敌方全体(必中)',
+    '对前方一名敌人造成魔法固定伤害',
+)
+
+
+def _boss_clauses(description):
     text = normalized(description)
-    required = ('技能伤害无法回复技能值', '烧伤状态', '物理防御力越高',
-                '魔法防御力越高', '降低敌方全体生命值吸收量', '对敌方全体造成魔法伤害',
-                '击退敌方全体', '对前方一名敌人造成魔法固定伤害')
+    headers = tuple((match.group(), text[:match.start()].count('·'))
+                    for match in re.finditer(r'【[^】]*】', text))
+    text = re.sub(r'【[^】]*】', '', text)
+    clauses = tuple(re.sub(r'[,，:：。;；]', '', clause) for clause in text.split('·')[1:])
+    return headers, clauses
+
+
+def known_boss_description_part(description):
+    """Every visible bullet must fit a contiguous portion of the known profile."""
+    headers, clauses = _boss_clauses(description)
+    if any(header not in _BOSS_HEADERS+('【物理】',) for header, _ in headers):
+        return False
+    if not clauses:
+        return True  # Lore-only view; never sufficient to authorize combat.
+    for start in range(len(_BOSS_SKILLS)-len(clauses)+1):
+        if all(clause and (clause == _BOSS_SKILLS[start+offset]
+                           or (offset == len(clauses)-1 and _BOSS_SKILLS[start+offset].startswith(clause)))
+               for offset, clause in enumerate(clauses)):
+            return True
+    return False
+
+
+def supported_boss(name, level, maximum_hp, effects, description):
+    headers, clauses = _boss_clauses(description)
+    effect_text = normalized(effects).replace('对怪物的有效效果', '').replace('详情', '')
+    known_effects = ('坦克型', '物防下降', '魔防下降')
+    effects_match = all(effect_text.count(effect) == 1 for effect in known_effects)
+    for effect in known_effects:
+        effect_text = effect_text.replace(effect, '')
     return bool(name == '暗黑滴水嘴兽' and level == 350 and maximum_hp == 60000000
-                and all(effect in effects for effect in ('坦克型', '物防下降', '魔防下降'))
-                and all(phrase in text for phrase in required)
-                and not re.search('比例|百分比|即死|免疫|无效', text))
+                and effects_match and not effect_text
+                and headers in (_BOSS_HEADER_POSITIONS, (('【物理】', 0),)+_BOSS_HEADER_POSITIONS)
+                and clauses == _BOSS_SKILLS)
+
+
+def enemy_details_match(ui, screen: EventScreen, name, level, current, maximum):
+    observed_name = screen.find('.+', (270, 60, 675, 105))
+    hp = screen.find(r'\d+/\d+', (480, 140, 700, 180), exact=True)
+    return bool(observed_name and observed_name.score >= .95 and normalized(observed_name.text) == name
+                and hp and hp.score >= .95 and normalized(hp.text) == f'{current}/{maximum}'
+                and ui.number(screen, (615, 110, 700, 145)) == level)
 
 
 def departure_preview(ui, screen: EventScreen) -> tuple[int, int]:
