@@ -46,6 +46,8 @@ GUI 的 `PortableTools.cs` 管理固定版本工具的下载、SHA-256 校验与
 | [task_character_bond.py](../pcrscript/tasks/task_character_bond.py) | `max_character_bonds`（现有礼物与角色剧情） |
 | [task_dungeon.py](../pcrscript/tasks/task_dungeon.py) | `dungeon_first_clear` |
 | [task_abyss.py](../pcrscript/tasks/task_abyss.py) | `abyss_push`（深域按需推进） |
+| [task_recollection_first_clear.py](../pcrscript/tasks/task_recollection_first_clear.py) | `recollection_first_clear`（普通及霸首通） |
+| [task_recollection.py](../pcrscript/tasks/task_recollection.py) | `recollection`（普通报酬及已通关霸扫荡） |
 | [task_caravan.py](../pcrscript/tasks/task_caravan.py) | `caravan` |
 | [task_dawn_labyrinth.py](../pcrscript/tasks/task_dawn_labyrinth.py) | `dawn_labyrinth`（仅已通关难度跳过） |
 | [task_dawn_labyrinth_first_clear.py](../pcrscript/tasks/task_dawn_labyrinth_first_clear.py) | `dawn_labyrinth_first_clear`（美食殿堂难度 1 的一次探索） |
@@ -65,6 +67,8 @@ GUI 的 `PortableTools.cs` 管理固定版本工具的下载、SHA-256 校验与
 通用命令：`./.venv/Scripts/python.exe -X utf8 scripts/daily/task.py <注册任务名>`（在项目根目录运行）。驾车游 `caravan` 仍仅按需启用。
 
 新增具体任务使用 `task_<功能>.py`，需要独立调度时使用 `@register(...)` 并在 `__init__.py` 导入，同时更新本表。对外优先从 `pcrscript.tasks` 导入任务类；文件改名不改变类名、注册名和脚本命令。
+
+追忆战场的共享页面识别在 `game_ui/recollection.py`，导航、限额及待核对记录在 `tasks/recollection_flow.py`，精确层数来源适配及编队审计在 `tasks/recollection_strategy.py`。首通调用共享视频解析、`EventFormation` 和 `EventCombat`；日常使用游戏一键扫荡预览与消费核对，均经现有通用命令运行。见[追忆战场指南](guides/recollection.md)。
 
 地下城识别位于 `game_ui/dungeon.py`，方案校验、跨队冲突与编队布局位于 `tasks/dungeon_party.py`，候选头像盘点位于 `game_ui/roster.py`，均非独立任务。运行与本地方案格式见 [地下城首通](guides/dungeon.md)。
 

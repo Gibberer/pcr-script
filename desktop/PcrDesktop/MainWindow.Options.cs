@@ -25,6 +25,10 @@ public partial class MainWindow
         ["Gift"] = "礼物领取", ["Caravan"] = "驾车游", ["dnpath"] = "雷电模拟器安装目录", ["adb_path"] = "ADB 程序", ["adb_serial"] = "ADB 设备序列号（多个设备时填写）",
         ["DawnLabyrinth"] = "黎明界迷宫扫荡", ["max_passes"] = "本次通行证消费上限（1～99）",
         ["DawnLabyrinthFirstClear"] = "黎明界迷宫首通", ["retry_failed_boss"] = "接续失败首领时允许一次重新挑战",
+        ["Recollection"] = "追忆战场日常", ["RecollectionFirstClear"] = "追忆战场首通",
+        ["areas"] = "目标领域列表", ["claim_rewards"] = "领取普通追忆战累计报酬", ["sweep_dominion"] = "扫荡已通关的追忆战·霸",
+        ["max_sweeps"] = "本次扫荡次数上限", ["max_attempts_per_stage"] = "每层候选队伍尝试上限",
+        ["preview_only"] = "只核对预览，不领取或扫荡",
         ["teams"] = "队伍方案文件", ["first_clear"] = "推进首次通关（待实机验证）", ["bosses"] = "挑战首领",
         ["stories"] = "处理剧情", ["memoirs"] = "处理追忆", ["missions"] = "领取任务奖励", ["exchange"] = "兑换奖励",
         ["max_boss_attempts"] = "首领最大尝试次数", ["battle_timeout"] = "战斗超时（秒）", ["timeout"] = "任务超时（秒）",
@@ -103,7 +107,7 @@ public partial class MainWindow
     }
 
     private static bool NeedsStrategyHint(string section) =>
-        section is "Abyss" or "Dungeon" or "StoryEvent" or "RevivalEvent";
+        section is "Abyss" or "Dungeon" or "StoryEvent" or "RevivalEvent" or "RecollectionFirstClear";
 
     private static TextBlock CreateStrategyHint() => new()
     {

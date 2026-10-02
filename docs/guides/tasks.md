@@ -12,7 +12,8 @@ GUI 的“每日日常”会按顺序执行预设列表；配置好 Python 依�
 |---|---|---|
 | 免费十连 | `free_gacha` | 是否抽取全部累积次数；完整日常按活动情报筛选 |
 | 普通扭蛋 | `normal_gacha` | 需要有免费次数 |
-| 日程表 | `schedule` | 使用游戏中已保存的日程安排 |
+| 日程表 | `schedule` | 使用游戏中已保存的日程安排；可领取普通追忆战报酬，追忆战·霸仅显示次数、不扫荡。见[追忆战场](recollection.md) |
+| 追忆战场日常 | `recollection` | 领取普通累计报酬，按 `Recollection.max_sweeps` 合计上限扫荡已通关霸领域；消耗现有挑战次数和扫荡券。见[详细指南](recollection.md) |
 | 竞技场 / 公主竞技场 | `arena` / `princess_arena` | 使用已保存队伍，各挑战一次 |
 | 圣迹 / 神殿调查 | `research` | 使用可用次数和体力 |
 | 冒险日常 | `adventure_daily` | 探险归来、再次出发及地图事件 |
@@ -52,6 +53,7 @@ GUI 的“每日日常”会按顺序执行预设列表；配置好 Python 依�
 |---|---|---|
 | 地下城首通 | `dungeon_first_clear` | `Dungeon` 配置；读层数/阶段 → 获取来源或本地路线 → 检查跨队占用与培养 → 有限挑战并核验进展；[详细指南](dungeon.md) |
 | 深域推进 | `abyss_push` | `Abyss` 配置；定位各属性 NEXT → 获取适用来源 → 核验账号 → 按结果与历史有限重试；以 NEXT 前进确认通关；[详细指南](abyss.md) |
+| 追忆战场首通 | `recollection_first_clear` | `RecollectionFirstClear` 配置；普通及霸领域逐层取得适用攻略，核验五人与培养、SET/AUTO，按通关标记确认进展；[详细指南](recollection.md) |
 | 全角色强化 | `upgrade_all_characters` | 游戏一键强化分批提升等级、技能和普通装备，消耗现有材料；[范围说明](character-upgrade.md) |
 | 好感度与角色剧情 | `max_character_bonds` | 使用持有礼物提升好感度，处理已开放剧情；[详细说明](character-bond.md) |
 | 驾车游 | `caravan` | 持有骰子达标前单骰、满足条件后快速通关；[详细说明](../game-knowledge/caravan.md) |

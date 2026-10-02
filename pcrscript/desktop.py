@@ -29,6 +29,8 @@ LABELS = {
     'caravan': '驾车游 · 清空骰子', 'get_gift': '礼物箱 · 领取邮件与赠礼', 'campaign_clean': '剧情活动日常',
     'dawn_labyrinth': '黎明界迷宫 · 扫荡通行证',
     'dawn_labyrinth_first_clear': '黎明界迷宫 · 难度1首通',
+    'recollection': '追忆战场 · 日常领奖与扫荡',
+    'recollection_first_clear': '追忆战场 · 首次通关',
     'revival_event_once': '复刻活动', 'tohomepage': '返回首页', 'free_gacha': '免费十连',
     'normal_gacha': '普通扭蛋', 'arena': '竞技场', 'princess_arena': '公主竞技场',
     'research': '圣迹 / 神殿调查', 'schedule': '日程表', 'shop_buy': '商店购买',
@@ -40,7 +42,7 @@ LABELS = {
 }
 SPECIAL_TASKS = {'clear_story', 'dungeon_first_clear', 'abyss_push',
                  'upgrade_all_characters', 'max_character_bonds', 'common_adventure', 'caravan', 'tohomepage',
-                 'dawn_labyrinth_first_clear'}
+                 'dawn_labyrinth_first_clear', 'recollection_first_clear'}
 
 PARAMETER_LABELS = {
     'multi': '抽取所有可用免费十连', 'exclude_stamina': '暂不领取体力',
@@ -57,6 +59,8 @@ DESCRIPTIONS = {
     'caravan': '从冒险进入驾车游，消耗持有的骰子。未达标时使用单骰争取15回合内到达；已解锁时使用快速通关。不购买骰子，默认不加入每日列表。',
     'dawn_labyrinth': '从冒险进入黎明界迷宫，沿用游戏已选难度，通过已解锁的跳过消耗现有通行证。核对消费预览、跳过结果和余额后继续，结束时领取迷宫任务奖励；零票也检查奖励。未解锁时提示先运行首通任务，可设置本次通行证上限。',
     'dawn_labyrinth_first_clear': '从冒险进入黎明界迷宫，尝试美食殿堂难度1首通；每次至多出发一次。伙伴须核验身份、培养、完整装备与专武，装备信息不全时停止。已有探索须证明难度与同行公会，无法证明时保留进度；不购买资源或培养角色。首通或已通关复查完成后领取迷宫任务奖励。',
+    'recollection': '领取普通追忆战的累计报酬，按本次上限扫荡追忆战·霸各领域已通关的最高层；核对扫荡券与挑战次数，不挑战未通关层。日程表能领取普通报酬，但不支持追忆战·霸扫荡。',
+    'recollection_first_clear': '尽力推进记忆领域和追忆战·霸已解锁领域。程序获取对应层攻略、核对五人身份与培养后有限挑战；已完成层跳过，次数耗尽或来源、装备未知时保留进度。可选分配现有特别装备；不购买资源、重置次数或培养角色。',
     'get_gift': '从首页礼物箱领取邮件与赠礼，不是任务页面的成就/每日任务领奖。可选择暂不领取体力。特别装备满仓时按配置使用游戏已有自动分解规则释放空间；其他持有上限会停止并报告。',
     'campaign_clean': '处理剧情活动重复日：困难扫荡、按标记检查剧情与任务、兑换奖励。首通和首领是否执行由活动配置控制，默认关闭。',
     'revival_event_once': '检查当期复刻活动并按完成回执跳过已完成内容。未完成时根据布局和配置处理关卡、首领与奖励；开战依赖有效队伍方案及培养核验。',

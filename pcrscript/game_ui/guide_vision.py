@@ -44,7 +44,11 @@ def battle_rectangles(image, *, relaxed=False) -> list[tuple[int, int, int, int]
     mask = (((hsv[:, :, 0] >= 75) & (hsv[:, :, 0] <= 105)
              & (hsv[:, :, 1] > 100) & (hsv[:, :, 2] > 150))*255).astype(np.uint8)
     mask[:round(height*.65)] = 0
-    contours, _ = cv.findContours(mask, cv.RETR_LIST, cv.CHAIN_APPROX_SIMPLE)
+    # Codec gaps can open the inner card outline into its SET bubble.
+    # Close only contour proposals; all five borders are checked against
+    # the original cyan pixels below, never against the repaired mask.
+    contour_mask = cv.morphologyEx(mask, cv.MORPH_CLOSE, np.ones((3, 3), np.uint8))
+    contours, _ = cv.findContours(contour_mask, cv.RETR_LIST, cv.CHAIN_APPROX_SIMPLE)
     boxes = [cv.boundingRect(c) for c in contours]
     boxes = [r for r in boxes if .07*width <= r[2] <= .12*width
              and .78 <= r[2]/r[3] <= 1.12

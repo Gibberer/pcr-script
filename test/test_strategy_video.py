@@ -232,6 +232,19 @@ class VideoStrategyTests(TestCase):
         self.assertEqual(len(boxes),5)
         self.assertTrue(all(abs((x+w/2)-(244+120*i))<8 for i,(x,y,w,h) in enumerate(boxes)))
 
+    def test_codec_gaps_in_five_cyan_cards_do_not_invent_a_missing_border(self):
+        image=np.full((540,960,3),245,np.uint8)
+        for i in range(5):
+            x,y,w,h=196+120*i,398,86,86
+            cv.rectangle(image,(x,y),(x+w,y+h),(255,200,0),4)
+            cv.circle(image,(x+w-4,y+4),15,(255,200,0),-1)
+            image[y+30:y+32,x-3:x+w+4]=245
+        boxes=battle_rectangles(image)
+        self.assertEqual(len(boxes),5)
+        self.assertTrue(all(abs(x+w/2-(239+120*i))<8 for i,(x,y,w,h) in enumerate(boxes)))
+        image[370:495,552:666]=245
+        self.assertEqual(battle_rectangles(image),[])
+
     def test_combat_button_regions_use_recognition_without_text_detection(self):
         frame=np.zeros((720,1280,3),np.uint8)
         small=np.zeros((540,960,3),np.uint8)

@@ -80,6 +80,23 @@ class EventRecognitionTests(TestCase):
         self.assertEqual(badges.read(cv.imread(str(FIXTURES/"badge_none_nefi.png")), (0, 0, 100, 100)), (False, False))
         self.assertEqual(badges.read(cv.imread(str(FIXTURES/"badge_none_aira.png")), (0, 0, 100, 100)), (False, False))
 
+    def test_padded_search_card_still_needs_two_equipment_frames(self):
+        badges = EquipmentBadges()
+        card = np.full((100,100,3),70,np.uint8)
+        glyph = badges.swords[0]
+        card[76:76+glyph.shape[0],2:2+glyph.shape[1]] = glyph
+        image = np.full((110,110,3),240,np.uint8)
+        image[:96,:97] = cv.resize(card,(97,96),interpolation=cv.INTER_AREA)
+        observed = EventScreen(image,[])
+        with patch('pcrscript.run_session.clock.sleep'):
+            ui = Mock(capture=Mock(return_value=observed))
+            self.assertIsNone(badges.observe(ui,(0,0,100,99),frames=1)[0])
+            self.assertEqual(badges.observe(ui,(0,0,100,99),frames=2)[0],(True,False))
+        star = np.full((100,100,3),70,np.uint8)
+        cv.putText(star,'5',(4,97),cv.FONT_HERSHEY_SIMPLEX,.6,(20,200,250),2)
+        image[:96,:97] = cv.resize(star,(97,96),interpolation=cv.INTER_AREA)
+        self.assertIsNone(badges.read(image,(0,0,100,99)))
+
     def test_actual_home_and_stage_stars(self):
         self.assertTrue(fixture("event_home").event_home)
         s = fixture("event_levels", (490, 160, 580, 465))

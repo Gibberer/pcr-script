@@ -2,7 +2,10 @@
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase
-from unittest.mock import patch
+from unittest.mock import Mock, patch
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from threading import Event, Thread
+import time
 
 import requests
 
@@ -64,6 +67,58 @@ class _SlowHttp:
 
 
 class GuideMediaTests(TestCase):
+    def test_invalid_media_url_is_not_exposed_in_diagnostics(self):
+        secret='https://example.com/synthetic?signature=private-value'
+        with TemporaryDirectory() as folder:
+            http=Mock()
+            http.get.side_effect=requests.exceptions.InvalidURL(secret)
+            with self.assertRaises(RuntimeError) as caught:
+                fetch_video(_Api(),'BVsynthetic',{'cid':1},Path(folder),http=http)
+            self.assertIn('InvalidURL',str(caught.exception))
+            self.assertNotIn(secret,str(caught.exception))
+
+    def test_trickle_stream_cannot_hide_download_deadline(self):
+        requests_seen=[]
+        stopped=Event()
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, *args):
+                pass
+
+            def do_GET(self):
+                requests_seen.append(self.path)
+                self.send_response(200)
+                self.send_header('Content-Length', '500')
+                self.end_headers()
+                try:
+                    for _ in range(500):
+                        if stopped.is_set():
+                            break
+                        self.wfile.write(b'x')
+                        self.wfile.flush()
+                        stopped.wait(.05)
+                except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+                    pass
+
+        with ThreadingHTTPServer(('127.0.0.1', 0), Handler) as server:
+            worker=Thread(target=server.serve_forever,daemon=True)
+            worker.start()
+            api=_Api()
+            api.getVideoPlay=lambda **kwargs: {'code':0,'data':{'durl':[
+                {'url':f'http://127.0.0.1:{server.server_port}/synthetic'}]}}
+            try:
+                with TemporaryDirectory() as folder:
+                    started=time.monotonic()
+                    with self.assertRaises(RuntimeError):
+                        fetch_video(api,'BVsynthetic',{'cid':1},Path(folder),max_seconds=3)
+                    self.assertLess(time.monotonic()-started,4.5)
+                    self.assertTrue(requests_seen,'The deadline must bound an actual network read')
+                    self.assertFalse(list(Path(folder).rglob('*.part')))
+                    self.assertFalse(list(Path(folder).rglob('*.mp4')))
+            finally:
+                stopped.set()
+                server.shutdown()
+                worker.join(timeout=2)
+
     def test_falls_back_to_smaller_stream_after_cdn_failure(self):
         with TemporaryDirectory() as folder:
             api = _Api()
