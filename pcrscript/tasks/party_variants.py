@@ -11,7 +11,8 @@ def character_roles(database='cache/redive_cn.db'):
     with closing(sqlite3.connect(database)) as conn:
         roles=dict(conn.execute('SELECT unit_id,unit_role_id FROM unit_role_data'))
         rows = conn.execute('SELECT u.unit_id,u.unit_name,u.atk_type,u.search_area_width,s.union_burst,s.main_skill_1,s.main_skill_2 '
-                            'FROM unit_data u JOIN unit_skill_data s ON s.unit_id=u.unit_id')
+                            'FROM unit_data u JOIN unit_profile p ON p.unit_id=u.unit_id '
+                            'JOIN unit_skill_data s ON s.unit_id=u.unit_id')
         for uid,name,kind,position,*skills in rows.fetchall():
             texts = [r[0] for sid in skills for r in conn.execute('SELECT description FROM skill_data WHERE skill_id=?',(sid,))]
             text = ''.join(texts)

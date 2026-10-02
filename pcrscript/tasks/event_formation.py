@@ -50,6 +50,8 @@ def search_text_confirmed(base: str, screen: EventScreen) -> bool:
 class EventFormation:
     requires_declared_build = True
     infer_costume_from_skills = False
+    detail_close_pattern = '确认'
+    formation_title_pattern = '队伍编组'
     slots = [(96+109*i, 452) for i in range(5)]
     slot_top = 405
     search_top = 177
@@ -190,17 +192,17 @@ class EventFormation:
             self.observed[normalized(name)] = actual
             (self.ui.output / "roster.json").write_text(json.dumps(
                 {k: asdict(v) for k, v in self.observed.items()}, ensure_ascii=False, indent=2), encoding="utf-8")
-        self.ui.expect_click("确认", (320, 450, 650, 515), exact=True)
+        self.ui.expect_click(self.detail_close_pattern, (320, 450, 650, 515), exact=True)
         close_attempts = 0
         def close_remaining_dialog(screen):
             nonlocal close_attempts
             if close_attempts >= 3 or not screen.find('角色详情', (300, 0, 650, 70), exact=True):
                 return
-            button = screen.find('确认', (320, 450, 650, 515), exact=True)
+            button = screen.find(self.detail_close_pattern, (320, 450, 650, 515), exact=True)
             if button:
                 close_attempts += 1
                 self.ui.click(button)
-        self.ui.wait(lambda s: s.find("队伍编组", (300, 0, 650, 70)), "返回编队",
+        self.ui.wait(lambda s: s.find(self.formation_title_pattern, (300, 0, 650, 70), exact=True), "返回编队",
                      handle=close_remaining_dialog)
         return actual
 

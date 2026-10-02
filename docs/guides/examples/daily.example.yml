@@ -40,6 +40,13 @@ Gift:
 Caravan: # 按需任务配置；存在此配置不代表加入每日任务列表
   timeout: 1800
   max_rolls: 200
+DawnLabyrinth: # 首通后可添加 [dawn_labyrinth] 日常项；仅跳过已通关难度
+  timeout: 600
+  max_passes: 99 # 本次最多消费通行证，范围 1～99；不会超过进入时持有量
+DawnLabyrinthFirstClear: # 按需运行 [dawn_labyrinth_first_clear]，每次至多出发一次
+  timeout: 1800
+  max_battles: 30
+  retry_failed_boss: false
 TeamBattle:
   timeout: 1800
   battle_timeout: 220

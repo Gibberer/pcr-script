@@ -40,6 +40,14 @@ Gift:
 Caravan:
   timeout: 1800
   max_rolls: 200
+# 可添加 dawn_labyrinth 日常项；仅跳过已通关难度，不自动首通。
+DawnLabyrinth:
+  timeout: 600
+  max_passes: 99
+DawnLabyrinthFirstClear:
+  timeout: 1800
+  max_battles: 30
+  retry_failed_boss: false
 TeamBattle:
   timeout: 3600
   battle_timeout: 220

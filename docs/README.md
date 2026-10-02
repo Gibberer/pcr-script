@@ -11,6 +11,7 @@
 | 运行异常与控制 | [运行诊断](run-diagnostics.md) |
 | 视频来源、头像与解析边界 | [视频解析](video-strategies.md) |
 | 地下城、深域等玩法的执行实现 | [任务指南](guides/tasks.md)及其专项链接 |
+| 黎明界迷宫通行证消费与任务奖励 | [使用指南](guides/dawn-labyrinth.md)、[游戏页面与规则](game-knowledge/dawn-labyrinth.md) |
 | 游戏中的页面、角色与机制 | [游戏知识](game-knowledge/README.md) |
 | 公会之家体力的游戏入口与回执 | [公会之家](game-knowledge/guild-house.md) |
 | 尚需真实环境的工程验收 | [工程待办](pending-validation.md) |

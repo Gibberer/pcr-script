@@ -16,6 +16,8 @@ GUI 的“每日日常”会按顺序执行预设列表；配置好 Python 依�
 | 竞技场 / 公主竞技场 | `arena` / `princess_arena` | 使用已保存队伍，各挑战一次 |
 | 圣迹 / 神殿调查 | `research` | 使用可用次数和体力 |
 | 冒险日常 | `adventure_daily` | 探险归来、再次出发及地图事件 |
+| 黎明界迷宫扫荡 | `dawn_labyrinth` | 已通关公会扫荡，按现有通行证预算消费并领奖；默认不加入每日列表。[说明](dawn-labyrinth.md)。 |
+| 黎明界迷宫首通 | `dawn_labyrinth_first_clear` | 按需核对或尝试美食殿堂难度 1 首通；装备或探索上下文未知时停止。[说明](dawn-labyrinth.md)。 |
 | 首页任务领奖 | `get_quest_reward` | 依次检查每日、普通、称号三个标签，领取已完成任务奖励，可能包含体力 |
 | 礼物箱 | `get_gift` | 可选择暂不领取体力；满仓处理见 [礼物说明](../game-knowledge/gifts.md) |
 | 剧情活动日常 | `campaign_clean` | 困难扫荡、普通扫荡开关；剧情、领奖、兑换放在日常选项；[详细说明](story-event.md) |

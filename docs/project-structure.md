@@ -47,6 +47,8 @@ GUI 的 `PortableTools.cs` 管理固定版本工具的下载、SHA-256 校验与
 | [task_dungeon.py](../pcrscript/tasks/task_dungeon.py) | `dungeon_first_clear` |
 | [task_abyss.py](../pcrscript/tasks/task_abyss.py) | `abyss_push`（深域按需推进） |
 | [task_caravan.py](../pcrscript/tasks/task_caravan.py) | `caravan` |
+| [task_dawn_labyrinth.py](../pcrscript/tasks/task_dawn_labyrinth.py) | `dawn_labyrinth`（仅已通关难度跳过） |
+| [task_dawn_labyrinth_first_clear.py](../pcrscript/tasks/task_dawn_labyrinth_first_clear.py) | `dawn_labyrinth_first_clear`（美食殿堂难度 1 的一次探索） |
 | [task_team_battle.py](../pcrscript/tasks/task_team_battle.py) | `team_battle` |
 | [task_gacha.py](../pcrscript/tasks/task_gacha.py) | `free_gacha`、`normal_gacha` |
 | [task_gifts.py](../pcrscript/tasks/task_gifts.py) | `get_gift` |
