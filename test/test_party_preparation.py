@@ -144,14 +144,25 @@ class PartyPreparationTests(TestCase):
         self.assertEqual(fetch.call_count, 3)
         self.assertEqual(rank_candidates([a, b], actual)[0].name, 'owned')
 
-    def test_repeated_catalog_terminates_and_settings_remain_distinct(self):
+    def test_repeated_catalog_is_deduplicated_within_the_batch_limit(self):
         first, second = party(), party()
         second.members[0].instant = False
         self.assertNotEqual(party_fingerprint(first), party_fingerprint(second))
         fetch = Mock(return_value=[first, second])
         result = list(source_candidates(fetch, lambda: {}, max_batches=10))
         self.assertEqual(len(result), 4)
-        self.assertEqual(fetch.call_count, 2)
+        self.assertEqual(fetch.call_count, 10)
+
+    def test_duplicate_batch_does_not_hide_a_later_distinct_source(self):
+        first, later = party('first'), party('later', 'abcdf')
+        duplicate = replace(first, name='same-party-new-guide', source='https://example.com/another-guide')
+        fetch = Mock(side_effect=[[first], [duplicate], [later]])
+        available = Mock(return_value=[])
+        result = list(source_candidates(fetch, lambda: {}, max_batches=3,
+                                        available=available, allow_substitutions=False))
+        self.assertEqual([c.party.name for c in result], ['first', 'later'])
+        self.assertEqual([c.kwargs['advance'] for c in fetch.call_args_list], [False, True, True])
+        self.assertEqual(available.call_count, 2)
 
     def test_complete_guides_have_explicit_substitution_policy_and_distinct_damage_goals(self):
         first, second = party(), party()

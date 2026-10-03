@@ -108,6 +108,59 @@ class SubjugationGuideTests(TestCase):
                 acquire_strategies(options, api=api, index=Mock())
                 self.assertEqual(parse.call_args.args[0]['author_comments'], [comment])
 
+    def test_target_relevant_metadata_manual_and_borrow_requirements_block_parties(self):
+        for field in ('description', 'author_comments'):
+            for statement in ('Boss2 手动轴', '需要借角色', 'Boss2 1:05关闭自动', 'Boss1 手动轴'):
+                with self.subTest(field=field, statement=statement), TemporaryDirectory() as folder:
+                    options = source_options({}, EVENT, kind='boss', boss='合成首领', boss_number=2)
+                    options.update(parsed_dir=folder, skip_manual_media=False)
+                    source = dict(bvid='BVSYNTHETIC', url='https://example.com/synthetic',
+                        title='公主连结 国服 合成深渊', pages=[dict(cid=1, part='Boss2', duration=4)])
+                    source[field] = statement if field == 'description' else [dict(text=statement, reply_id=12)]
+                    boxes = [(100+i*120, 390, 100, 100) for i in range(5)]
+                    members = [dict(name=f'合成角色{i}', rectangle=list(b), score=.99) for i, b in enumerate(boxes)]
+                    index = SimpleNamespace(names=[m['name'] for m in members], matrix=np.ones((5,1728),np.float32))
+                    capture = Mock()
+                    capture.read.side_effect = [(True, np.full((540,960,3), i*20, np.uint8)) for i in range(4)]
+                    labels = [texts('BOSS详情', '高难', '合成首领', '80000000/80000000')]*2+[
+                        texts(timer, '79000000/80000000') for timer in ('1:29', '1:28')]
+                    with patch('pcrscript.tasks.strategy_video.cv.VideoCapture', return_value=capture), \
+                         patch('pcrscript.tasks.strategy_video.sample_seconds', return_value=[.5,1.5,2.5,3.5]), \
+                         patch('pcrscript.tasks.strategy_video.frame_texts', side_effect=labels), \
+                         patch('pcrscript.tasks.strategy_video.battle_rectangles', side_effect=[[]]*2+[boxes]*2), \
+                         patch('pcrscript.tasks.strategy_video.combat_team', side_effect=[[]]*2+[members]*2), \
+                         patch('pcrscript.tasks.strategy_video.formation_fields', return_value=[]), \
+                         patch('pcrscript.tasks.strategy_video.combat_auto', return_value=True), \
+                         patch('pcrscript.tasks.strategy_video.combat_set', return_value=True):
+                        report = parse_video_source(source, options, index, api=Mock(), ocr=Mock(),
+                            media_fetcher=lambda *a, **k: (Path(folder)/'synthetic.avi',dict(duration=4)))
+                    self.assertEqual(len(report['parties']), 1)
+                    actions = report['parties'][0]['manual_actions']
+                    applies = not statement.startswith('Boss1')
+                    self.assertEqual(len(parties_for_target(report, options, allow_local_trials=True)), int(not applies))
+                    if applies:
+                        self.assertEqual(actions[0]['text'], statement)
+                        self.assertIsNone(actions[0]['evidence']['cid'])
+                        self.assertEqual(actions[0]['evidence']['method'],
+                                         'source_description' if field == 'description' else 'author_comment:12')
+                    else:
+                        self.assertEqual(actions, [])
+
+    def test_production_skips_media_for_manual_source_metadata(self):
+        for field in ('title', 'description', 'author_comments'):
+            with self.subTest(field=field), TemporaryDirectory() as folder:
+                options = source_options({}, EVENT, kind='boss', boss='合成首领', boss_number=2)
+                options['parsed_dir'] = folder
+                source = dict(bvid='BVSYNTHETIC', url='https://example.com/synthetic',
+                    title='公主连结 国服 合成深渊', pages=[dict(cid=1, part='Boss2', duration=4)])
+                source[field] = [dict(text='需要借角色', reply_id=12)] if field == 'author_comments' else '需要借角色'
+                index = SimpleNamespace(names=['合成角色'], matrix=np.ones((1,1728),np.float32))
+                fetch = Mock(side_effect=AssertionError('Unsupported source must not download media'))
+                report = parse_video_source(source, options, index, api=Mock(), ocr=Mock(), media_fetcher=fetch)
+                self.assertEqual(report['parties'], [])
+                self.assertTrue(report['manual_actions'])
+                fetch.assert_not_called()
+
     def test_nonmatching_boss_video_cache_is_bound_to_the_requested_boss(self):
         with TemporaryDirectory() as folder:
             options = source_options({}, EVENT, kind='boss', boss='合成首领')
@@ -249,19 +302,20 @@ class SubjugationGuideTests(TestCase):
             parse.assert_not_called()
 
     def test_unread_or_truncated_common_notes_cannot_authorize_a_parsed_combat_party(self):
-        for failure in ('download', 'duration_skip', 'truncated', 'empty', 'partial', 'aspect', 'ocr_empty'):
+        for failure in ('download', 'unknown_notes', 'duration_skip', 'truncated', 'empty', 'partial', 'aspect', 'ocr_empty'):
             with self.subTest(failure=failure), TemporaryDirectory() as folder:
                 options = source_options({}, EVENT)
                 options.update(parsed_dir=folder, skip_long_media=failure != 'truncated')
                 source = dict(bvid='BVSYNTHETIC', url='https://example.com/synthetic',
                     title='公主连结 国服 合成深渊', pages=[
-                        dict(cid=1, part='通用说明', duration=601 if failure in ('duration_skip', 'truncated') else 2),
+                        dict(cid=1, part='前哨其他信息' if failure == 'unknown_notes' else '通用说明',
+                             duration=601 if failure in ('duration_skip', 'truncated') else 2),
                         dict(cid=2, part='前哨打法1', duration=4)])
                 boxes = [(100+i*120, 390, 100, 100) for i in range(5)]
                 members = [dict(name=f'合成角色{i}', rectangle=list(b), score=.99) for i, b in enumerate(boxes)]
                 index = SimpleNamespace(names=[m['name'] for m in members], matrix=np.ones((5,1728),np.float32))
                 frames = [(True, np.full((540,960,3), i*20, np.uint8)) for i in range(6)]
-                note_frames = {'download': [], 'duration_skip': [], 'truncated': frames[:2], 'ocr_empty': frames[:2],
+                note_frames = {'download': [], 'unknown_notes': [], 'duration_skip': [], 'truncated': frames[:2], 'ocr_empty': frames[:2],
                     'empty': [(False, None)]*2, 'partial': [frames[0], (False, None)],
                     'aspect': [(True, np.zeros((540,2000,3), np.uint8))]*2}[failure]
                 readable = 2 if failure in ('truncated', 'ocr_empty') else 1 if failure == 'partial' else 0
@@ -270,7 +324,7 @@ class SubjugationGuideTests(TestCase):
                 labels = [[] if failure == 'ocr_empty' else texts('说明正文')]*readable+[texts('前哨关卡', '高难')]*2+[
                     texts('1:29'), texts('1:28')]
                 def fetch(api, bvid, page, *args, **kwargs):
-                    if failure == 'download' and page['cid'] == 1:
+                    if failure in ('download', 'unknown_notes') and page['cid'] == 1:
                         raise OSError('synthetic download failure')
                     return Path(folder)/'synthetic.avi', dict(duration=page['duration'])
                 with patch('pcrscript.tasks.strategy_video.cv.VideoCapture', return_value=capture), \

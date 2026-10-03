@@ -188,8 +188,6 @@ def source_candidates(fetch, observations, *, max_batches=3, available=lambda: (
             if key not in seen:
                 seen.add(key)
                 fresh.append(party)
-        if fetched and not fresh:
-            break
         if not fresh:
             continue
         for party in rank_candidates(fresh, observations(), available=available()):

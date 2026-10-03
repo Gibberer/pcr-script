@@ -21,7 +21,7 @@ from .strategy_document import Evidence, Fact, empty_member, finalize, export_do
 from .strategy_sources import BORROW_PART, MANUAL_PART, UNVERIFIED_SETTING, discover_sources
 from .strategy_inputs import preferred_sources
 
-PARSER_VERSION = 63
+PARSER_VERSION = 64
 FRAME_OCR_VERSION = 1
 COMBAT_AUDIT_SECONDS = 20
 RECOLLECTION_UNSUPPORTED = re.compile(
@@ -596,6 +596,12 @@ def requirement_scope(texts) -> list[int] | None:
     return [values[0], values[0]] if values and len(set(values)) == 1 else None
 
 
+def manual_requirement(text):
+    return bool(MANUAL_PART.search(text) or BORROW_PART.search(text) or re.search(
+        r'手动|目押|卡[秒帧]|连点|关闭自动|关AUTO|轴[:：]|改星|调星|切星|降星|星级变更|\d[:：]\d{2}.*(?:开|关|点|放)',
+        text, re.I))
+
+
 def text_constraints(texts, proof: Evidence) -> tuple[list[dict], list[dict]]:
     global_requirements, manual = [], []
     for t in texts:
@@ -606,7 +612,7 @@ def text_constraints(texts, proof: Evidence) -> tuple[list[dict], list[dict]]:
         if re.search(r'属性等级|属性技能|公主骑士|\bMP\d|突破', t.text, re.I):
             row['advisory'] = bool(re.search(r'建议|推荐|可选', t.text))
             global_requirements.append(row)
-        if re.search(r'手动|目押|卡[秒帧]|连点|关闭自动|关AUTO|轴[:：]|改星|调星|切星|降星|星级变更|\d[:：]\d{2}.*(?:开|关|点|放)', t.text, re.I):
+        if manual_requirement(t.text):
             manual.append(row)
     return global_requirements, manual
 
@@ -680,13 +686,25 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
         if RECOLLECTION_UNSUPPORTED.search(unsupported):
             globals_.append(dict(text=unsupported[:500], advisory=False, evidence=asdict(Evidence(
                 source['url'], method='source_requirements', text=unsupported[:500]))))
-    title_setting = UNVERIFIED_SETTING.search(source.get('title') or '')
-    source_setting = title_setting or UNVERIFIED_SETTING.search(source.get('description') or '')
-    if source_setting:
-        setting_text = (source.get('title') if title_setting else source.get('description')) or ''
-        manual.append(dict(text=setting_text[:240], evidence=asdict(Evidence(
-            source['url'], int(pages[0]['cid']) if pages else 0,
-            method='source_title' if title_setting else 'source_description', text=setting_text[:240]))))
+    if options['task_type'] == 'subjugation':
+        metadata = [(source.get('title', ''), 'source_title'),
+                    (source.get('description', ''), 'source_description')]
+        metadata.extend((r.get('text', ''), 'author_comment:'+str(r.get('reply_id')))
+                        for r in source.get('author_comments', []))
+        for statement, method in metadata:
+            for line in relevant_statements(statement, options).splitlines():
+                if manual_requirement(line):
+                    manual.append(dict(text=line, evidence=asdict(Evidence(
+                        source['url'], method=method, text=line))))
+        source_setting = bool(manual)
+    else:
+        title_setting = UNVERIFIED_SETTING.search(source.get('title') or '')
+        source_setting = title_setting or UNVERIFIED_SETTING.search(source.get('description') or '')
+        if source_setting:
+            setting_text = (source.get('title') if title_setting else source.get('description')) or ''
+            manual.append(dict(text=setting_text[:240], evidence=asdict(Evidence(
+                source['url'], int(pages[0]['cid']) if pages else 0,
+                method='source_title' if title_setting else 'source_description', text=setting_text[:240]))))
     for page in pages:
         check()
         page_name = page.get('part', page.get('title', ''))
@@ -695,7 +713,7 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
                 source['url'], int(page['cid']), method='part_requirements', text=page_name))))
         requirements_page = bool(re.search(r'练度|培养|角色需求|配置要求', page_name))
         original_part = page.get('original_part', page_name)
-        manual_part = bool(MANUAL_PART.search(original_part) or BORROW_PART.search(original_part))
+        manual_part = manual_requirement(original_part)
         if manual_part:
             manual.append(dict(text=original_part, evidence=asdict(Evidence(
                 source['url'], int(page['cid']), method='part_title', text=original_part))))
@@ -705,7 +723,7 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
                 continue
         if source_setting and options.get('skip_manual_media'):
             pages_report.append(dict(cid=page['cid'], title=page_name,
-                                     skipped='标题或简介含未核实TP+2大师点条件，自动任务不下载此分P'))
+                                     skipped='来源声明手动、借角或未核实TP+2/大师点条件，自动任务不下载此分P'))
             continue
         page_duration = float(page.get('duration') or 0)
         if (options.get('skip_long_media') and page_duration > 0
@@ -979,14 +997,15 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
         finally:
             capture.release()
     if options['task_type'] == 'subjugation':
-        from .subjugation_guides import requirement_pages
         inspected = {p['cid']: p for p in pages_report}
-        for page in requirement_pages(source, options):
+        # A selected page with an unfamiliar title may still hold common
+        # conditions. The later CID filter isolates only explicit other plans.
+        for page in pages:
             record = inspected.get(page['cid'], {})
             if (record.get('readable_text_frames', 0) == 0 or record.get('skipped') or record.get('truncated')
                     or record.get('unread_frames') or record.get('unsupported_aspect')):
                 title = page.get('part', page.get('title', ''))
-                reason = '来源说明页未完整解析：'+title
+                reason = '来源页面未完整解析：'+title
                 globals_.append(dict(text=reason, advisory=False, evidence=asdict(Evidence(
                     source['url'], int(page['cid']), method='unread_requirements', text=reason))))
     # Named author statements can supply fields omitted by combat footage.
