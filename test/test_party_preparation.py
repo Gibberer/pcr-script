@@ -213,6 +213,34 @@ class PartyPreparationTests(TestCase):
             self.assertEqual([m.instant for m in result.members], [m.instant for m in team.members])
             self.assertEqual(result.members[0].stars, 3)
 
+    def test_other_members_star_conflicts_block_all_star_spending(self):
+        for required, current in ((3, 4), (3, 2), (3, None), (6, 5), (5, 6)):
+            with self.subTest(required=required, current=current):
+                team = party()
+                team.members[1].stars = required
+                actual = statuses(team)
+                actual[0].stars = 3  # This member can be upgraded to the required five stars.
+                actual[1].stars = current
+                before = dict(order=list('abcde'), observed=[asdict(a) for a in actual])
+                formation, leave, reopen, save = Mock(), Mock(), Mock(), Mock()
+                report = {}
+                with patch('pcrscript.game_ui.character_stars.upgrade_to_five',
+                           side_effect=AssertionError('Incompatible party must not spend on stars')) as upgrade:
+                    result, audit = upgrade_party_stars(formation, team, before,
+                        options=dict(allow_five_star_upgrade=True, allow_divine_amulets=True),
+                        report=report, save=save, leave=leave, reopen=reopen,
+                        stage=SimpleNamespace(), declared=team.members)
+                    self.assertIsNone(result)
+                    self.assertEqual(audit['unready'][0]['character'], 'b')
+                    self.assertIn('星级', str(audit['unready']))
+                    self.assertEqual(team.members[1].stars, required)
+                    self.assertEqual(report, {})
+                    upgrade.assert_not_called()
+                    leave.assert_not_called()
+                    reopen.assert_not_called()
+                    save.assert_not_called()
+                    formation.select.assert_not_called()
+
     def test_other_build_gaps_block_star_spending_and_preview_is_read_only(self):
         team = party()
         actual = statuses(team)

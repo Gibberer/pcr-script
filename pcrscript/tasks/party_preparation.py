@@ -228,12 +228,17 @@ def upgrade_party_stars(formation, party, audit, *, options, report, save, leave
                 targets.append(row['name'])
     if not targets:
         return party, audit
+    target_names = {normalized(name) for name in targets}
     # Validate the rest of the build before spending anything on stars.
     for row in audit['observed']:
         need = constraints.get(normalized(row['name']))
         if need is not None:
             actual = CharacterStatus(**row)
-            reasons = readiness(replace(trial_requirement(need, actual), stars=actual.stars), actual)
+            required = trial_requirement(need, actual)
+            # Only waive a star gap that this executor is about to repair.
+            if normalized(actual.name) in target_names:
+                required = replace(required, stars=actual.stars)
+            reasons = readiness(required, actual)
             if reasons:
                 audit['unready'] = [dict(character=actual.name, reasons=reasons)]
                 audit['cultivation'] = cultivation_plan(replace(party, members=list(declared)),
@@ -249,7 +254,8 @@ def upgrade_party_stars(formation, party, audit, *, options, report, save, leave
         formation.observed.pop(normalized(name), None)
     reopen()
     # Repopulation uses observed builds; old pinned trial stars are now stale.
-    probe = replace(party, members=[replace(m, stars=5) if m.name in targets else m for m in party.members])
+    probe = replace(party, members=[replace(m, stars=5) if normalized(m.name) in target_names else m
+                                    for m in party.members])
     ready, selection = formation.select(probe)
     if not ready:
         return None, dict(unready=['升星后编队未恢复'], selection=selection)
