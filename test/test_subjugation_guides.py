@@ -233,7 +233,10 @@ class SubjugationGuideTests(TestCase):
             for statement in ('Boss2 手动轴', '需要借角色', 'Boss2 1:05关闭自动', 'Boss1 手动轴',
                               'Boss2 AUTO关闭', 'Boss2 合成角色0关SET', 'Boss2 SET OFF',
                               'Boss2 AUTO改为关闭', 'Boss2 合成角色0不SET', 'Boss2 SET不要开',
-                              'Boss2 关闭所有人的SET', 'Boss1 AUTO关闭'):
+                              'Boss2 关闭所有人的SET', 'Boss1 AUTO关闭', 'Boss2 AUTO全程关闭',
+                              'Boss2 SET始终关闭', 'Boss2 AUTO在倒计时70秒后关闭',
+                              'Boss2 SET从开场一直保持OFF', 'Boss2 关闭合成角色0和合成角色1以及合成角色2的SET',
+                              'Boss1 AUTO全程关闭'):
                 with self.subTest(field=field, statement=statement), TemporaryDirectory() as folder:
                     options = source_options({}, EVENT, kind='boss', boss='合成首领', boss_number=2)
                     options.update(parsed_dir=folder, skip_manual_media=False)
@@ -283,6 +286,13 @@ class SubjugationGuideTests(TestCase):
                 self.assertEqual(report['parties'], [])
                 self.assertTrue(report['manual_actions'])
                 fetch.assert_not_called()
+
+    def test_plain_auto_set_labels_do_not_turn_boss_names_into_switch_actions(self):
+        for text in ('暗黑合成首领 全AUTO', '光亮合成首领 全SET', 'Boss2 全AUTO 关卡攻略'):
+            with self.subTest(text=text), TemporaryDirectory() as folder:
+                report, options = self.parse_notes(folder, '前言', 'boss', '说明正文',
+                    metadata=dict(author_comments=[dict(text=text, reply_id=12)]), boss_number=2)
+                self.assertEqual(len(parties_for_target(report, options, allow_local_trials=True)), 1)
 
     def test_nonmatching_boss_video_cache_is_bound_to_the_requested_boss(self):
         with TemporaryDirectory() as folder:

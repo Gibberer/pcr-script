@@ -18,10 +18,10 @@ from ..extras.guide_media import fetch_video
 from ..game_ui.avatar_assets import ensure_avatar_index, atomic_json, read_json
 from ..game_ui.guide_vision import GuideText, combat_team, formation_team, wide_special_equipment_team, combat_set, combat_auto, battle_rectangles, match_portrait, read_text, requirement_cells, labeled_fields, formation_fields
 from .strategy_document import Evidence, Fact, empty_member, finalize, export_document
-from .strategy_sources import BORROW_PART, MANUAL_PART, SWITCH_DIRECTIVE, UNVERIFIED_SETTING, discover_sources
+from .strategy_sources import BORROW_PART, MANUAL_PART, UNVERIFIED_SETTING, discover_sources, unparsed_switch_requirement
 from .strategy_inputs import declared_region, preferred_sources, source_statements
 
-PARSER_VERSION = 71
+PARSER_VERSION = 72
 FRAME_OCR_VERSION = 1
 COMBAT_AUDIT_SECONDS = 20
 RECOLLECTION_UNSUPPORTED = re.compile(
@@ -594,7 +594,7 @@ def requirement_scope(texts) -> list[int] | None:
 
 
 def manual_requirement(text, *, unparsed_settings=False):
-    return bool(unparsed_settings and SWITCH_DIRECTIVE.search(text)
+    return bool(unparsed_settings and unparsed_switch_requirement(text)
         or MANUAL_PART.search(text) or BORROW_PART.search(text) or re.search(
         r'手动|目押|卡[秒帧]|连点|关闭自动|关AUTO|轴[:：]|改星|调星|切星|降星|星级变更|\d[:：]\d{2}.*(?:开|关|点|放)',
         text, re.I))
