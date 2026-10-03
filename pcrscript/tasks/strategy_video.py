@@ -21,7 +21,7 @@ from .strategy_document import Evidence, Fact, empty_member, finalize, export_do
 from .strategy_sources import BORROW_PART, MANUAL_PART, UNVERIFIED_SETTING, discover_sources
 from .strategy_inputs import preferred_sources
 
-PARSER_VERSION = 68
+PARSER_VERSION = 69
 FRAME_OCR_VERSION = 1
 COMBAT_AUDIT_SECONDS = 20
 RECOLLECTION_UNSUPPORTED = re.compile(
@@ -650,8 +650,12 @@ def event_record_rows(frame, texts, index):
 def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None,
                        media_fetcher=fetch_video, check=lambda: None) -> dict:
     """Return candidates plus field evidence, including incomplete/contradictory ones."""
-    if options['task_type'] == 'subjugation' and (source.get('comment_pending') or source.get('comment_complete') is False):
-        raise ValueError('作者评论补充未读取完成：'+str(source.get('comment_pending') or '仅取得部分评论'))
+    if options['task_type'] == 'subjugation':
+        if source.get('comment_pending') or source.get('comment_complete') is False:
+            raise ValueError('作者评论补充未读取完成：'+str(source.get('comment_pending') or '仅取得部分评论'))
+        for comment in source.get('author_comments', []):
+            if comment.get('images'):
+                raise ValueError(f'作者评论{comment.get("reply_id")}含未解析图片，不能确认攻略要求完整')
     from rapidocr import RapidOCR
     from .strategy_tables import universal_row
     api = api or BilibiliApi(timeout=options.get('request_timeout', 20), browser_session=True)

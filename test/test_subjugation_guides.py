@@ -193,6 +193,41 @@ class SubjugationGuideTests(TestCase):
             parse_video_source(source, options, Mock(), api=Mock(), ocr=Mock())
         cache.assert_not_called()
 
+    def test_parser_rejects_unread_author_images_before_media_or_cache(self):
+        for text in ('', 'Boss3 其他首领说明', 'Boss1全自动'):
+            with self.subTest(text=text):
+                source = dict(bvid='BV1234567890', url='https://example.com/synthetic', pages=[],
+                    comment_complete=True, author_comments=[dict(reply_id=12, text=text,
+                        images=['https://example.com/synthetic.png'])])
+                with patch('pcrscript.tasks.strategy_video.read_json') as cache, \
+                     self.assertRaisesRegex(ValueError, '作者评论12.*图片'):
+                    parse_video_source(source, source_options({}, EVENT), Mock(), api=Mock(), ocr=Mock())
+                cache.assert_not_called()
+
+    def test_author_images_block_searched_and_supplied_sources(self):
+        for supplied in (False, True):
+            with self.subTest(supplied=supplied), TemporaryDirectory() as folder:
+                url = 'https://www.bilibili.com/video/BV1234567890/'
+                options = source_options({}, EVENT)
+                options.update(search=not supplied, source_urls=[url] if supplied else [],
+                    parsed_dir=folder, source_cache_dir=str(Path(folder)/'inputs'))
+                api = Mock()
+                api.getVideoInfo.return_value = dict(code=0, data=dict(bvid='BV1234567890',
+                    title='公主连结 国服10月水属性深渊讨伐战', pubdate=START+100,
+                    aid=1, owner=dict(mid=7), pages=[dict(cid=1, part='前哨高难', duration=2)]))
+                api.getVideoComments.return_value = dict(code=0, data=dict(page=dict(num=1,size=20,count=1),
+                    replies=[dict(rpid=12, rcount=0, member=dict(mid=7),
+                                  content=dict(message='', pictures=[dict(img_src='https://example.com/synthetic.png')]))]))
+                media = Mock(side_effect=AssertionError('Unread author images must block media download'))
+                with patch('pcrscript.tasks.strategy_video.discover_sources', return_value=dict(
+                        candidates=[dict(bvid='BV1234567890')])), \
+                     patch('pcrscript.tasks.strategy_video.parse_video_source', side_effect=
+                           lambda *args, **kwargs: parse_video_source(*args, media_fetcher=media, **kwargs)):
+                    report = acquire_strategies(options, api=api, index=Mock())
+                self.assertEqual(report['parties'], [])
+                self.assertTrue(any('作者评论12' in row['error'] and '图片' in row['error'] for row in report['errors']))
+                media.assert_not_called()
+
     def test_target_relevant_metadata_manual_and_borrow_requirements_block_parties(self):
         for field in ('description', 'author_comments'):
             for statement in ('Boss2 手动轴', '需要借角色', 'Boss2 1:05关闭自动', 'Boss1 手动轴'):
@@ -401,6 +436,30 @@ class SubjugationGuideTests(TestCase):
                         else:
                             self.assertEqual(len(parties),1)
                             self.assertEqual(parties[0].members[0].stars,3 if number in targets else None)
+
+    def test_later_scoped_clauses_keep_manual_and_build_requirements(self):
+        for field in ('description', 'author_comments'):
+            for separator in ('；', ';', '。', '，', ' '):
+                for constraint in ('手动轴', '合成角色0：3星'):
+                    with self.subTest(field=field, separator=separator, constraint=constraint), TemporaryDirectory() as folder:
+                        statement = 'Boss1 AUTO'+separator+'Boss2 '+constraint
+                        metadata = {field: [dict(text=statement, reply_id=12)] if field == 'author_comments' else statement}
+                        report, options = self.parse_notes(folder, '前言', 'boss', '说明正文',
+                                                          boss_number=2, metadata=metadata)
+                        parties = parties_for_target(report, options, allow_local_trials=True)
+                        if constraint == '手动轴' or separator in (' ', '，'):
+                            self.assertEqual(parties, [])
+                        else:
+                            self.assertEqual(len(parties), 1)
+                            self.assertEqual(parties[0].members[0].stars, 3)
+
+    def test_scoped_clauses_are_filtered_without_discarding_other_targets(self):
+        statement = 'Boss1 手动；Boss2 AUTO；前哨 需要借角色'
+        self.assertEqual(relevant_statements(statement, dict(kind='boss', boss_number=2)), 'Boss2 AUTO')
+        self.assertEqual(relevant_statements(statement, dict(kind='outpost')), '前哨 需要借角色')
+        source = dict(pages=[dict(cid=1, part='Boss1 AUTO；Boss2 注意事项'), dict(cid=2, part='Boss2打法2')])
+        options = source_options({}, EVENT, kind='boss', boss='合成首领', boss_number=2)
+        self.assertEqual({page['cid'] for page in choose_pages(source, options)}, {1, 2})
 
     def test_metadata_rejects_old_month_other_talent_or_unknown_publication(self):
         options = source_options({}, EVENT)

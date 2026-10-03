@@ -12,6 +12,7 @@ from ..game_ui.screen import normalized
 ELEMENTS = ('fire', 'water', 'wind', 'light', 'dark')
 LABELS = ('火', '水', '风', '光', '暗')
 SHARED_REQUIREMENTS = re.compile(r'通用|共同|共用|公共|全局|所有|全部')
+BOSS_LABEL = re.compile(r'Boss|首领|[1-3]\s*王', re.I)
 BUILD_LABEL = re.compile(r'等级|(?<![A-Za-z])Lv|Rank|(?<![A-Za-z])R\s*\d|技能|专武|专用装备|专\s*\d|星级|星数|[0-9一二三四五六七八九十]+[星★]', re.I)
 BUILD_VALUE = re.compile(
     r'(?:[1-6][星★]|(?:等级|Lv\.?|Rank|R|技能(?:等级)?)[：:=]?\d{1,3}(?!\d)|'
@@ -160,7 +161,8 @@ def leading_boss_scope(line):
     atom = r'(?:(?:Boss|首领)\s*)?[1-3](?!\d)(?:\s*王)?'
     match = re.match(r'\s*[【\[]?\s*('+atom+r'(?:\s*[/、,，&和及与\-－~～至到]\s*'+atom+r')*)', line, re.I)
     if (not match or not re.search(r'Boss|首领|王', match[1], re.I) or '前哨' in line
-            or re.match(r'\s*[/、,，&和及与\-－~～至到]', line[match.end():])):
+            or re.match(r'\s*[/、,，&和及与\-－~～至到]', line[match.end():])
+            or BOSS_LABEL.search(line[match.end():])):
         return None, 0
     markers = list(re.finditer(r'[1-3]', match[1]))
     bosses = {int(m[0]) for m in markers}
@@ -174,15 +176,22 @@ def leading_boss_scope(line):
 def relevant_statements(text, options):
     """Keep common requirements and those explicitly scoped to this target."""
     result = []
-    for line in text.splitlines():
+    # Lists use commas/slashes; sentence boundaries delimit independent scopes.
+    # A remaining clause with later target markers is ambiguous, never unrelated.
+    for line in re.split(r'[\r\n;；。!?！？|｜]+', text):
+        line = line.strip()
+        if not line:
+            continue
         if SHARED_REQUIREMENTS.search(line):
             result.append(line)
             continue
-        bosses, _ = leading_boss_scope(line)
+        bosses, scope_end = leading_boss_scope(line)
+        if options.get('boss') and options['boss'] in line[scope_end:]:
+            bosses = None
         if bosses is not None and (options['kind'] == 'outpost' or options.get('boss_number') is not None
                                    and options['boss_number'] not in bosses):
             continue
-        boss_label = re.search(r'Boss|首领|[1-3]王', line, re.I)
+        boss_label = BOSS_LABEL.search(line)
         if (options['kind'] == 'outpost' and '前哨' not in line
                 and re.match(r'\s*[【\[]?\s*(?:Boss(?![A-Za-z0-9])|首领)(?!\s*[1-3])', line, re.I)):
             continue
