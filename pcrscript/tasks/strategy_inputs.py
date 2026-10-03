@@ -8,12 +8,20 @@ import time
 from urllib.parse import urlsplit,urljoin
 import requests
 
+SOURCE_CACHE_VERSION = 3
+
 
 def author_comment_clues(response, owner_id, video_url):
     """Keep author identity and reply provenance; viewers are not the author."""
     if response.get('code') != 0:
         raise ValueError('评论读取未完成：'+str(response.get('code')))
-    data=response.get('data') or {};queue=[];seen=set();clues=[]
+    data=response.get('data')
+    if not isinstance(data,dict) or not any(k in data for k in ('replies','hots','top','top_replies')):
+        raise ValueError('评论结构未知，不能确认作者补充已读取')
+    for key,kind in (('replies',list),('hots',list),('top',dict),('top_replies',(dict,list))):
+        if data.get(key) is not None and not isinstance(data[key],kind):
+            raise ValueError('评论列表结构未知：'+key)
+    queue=[];seen=set();clues=[]
     for key in ('replies','hots'):
         queue.extend(data.get(key) or [])
     queue.extend(v for v in (data.get('top') or {}).values() if isinstance(v,dict))
@@ -82,7 +90,8 @@ def preferred_sources(urls,api,*,directory='cache/game/strategies/user_sources',
         try:
             if path.exists():
                 saved=json.loads(path.read_text(encoding='utf-8'))
-                if saved.get('version')==2 and saved.get('url')==url and 0<=time.time()-saved['fetched_at']<86400:
+                if (saved.get('version')==SOURCE_CACHE_VERSION and not saved.get('comment_pending')
+                        and saved.get('url')==url and 0<=time.time()-saved['fetched_at']<86400):
                     result.append(dict(saved,priority=priority));continue
             bvid=re.search(r'/(BV[0-9A-Za-z]{10})(?:[/?#]|$)',url)
             if urlsplit(url).hostname in ('www.bilibili.com','bilibili.com','m.bilibili.com') and bvid:
@@ -104,7 +113,7 @@ def preferred_sources(urls,api,*,directory='cache/game/strategies/user_sources',
                 entry=dict(provider='web',title=parser.text[0] if parser.text else '',
                            description='\n'.join(parser.text),images=[urljoin(response.url,u) for u in parser.images],
                            resolved_url=response.url)
-            entry.update(version=2,url=url,fetched_at=time.time(),priority=priority,user_provided=True,
+            entry.update(version=SOURCE_CACHE_VERSION,url=url,fetched_at=time.time(),priority=priority,user_provided=True,
                          readiness='source_only',pending=['仍需核验任务范围和解析角色/培养要求'])
             path.write_text(json.dumps(entry,ensure_ascii=False,indent=2),encoding='utf-8')
             result.append(entry)

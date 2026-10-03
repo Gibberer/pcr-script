@@ -21,7 +21,7 @@ from .strategy_document import Evidence, Fact, empty_member, finalize, export_do
 from .strategy_sources import BORROW_PART, MANUAL_PART, UNVERIFIED_SETTING, discover_sources
 from .strategy_inputs import preferred_sources
 
-PARSER_VERSION = 65
+PARSER_VERSION = 66
 FRAME_OCR_VERSION = 1
 COMBAT_AUDIT_SECONDS = 20
 RECOLLECTION_UNSUPPORTED = re.compile(
@@ -650,6 +650,8 @@ def event_record_rows(frame, texts, index):
 def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None,
                        media_fetcher=fetch_video, check=lambda: None) -> dict:
     """Return candidates plus field evidence, including incomplete/contradictory ones."""
+    if options['task_type'] == 'subjugation' and source.get('comment_pending'):
+        raise ValueError('作者评论补充未读取完成：'+str(source['comment_pending']))
     from rapidocr import RapidOCR
     from .strategy_tables import universal_row
     api = api or BilibiliApi(timeout=options.get('request_timeout', 20), browser_session=True)
@@ -1219,10 +1221,14 @@ def acquire_strategies(options: dict, *, api=None, index=None, ocr=None, check=l
                         directory=options.get('source_cache_dir', 'cache/game/strategies/user_sources'),
                         timeout=options.get('request_timeout', 20), follow_comments=False)
                     report['errors'].extend(errors)
-                    if supplements:
-                        source['author_comments'] = supplements[0].get('author_comments', [])
-                        source['comment_scope'] = supplements[0].get('comment_scope')
-                        source['comment_pending'] = supplements[0].get('comment_pending')
+                    if not supplements:
+                        raise ValueError('作者评论补充未读取完成：没有来源返回')
+                    supplement = supplements[0]
+                    if (supplement.get('comment_pending') or not supplement.get('comment_scope')
+                            or not isinstance(supplement.get('author_comments'), list)):
+                        raise ValueError('作者评论补充未读取完成：'+str(supplement.get('comment_pending') or '读取状态未知'))
+                    source['author_comments'] = supplement['author_comments']
+                    source['comment_scope'] = supplement['comment_scope']
                 if not choose_pages(source, options):
                     report.setdefault('skipped_sources', []).append(dict(bvid=bvid, reason='没有目标关卡候选分P'))
                     continue

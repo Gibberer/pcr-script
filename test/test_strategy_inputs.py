@@ -37,6 +37,27 @@ class CommentSourcesTests(TestCase):
             self.assertIn('comment_pending',sources[0])
             self.assertEqual(sources[0]['readiness'],'source_only')
 
+    def test_failed_comments_are_refetched_before_reusing_the_source_cache(self):
+        api=Mock()
+        api.getVideoInfo.return_value={'code':0,'data':dict(bvid='BV1234567890',aid=1,title='guide',owner={'mid':7})}
+        api.getVideoComments.side_effect=[{'code':-352}, {'code':0,'data':{'replies':[reply(1,7,'需要借角色')]}}]
+        with TemporaryDirectory() as folder:
+            url='https://www.bilibili.com/video/BV1234567890'
+            first,_=preferred_sources([url],api,directory=folder)
+            self.assertIn('comment_pending',first[0])
+            second,_=preferred_sources([url],api,directory=folder)
+            self.assertNotIn('comment_pending',second[0])
+            self.assertEqual(second[0]['author_comments'][0]['text'],'需要借角色')
+            third,_=preferred_sources([url],api,directory=folder)
+            self.assertEqual(third[0]['author_comments'],second[0]['author_comments'])
+            self.assertEqual(api.getVideoComments.call_count,2)
+
+    def test_unknown_comment_response_is_not_an_empty_supplement(self):
+        for data in (None, {}, {'unknown': []}, [], {'replies':'changed'}, {'top':[]}):
+            with self.subTest(data=data),self.assertRaises(ValueError):
+                author_comment_clues(dict(code=0,data=data),7,'https://example.com/video')
+        self.assertEqual(author_comment_clues(dict(code=0,data={'replies':None}),7,'https://example.com/video'),[])
+
     def test_one_hop_does_not_crawl_recursive_recommendations(self):
         api=Mock()
         api.getVideoInfo.side_effect=lambda bvid:{'code':0,'data':dict(bvid=bvid,aid=1,title='guide',owner={'mid':7})}

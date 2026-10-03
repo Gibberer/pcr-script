@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from unittest import TestCase
 from unittest.mock import Mock, patch
 import numpy as np
+import requests
 
 from pcrscript.constants import SERVER_TIMEZONE
 from pcrscript.game_ui.guide_vision import GuideText
@@ -63,7 +64,7 @@ class SubjugationGuideTests(TestCase):
                 report_progress=Mock(), check_deadline=Mock(), save=Mock())
             with patch('pcrscript.tasks.task_abyss_subjugation.prepare_avatars'), \
                  patch('pcrscript.tasks.strategy_video.BilibiliApi', return_value=api), \
-                 patch('pcrscript.tasks.strategy_video.preferred_sources', return_value=([], [])), \
+                 patch('pcrscript.tasks.strategy_video.preferred_sources', return_value=([dict(author_comments=[], comment_scope='synthetic')], [])), \
                  patch('pcrscript.tasks.strategy_video.parse_video_source', side_effect=parse) as parser:
                 self.assertEqual(AbyssSubjugation.source_parties(runner, 'outpost', difficulty='高难'), [])
                 found = AbyssSubjugation.source_parties(runner, 'outpost', difficulty='高难', advance=True)
@@ -131,10 +132,65 @@ class SubjugationGuideTests(TestCase):
             comment = dict(text='3王需要等级突破', reply_id=12, owner_id='34')
             parsed = dict(parties=[], errors=[], source='https://example.com/synthetic')
             with patch('pcrscript.tasks.strategy_video.discover_sources', return_value=dict(candidates=[dict(bvid='BVSYNTHETIC')])), \
-                 patch('pcrscript.tasks.strategy_video.preferred_sources', return_value=([dict(author_comments=[comment])], [])), \
+                 patch('pcrscript.tasks.strategy_video.preferred_sources', return_value=([dict(author_comments=[comment], comment_scope='synthetic')], [])), \
                  patch('pcrscript.tasks.strategy_video.parse_video_source', return_value=parsed) as parse:
                 acquire_strategies(options, api=api, index=Mock())
                 self.assertEqual(parse.call_args.args[0]['author_comments'], [comment])
+
+    def test_unread_comments_block_both_search_hits_and_supplied_links(self):
+        for supplied in (False, True):
+            for response in (dict(code=-352), dict(code=0, data=None),
+                             requests.ConnectionError('synthetic offline'), dict(code=0, data=dict(replies=[]))):
+                with self.subTest(supplied=supplied, response=response), TemporaryDirectory() as folder:
+                    url = 'https://www.bilibili.com/video/BV1234567890/'
+                    options = source_options({}, EVENT)
+                    options.update(search=not supplied, source_urls=[url] if supplied else [],
+                        parsed_dir=folder, source_cache_dir=str(Path(folder)/'inputs'))
+                    api = Mock()
+                    api.getVideoInfo.return_value = dict(code=0, data=dict(bvid='BV1234567890',
+                        title='公主连结 国服10月水属性深渊讨伐战', pubdate=START+100,
+                        aid=1, owner=dict(mid=7), pages=[dict(cid=1, part='前哨高难', duration=2)]))
+                    if isinstance(response, Exception):
+                        api.getVideoComments.side_effect = response
+                    else:
+                        api.getVideoComments.return_value = response
+                    parsed = dict(trial_report(), errors=[])
+                    with patch('pcrscript.tasks.strategy_video.discover_sources', return_value=dict(
+                            candidates=[dict(bvid='BV1234567890')])), \
+                         patch('pcrscript.tasks.strategy_video.parse_video_source', return_value=parsed) as parse:
+                        report = acquire_strategies(options, api=api, index=Mock())
+                    if response == dict(code=0, data=dict(replies=[])):
+                        self.assertEqual(len(report['parties']), 1)
+                        parse.assert_called_once()
+                    else:
+                        self.assertEqual(report['parties'], [])
+                        self.assertTrue(any('评论' in e['error'] for e in report['errors']))
+                        parse.assert_not_called()
+
+    def test_empty_supplement_result_cannot_reuse_a_candidates_prior_comments(self):
+        with TemporaryDirectory() as folder:
+            options = source_options({}, EVENT)
+            options['parsed_dir'] = folder
+            api = Mock()
+            api.getVideoInfo.return_value = dict(code=0, data=dict(bvid='BV1234567890',
+                title='公主连结 国服10月水属性深渊讨伐战', pubdate=START+100,
+                pages=[dict(cid=1, part='前哨高难', duration=2)]))
+            with patch('pcrscript.tasks.strategy_video.discover_sources', return_value=dict(
+                    candidates=[dict(bvid='BV1234567890', author_comments=[])])), \
+                 patch('pcrscript.tasks.strategy_video.preferred_sources', return_value=([], [])), \
+                 patch('pcrscript.tasks.strategy_video.parse_video_source', return_value=dict(trial_report(), errors=[])) as parse:
+                report = acquire_strategies(options, api=api, index=Mock())
+            self.assertEqual(report['parties'], [])
+            parse.assert_not_called()
+
+    def test_parser_rejects_pending_author_comments_before_media_or_cache(self):
+        options = source_options({}, EVENT)
+        source = dict(bvid='BV1234567890', url='https://example.com/synthetic',
+            comment_pending='评论未获取：ConnectionError', pages=[])
+        with patch('pcrscript.tasks.strategy_video.read_json') as cache, \
+             self.assertRaisesRegex(ValueError, '评论'):
+            parse_video_source(source, options, Mock(), api=Mock(), ocr=Mock())
+        cache.assert_not_called()
 
     def test_target_relevant_metadata_manual_and_borrow_requirements_block_parties(self):
         for field in ('description', 'author_comments'):
@@ -352,7 +408,7 @@ class SubjugationGuideTests(TestCase):
             api.getVideoInfo.return_value = dict(code=0, data=dict(bvid='BVSYNTHETIC',
                 title='公主连结10月水属性深渊讨伐战', desc='-', pubdate=START+100, pages=pages))
             with patch('pcrscript.tasks.strategy_video.discover_sources', return_value=dict(candidates=[dict(bvid='BVSYNTHETIC')])), \
-                 patch('pcrscript.tasks.strategy_video.preferred_sources', return_value=([], [])), \
+                 patch('pcrscript.tasks.strategy_video.preferred_sources', return_value=([dict(author_comments=[], comment_scope='synthetic')], [])), \
                  patch('pcrscript.tasks.strategy_video.parse_video_source') as parse:
                 report = acquire_strategies(options, api=api, index=Mock())
             self.assertEqual(report['status'], 'blocked')
