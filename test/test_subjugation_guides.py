@@ -224,40 +224,60 @@ class SubjugationGuideTests(TestCase):
                  ('前哨其他信息', 'outpost', '等级突破要求', 0),
                  ('前哨打法1通用说明', 'outpost', '特别装备五星要求', 0),
                  ('Boss通用说明', 'boss', '特别装备五星要求', 0),
-                 ('Boss通用说明', 'boss', '1:05关闭自动', 0)]
+                 ('Boss通用说明', 'boss', '1:05关闭自动', 0),
+                 ('必看', 'boss', '1:05关闭自动', 0),
+                 ('前言', 'boss', '等级突破要求', 0),
+                 ('', 'boss', '需要借角色', 0),
+                 ('Boss1打法2说明', 'boss', '特别装备五星要求', 0),
+                 ('Boss3打法1共用必看', 'boss', '等级突破要求', 0)]
         for first_title, kind, constraint, eligible in cases:
             with self.subTest(first_title=first_title, constraint=constraint), TemporaryDirectory() as folder:
-                options = source_options({}, EVENT, kind=kind, boss='合成首领', boss_number=1)
-                options['parsed_dir'] = folder
-                source = dict(bvid='BVSYNTHETIC', url='https://example.com/synthetic',
-                    title='公主连结 国服 合成深渊',
-                    author_comments=[dict(text='3王需要等级突破')],
-                    pages=[dict(cid=1, part=first_title, duration=2),
-                           dict(cid=2, part=('前哨' if kind == 'outpost' else 'Boss1')+'打法2', duration=4)])
-                boxes = [(100+i*120, 390, 100, 100) for i in range(5)]
-                members = [dict(name=f'合成角色{i}', rectangle=list(b), score=.99) for i, b in enumerate(boxes)]
-                index = SimpleNamespace(names=[m['name'] for m in members], matrix=np.ones((5,1728),np.float32))
-                capture = Mock()
-                capture.read.side_effect = [(True, np.full((540,960,3), i*20, np.uint8)) for i in range(6)]
-                detail = texts('前哨关卡', '高难') if kind == 'outpost' else texts(
-                    'BOSS详情', '高难', '合成首领', '80000000/80000000')
-                labels = [texts(constraint)]*2+[detail]*2+[
-                    texts(timer, '79000000/80000000') for timer in ('1:29', '1:28')]
-                with patch('pcrscript.tasks.strategy_video.cv.VideoCapture', return_value=capture), \
-                     patch('pcrscript.tasks.strategy_video.sample_seconds', side_effect=[[.5,1.5],[.5,1.5,2.5,3.5]]), \
-                     patch('pcrscript.tasks.strategy_video.frame_texts', side_effect=labels), \
-                     patch('pcrscript.tasks.strategy_video.battle_rectangles', side_effect=[[]]*4+[boxes]*2), \
-                     patch('pcrscript.tasks.strategy_video.combat_team', side_effect=[[]]*4+[members]*2), \
-                     patch('pcrscript.tasks.strategy_video.formation_fields', return_value=[]), \
-                     patch('pcrscript.tasks.strategy_video.combat_auto', return_value=True), \
-                     patch('pcrscript.tasks.strategy_video.combat_set', return_value=True):
-                    report = parse_video_source(source, options, index, api=Mock(), ocr=Mock(),
-                        media_fetcher=lambda *a, **k: (Path(folder)/'synthetic.avi',dict(duration=4)))
+                report, options = self.parse_notes(folder, first_title, kind, constraint)
                 self.assertEqual(len(report['parties']), 1)
                 self.assertEqual(len(parties_for_target(report, options, allow_local_trials=True)), eligible)
                 if not eligible:
                     rows = report['parties'][0]['global_requirements']+report['parties'][0]['manual_actions']
                     self.assertTrue(any(r['text'] == constraint and r['evidence']['cid'] == 1 for r in rows))
+
+    def parse_notes(self, folder, title, kind, constraint, *, combat_title=None):
+        options = source_options({}, EVENT, kind=kind, boss='合成首领', boss_number=1)
+        options['parsed_dir'] = folder
+        source = dict(bvid='BVSYNTHETIC', url='https://example.com/synthetic',
+            title='公主连结 国服 合成深渊', author_comments=[dict(text='3王需要等级突破')],
+            pages=[dict(cid=1, part=title, duration=2),
+                   dict(cid=2, part=combat_title or ('前哨' if kind == 'outpost' else 'Boss1')+'打法2', duration=4)])
+        boxes = [(100+i*120, 390, 100, 100) for i in range(5)]
+        members = [dict(name=f'合成角色{i}', rectangle=list(b), score=.99) for i, b in enumerate(boxes)]
+        index = SimpleNamespace(names=[m['name'] for m in members], matrix=np.ones((5,1728),np.float32))
+        capture = Mock()
+        capture.read.side_effect = [(True, np.full((540,960,3), i*20, np.uint8)) for i in range(6)]
+        detail = texts('前哨关卡', '高难') if kind == 'outpost' else texts(
+            'BOSS详情', '高难', '合成首领', '80000000/80000000')
+        labels = [texts(constraint)]*2+[detail]*2+[
+            texts(timer, '79000000/80000000') for timer in ('1:29', '1:28')]
+        with patch('pcrscript.tasks.strategy_video.cv.VideoCapture', return_value=capture), \
+             patch('pcrscript.tasks.strategy_video.sample_seconds', side_effect=[[.5,1.5],[.5,1.5,2.5,3.5]]), \
+             patch('pcrscript.tasks.strategy_video.frame_texts', side_effect=labels), \
+             patch('pcrscript.tasks.strategy_video.battle_rectangles', side_effect=[[]]*4+[boxes]*2), \
+             patch('pcrscript.tasks.strategy_video.combat_team', side_effect=[[]]*4+[members]*2), \
+             patch('pcrscript.tasks.strategy_video.formation_fields', return_value=[]), \
+             patch('pcrscript.tasks.strategy_video.combat_auto', return_value=True), \
+             patch('pcrscript.tasks.strategy_video.combat_set', return_value=True):
+            return parse_video_source(source, options, index, api=Mock(), ocr=Mock(),
+                media_fetcher=lambda *a, **k: (Path(folder)/'synthetic.avi', dict(duration=4))), options
+
+    def test_common_character_fields_follow_the_current_plan_scope(self):
+        for title, combat, expected in (('前言', 'Boss1打法2', 30),
+                                       ('Boss1方案二说明', 'Boss1打法2', 30),
+                                       ('Boss1方案一说明', 'Boss1打法2', None),
+                                       ('Boss1方案一说明', 'Boss1', 30)):
+            with self.subTest(title=title, combat=combat), TemporaryDirectory() as folder:
+                report, options = self.parse_notes(folder, title, 'boss', '合成角色0：Rank30', combat_title=combat)
+                parties = parties_for_target(report, options, allow_local_trials=True)
+                self.assertEqual(len(parties), 1)
+                self.assertEqual(parties[0].members[0].rank, expected)
+                if expected:
+                    self.assertTrue(all(e['cid'] == 1 for e in report['parties'][0]['members'][0]['rank']['evidence']))
 
     def test_metadata_rejects_old_month_other_talent_or_unknown_publication(self):
         options = source_options({}, EVENT)
@@ -306,6 +326,17 @@ class SubjugationGuideTests(TestCase):
                 pages = choose_pages(source, options)
                 self.assertEqual([p['part'] for p in pages], ['Boss通用说明', '2王注意事项', target])
 
+    def test_unknown_pages_are_retained_even_after_the_combat_part(self):
+        pages = [dict(cid=i, part=title) for i, title in enumerate(
+            ('Boss2打法1', '必看', '前言', ''))]
+        source = dict(pages=pages)
+        options = source_options({}, EVENT, kind='boss', boss='合成首领', boss_number=2)
+        self.assertEqual([p['cid'] for p in choose_pages(source, options)], [1, 2, 3, 0])
+        with self.assertRaisesRegex(ValueError, 'max_pages_per_video=3'):
+            choose_pages(source, dict(options, max_pages_per_video=3))
+        self.assertEqual(choose_pages(dict(pages=[pages[-1]]), dict(options, max_pages_per_video=1)),
+                         [pages[-1]])
+
     def test_requirement_page_budget_blocks_the_source_instead_of_truncating_notes(self):
         pages = [dict(cid=i, part='通用说明'+str(i), duration=2) for i in range(1, 5)]
         pages.append(dict(cid=5, part='Boss1打法1', duration=4))
@@ -336,7 +367,7 @@ class SubjugationGuideTests(TestCase):
                 options.update(parsed_dir=folder, skip_long_media=failure != 'truncated')
                 source = dict(bvid='BVSYNTHETIC', url='https://example.com/synthetic',
                     title='公主连结 国服 合成深渊', pages=[
-                        dict(cid=1, part='前哨其他信息' if failure == 'unknown_notes' else '通用说明',
+                        dict(cid=1, part='前言' if failure == 'unknown_notes' else '通用说明',
                              duration=601 if failure in ('duration_skip', 'truncated') else 2),
                         dict(cid=2, part='前哨打法1', duration=4)])
                 boxes = [(100+i*120, 390, 100, 100) for i in range(5)]

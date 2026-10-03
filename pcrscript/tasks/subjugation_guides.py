@@ -11,6 +11,7 @@ from ..game_ui.screen import normalized
 
 ELEMENTS = ('fire', 'water', 'wind', 'light', 'dark')
 LABELS = ('火', '水', '风', '光', '暗')
+SHARED_REQUIREMENTS = re.compile(r'通用|共同|共用|公共|全局|所有|全部')
 
 
 def source_options(options, event, *, kind='outpost', difficulty='高难', boss='', boss_number=None):
@@ -96,15 +97,14 @@ def choose_pages(source, options):
 
 
 def requirement_pages(source, options):
-    """Retain relevant notes even when a named/numbered combat part is found."""
+    """Any page may carry conditions unless it explicitly targets another fight."""
     result = []
     for page in source.get('pages', []):
         title = page.get('part', page.get('title', ''))
-        if not re.search(r'练度|培养|需求|要求|说明|事项|须知|补充|通用|共同|共用', title):
+        if title.strip() and not relevant_statements(title, options):
             continue
-        if not relevant_statements(title, options):
-            continue
-        if options['kind'] == 'outpost' and re.match(r'\s*(?:[【\[]\s*)?(?:Boss|首领)', title, re.I):
+        if (options['kind'] == 'outpost' and not SHARED_REQUIREMENTS.search(title)
+                and re.match(r'\s*(?:[【\[]\s*)?(?:Boss|首领)', title, re.I)):
             continue
         result.append(page)
     return result
@@ -156,6 +156,9 @@ def relevant_statements(text, options):
     """Keep common requirements and those explicitly scoped to this target."""
     result = []
     for line in text.splitlines():
+        if SHARED_REQUIREMENTS.search(line):
+            result.append(line)
+            continue
         marker = re.match(r'\s*(?:[【\[]\s*)?(?:Boss\s*([1-3])|([1-3])\s*王)', line, re.I)
         if marker and (options['kind'] == 'outpost' or options.get('boss_number') is not None
                        and int(marker[1] or marker[2]) != options['boss_number']):
@@ -231,13 +234,24 @@ def target_scope(options):
     return wanted
 
 
+def plan_number(page):
+    title = page.get('part', page.get('title', ''))
+    if SHARED_REQUIREMENTS.search(title):
+        return None
+    numbers = re.findall(r'(?:打法|方案|阵容|配队)\s*(\d+|[一二三四五六七八九十]+)', title)
+    if len(numbers) != 1:
+        return None
+    value = numbers[0]
+    return int(value) if value.isdecimal() else dict(zip('一二三四五六七八九十', range(1, 11))).get(value)
+
+
 def constraint_cids(pages, frames):
-    """Unknown/common notes apply; only explicitly numbered plans are isolated."""
+    """Keep shared/unknown and same-plan conditions; isolate only known other plans."""
     result = {frame['cid'] for frame in frames}
+    numbers = {plan_number(page) for page in pages if page['cid'] in result}
     for page in pages:
-        title = page.get('part', page.get('title', ''))
-        separate = re.search(r'(?:打法|方案|阵容|配队)\s*(?:\d+|[一二三四五六七八九十]+)', title)
-        if not separate or re.search(r'通用|共同|共用|所有|全部', title):
+        number = plan_number(page)
+        if number is None or not numbers or None in numbers or number in numbers:
             result.add(page['cid'])
     return result
 

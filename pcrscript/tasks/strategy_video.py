@@ -21,7 +21,7 @@ from .strategy_document import Evidence, Fact, empty_member, finalize, export_do
 from .strategy_sources import BORROW_PART, MANUAL_PART, UNVERIFIED_SETTING, discover_sources
 from .strategy_inputs import preferred_sources
 
-PARSER_VERSION = 64
+PARSER_VERSION = 65
 FRAME_OCR_VERSION = 1
 COMBAT_AUDIT_SECONDS = 20
 RECOLLECTION_UNSUPPORTED = re.compile(
@@ -471,7 +471,8 @@ def choose_pages(source: dict, options: dict) -> list[dict]:
     elif kind == 'subjugation':
         from .subjugation_guides import choose_pages as subjugation_pages, requirement_pages
         requirements = requirement_pages(source, options)
-        targets = subjugation_pages(source, options)
+        required_cids = {p['cid'] for p in requirements}
+        targets = [p for p in subjugation_pages(source, options) if p['cid'] in required_cids]
     elif kind in ('event', 'revival'):
         wanted = {'difficulty': options.get('difficulty'), 'mode': options.get('mode')}
         targets = [p for p in pages if (scope := page_scope(p, kind)) == wanted]
@@ -487,6 +488,15 @@ def choose_pages(source: dict, options: dict) -> list[dict]:
     limit = options.get('max_pages_per_video', 4)
     if type(limit) is not int or not 1 <= limit <= 30:
         raise ValueError('max_pages_per_video必须为1到30')
+    if kind == 'subjugation':
+        target_cids = {p['cid'] for p in targets}
+        # Parse all potentially relevant parts, including blank/unknown titles.
+        # A budget cannot turn an unread condition into permission to fight.
+        ordered = [p for p in requirements if p['cid'] not in target_cids] + targets
+        selected = list({p['cid']: p for p in ordered}.values())
+        if len(selected) > limit:
+            raise ValueError(f'攻略说明页与候选关卡无法在 max_pages_per_video={limit} 上限内完整解析，拒绝该来源')
+        return selected
     # Reserve a combat slot; a stage part mentioning training uses one CID.
     selected = list({p['cid']: p for p in requirements[:max(0, limit-1)]}.values())
     for page in targets:
@@ -495,10 +505,6 @@ def choose_pages(source: dict, options: dict) -> list[dict]:
             selected[duplicate] = page
         elif len(selected) < limit:
             selected.append(page)
-    if kind == 'subjugation':
-        missing_requirements = {p['cid'] for p in requirements} - {p['cid'] for p in selected}
-        if missing_requirements:
-            raise ValueError(f'攻略说明页与候选关卡无法在 max_pages_per_video={limit} 上限内完整解析，拒绝该来源')
     return selected
 
 
@@ -840,7 +846,8 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
                     globals_.extend(dict(text=t.text, advisory=False, evidence=asdict(proof)) for t in texts
                                     if t.score >= .94 and RECOLLECTION_UNSUPPORTED.search(t.text)
                                     and t.text not in ('特别装备设定', '可变更队伍角色的特别装备。'))
-                if not wide_crop and (requirements_page or any('角色需求' in t.text or '练度' in t.text for t in texts)):
+                if (options['task_type'] != 'subjugation' and not wide_crop
+                        and (requirements_page or any('角色需求' in t.text or '练度' in t.text for t in texts))):
                     chapter_scope = requirement_scope(texts)
                     for row in requirement_cells(frame, texts, index):
                         evidence = Evidence(**{**asdict(proof), 'text': row['text'], 'rectangle': row['rectangle'],
@@ -881,10 +888,6 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
                 elif options['task_type'] == 'recollection':
                     if scope != dict(area=options.get('area'), floor=int(options['stage'])):
                         continue
-                elif options['task_type'] == 'subjugation':
-                    from .subjugation_guides import applicable_scope
-                    if not applicable_scope(scope, options, allow_higher=True):
-                        continue
                 elif options['task_type'] in ('event', 'revival'):
                     area = options.get('area', '')
                     description = source.get('title', '')+' '+source.get('description', '')+' '+page_name
@@ -892,6 +895,14 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
                     scope = dict(scope, area=area) if scope else {}
                 # Full-name text rows and formation badges also occur outside battle.
                 field_scope = scope if verified else {'chapters': requirement_scope(texts)}
+                if options['task_type'] == 'subjugation':
+                    if not verified:
+                        field_scope = {'subjugation_cid': int(page['cid'])}
+                    if not wide_crop and not combat_scene:
+                        for row in requirement_cells(frame, texts, index):
+                            evidence = Evidence(**{**asdict(proof), 'text': row['text'], 'rectangle': row['rectangle'],
+                                                   'confidence': row['confidence'], 'method': 'avatar_labeled_cell'})
+                            character_facts[row['name']].append((row['field'], row['value'], evidence, field_scope))
                 for t in texts:
                     if t.score < .95:
                         continue
@@ -903,6 +914,10 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
                 for row in (formation_fields(frame, texts, index, badges) if not wide_crop else []):
                     evidence = Evidence(**{**asdict(proof), 'text': row['text'], 'rectangle': row['rectangle'], 'method': 'formation_badge', 'confidence': row['confidence']})
                     character_facts[row['name']].append((row['field'], row['value'], evidence, field_scope))
+                if options['task_type'] == 'subjugation':
+                    from .subjugation_guides import applicable_scope
+                    if not applicable_scope(scope, options, allow_higher=True):
+                        continue
                 formation_found = False
                 if not found:
                     found = formation_team(small, texts, index)
@@ -1019,6 +1034,9 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
         if any(not any(row['name'] == member['name'] and row['confidence'] >= .92
                        for row in team['identity_evidence']) for member in team['members']):
             continue
+        if options['task_type'] == 'subjugation':
+            from .subjugation_guides import constraint_cids
+            cids = constraint_cids(pages, team['frames'])
         chapter = team['scope'].get('chapters')
         auto_proofs = defaultdict(list)
         for value, proof in team.pop('auto_observations'):
@@ -1036,7 +1054,11 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
         for member in team['members']:
             observations = team['observations'][member['name']]
             for field, value, evidence, chapters in character_facts[member['name']]:
-                if isinstance(chapters, dict):
+                if options['task_type'] == 'subjugation' and evidence.cid not in cids:
+                    continue
+                if options['task_type'] == 'subjugation' and isinstance(chapters, dict) and 'subjugation_cid' in chapters:
+                    exact, chapters = chapters['subjugation_cid'] in cids, None
+                elif isinstance(chapters, dict):
                     exact = bool(chapters) and all(team['scope'].get(k) == v for k, v in chapters.items())
                     chapters = chapters.get('chapters') if set(chapters) == {'chapters'} else None
                 else:
@@ -1076,8 +1098,6 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
             # Keep every selected notes page unless it explicitly belongs to
             # a different numbered plan. Absence of a recognized notes title
             # cannot remove an observed preparation or manual requirement.
-            from .subjugation_guides import constraint_cids
-            cids = constraint_cids(pages, team['frames'])
             def applicable(row):
                 evidence = row.get('evidence', {})
                 return (evidence.get('cid') is None or evidence.get('cid') in cids
