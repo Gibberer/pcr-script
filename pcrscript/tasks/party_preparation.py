@@ -143,9 +143,11 @@ def cultivation_plan(party, observed):
 
 
 def party_fingerprint(party):
-    """Settings and build changes are different trials, even for the same five."""
+    """Build, switches and a verified damage goal define a distinct trial."""
+    reference = party.damage_reference
     return json.dumps([party.auto, sorted((normalized(m.name), asdict(m))
-                       for m in party.members)], ensure_ascii=False, sort_keys=True)
+                       for m in party.members), reference.get('damage'), reference.get('scope'),
+                       bool(reference.get('evidence'))], ensure_ascii=False, sort_keys=True)
 
 
 def rank_candidates(parties, observed, *, available=()):
@@ -174,8 +176,9 @@ class GuideCandidate:
     allow_substitutions: bool = False
 
 
-def source_candidates(fetch, observations, *, max_batches=3, available=lambda: ()):
-    """Try original source teams before substitutions, then let callers fall back."""
+def source_candidates(fetch, observations, *, max_batches=3, available=lambda: (),
+                      allow_substitutions=True):
+    """Bound source batches and try all original teams before guided substitutions."""
     seen, originals = set(), []
     for batch in range(max_batches):
         fresh = []
@@ -187,11 +190,13 @@ def source_candidates(fetch, observations, *, max_batches=3, available=lambda: (
                 fresh.append(party)
         if fetched and not fresh:
             break
+        if not fresh:
+            continue
         for party in rank_candidates(fresh, observations(), available=available()):
             originals.append(party)
             yield GuideCandidate(party)
-    for party in rank_candidates(originals, observations(), available=available()):
-        if party.build_basis == 'local_trial':
+    if allow_substitutions and originals:
+        for party in rank_candidates(originals, observations(), available=available()):
             yield GuideCandidate(party, allow_substitutions=True)
 
 

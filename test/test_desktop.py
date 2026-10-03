@@ -2,6 +2,8 @@
 import json
 from contextlib import nullcontext
 from pathlib import Path
+import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -160,6 +162,32 @@ class DesktopTests(unittest.TestCase):
             report = desktop.environment_report()
         self.assertTrue(report['ready'])
         self.assertEqual(report['missing'], [])
+
+    def test_subjugation_options_remove_saved_positions_and_preserve_legacy_sweep_only(self):
+        from pcrscript.tasks.task_abyss_subjugation import validate_options
+        defaults = desktop.new_config()['options']['AbyssSubjugation']
+        self.assertIs(defaults['first_clear'], True)
+        self.assertNotIn('normal_team', defaults)
+        self.assertNotIn('boss_teams', defaults)
+        legacy = dict(normal_team=[1, 1], boss_teams=[[1, 1]], allow_local_trials=False)
+        view = desktop.config_data(dict(AbyssSubjugation=legacy), 'synthetic')
+        migrated = view['options']['AbyssSubjugation']
+        self.assertIs(migrated['first_clear'], False)
+        self.assertEqual(validate_options(migrated), validate_options(legacy))
+        self.assertIn('normal_team', legacy)  # Reading the editor does not mutate the account config.
+        self.assertNotIn('normal_team', migrated)
+        self.assertNotIn('boss_teams', migrated)
+
+    def test_standalone_desktop_entry_loads_migrated_task_options(self):
+        self.config.write_text(yaml.safe_dump(dict(AbyssSubjugation=dict(
+            normal_team=[1, 1], allow_local_trials=False))), encoding='utf-8')
+        result = subprocess.run([sys.executable, '-X', 'utf8', desktop.__file__,
+            'load', '--config', str(self.config)], capture_output=True, text=True,
+            encoding='utf-8', timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        options = json.loads(result.stdout)['options']['AbyssSubjugation']
+        self.assertIs(options['first_clear'], False)
+        self.assertNotIn('normal_team', options)
 
     def test_labyrinth_available_to_add_with_shared_resource_limits(self):
         entry = next(row for row in desktop.catalog() if row['name'] == 'dawn_labyrinth')

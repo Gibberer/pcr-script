@@ -2,20 +2,17 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
-from dataclasses import asdict
 from hashlib import sha256
 from pathlib import Path
-from itertools import chain
-from collections import deque
 import re
 
 from .base import Event, EventNews, TimeLimitTask
 from .event_battle import EventCombat
 from .abyss_retry import combat_sample, retry_decision
 from .registry import register
-from .subjugation_party import SubjugationFormation, audit_current, saved_party, require_event_talent, prepare_avatars, current_party, guide_party, trial_stage
-from .event_strategy import EventParty, MemberRequirement
-from .party_preparation import GuideCandidate, source_candidates, prepare_special, party_fingerprint
+from .subjugation_party import (SubjugationFormation, prepare_avatars, recover_equipment,
+                                require_event_talent, guide_party, trial_stage)
+from .party_preparation import source_candidates, prepare_special, party_fingerprint, numeric_equipment_unknown
 from ..constants import SERVER_TIMEZONE
 from ..game_ui import abyss_subjugation as field
 from ..game_ui.avatar_assets import atomic_json, read_json
@@ -28,10 +25,19 @@ class SubjugationBlocked(EventUIError):
     pass
 
 
+def migrate_options(options):
+    """Remove retired saved-team settings without expanding old sweep-only runs."""
+    value = dict(options)
+    value.setdefault('first_clear', value.get('allow_local_trials') is not False)
+    value.pop('normal_team', None)
+    value.pop('boss_teams', None)
+    return value
+
+
 def validate_options(options):
     if not isinstance(options, dict):
         raise ValueError('AbyssSubjugation必须是配置对象')
-    value = dict(options)
+    value = migrate_options(options)
     for key, default, upper in (('timeout', 7200, 21600), ('battle_timeout', 240, 600),
                                 ('max_stamina', 400, 2000), ('max_boss_tickets', 99, 999),
                                 ('max_simulations', 30, 100), ('max_normal_trials', 6, 12),
@@ -39,21 +45,12 @@ def validate_options(options):
         number = value.setdefault(key, default)
         if type(number) is not int or not 1 <= number <= upper:
             raise ValueError(f'AbyssSubjugation.{key}必须是1到{upper}的整数')
-    for key, default in (('preview_only', False), ('allow_local_trials', True),
+    for key, default in (('preview_only', False), ('first_clear', True), ('allow_local_trials', True),
                          ('auto_collect_house_stamina', True), ('discover_sources', True),
                          ('auto_equip_special', True), ('allow_five_star_upgrade', False),
                          ('allow_divine_amulets', False)):
         if type(value.setdefault(key, default)) is not bool:
             raise ValueError('AbyssSubjugation.'+key+'必须是布尔值')
-    normal = value.setdefault('normal_team', [1, 1])
-    bosses = value.setdefault('boss_teams', [[g, row] for g in range(1, 6) for row in (1, 2)])
-    def valid_team(team):
-        return (isinstance(team, (list, tuple)) and len(team) == 2
-                and all(type(v) is int for v in team) and 1 <= team[0] <= 5 and 1 <= team[1] <= 2)
-    if not valid_team(normal) or not isinstance(bosses, list) or not bosses or any(not valid_team(t) for t in bosses):
-        raise ValueError('normal_team和boss_teams使用[编组1～5, 顶部队伍1～2]')
-    if len({tuple(t) for t in bosses}) != len(bosses) or len(bosses) > 10:
-        raise ValueError('boss_teams必须是最多10个不同的保存队伍位置')
     if 'avatars' in value and not isinstance(value['avatars'], dict):
         raise ValueError('AbyssSubjugation.avatars必须是配置对象')
     if 'sources' in value and not isinstance(value['sources'], dict):
@@ -96,11 +93,11 @@ class AbyssSubjugation(TimeLimitTask):
         self.state = {}
         self.state_path = None
         self.event = None
-        self.normal_party = None
         self.last_result = {}
         self.house_checked = False
         self.simulation_count = 0
         self.source_pools = {}
+        self.guide_streams = {}
         self.inspected_sources = {}
         self.boss_unlocks = {}
         self.failed_boss_teams = {}
@@ -289,19 +286,6 @@ class AbyssSubjugation(TimeLimitTask):
         self.ui.click(button)
         return self.wait(field.formation, '队伍编组')
 
-    def choose_saved(self, candidate, reopen):
-        self.report_progress(f'深渊讨伐战 · 核验保存编组{candidate[0]}第{candidate[1]}队')
-        if not saved_party(self, *candidate):
-            raise SubjugationBlocked('指定保存编组没有可呼出的队伍')
-        require_event_talent(self)
-        def reload():
-            reopen()
-            if not saved_party(self, *candidate):
-                raise SubjugationBlocked('专武核验后保存编组不可用')
-        party, order = audit_current(self, reload)
-        require_event_talent(self, party)
-        return party, order
-
     def commit(self, plan):
         if self.state.get('pending'):
             raise SubjugationBlocked('上次消费尚未核对；未重复提交')
@@ -329,8 +313,6 @@ class AbyssSubjugation(TimeLimitTask):
                 raise SubjugationBlocked('前哨次数扣除或讨伐委托证增加未确认；未重复提交')
             self.report['stamina_spent'] += plan['stamina_cost']
             self.report['outposts'][plan['difficulty']] = dict(cleared=True, gained_tickets=tickets-plan['tickets_before'])
-            if plan['kind'] == 'outpost_battle' and plan.get('normal_party'):
-                self.state['normal_party'] = plan['normal_party']
         else:
             detail = self.boss_detail(plan['index'], plan['difficulty'])
             if detail is None or field.boss_name(detail) != plan['boss']:
@@ -426,15 +408,20 @@ class AbyssSubjugation(TimeLimitTask):
         self.save()
         return result
 
-    def guide_candidates(self, kind, reopen, boss='', boss_number=None):
+    def guide_candidates(self, kind, difficulty, reopen, boss='', boss_number=None):
+        key = (kind, difficulty, boss)
         def available():
             stage = trial_stage(self)
             if stage.element not in getattr(self.formation, '_owned_candidates', {}):
                 reopen()
             return self.formation.owned_candidates(stage.element)
-        return source_candidates(lambda **kw: self.source_parties(kind, boss, boss_number, **kw),
-                                 lambda: self.formation.observed, available=available,
-                                 max_batches=self.options['max_source_batches'])
+        if key not in self.guide_streams:
+            self.guide_streams[key] = source_candidates(
+                lambda **kw: self.source_parties(kind, boss, boss_number, difficulty=difficulty, **kw),
+                lambda: self.formation.observed, available=available,
+                max_batches=self.options['max_source_batches'],
+                allow_substitutions=self.options['allow_local_trials'])
+        return self.guide_streams[key]
 
     def ensure_stamina(self, difficulty, detail):
         # Once cleared, the game initially selects all remaining attempts.
@@ -461,10 +448,6 @@ class AbyssSubjugation(TimeLimitTask):
                 return detail, preview[0]-preview[1]
         raise SubjugationBlocked('现有体力不足；未购买体力')
 
-    @staticmethod
-    def party_signature(party):
-        return tuple(sorted(normalized(member.name) for member in party.members))
-
     def select_verified_party(self, party, reopen):
         prepare_avatars(self)
         ready, selection = self.formation.select(party)
@@ -476,83 +459,67 @@ class AbyssSubjugation(TimeLimitTask):
             ('专武' in reason and '未知' in reason)
             or reason.startswith('账号培养或装备未知：') and reason.rsplit('：', 1)[-1] in ('unique', 'unique2')
             for reason in reasons)
-        if party.build_basis == 'local_trial' and equipment_unknown:
-            # A new process has no unreleased-equipment proof from the prior
-            # audit. Re-read the account's equipment page instead of requiring
-            # Agent preparation or treating an unknown badge as absent.
-            return guide_party(self, party, reopen)
+        if equipment_unknown:
+            # Re-establish missing evidence without replacing the simulated
+            # build or running cultivation between simulation and paid combat.
+            self.formation.numeric_equipment_names = numeric_equipment_unknown(party, self.formation.observed)
+            try:
+                recover_equipment(self, [m.name for m in party.members])
+            finally:
+                self.formation.numeric_equipment_names = ()
+            reopen()
+            ready, selection = self.formation.select(party)
+            if ready:
+                return party, selection['order']
         raise SubjugationBlocked('队伍核验失败：'+str(selection))
 
-    def choose_normal_party(self, reopen, failed):
-        if self.normal_party is not None and self.party_signature(self.normal_party) not in failed:
-            self.normal_party, order = self.select_verified_party(self.normal_party, reopen)
-            return self.normal_party, order
-        for candidate in self.guide_candidates('outpost', reopen):
+    def choose_normal_party(self, difficulty, reopen, failed):
+        for candidate in self.guide_candidates('outpost', difficulty, reopen):
             seed = candidate.party
-            if self.party_signature(seed) in failed and not candidate.allow_substitutions:
-                continue
             try:
                 reopen()
                 party, order = guide_party(self, seed, reopen,
                                           allow_substitutions=candidate.allow_substitutions)
-                if self.party_signature(party) in failed:
+                if party_fingerprint(party) in failed:
                     continue
             except EventUIError as error:
                 self.report.setdefault('candidate_rejections', []).append(dict(candidate=seed.name, source=seed.source, reason=str(error)))
                 continue
-            self.normal_party = party
-            self.report['normal_team'] = dict(candidate='guide', party=party.name, source=party.source)
+            self.report.setdefault('outpost_parties', {})[difficulty] = dict(
+                party=party.name, source=party.source, assumptions=party.assumptions)
             return party, order
-        candidates = ['current', self.options['normal_team']]
-        candidates += [t for t in self.options['boss_teams'] if t != self.options['normal_team']]
-        for candidate in candidates:
-            try:
-                reopen()
-                if candidate == 'current':
-                    party, order = current_party(self, reopen, excluded_teams=failed)
-                else:
-                    party, order = self.choose_saved(candidate, reopen)
-                if self.party_signature(party) in failed:
-                    raise EventUIError('本日已核实失败的前哨队伍，不重复试打')
-                break
-            except EventUIError as error:
-                self.report.setdefault('candidate_rejections', []).append(dict(candidate=candidate, reason=str(error)))
-        else:
-            raise SubjugationBlocked('没有核验通过的本期攻略或保存队伍；未开战')
-        self.normal_party = party
-        self.report['normal_team'] = dict(candidate=candidate, party=party.name)
-        return party, order
+        raise SubjugationBlocked('没有核验通过的本期前哨攻略；未开战')
 
-    def source_parties(self, kind, boss='', boss_number=None, *, advance=False):
+    def source_parties(self, kind, boss='', boss_number=None, *, difficulty, advance=False):
         if not self.options['discover_sources'] and not self.options['source_urls']:
             return []
-        key = (kind, boss)
+        key = (kind, difficulty, boss)
         if key not in self.source_pools or advance:
             from .subjugation_guides import source_options, parties_for_target
             from .strategy_video import acquire_strategies
             prepare_avatars(self)
             options = source_options(self.options, self.event, kind=kind, boss=boss, boss_number=boss_number,
-                                     difficulty=field.BOSS_DIFFICULTIES[-1] if kind == 'boss' else field.DIFFICULTIES[-1])
-            self.report_progress('检索并解析本期攻略 · '+('高难前哨' if kind == 'outpost' else boss))
+                                     difficulty=difficulty)
+            self.report_progress('检索并解析本期攻略 · '+difficulty+('前哨' if kind == 'outpost' else boss))
             report = acquire_strategies(options, index=self.formation.avatars, check=self.check_deadline,
                 exclude_sources=self.inspected_sources.get(key, set()))
             self.inspected_sources.setdefault(key, set()).update(report.get('inspected_sources', []))
-            self.report.setdefault('sources', []).append(dict(kind=kind, boss=boss, report=report))
+            self.report.setdefault('sources', []).append(dict(kind=kind, difficulty=difficulty, boss=boss, report=report))
             self.source_pools[key] = parties_for_target(report, options,
                                                 allow_local_trials=self.options['allow_local_trials'])
             self.save()
         return self.source_pools[key]
 
     def normal_first_clear(self, difficulty, detail, cost):
-        if not self.options['allow_local_trials']:
-            raise SubjugationBlocked('前哨尚未通关，未允许当前账号队伍试打')
+        if not self.options['first_clear']:
+            raise SubjugationBlocked('前哨尚未通关，已关闭首次通关')
         if self.report['stamina_spent']+cost > self.options['max_stamina']:
             raise SubjugationBlocked('前哨体力消费达到本次上限')
         failures = self.state.setdefault('failed_outpost_teams', {})
-        if failures.get('day') != self.day():
+        if failures.get('day') != self.day() or failures.get('version') != 2:
             failures.clear()
-            failures.update(day=self.day(), difficulties={})
-        failed = {tuple(names) for names in failures['difficulties'].get(difficulty, [])}
+            failures.update(day=self.day(), version=2, difficulties={})
+        failed = set(failures['difficulties'].get(difficulty, []))
         def reopen():
             return self.open_formation(self.normal_detail(difficulty))
         for trial in range(self.options['max_normal_trials']):
@@ -560,15 +527,12 @@ class AbyssSubjugation(TimeLimitTask):
             plan = dict(kind='outpost_battle', difficulty=difficulty, quantity=1, stamina_cost=cost,
                         attempts=field.attempts(before), tickets_before=field.tickets(self.ui, before))
             reopen()
-            self.report_progress('前哨'+difficulty+'首通 · 核对同一五人队伍')
-            party, order = self.choose_normal_party(reopen, failed)
-            plan['normal_party'] = asdict(party)
+            self.report_progress('前哨'+difficulty+'首通 · 核验适用攻略队伍')
+            party, order = self.choose_normal_party(difficulty, reopen, failed)
             prior = len(self.report['history'])
             self.report_progress('前哨'+difficulty+' · 首通实战')
             result = self.battle(party, order, plan)
             if len(self.report['history']) > prior:
-                self.state['normal_party'] = asdict(party)
-                self.save()
                 detail, _ = self.ensure_stamina(difficulty, self.normal_detail(difficulty))
                 if field.sweep_enabled(detail) is not True:
                     raise SubjugationBlocked('前哨首通后扫荡未解锁；未重复战斗')
@@ -578,8 +542,8 @@ class AbyssSubjugation(TimeLimitTask):
             # Reconciliation must have confirmed unchanged attempts and tickets.
             if self.state.get('pending'):
                 raise SubjugationBlocked('前哨失败资源尚未核对；未追加试打')
-            failed.add(self.party_signature(party))
-            failures['difficulties'][difficulty] = [list(names) for names in sorted(failed)]
+            failed.add(party_fingerprint(party))
+            failures['difficulties'][difficulty] = sorted(failed)
             self.report.setdefault('normal_trials', []).append(dict(difficulty=difficulty,
                 party=party.name, outcome='failed', resources_unchanged=True))
             self.save()
@@ -673,79 +637,41 @@ class AbyssSubjugation(TimeLimitTask):
                     reason=('存活至时限并达到攻略参考伤害' if timed_alive and met else
                             '模拟伤害未达到攻略参考值' if not met else '未确认队伍存活至时限'))
 
-    def boss_alternative(self, party, order, failed, retry, reopen):
-        if party.build_basis != 'local_trial':
-            return None
-        observed = [asdict(self.formation.observed[n]) for n in order if n in self.formation.observed]
-        if len(observed) != 5:
-            return None
-        reopen()
-        self.report_progress('按深域试打结果换队 · '+retry['reason'])
-        self.formation.check_deadline = self.check_deadline
-        alternative, audit = self.formation.alternative_trial(
-            trial_stage(self, party.name, boss=True), dict(order=order, observed=observed), failed,
-            survival=retry['action'] == 'change_survival')
-        self.report.setdefault('party_audits', []).append(audit)
-        if alternative is None:
-            return None
-        require_event_talent(self, alternative)
-        alternative.build_basis = 'local_trial'
-        alternative.damage_reference = dict(party.damage_reference)
-        alternative.assumptions.append('按深域试打判断调整当前账号队伍，仍须免费模拟达到参考伤害')
-        return dict(party=alternative, order=audit['order'])
-
     def simulate_boss(self, index, difficulty, reference):
-        if not self.options['allow_local_trials']:
-            raise SubjugationBlocked('首领未通关，未允许核验保存队伍和模拟战')
+        if not self.options['first_clear']:
+            raise SubjugationBlocked('首领尚未通关，已关闭首次通关')
         def reopen():
             return self.open_formation(self.boss_detail(index, difficulty, simulation=True))
-        fallbacks = []
-        if self.normal_party is not None:
-            fallbacks.append(None)
-        fallbacks.append('current')
-        fallbacks.extend(self.options['boss_teams'])
-        candidates = iter(chain(self.guide_candidates('boss', reopen, reference['boss'], index+1), fallbacks))
-        immediate = deque()
+        candidates = self.guide_candidates('boss', difficulty, reopen, reference['boss'], index+1)
         failed = self.failed_boss_teams.setdefault((index, difficulty), set())
-        failed_rosters = set()
         attempts = {}
-        sentinel = object()
+        retry_party = None
         while True:
-            candidate = immediate.popleft() if immediate else next(candidates, sentinel)
-            if candidate is sentinel:
-                break
+            retrying = retry_party is not None
+            if retrying:
+                party, retry_party = retry_party, None
+                candidate_name = party.name
+            else:
+                candidate = next(candidates, None)
+                if candidate is None:
+                    break
+                candidate_name = candidate.party.name
             if self.simulation_count >= self.options['max_simulations']:
                 raise SubjugationBlocked('模拟战达到本次上限；未使用未经验证的队伍实战')
             reopen()
             try:
-                if isinstance(candidate, dict):
-                    party, order = self.select_verified_party(candidate['party'], reopen)
-                elif isinstance(candidate, GuideCandidate):
+                if retrying:
+                    party, order = self.select_verified_party(party, reopen)
+                else:
                     party, order = guide_party(self, candidate.party, reopen,
                                               allow_substitutions=candidate.allow_substitutions)
-                    if difficulty != field.BOSS_DIFFICULTIES[-1]:
-                        party.assumptions.append('同一首领最高难度来源队伍用于当前难度免费模拟，实战须另核验模拟结果')
-                elif candidate == 'current':
-                    party, order = audit_current(self, reopen)
-                    require_event_talent(self, party)
-                elif candidate is None:
-                    front_failures = self.state.get('failed_outpost_teams', {})
-                    excluded = {tuple(names) for names in front_failures.get('difficulties', {}).get('高难', [])}
-                    if front_failures.get('day') != self.day():
-                        excluded.clear()
-                    party, order = self.choose_normal_party(reopen, excluded)
-                    self.state['normal_party'] = asdict(party)
-                    self.save()
-                else:
-                    party, order = self.choose_saved(candidate, reopen)
                 signature = party_fingerprint(party)
-                if signature in failed and not (isinstance(candidate, dict) and candidate.get('retry')):
+                if signature in failed and not retrying:
                     raise EventUIError('已失败的五人队伍不重复模拟')
             except EventUIError as error:
                 self.report.setdefault('candidate_rejections', []).append(dict(
                     kind='boss', index=index, difficulty=difficulty,
-                    candidate=(candidate.party.name if isinstance(candidate, GuideCandidate) else
-                               candidate['party'].name if isinstance(candidate, dict) else candidate), reason=str(error)))
+                    candidate=candidate_name, reason=str(error)))
                 continue
             self.simulation_count += 1
             attempts[signature] = attempts.get(signature, 0)+1
@@ -757,7 +683,7 @@ class AbyssSubjugation(TimeLimitTask):
                     or field.boss_health(self.ui, actual) != tuple(reference['health'])
                     or field.tickets(self.ui, actual) != reference['tickets_before']):
                 raise SubjugationBlocked('模拟战后实战首领进度或券余额变化')
-            record = dict(index=index, difficulty=difficulty, party=party.name, outcome=result.outcome,
+            record = dict(index=index, difficulty=difficulty, party=party.name, source=party.source, outcome=result.outcome,
                           result=self.last_result, build_basis=party.build_basis, assumptions=party.assumptions)
             record['readiness'] = self.boss_trial_readiness(party, reference, result)
             self.report['simulations'].append(record)
@@ -766,19 +692,10 @@ class AbyssSubjugation(TimeLimitTask):
                 self.simulated_loadout = self.last_result['preparation']
                 return party, order
             failed.add(signature)
-            failed_rosters.add('|'.join(self.party_signature(party)))
             retry = self.last_result['retry']
             if retry['action'] == 'retry_once' and attempts[signature] < 2:
-                immediate.append(dict(party=party, order=order, retry=True))
-            else:
-                try:
-                    alternative = self.boss_alternative(party, order, failed_rosters, retry, reopen)
-                    if alternative:
-                        fallbacks.append(alternative)
-                except EventUIError as error:
-                    self.report.setdefault('candidate_rejections', []).append(dict(
-                        kind='boss_adjustment', index=index, difficulty=difficulty, reason=str(error)))
-        raise SubjugationBlocked('候选队伍未达到首领模拟的生存和参考伤害要求；未追加实战消费')
+                retry_party = party
+        raise SubjugationBlocked('没有通过本期首领攻略核验及模拟的队伍；未追加实战消费')
 
     def bosses(self):
         for difficulty in field.BOSS_DIFFICULTIES:
@@ -916,20 +833,9 @@ class AbyssSubjugation(TimeLimitTask):
                 return self.report
             self.ui.save('event_home_before', s)
             self.reconcile()
-            cached = self.state.get('normal_party')
-            if cached:
-                try:
-                    cached = dict(cached)
-                    members = [MemberRequirement(**m) for m in cached.pop('members')]
-                    if len({m.name for m in members}) != 5 or len(members) != 5 or any(
-                            type(m.unique) is not bool or type(m.unique2) is not bool
-                            or any(type(getattr(m, k)) is not int or getattr(m, k) < 1 for k in ('level', 'rank', 'stars'))
-                            or type(m.skill_level) is not int or m.skill_level < 0
-                            for m in members):
-                        raise ValueError('incomplete saved audit')
-                    self.normal_party = EventParty(**cached, members=members)
-                except (KeyError, TypeError, ValueError) as error:
-                    raise SubjugationBlocked('缓存前哨队伍不完整；未开战') from error
+            # Account snapshots from old runs are not guide evidence. Public
+            # source caches remain reusable after normal source validation.
+            self.state.pop('normal_party', None)
             if self.options['preview_only']:
                 self.report['status'] = 'preview'
                 return self.report

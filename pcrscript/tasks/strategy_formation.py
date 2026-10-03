@@ -182,6 +182,10 @@ class StrategyFormation(EventFormation):
         return None,dict(unready=['没有可确认且未试过的同属性替代阵容'],
                          available=available,rejected=rejected,proposals=choices)
 
+    def select_source_members(self, party):
+        """Select source identities before their separately declared build is audited."""
+        return self.select(party)
+
     def source_trial(self,stage,source,*,recover=True):
         if source.get('document'):
             from .party_preparation import audit_declared_build, numeric_equipment_unknown, catalogue_issues
@@ -258,7 +262,7 @@ class StrategyFormation(EventFormation):
         candidate=EventParty('用户攻略成员 '+stage.title,source['source'],
                              [MemberRequirement(n,1,1,1,None,None,True,0) for n in source['names']])
         if None in identities or set(identities)!=set(source['names']):
-            ready,details=self.select(candidate)
+            ready,details=self.select_source_members(candidate)
             if not ready:
                 unresolved=[f['character'] for f in details.get('unready',[]) if any('专武' in r for r in f.get('reasons',[]))]
                 missing=[f['character'] for f in details.get('unready',[]) if any('未在搜索结果' in r for r in f.get('reasons',[]))]

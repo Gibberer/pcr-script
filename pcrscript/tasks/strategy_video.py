@@ -21,7 +21,7 @@ from .strategy_document import Evidence, Fact, empty_member, finalize, export_do
 from .strategy_sources import BORROW_PART, MANUAL_PART, UNVERIFIED_SETTING, discover_sources
 from .strategy_inputs import preferred_sources
 
-PARSER_VERSION = 60
+PARSER_VERSION = 61
 FRAME_OCR_VERSION = 1
 COMBAT_AUDIT_SECONDS = 20
 RECOLLECTION_UNSUPPORTED = re.compile(
@@ -854,12 +854,8 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
                     if scope != dict(area=options.get('area'), floor=int(options['stage'])):
                         continue
                 elif options['task_type'] == 'subjugation':
-                    target = dict(kind=options['kind'], difficulty=options['difficulty'])
-                    if options['kind'] == 'boss':
-                        target['boss'] = options['boss']
-                    higher = (options['kind'] == 'boss' and scope == dict(
-                        kind='boss', difficulty='极难', boss=options['boss']))
-                    if scope != target and not higher:
+                    from .subjugation_guides import applicable_scope
+                    if not applicable_scope(scope, options, allow_higher=True):
                         continue
                 elif options['task_type'] in ('event', 'revival'):
                     area = options.get('area', '')

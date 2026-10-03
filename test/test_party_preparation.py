@@ -153,6 +153,19 @@ class PartyPreparationTests(TestCase):
         self.assertEqual(len(result), 4)
         self.assertEqual(fetch.call_count, 2)
 
+    def test_complete_guides_have_explicit_substitution_policy_and_distinct_damage_goals(self):
+        first, second = party(), party()
+        first.build_basis = second.build_basis = 'source'
+        second.damage_reference = dict(damage=40000000, scope=dict(kind='boss', boss='合成首领'),
+                                      evidence=[dict(source='https://example.com/synthetic')])
+        fetch = Mock(return_value=[first, second])
+        self.assertNotEqual(party_fingerprint(first), party_fingerprint(second))
+        strict = list(source_candidates(fetch, lambda: {}, allow_substitutions=False))
+        self.assertEqual(len(strict), 2)
+        self.assertTrue(all(not c.allow_substitutions for c in strict))
+        adapted = list(source_candidates(fetch, lambda: {}, allow_substitutions=True))
+        self.assertEqual([c.allow_substitutions for c in adapted], [False, False, True, True])
+
     def test_empty_parsed_batch_does_not_hide_a_later_source(self):
         candidate = party('later')
         fetch = Mock(side_effect=[[], [candidate], []])

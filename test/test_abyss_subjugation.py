@@ -20,16 +20,15 @@ from pcrscript.game_ui.screen import EventScreen, EventUIError, TextBox
 from pcrscript.tasks import AbyssSubjugation, Event, EventNews
 from pcrscript.tasks.event_battle import BattleResult
 from pcrscript.tasks.event_strategy import CharacterStatus, EventParty, MemberRequirement
-from pcrscript.tasks.subjugation_party import audit_current, character_talents, require_event_talent, current_party
+from pcrscript.tasks.subjugation_party import character_talents, require_event_talent
+from pcrscript.tasks.party_preparation import party_fingerprint
 from pcrscript.tasks.task_abyss_subjugation import validate_options
 from pcrscript.runtime import modify_task_list, run_task_with_config
-
 
 START = datetime(2026, 10, 2, 12, tzinfo=SERVER_TIMEZONE)
 NOW = START+timedelta(hours=1)
 EVENT = Event(START.timestamp(), datetime(2026, 10, 7, 4, 59, 59, tzinfo=SERVER_TIMEZONE).timestamp(),
               '深渊讨伐战', dict(abyss_id=1, boss_ticket_id=70001, talent_id=2, title='合成深渊'))
-
 
 def screen(*labels, blue=(), yellow=()):
     img = np.full((540, 960, 3), 245, np.uint8)
@@ -42,12 +41,10 @@ def screen(*labels, blue=(), yellow=()):
         cv.rectangle(img, (x1, y1), (x2, y2), (25, 200, 245), -1)
     return EventScreen(img, items)
 
-
 def party():
     return EventParty('synthetic', '合成游戏保存队伍',
         [MemberRequirement('合成角色'+str(i), 100, 10, 5, True, False, True, 100) for i in range(5)],
         build_basis='local_trial', allow_deaths=5)
-
 
 class Game:
     def __init__(self):
@@ -264,7 +261,6 @@ class Game:
         if selected.name != 'synthetic' or len(set(order)) != 5 or set(order) != {m.name for m in selected.members}:
             raise AssertionError('wrong synthetic party')
 
-
 class SubjugationTests(TestCase):
     def setUp(self):
         self.temp = TemporaryDirectory()
@@ -292,13 +288,13 @@ class SubjugationTests(TestCase):
         task.ui.number = lambda s, roi: s.number(roi)
         task.ui.read_region = lambda s, roi, **kwargs: s
         task.ui.save = lambda name, s=None: self.root/(name+'.png')
-        task.choose_saved = Mock(return_value=(party(), ['合成角色'+str(i) for i in range(5)]))
+        task.source_parties = Mock(side_effect=lambda *args, **kwargs: [party()])
         task.formation.owned_candidates = Mock(return_value=[m.name for m in party().members])
         task.prepare_party = Mock(return_value={'slots': [[True]*3 for _ in range(5)], 'empty': 0, 'unknown': 0})
         task.formation.select = Mock(side_effect=lambda selected: (True, dict(order=[m.name for m in selected.members])))
         task.combat.run = game.combat
-        patch('pcrscript.tasks.task_abyss_subjugation.current_party',
-              side_effect=EventUIError('合成当前编组不可用')).start()
+        patch('pcrscript.tasks.task_abyss_subjugation.guide_party',
+              side_effect=lambda task, seed, reopen, **kwargs: (seed, [m.name for m in seed.members])).start()
         return task
 
     def referenced_task(self, game, damage=40000000, **options):
@@ -327,73 +323,9 @@ class SubjugationTests(TestCase):
         self.assertEqual(game.real_battles, 12)
         self.assertEqual(game.tickets, 0)
         self.assertEqual(game.sweeps[-1], ('boss', 0, '极难', 3))
-        self.assertEqual(sum(1 for call in task.choose_saved.call_args_list if call.args[0] == [1, 1]), 1)
+        self.assertEqual(set(report['outpost_parties']), set(field.DIFFICULTIES))
+        self.assertEqual(task.source_parties.call_count, 15)
         self.assertNotIn('pending', task.state)
-
-    def test_public_guide_is_audited_before_native_or_role_candidates(self):
-        game = Game()
-        task = self.task(game)
-        seed = party()
-        seed.source = 'https://example.com/synthetic-guide'
-        task.source_parties = Mock(side_effect=lambda kind, *args, **kwargs: [seed] if kind == 'outpost' else [])
-        with patch('pcrscript.tasks.task_abyss_subjugation.guide_party',
-                   return_value=(seed, [m.name for m in seed.members])) as audit:
-            report = task.run(EVENT)
-        self.assertEqual(report['status'], 'complete', report['pending'])
-        self.assertEqual(report['normal_team']['candidate'], 'guide')
-        audit.assert_called_once()
-        task.choose_saved.assert_not_called()
-        self.assertEqual(game.normal_commits, 6)
-
-    def test_cached_trial_reaudits_unknown_equipment_without_bypassing_build_checks(self):
-        game = Game()
-        task = self.task(game)
-        task.event = EVENT
-        seed = party()
-        task.normal_party = seed
-        task.formation.select.side_effect = None
-        task.formation.select.return_value = (False, {'unready': ['专武状态未知']})
-        task.formation.populate_candidates = Mock(return_value=(True, {}))
-        order = [m.name for m in seed.members]
-        reopen = Mock()
-        with patch.object(task.formation, 'source_trial', return_value=(party(), {'order':order, 'observed':[asdict(CharacterStatus(m.name, **{key:getattr(m,key) for key in ('level','rank','stars','skill_level','unique','unique2')}, identity_verified=True)) for m in party().members]})) as audit:
-            selected, actual_order = task.choose_normal_party(reopen, set())
-        self.assertEqual(actual_order, order)
-        self.assertEqual(selected.members, seed.members)
-        audit.assert_called_once()
-        self.assertEqual(audit.call_args.args[1]['names'], order)
-        mismatched = party()
-        mismatched.members[0].unique2 = True
-        with patch.object(task.formation, 'source_trial', return_value=(mismatched, {'order':order, 'observed':[asdict(CharacterStatus(m.name, **{key:getattr(m,key) for key in ('level','rank','stars','skill_level','unique','unique2')}, identity_verified=True)) for m in mismatched.members]})):
-            with self.assertRaisesRegex(EventUIError, '攻略要求不符'):
-                task.choose_normal_party(reopen, set())
-        self.assertEqual(game.normal_commits+game.real_battles, 0)
-
-    def test_verified_outpost_failure_changes_candidate_once_without_replaying_failed_party(self):
-        game = Game()
-        game.outpost_wins = False
-        game.boss_clears = {(i, d) for i in range(3) for d in field.BOSS_DIFFICULTIES}
-        task = self.task(game)
-        alternative = party()
-        alternative.members[0].name = '合成替代角色'
-        task.character_talents['合成替代角色'] = 2
-        selected = [False]
-        def choose(candidate, reopen):
-            if not selected[0]:
-                selected[0] = True
-                return party(), [m.name for m in party().members]
-            game.outpost_wins = True
-            return alternative, [m.name for m in alternative.members]
-        task.choose_saved.side_effect = choose
-        report = task.run(EVENT)
-        self.assertEqual(report['status'], 'complete', report['pending'])
-        self.assertEqual(task.choose_saved.call_count, 2)
-        self.assertEqual(len(report['unspent_actions']), 1)
-        self.assertEqual(len(report['normal_trials']), 1)
-        self.assertEqual(game.normal_commits, 6)
-        self.assertEqual(report['stamina_spent'], 300)
-        self.assertEqual(task.normal_party.members[0].name, '合成替代角色')
-        self.assertEqual(len(task.state['failed_outpost_teams']['difficulties']['普通']), 1)
 
     def test_second_run_targets_remaining_first_clears_before_sweeping(self):
         game = Game()
@@ -456,7 +388,7 @@ class SubjugationTests(TestCase):
         self.assertEqual(report['stamina_spent'], 300)
         self.assertEqual(game.stamina, 25)
         self.assertEqual(game.real_battles, 0)
-        self.assertIn('normal_party', task.state)
+        self.assertNotIn('normal_party', task.state)
 
     def test_blue_challenge_without_enough_stamina_never_starts_battle(self):
         game = Game()
@@ -616,62 +548,17 @@ class SubjugationTests(TestCase):
         self.assertNotIn((0, '高难'), game.boss_clears)
         self.assertFalse(game.task.state.get('pending'))
 
-    def test_normal_candidate_rejection_falls_back_then_reuses_one_party(self):
-        game = Game()
-        task = self.task(game)
-        def choose(candidate, reopen):
-            if candidate == [1, 1]:
-                raise EventUIError('合成非活动属性队伍')
-            return party(), ['合成角色'+str(i) for i in range(5)]
-        task.choose_saved.side_effect = choose
-        report = task.run(EVENT)
-        self.assertEqual(report['status'], 'complete', report['pending'])
-        self.assertEqual(report['normal_team']['candidate'], [1, 2])
-        self.assertEqual(task.choose_saved.call_count, 2)
-        self.assertEqual(len([r for r in report['candidate_rejections'] if r.get('kind') != 'boss']), 2)
-
     def test_subsequent_day_uses_only_sweeps_and_needs_no_avatar_audit(self):
         game = Game()
         game.outpost_clears = set(field.DIFFICULTIES)
         game.boss_clears = {(i, d) for i in range(3) for d in field.BOSS_DIFFICULTIES}
-        task = self.task(game, allow_local_trials=False)
+        task = self.task(game, first_clear=False)
         report = task.run(EVENT)
         self.assertEqual(report['status'], 'complete', report['pending'])
         self.assertEqual(game.real_battles, 0)
         self.assertEqual(game.sweeps[-1], ('boss', 0, '极难', 12))
-        task.choose_saved.assert_not_called()
+        task.source_parties.assert_not_called()
         task.formation.select.assert_not_called()
-
-    def test_boss_can_simulate_the_current_party_before_loading_saves(self):
-        game = Game()
-        game.boss_clears = {(0, '普通')}
-        game.tickets = 3
-        task = self.task(game)
-        selected = party()
-        reference = dict(boss='合成首领0', health=(80000000, 80000000), tickets_before=3)
-        with patch('pcrscript.tasks.task_abyss_subjugation.audit_current',
-                   return_value=(selected, [m.name for m in selected.members])) as audit:
-            actual, order = task.simulate_boss(0, '困难', reference)
-        self.assertIs(actual, selected)
-        self.assertEqual(order, [m.name for m in selected.members])
-        audit.assert_called_once()
-        task.choose_saved.assert_not_called()
-        self.assertEqual(game.tickets, 3)
-        self.assertEqual(game.real_battles, 0)
-
-        task.normal_party = selected
-        task.choose_normal_party = Mock(return_value=(selected, order))
-        failed = tuple(sorted(m.name for m in selected.members))
-        task.state['failed_outpost_teams'] = dict(day=task.day(), difficulties={'高难': [list(failed)]})
-        with patch('pcrscript.tasks.task_abyss_subjugation.audit_current') as audit:
-            actual, _ = task.simulate_boss(0, '困难', reference)
-        self.assertIs(actual, selected)
-        task.choose_normal_party.assert_called_once()
-        self.assertEqual(task.choose_normal_party.call_args.args[1], {failed})
-        audit.assert_not_called()
-        self.assertEqual(game.tickets, 3)
-        self.assertEqual([m['name'] for m in task.state['normal_party']['members']], order)
-        self.assertNotIn('pending', task.state)
 
     def test_failed_simulation_does_not_spend_boss_tickets(self):
         game = Game()
@@ -694,7 +581,7 @@ class SubjugationTests(TestCase):
         self.assertEqual(report['status'], 'blocked')
         self.assertEqual(game.tickets, 1)
         self.assertEqual(game.real_battles, 0)
-        self.assertEqual(task.simulation_count, 1)  # Duplicate saved rosters are not replayed.
+        self.assertEqual(task.simulation_count, 1)  # Duplicate guide trials are not replayed.
         self.assertFalse(report['simulations'][0]['readiness']['accepted'])
         self.assertTrue(all(d == 0 for d in game.allowed_deaths))
 
@@ -733,50 +620,10 @@ class SubjugationTests(TestCase):
                 raise EventUIError('合成攻略缺员')
             return seed, [m.name for m in seed.members]
         with patch('pcrscript.tasks.task_abyss_subjugation.guide_party', side_effect=audit):
-            result, _ = task.choose_normal_party(Mock(), set())
+            result, _ = task.choose_normal_party('普通', Mock(), set())
         self.assertIs(result, second)
         self.assertEqual(calls, [('first', False), ('second', False)])
-        task.choose_saved.assert_not_called()
-
-    def test_changed_special_equipment_after_simulation_blocks_real_ticket(self):
-        from pcrscript.game_ui.special_equipment import loadout_items
-        game = Game()
-        game.outpost_clears = set(field.DIFFICULTIES)
-        game.attempts = dict.fromkeys(field.DIFFICULTIES, 0)
-        game.tickets = 1
-        task = self.task(game)
-        task.prepare_party = lambda *args, **kw: AbyssSubjugation.prepare_party(task, *args, **kw)
-        team = party()
-        task.formation.inspect_current = Mock(return_value=[CharacterStatus(m.name, identity_verified=True) for m in team.members])
-        before = dict(order=[m.name for m in team.members], slots=[[True]*3 for _ in range(5)],
-                      empty=0, unknown=0, items=loadout_items(np.full((540, 960, 3), 80, np.uint8)))
-        after = dict(before, items=loadout_items(np.full((540, 960, 3), 180, np.uint8)))
-        with patch('pcrscript.tasks.party_preparation.auto_equip_special', return_value=before) as equip, \
-             patch('pcrscript.tasks.party_preparation.inspect_special_equipment', return_value=after):
-            report = task.run(EVENT)
-        self.assertEqual(report['status'], 'blocked')
-        self.assertIn('必须重新模拟', str(report['pending']))
-        self.assertEqual(game.real_battles, 0)
-        self.assertEqual(game.tickets, 1)
-        self.assertEqual(equip.call_count, 1)
-
-    def test_later_source_is_tried_before_weakening_an_earlier_roster(self):
-        task = self.task(Game())
-        first, second = party(), party()
-        first.name, second.name = 'first', 'second'
-        second.members[0].instant = False
-        task.source_parties = Mock(side_effect=[[first], [second]])
-        calls = []
-        def audit(runner, seed, reopen, *, allow_substitutions):
-            calls.append((seed.name, allow_substitutions))
-            if seed.name == 'first':
-                raise EventUIError('合成攻略缺员')
-            return seed, [m.name for m in seed.members]
-        with patch('pcrscript.tasks.task_abyss_subjugation.guide_party', side_effect=audit):
-            result, _ = task.choose_normal_party(Mock(), set())
-        self.assertIs(result, second)
-        self.assertEqual(calls, [('first', False), ('second', False)])
-        task.choose_saved.assert_not_called()
+        self.assertEqual(task.source_parties.call_count, 2)
 
     def test_wiped_trial_cannot_spend_even_when_damage_exceeds_the_reference(self):
         game = Game()
@@ -835,27 +682,6 @@ class SubjugationTests(TestCase):
         self.assertEqual(game.tickets, 2)
         self.assertEqual(len(report['real_rejections']), 1)
         self.assertFalse(game.task.state.get('pending'))
-
-    def test_survival_adjustment_delegates_to_deep_area_formation(self):
-        game = Game()
-        task = self.task(game)
-        selected = party()
-        order = [m.name for m in selected.members]
-        task.formation.observed = {m.name: CharacterStatus(m.name,
-            **{k: getattr(m, k) for k in ('level', 'rank', 'stars', 'skill_level', 'unique', 'unique2')},
-            identity_verified=True) for m in selected.members}
-        task.formation.alternative_trial = Mock(return_value=(party(), dict(order=order)))
-        failed = {tuple(sorted(order))}
-        reopen = Mock()
-        candidate = task.boss_alternative(selected, order, failed,
-            dict(action='change_survival', reason='合成持续减员'), reopen)
-        self.assertIsNotNone(candidate)
-        call = task.formation.alternative_trial.call_args
-        self.assertTrue(call.args[0].is_boss)
-        self.assertEqual(call.args[1]['order'], order)
-        self.assertIs(call.args[2], failed)
-        self.assertIs(call.kwargs['survival'], True)
-        reopen.assert_called_once()
 
     def test_partial_damage_uses_all_tickets_and_continues_remaining_bosses_next_day(self):
         game = Game()
@@ -1017,7 +843,7 @@ class SubjugationTests(TestCase):
             task.enter()
         task.ui.click.assert_not_called()
 
-    def test_resumed_first_clear_keeps_its_verified_party(self):
+    def test_resumed_first_clear_reconciles_resources_without_restoring_an_old_party(self):
         game = Game()
         game.page, game.tickets = 'home', 1
         before = dict(game.attempts)
@@ -1034,8 +860,8 @@ class SubjugationTests(TestCase):
         task.save()
         report = task.run(EVENT)
         self.assertEqual(report['status'], 'preview', report['pending'])
-        self.assertEqual(task.state['normal_party'], winner)
-        self.assertEqual(task.normal_party.members[0].name, winner['members'][0]['name'])
+        self.assertNotIn('normal_party', task.state)
+        self.assertEqual(report['stamina_spent'], 25)
         self.assertNotIn('pending', task.state)
         self.assertEqual(game.normal_commits+game.real_battles, 0)
 
@@ -1080,75 +906,6 @@ class SubjugationTests(TestCase):
         self.assertEqual(game.attempts['普通'], 2)
         self.assertEqual(report['status'], 'partial')
 
-    def test_cached_party_wrong_event_talent_is_blocked_before_simulation_or_real_spend(self):
-        game = Game()
-        game.outpost_clears = set(field.DIFFICULTIES)
-        task = self.task(game)
-        task.character_talents['合成角色0'] = 1
-        task.state['normal_party'] = asdict(party())
-        task.state_path = self.root/'state'/(sha256(b'synthetic|1').hexdigest()[:24]+'.json')
-        task.save()
-        report = task.run(EVENT)
-        self.assertEqual(report['status'], 'partial')
-        self.assertEqual(game.real_battles, 0)
-        self.assertEqual(report['simulations'], [])
-        self.assertEqual(game.tickets, 12)
-        self.assertIn('加成属性', ' '.join(report['pending']))
-
-    def test_unknown_live_equipment_blocks_the_auditor(self):
-        game = Game()
-        task = self.task(game)
-        game.page = 'formation'
-        task.avatars_ready = True
-        task.formation.occupied_slots = Mock(return_value=[(1, 1)]*5)
-        task.formation.inspect_current = Mock(return_value=[CharacterStatus(
-            '合成角色'+str(i), level=100, rank=10, stars=5, skill_level=100,
-            unique=None if i == 0 else True, unique2=False, identity_verified=True) for i in range(5)])
-        with patch('pcrscript.tasks.subjugation_party.recover_equipment') as recover, \
-             self.assertRaisesRegex(EventUIError, '专武状态未知'):
-            audit_current(task, Mock())
-        recover.assert_called_once_with(task, ['合成角色0'])
-        self.assertEqual(game.normal_commits+game.real_battles, 0)
-
-    def test_current_party_is_audited_and_full_identity_must_match_the_five_faces(self):
-        game = Game()
-        game.page = 'formation'
-        task = self.task(game)
-        task.event = EVENT
-        actual = [CharacterStatus(m.name, level=m.level, rank=m.rank, stars=m.stars,
-                                  skill_level=m.skill_level, unique=m.unique, unique2=m.unique2,
-                                  identity_verified=True) for m in party().members]
-        task.formation.occupied_slots = Mock(return_value=[(1, 1)]*5)
-        task.formation.avatars.query = Mock(return_value=[m.name for m in actual])
-        task.formation.inspect_current = Mock(return_value=actual)
-        selected, order = current_party(task, Mock())
-        self.assertEqual(selected.source, '游戏当前编组')
-        self.assertEqual(order, [m.name for m in actual])
-        self.assertEqual(len(task.report['party_audits']), 1)
-        actual[0].name += '(礼服)'
-        task.character_talents[actual[0].name] = 2
-        with self.assertRaisesRegex(EventUIError, '完整衣装与预核验不符'):
-            current_party(task, Mock())
-
-    def test_current_and_saved_party_audit_uses_shared_opt_in_training(self):
-        game = Game()
-        task = self.task(game)
-        task.options['allow_five_star_upgrade'] = True
-        task.avatars_ready = True
-        chosen = party()
-        order = [m.name for m in chosen.members]
-        before, after = dict(order=order, observed=[]), dict(order=order, observed=[], refreshed=True)
-        task.formation.current_trial = Mock(return_value=(chosen,before))
-        reopen = Mock()
-        with patch('pcrscript.tasks.subjugation_party.upgrade_party_stars',
-                   return_value=(chosen,after)) as train:
-            result, actual_order = audit_current(task,reopen)
-        self.assertIs(result,chosen)
-        self.assertEqual(actual_order,order)
-        self.assertIs(train.call_args.kwargs['reopen'],reopen)
-        self.assertEqual(task.report['party_audits'],[before,after])
-        self.assertEqual(game.normal_commits+game.real_battles, 0)
-
     def test_full_costume_talent_must_match_even_when_prefilter_identity_is_unknown(self):
         database = self.root/'synthetic.db'
         with closing(sqlite3.connect(database)) as c:
@@ -1167,7 +924,6 @@ class SubjugationTests(TestCase):
         del task.character_talents
         task.formation.occupied_slots = Mock(return_value=[(1, 1)]*5)
         task.formation.avatars.query = Mock(return_value=[None]*5)
-        require_event_talent(task)
         require_event_talent(task, party())
         wrong = party()
         wrong.members[0].name = '合成角色0(礼服)'
@@ -1177,18 +933,33 @@ class SubjugationTests(TestCase):
         with self.assertRaises(EventUIError):
             require_event_talent(task, wrong)
 
-    def test_local_trial_build_is_pinned_between_simulation_and_real_selection(self):
+    def test_all_prepared_builds_are_pinned_between_simulation_and_real_selection(self):
         task = self.task(Game())
         formation = task.formation
-        formation.pin_build = True
-        required = party().members[0]
+        formation.select = type(formation).select.__get__(formation)
+        selected = party()
+        required = selected.members[0]
         changed = CharacterStatus(required.name, level=80, rank=8, stars=3,
                                   skill_level=80, unique=False, unique2=False, identity_verified=True)
-        resolved = formation.resolve_requirement(required, changed)
-        self.assertIs(resolved, required)
-        self.assertTrue(formation.member_readiness(resolved, changed))
-        formation.pin_build = False
+        def inspect(party):
+            resolved = formation.resolve_requirement(required, changed)
+            self.assertIs(resolved, required)
+            self.assertTrue(formation.member_readiness(resolved, changed))
+            return False, {}
+        for basis in ('source', 'local_trial'):
+            selected.build_basis = basis
+            with self.subTest(basis=basis), \
+                 patch.object(formation, 'quick_current', return_value=None), \
+                 patch('pcrscript.tasks.event_formation.EventFormation.select', side_effect=inspect):
+                self.assertFalse(formation.select(selected)[0])
+                self.assertFalse(formation.pin_build)
         self.assertFalse(formation.member_readiness(required, changed))
+
+    def test_missing_public_database_does_not_create_an_empty_account_catalog(self):
+        missing = self.root/'missing.db'
+        with self.assertRaisesRegex(EventUIError, '角色属性资料不可用'):
+            character_talents(missing)
+        self.assertFalse(missing.exists())
 
     def test_recent_audit_requires_same_equipment_before_reuse(self):
         game = Game()
@@ -1217,8 +988,138 @@ class SubjugationTests(TestCase):
             self.assertEqual(run_task_with_config({}, 'abyss_subjugation')['status'], 'unavailable')
             connect.assert_not_called()
 
+    def test_missing_guides_never_fall_back_to_current_saved_or_cached_parties(self):
+        game = Game()
+        game.tickets = 1
+        task = self.task(game, normal_team=[1, 1], boss_teams=[[1, 1]])
+        task.source_parties = Mock(return_value=[])
+        task.state.update(normal_party=asdict(party()))
+        task.state_path = self.root/'state'/(sha256(b'synthetic|1').hexdigest()[:24]+'.json')
+        task.save()
+        report = task.run(EVENT)
+        self.assertEqual(report['status'], 'blocked')
+        self.assertEqual(game.normal_commits+game.real_battles, 0)
+        self.assertEqual(task.simulation_count, 0)
+        self.assertEqual(game.tickets, 1)
+        self.assertNotIn('normal_party', task.state)
+        self.assertNotIn('normal_team', task.options)
+        self.assertNotIn('boss_teams', task.options)
+        task.formation.select.assert_not_called()
+        task.formation.owned_candidates.assert_not_called()
+        self.assertTrue(all('攻略' in reason for reason in report['pending']))
+
+    def test_complete_guides_can_clear_without_allowing_account_trial_adaptations(self):
+        game = Game()
+        task = self.task(game, first_clear=True, allow_local_trials=False)
+        seed = party()
+        seed.build_basis = 'source'
+        task.source_parties = Mock(return_value=[seed])
+        with patch('pcrscript.tasks.task_abyss_subjugation.guide_party',
+                   side_effect=lambda runner, seed, reopen, **kw: (seed, [m.name for m in seed.members])) as audit:
+            report = task.run(EVENT)
+        self.assertEqual(report['status'], 'complete', report['pending'])
+        self.assertEqual(game.normal_commits, 6)
+        self.assertGreater(game.real_battles, 0)
+        self.assertTrue(all(not c.kwargs['allow_substitutions'] for c in audit.call_args_list))
+
+    def test_first_clear_switch_blocks_new_battles_independently_of_source_trials(self):
+        game = Game()
+        game.tickets = 1
+        task = self.task(game, first_clear=False, allow_local_trials=True)
+        report = task.run(EVENT)
+        self.assertEqual(report['status'], 'blocked')
+        self.assertEqual(game.normal_commits+game.real_battles, 0)
+        self.assertEqual(task.simulation_count, 0)
+        task.source_parties.assert_not_called()
+
+    def test_legacy_sweep_only_configuration_does_not_enable_new_source_battles(self):
+        game = Game()
+        game.tickets = 1
+        task = self.task(game, normal_team=[1, 1], allow_local_trials=False)
+        report = task.run(EVENT)
+        self.assertIs(task.options['first_clear'], False)
+        self.assertEqual(report['status'], 'blocked')
+        self.assertEqual(game.normal_commits+game.real_battles, 0)
+        task.source_parties.assert_not_called()
+
+    def test_minimal_legacy_sweep_only_options_require_explicit_first_clear_opt_in(self):
+        self.assertIs(validate_options(dict(allow_local_trials=False))['first_clear'], False)
+        self.assertIs(validate_options(dict(first_clear=True, allow_local_trials=False))['first_clear'], True)
+
+    def test_failure_keeps_different_source_switches_eligible_and_resumes_the_same_stream(self):
+        game = Game()
+        game.outpost_wins = False
+        game.boss_clears = {(i, d) for i in range(3) for d in field.BOSS_DIFFICULTIES}
+        task = self.task(game)
+        first, second = party(), party()
+        second.members[0].instant = not first.members[0].instant
+        task.source_parties = Mock(return_value=[first, second])
+        calls = []
+        def audit(runner, seed, reopen, **kwargs):
+            calls.append((game.difficulty, seed.members[0].instant))
+            if seed is second:
+                game.outpost_wins = True
+            return seed, [m.name for m in seed.members]
+        with patch('pcrscript.tasks.task_abyss_subjugation.guide_party', side_effect=audit):
+            report = task.run(EVENT)
+        self.assertEqual(report['status'], 'complete', report['pending'])
+        self.assertEqual(len(report['normal_trials']), 1)
+        self.assertEqual(task.source_parties.call_count, 3)  # One catalog for each target, including retries.
+        self.assertEqual(task.state['failed_outpost_teams']['difficulties']['普通'], [party_fingerprint(first)])
+        self.assertNotEqual(party_fingerprint(first), party_fingerprint(second))
+        self.assertEqual(game.normal_commits, 6)
+        self.assertEqual(report['stamina_spent'], 300)
+
+    def test_source_batch_budget_is_retained_when_all_candidates_are_rejected(self):
+        task = self.task(Game(), max_source_batches=2)
+        task.source_parties = Mock(return_value=[])
+        for _ in range(2):
+            with self.assertRaisesRegex(EventUIError, '本期前哨攻略'):
+                task.choose_normal_party('普通', Mock(), set())
+        self.assertEqual(task.source_parties.call_count, 2)
+        self.assertEqual([c.kwargs['advance'] for c in task.source_parties.call_args_list], [False, True])
+
+    def test_simulation_failure_tries_next_guide_without_creating_an_unrelated_team(self):
+        game = Game()
+        game.tickets = 1
+        game.simulation_wins = False
+        task = self.task(game)
+        first, second = party(), party()
+        second.members[0].instant = not first.members[0].instant
+        task.source_parties = Mock(return_value=[first, second])
+        task.formation.alternative_trial = Mock(side_effect=AssertionError('No unscoped role-based team'))
+        def audit(runner, seed, reopen, **kwargs):
+            if seed is second:
+                game.simulation_wins = True
+            return seed, [m.name for m in seed.members]
+        with patch('pcrscript.tasks.task_abyss_subjugation.guide_party', side_effect=audit):
+            selected, _ = task.simulate_boss(0, '普通', dict(
+                boss='合成首领0', health=(80000000, 80000000), tickets_before=1))
+        self.assertIs(selected, second)
+        self.assertEqual(task.simulation_count, 2)
+        self.assertEqual(game.tickets, 1)
+        self.assertEqual(game.real_battles, 0)
+        task.formation.alternative_trial.assert_not_called()
+
+    def test_equipment_recovery_retains_the_simulated_build_and_cannot_train(self):
+        task = self.task(Game(), allow_five_star_upgrade=True)
+        selected = party()
+        order = [m.name for m in selected.members]
+        for basis in ('source', 'local_trial'):
+            selected.build_basis = basis
+            task.formation.select.side_effect = [
+                (False, dict(unready=['专武状态未知'])),
+                (False, dict(unready=['装备Rank不符']))]
+            with patch('pcrscript.tasks.task_abyss_subjugation.recover_equipment') as recover, \
+                 patch('pcrscript.tasks.task_abyss_subjugation.guide_party') as source_audit:
+                with self.assertRaisesRegex(EventUIError, '装备Rank不符'):
+                    task.select_verified_party(selected, Mock())
+                recover.assert_called_once_with(task, order)
+                source_audit.assert_not_called()
+        self.assertEqual(task.simulation_count, 0)
+
     def test_configuration_rejects_unsafe_or_ambiguous_values(self):
         for options in ({'max_stamina': True}, {'max_boss_tickets': -1}, {'preview_only': 1},
-                        {'normal_team': [1, 3]}, {'boss_teams': [[1, 1], [1, 1]]}):
+                        {'first_clear': 1}, {'allow_local_trials': 1}):
             with self.subTest(options=options), self.assertRaises(ValueError):
                 validate_options(options)

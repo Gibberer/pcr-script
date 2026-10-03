@@ -38,7 +38,7 @@ def source_options(options, event, *, kind='outpost', difficulty='高难', boss=
 def queries(options):
     start = datetime.fromtimestamp(options['period_start'], SERVER_TIMEZONE)
     label = LABELS[ELEMENTS.index(options['element'])]
-    target = '前哨 高难' if options['kind'] == 'outpost' else options['boss']
+    target = ('前哨' if options['kind'] == 'outpost' else options['boss'])+' '+options['difficulty']
     return [f'公主连结 {start.month}月 深渊讨伐战 {label}',
             f'公主连结 {options["area"]}',
             f'公主连结 {start.year} {start.month}月 深渊讨伐战 {target}',
@@ -209,14 +209,29 @@ class ScopeContext:
         return {}, False, None
 
 
-def parties_for_target(report, options, *, allow_local_trials):
-    result = []
+def target_scope(options):
     wanted = dict(kind=options['kind'], difficulty=options['difficulty'])
     if wanted['kind'] == 'boss':
         wanted['boss'] = options['boss']
+    return wanted
+
+
+def applicable_scope(scope, options, *, allow_higher=False):
+    """Match the current target, or an explicitly allowed highest-tier guide."""
+    wanted = target_scope(options)
+    if scope == wanted:
+        return True
+    tiers = ('普通', '困难', '高难', '极难') if wanted['kind'] == 'boss' else ('普通', '困难', '高难')
+    return (allow_higher and wanted['difficulty'] in tiers[:-1]
+            and scope == dict(wanted, difficulty=tiers[-1]))
+
+
+def parties_for_target(report, options, *, allow_local_trials):
+    result = []
+    wanted = target_scope(options)
     for raw in report.get('parties', []):
-        higher_trial = (allow_local_trials and raw.get('scope') != wanted and wanted.get('kind') == 'boss'
-            and raw.get('scope') == dict(kind='boss', difficulty='极难', boss=options['boss']))
+        higher_trial = raw.get('scope') != wanted and applicable_scope(
+            raw.get('scope'), options, allow_higher=allow_local_trials)
         members = raw.get('members', [])
         names = [m.get('name') for m in members]
         flags = [raw.get('auto', {})]+[m.get('instant', {}) for m in members]
@@ -245,7 +260,8 @@ def parties_for_target(report, options, *, allow_local_trials):
         else:
             continue
         if higher_trial:
-            candidate.assumptions.append('同名首领极难来源阵容用于当前难度账号试打，保留来源难度，先免费模拟再核验实战')
+            candidate.assumptions.append('同一目标'+raw['scope']['difficulty']+'来源用于'+wanted['difficulty']+
+                '账号试打，保留来源难度'+('，首领先免费模拟再核验实战' if wanted['kind'] == 'boss' else ''))
         candidate.damage_reference = dict(raw.get('damage_reference', {}))
         result.append(candidate)
     return result

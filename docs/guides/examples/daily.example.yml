@@ -71,10 +71,9 @@ TeamBattle:
   max_real_attacks: 3
   max_simulations: 12
 AbyssSubjugation:
+  first_clear: true # 关闭时只执行已经满足条件的扫荡
   discover_sources: true
   source_urls: []
-  normal_team: [1, 1] # 当前编组未核验通过时检查这个保存位置，前哨复用选定的五人队伍
-  boss_teams: [[1, 1], [1, 2], [2, 1], [2, 2], [3, 1], [3, 2], [4, 1], [4, 2], [5, 1], [5, 2]]
   max_stamina: 400
   max_boss_tickets: 99
   max_normal_trials: 6

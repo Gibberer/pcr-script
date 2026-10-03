@@ -1,22 +1,22 @@
-"""Native saved parties and live audits for bounded account trials."""
+"""Adapt public guide members to the account and preserve verified battle builds."""
 from __future__ import annotations
 
 from contextlib import closing
+from pathlib import Path
 import sqlite3
 
-from .event_strategy import EventParty, MemberRequirement, readiness
+from .event_strategy import readiness
 from .strategy_formation import StrategyFormation, StrategyTarget
 from .party_preparation import (audit_declared_build, numeric_equipment_unknown,
     read_numeric_equipment, upgrade_party_stars, prepare_character_database, catalogue_issues)
 from ..game_ui import abyss_subjugation as field
 from ..game_ui.avatar_assets import ensure_avatar_index
-from ..game_ui.avatars import face_crop
 from ..game_ui.screen import EventUIError, normalized
 from ..run_session import clock as time
 
 def character_talents(database='cache/redive_cn.db'):
     try:
-        with closing(sqlite3.connect(database)) as conn:
+        with closing(sqlite3.connect(Path(database).resolve().as_uri()+'?mode=ro', uri=True)) as conn:
             rows = conn.execute('SELECT p.unit_name,t.talent_id FROM unit_profile p '
                                 'JOIN unit_talent t ON p.unit_id=t.unit_id').fetchall()
     except sqlite3.Error as error:
@@ -38,24 +38,14 @@ def prepare_avatars(runner):
         runner.avatars_ready = True
 
 
-def require_event_talent(runner, party=None):
-    """Prefilter saves by avatar; full audited identities authorize the battle."""
+def require_event_talent(runner, party):
+    """Require every guide or audited member to match this event's attribute."""
     talent = runner.event.extras.get('talent_id')
     if type(talent) is not int or talent not in range(1, 6):
         raise EventUIError('活动加成属性未知')
     if not hasattr(runner, 'character_talents'):
         runner.character_talents = character_talents(runner.options.get('avatars', {}).get('database', 'cache/redive_cn.db'))
-    if party is None:
-        prepare_avatars(runner)
-        s = runner.capture()
-        if len(runner.formation.occupied_slots(s)) != 5:
-            raise EventUIError('保存编组不是完整五人队伍')
-        names = runner.formation.avatars.query([face_crop(s.image, (p[0]-48, runner.formation.slot_top, 96, 96))
-                                               for p in runner.formation.slots])
-        # Unknown prefilter matches proceed to the full identity audit.
-        if any(name and runner.character_talents.get(normalized(name)) not in (None, talent) for name in names):
-            raise EventUIError('保存编组含非本期加成属性成员')
-    elif any(runner.character_talents.get(normalized(member.name)) != talent for member in party.members):
+    if any(runner.character_talents.get(normalized(member.name)) != talent for member in party.members):
         raise EventUIError('完整身份核验后队伍未全部匹配本期加成属性')
 
 
@@ -70,7 +60,7 @@ class SubjugationFormation(StrategyFormation):
         return requirement if self.pin_build else super().resolve_requirement(requirement, actual)
 
     def select(self, party):
-        self.pin_build = party.build_basis == 'local_trial'
+        self.pin_build = True
         strict = getattr(self, 'strict_source', False)
         if self.pin_build and any(m.skill_level for m in party.members):
             self.strict_source = True
@@ -85,9 +75,10 @@ class SubjugationFormation(StrategyFormation):
             self.pin_build = False
             self.strict_source = strict
 
-    def populate_candidates(self, names):
-        return super().select(EventParty('待核验成员', '攻略或保存队伍指定成员',
-            [MemberRequirement(n, 1, 1, 1, None, None, True, 0) for n in names]))
+    def select_source_members(self, party):
+        # Source identity selection uses provisional requirements. Executable
+        # parties always go through select(), which pins the audited build.
+        return super().select(party)
 
 
 def trial_stage(runner, title='深渊讨伐战', *, boss=False):
@@ -118,30 +109,6 @@ def recover_equipment(runner, names):
         if proof:
             runner.formation.unreleased[normalized(name)] = (time.time(), proof)
         ToHomePage(runner.robot).run(timeout=60)
-
-
-def current_party(runner, reopen, *, excluded_teams=()):
-    prepare_avatars(runner)
-    require_event_talent(runner)
-    s = runner.capture()
-    names = runner.formation.avatars.query([face_crop(s.image, (p[0]-48, runner.formation.slot_top, 96, 96))
-                                           for p in runner.formation.slots])
-    if any(not n for n in names) or len(set(names)) != 5:
-        raise EventUIError('当前五人完整身份未能预核验')
-    if tuple(sorted(map(normalized, names))) in excluded_teams:
-        raise EventUIError('本日已核实失败的前哨队伍，不重复审计和试打')
-    def reload():
-        reopen()
-        ready, _ = runner.formation.populate_candidates(names)
-        if not ready:
-            raise EventUIError('当前队伍返回后身份不符')
-    party, order = audit_current(runner, reload)
-    require_event_talent(runner, party)
-    if set(order) != set(map(normalized, names)):
-        raise EventUIError('当前队伍的完整衣装与预核验不符')
-    party.source = '游戏当前编组'
-    party.assumptions = ['当前账号实际编组，未宣称复现攻略培养阈值']+party.assumptions[1:]
-    return party, order
 
 
 def guide_party(runner, seed, reopen, *, allow_substitutions=True):
@@ -195,73 +162,10 @@ def guide_party(runner, seed, reopen, *, allow_substitutions=True):
         raise EventUIError('账号培养与已明确的攻略要求不符：'+str(audit['unready']))
     party.name, party.source, party.auto = seed.name, seed.source, seed.auto
     party.build_basis, party.allow_deaths = ('local_trial' if adaptations else seed.build_basis), 0
-    party.damage_reference = dict(seed.damage_reference)
+    party.damage_reference = {} if adaptations else dict(seed.damage_reference)
     party.assumptions = list(seed.assumptions)+['按共享编队流程核验当前账号，来源缺失字段仍保留为未知']
     party.assumptions.extend('共享编队缺员替补：'+a['missing']+' → '+a['replacement'] for a in adaptations)
+    if adaptations:
+        party.assumptions.append('替补队伍不继承原攻略伤害；首领须免费模拟击杀后才可实战')
     require_event_talent(runner, party)
     return party, order
-
-
-def saved_party(runner, group, row):
-    """Load a visible native saved party; no character training or support rental."""
-    s = runner.capture()
-    if not field.formation(s):
-        raise EventUIError('未处于深渊讨伐战编队页')
-    runner.ui.click((895, 86))
-    s = runner.wait(field.saved_teams, '保存队伍列表')
-    runner.click(s, '编组'+str(group), (45, 65, 770, 115))
-    # Scroll position persists independently for each saved group.
-    previous = None
-    for _ in range(12):
-        s = runner.capture()
-        signature = s.text((30, 145, 900, 410))
-        if signature == previous:
-            break
-        previous = signature
-        runner.ui.swipe((520, 190), (520, 420))
-    else:
-        raise EventUIError('保存队伍列表顶端未确认')
-    s = runner.capture()
-    buttons = sorted(s.all('呼出此编组', (700, 165, 900, 400)), key=lambda b: b.center[1])
-    if len(buttons) < row:
-        runner.click(s, '关闭', (360, 445, 620, 515))
-        runner.wait(field.formation, '返回编队')
-        return False
-    button = buttons[row-1]
-    if button.score < .95 or not s.blue_button(button):
-        raise EventUIError('保存队伍呼出按钮未确认')
-    runner.ui.save(f'saved_group_{group}_row_{row}', s)
-    runner.ui.click(button)
-    runner.wait(field.formation, '呼出保存队伍')
-    return True
-
-
-def audit_current(runner, reload_formation):
-    prepare_avatars(runner)
-    stage = trial_stage(runner)
-    party, audit = runner.formation.current_trial(stage)
-    unknown = [row['name'] for row in audit.get('observed', [])
-               if row.get('identity_verified') and (row.get('unique') is None or row.get('unique2') is None)]
-    if party is None and unknown:
-        recover_equipment(runner, unknown)
-        reload_formation()
-        party, audit = runner.formation.current_trial(stage)
-    runner.report.setdefault('party_audits', []).append(audit)
-    if party is None:
-        raise EventUIError('当前队伍培养或专武状态未知；未开战：'+str(audit))
-    if runner.options.get('allow_five_star_upgrade'):
-        from .task_home import ToHomePage
-        def leave():
-            runner.enter()
-            ToHomePage(runner.robot).run(timeout=60)
-        party, fresh = upgrade_party_stars(runner.formation, party, audit,
-            options=runner.options, report=runner.report, save=runner.save,
-            leave=leave, reopen=reload_formation, stage=stage)
-        if fresh is not audit:
-            runner.report['party_audits'].append(fresh)
-        audit = fresh
-        if party is None:
-            raise EventUIError('当前队伍五星培养后未通过核验：'+str(audit))
-    party.build_basis, party.auto, party.allow_deaths = 'local_trial', True, 0
-    party.assumptions = ['按共享编队流程核验当前账号保存队伍', '全员SET开启、AUTO开启']
-    return party, audit['order']

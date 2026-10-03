@@ -53,7 +53,7 @@ PARAMETER_LABELS = {
     'estimate_combat_duration': '预估战斗时长（秒）',
 }
 DESCRIPTIONS = {
-    'abyss_subjugation': '活动开放期间，优先取得本期国服攻略并核验五人身份、培养及 SET/AUTO，同队首通前哨各难度并扫荡剩余次数；首领模拟核验后消耗讨伐委托证推进未通关首领。全部首通后扫荡一个高难首领，核对次数与券余额。可领取公会之家现有体力，不购买体力、回复次数或重置首领进度。',
+    'abyss_subjugation': '活动开放期间，从本期适用攻略结合账号角色选队，核验培养及 SET/AUTO；没有可执行攻略时停止新战斗。按实际难度首通前哨并扫荡剩余次数，首领先免费模拟达标再消耗讨伐委托证。全部首通后扫荡一个极难首领。可领取公会之家现有体力，不购买体力、回复次数或重置首领进度。',
     'abyss_push': '按五种属性推进深域NEXT关卡。按来源优先选队并核验当前培养，开战前自动装备特别装备；结合伤害、减员和历史失败记录调整阵容与重试次数。可选升5星并用女神秘石兑换所需碎片，默认关闭；不购买体力或重置次数。攻略搜索结果仅为候选来源，尚不能自动解析完整培养要求。',
     'upgrade_all_characters': '使用角色页一键强化，分批提升全部可强化角色至最高可用品级，并强化等级、技能和普通装备。使用现有玛那、装备与原矿；不购买资源、不改变星数或专武开关。',
     'max_character_bonds': '按好感度从低到高检查持有角色，使用现有礼物尽量提升至当前上限，逐篇跳过新开放的角色剧情并核对首读及属性奖励。记录每位角色的礼物消耗与未完成原因；不购买礼物。',
@@ -249,6 +249,9 @@ def config_data(config: dict[str, Any], digest: str, path: Path | None = None) -
     saved = task_plan(tasks, path)
     saved = [r for r in saved if r['name'] != 'tohomepage' or r['args']]
     options = {k: v for k, v in config.items() if k not in ('Accounts', 'Task', 'Desktop')}
+    if isinstance(options.get('AbyssSubjugation'), dict):
+        from pcrscript.tasks.task_abyss_subjugation import migrate_options
+        options['AbyssSubjugation'] = migrate_options(options['AbyssSubjugation'])
     return dict(protocol=PROTOCOL, revision=digest, plan=saved, options=options,
                 account_group=str(selected), catalog=catalog())
 

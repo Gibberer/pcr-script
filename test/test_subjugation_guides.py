@@ -18,6 +18,7 @@ from pcrscript.tasks.strategy_video import choose_pages, parse_video_source, acq
 from pcrscript.tasks.subjugation_guides import (source_options, source_rejection, queries,
     visible_scope, relevant_statements, ScopeContext, parties_for_target, damage_reference)
 from pcrscript.tasks.subjugation_party import guide_party
+from pcrscript.tasks.task_abyss_subjugation import AbyssSubjugation
 
 
 START = datetime(2026, 10, 2, 12, tzinfo=SERVER_TIMEZONE).timestamp()
@@ -42,6 +43,55 @@ def trial_report():
 
 
 class SubjugationGuideTests(TestCase):
+    def test_actual_boss_and_difficulty_scope_have_separate_source_caches(self):
+        runner = SimpleNamespace(options=dict(discover_sources=True, source_urls=[], allow_local_trials=True),
+            source_pools={}, inspected_sources={}, event=EVENT, report={}, formation=Mock(),
+            report_progress=Mock(), check_deadline=Mock(), save=Mock())
+        def acquire(options, **kwargs):
+            report = trial_report()
+            report['parties'][0]['scope'] = dict(kind='boss', boss=options['boss'], difficulty=options['difficulty'])
+            return report
+        with patch('pcrscript.tasks.task_abyss_subjugation.prepare_avatars'), \
+             patch('pcrscript.tasks.strategy_video.acquire_strategies', side_effect=acquire) as fetch:
+            for boss, difficulty in (('合成首领甲', '普通'), ('合成首领甲', '普通'),
+                                     ('合成首领甲', '困难'), ('合成首领乙', '普通')):
+                self.assertEqual(len(AbyssSubjugation.source_parties(
+                    runner, 'boss', boss, 1, difficulty=difficulty)), 1)
+        self.assertEqual(fetch.call_count, 3)
+        self.assertEqual([(c.args[0]['boss'], c.args[0]['difficulty']) for c in fetch.call_args_list],
+                         [('合成首领甲', '普通'), ('合成首领甲', '困难'), ('合成首领乙', '普通')])
+
+    def test_higher_outpost_guide_requires_account_trial_permission(self):
+        report = trial_report()
+        options = source_options({}, EVENT, difficulty='普通')
+        self.assertEqual(parties_for_target(report, options, allow_local_trials=False), [])
+        candidate = parties_for_target(report, options, allow_local_trials=True)[0]
+        self.assertTrue(any('高难' in note and '普通' in note for note in candidate.assumptions))
+        report['parties'][0]['scope'] = dict(kind='boss', difficulty='极难', boss='合成首领')
+        self.assertEqual(parties_for_target(report, options, allow_local_trials=True), [])
+
+    def test_complete_current_difficulty_guide_needs_no_account_trial_permission(self):
+        report = trial_report()
+        raw = report['parties'][0]
+        for member in raw['members']:
+            for key, value in dict(level=100, rank=10, stars=5, skill_level=100,
+                                   unique=True, unique2=False).items():
+                member[key] = dict(value=value, evidence=[dict(method='synthetic')], conflicts=[])
+        for kind in ('outpost', 'boss'):
+            options = source_options({}, EVENT, kind=kind, boss='合成首领', difficulty='普通')
+            raw['scope'] = dict(kind=kind, difficulty='普通')
+            if kind == 'boss':
+                raw['scope']['boss'] = '合成首领'
+            with self.subTest(kind=kind):
+                candidate = parties_for_target(report, options, allow_local_trials=False)[0]
+                self.assertEqual(candidate.build_basis, 'source')
+                self.assertIs(candidate.auto, False)
+                self.assertIs(candidate.members[0].instant, False)
+                raw['scope']['difficulty'] = '极难' if kind == 'boss' else '高难'
+                self.assertEqual(parties_for_target(report, options, allow_local_trials=False), [])
+                adapted = parties_for_target(report, options, allow_local_trials=True)[0]
+                self.assertEqual(adapted.build_basis, 'local_trial')
+
     def test_searched_sources_keep_the_authors_supplement_before_video_parsing(self):
         with TemporaryDirectory() as folder:
             options = source_options({}, EVENT, kind='boss', boss='合成首领', boss_number=1)
@@ -314,6 +364,8 @@ class SubjugationGuideTests(TestCase):
     def test_shared_trial_replacement_keeps_audited_build_instead_of_absent_units_requirements(self):
         seed = parties_for_target(trial_report(), source_options({}, EVENT), allow_local_trials=True)[0]
         seed.members[0].stars = 6
+        seed.damage_reference = dict(damage=40000000, scope=dict(kind='boss', boss='合成首领'),
+                                     evidence=[dict(source='https://example.com/synthetic')])
         names = ['合成替补']+[m.name for m in seed.members[1:]]
         current = EventParty('synthetic-adapted', '游戏合成队伍',
             [MemberRequirement(n, 100, 10, 5, True, False, i != 0, 100) for i, n in enumerate(names)],
@@ -332,4 +384,6 @@ class SubjugationGuideTests(TestCase):
             self.assertEqual(order, names)
             self.assertEqual(party.members[0].stars, 5)
             self.assertIs(party.members[0].instant, False)
-            self.assertIn('合成替补', party.assumptions[-1])
+            self.assertTrue(any('合成替补' in note for note in party.assumptions))
+            self.assertEqual(party.damage_reference, {})
+            self.assertEqual(seed.damage_reference['damage'], 40000000)
