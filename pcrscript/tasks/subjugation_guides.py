@@ -12,6 +12,12 @@ from ..game_ui.screen import normalized
 ELEMENTS = ('fire', 'water', 'wind', 'light', 'dark')
 LABELS = ('火', '水', '风', '光', '暗')
 SHARED_REQUIREMENTS = re.compile(r'通用|共同|共用|公共|全局|所有|全部')
+BUILD_LABEL = re.compile(r'等级|(?<![A-Za-z])Lv|Rank|(?<![A-Za-z])R\s*\d|技能|专武|专用装备|专\s*\d|星级|星数|[0-9一二三四五六七八九十]+[星★]', re.I)
+BUILD_VALUE = re.compile(
+    r'(?:[1-6][星★]|(?:等级|Lv\.?|Rank|R|技能(?:等级)?)[：:=]?\d{1,3}(?!\d)|'
+    r'专(?:用装备|武)?[12一二](?:强化)?(?:等级|阶段|Lv\.?)?[：:=]?'
+    r'(?:\d{1,3}(?:[星★级])?|未开启|未装备|未实装|未开放|已装备|关闭|开启|装备|有|无)|'
+    r'专[：:=]?\d{2,3}(?!\d))', re.I)
 
 
 def source_options(options, event, *, kind='outpost', difficulty='高难', boss='', boss_number=None):
@@ -159,14 +165,49 @@ def relevant_statements(text, options):
         if SHARED_REQUIREMENTS.search(line):
             result.append(line)
             continue
-        marker = re.match(r'\s*(?:[【\[]\s*)?(?:Boss\s*([1-3])|([1-3])\s*王)', line, re.I)
+        marker = re.match(r'\s*(?:[【\[]\s*)?(?:Boss\s*([1-3])(?!\d)|([1-3])\s*王|首领\s*([1-3])(?!\d))', line, re.I)
         if marker and (options['kind'] == 'outpost' or options.get('boss_number') is not None
-                       and int(marker[1] or marker[2]) != options['boss_number']):
+                       and int(marker[1] or marker[2] or marker[3]) != options['boss_number']):
             continue
         if re.match(r'\s*(?:[【\[]\s*)?前哨', line) and options['kind'] == 'boss':
             continue
         result.append(line)
     return '\n'.join(result)
+
+
+def metadata_build_requirements(metadata, options, names):
+    """Bind only fully read named declarations; retain other build text as blocking evidence."""
+    from ..game_ui.guide_vision import labeled_fields
+    rows = []
+    scopes = r'Boss[1-3](?!\d)|[1-3]王|首领[1-3](?!\d)|前哨'
+    if options.get('boss'):
+        scopes += '|'+re.escape(normalized(options['boss']))
+    prefix = re.compile(r'^(?:[【\[]?(?:'+scopes+r')[】\]]?|普通|困难|高难|极难|'
+                        r'(?:打法|方案|阵容|配队)(?:\d+|[一二三四五六七八九十]+)|通用|共同|共用|全局)[：:]*', re.I)
+    identities = sorted(((normalized(name), name) for name in names), key=lambda row: len(row[0]), reverse=True)
+    for statement, method in metadata:
+        for line in relevant_statements(statement, options).splitlines():
+            if not BUILD_LABEL.search(line):
+                continue
+            content = normalized(line)
+            while (match := prefix.match(content)):
+                content = content[match.end():]
+            name = next((original for label, original in identities if content.startswith(label)), None)
+            tail = content[len(normalized(name)):].lstrip('：:,，') if name else ''
+            fields = []
+            while tail and (match := BUILD_VALUE.match(tail)):
+                values = labeled_fields(match[0])
+                if not values or any(type(value) is int and (
+                        not 0 <= value <= 5 if key == 'unique2_stars' else value <= 0)
+                        for key, value in values.items()):
+                    break
+                fields.extend(values.items())
+                tail = tail[match.end():].lstrip('：:,，;；')
+            tiers = {d for d in ('普通', '困难', '高难', '极难') if d in line}
+            difficulty = next(iter(tiers)) if len(tiers) == 1 and not SHARED_REQUIREMENTS.search(line) else None
+            rows.append(dict(name=name if fields and not tail else None, fields=fields,
+                             text=line, method=method, plan=plan_number(dict(part=line)), difficulty=difficulty))
+    return rows
 
 
 class ScopeContext:

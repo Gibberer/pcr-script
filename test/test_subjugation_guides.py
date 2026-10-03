@@ -295,13 +295,14 @@ class SubjugationGuideTests(TestCase):
                     rows = report['parties'][0]['global_requirements']+report['parties'][0]['manual_actions']
                     self.assertTrue(any(r['text'] == constraint and r['evidence']['cid'] == 1 for r in rows))
 
-    def parse_notes(self, folder, title, kind, constraint, *, combat_title=None):
+    def parse_notes(self, folder, title, kind, constraint, *, combat_title=None, metadata=None):
         options = source_options({}, EVENT, kind=kind, boss='合成首领', boss_number=1)
         options['parsed_dir'] = folder
         source = dict(bvid='BVSYNTHETIC', url='https://example.com/synthetic',
             title='公主连结 国服 合成深渊', author_comments=[dict(text='3王需要等级突破')],
             pages=[dict(cid=1, part=title, duration=2),
                    dict(cid=2, part=combat_title or ('前哨' if kind == 'outpost' else 'Boss1')+'打法2', duration=4)])
+        source.update(metadata or {})
         boxes = [(100+i*120, 390, 100, 100) for i in range(5)]
         members = [dict(name=f'合成角色{i}', rectangle=list(b), score=.99) for i, b in enumerate(boxes)]
         index = SimpleNamespace(names=[m['name'] for m in members], matrix=np.ones((5,1728),np.float32))
@@ -334,6 +335,53 @@ class SubjugationGuideTests(TestCase):
                 self.assertEqual(parties[0].members[0].rank, expected)
                 if expected:
                     self.assertTrue(all(e['cid'] == 1 for e in report['parties'][0]['members'][0]['rank']['evidence']))
+
+    def test_metadata_build_fields_bind_to_the_target_and_preserve_conflicts(self):
+        cases = [('Boss1 合成角色0：3星 Rank30 专武1等级310 专武2:0星', 1, 30),
+                 ('合成角色0：Rank30', 1, 30),
+                 ('Boss1方案二 合成角色0Rank30', 1, 30),
+                 ('Boss1方案一共用 合成角色0Rank30', 1, 30),
+                 ('Boss2 合成角色0Rank30', 1, None),
+                 ('首领2 合成角色0Rank30', 1, None),
+                 ('Boss1极难 合成角色0Rank30', 1, None),
+                 ('Boss1方案一 合成角色0Rank30', 1, None),
+                 ('Boss1 合成角色0Rank30 Rank31', 0, None),
+                 ('Boss1 未知衣装3星', 0, None),
+                 ('Boss1 合成角色0(未知衣装)3星', 0, None),
+                 ('Boss1 合成角色0Rank30 技能要满', 0, None),
+                 ('Boss1 合成角色0Rank0', 0, None),
+                 ('Boss1 合成角色0专武2:6星', 0, None),
+                 ('Boss1 合成角色0和合成角色1都要3星', 0, None)]
+        for method in ('description', 'author_comments'):
+            for statement, count, rank in cases:
+                with self.subTest(method=method, statement=statement), TemporaryDirectory() as folder:
+                    metadata = {method: [dict(text=statement, reply_id=12)] if method == 'author_comments' else statement}
+                    report, options = self.parse_notes(folder, '前言', 'boss', '说明正文', metadata=metadata)
+                    parties = parties_for_target(report, options, allow_local_trials=True)
+                    self.assertEqual(len(parties), count)
+                    if count:
+                        self.assertEqual(parties[0].members[0].rank, rank)
+                        if rank:
+                            evidence = report['parties'][0]['members'][0]['rank']['evidence']
+                            self.assertEqual(evidence[0]['text'], statement)
+                            self.assertIsNone(evidence[0]['cid'])
+                        if '专武1等级310' in statement:
+                            member = parties[0].members[0]
+                            self.assertEqual((member.stars, member.unique_level, member.unique2_stars), (3, 310, 0))
+
+    def test_metadata_level_and_skill_fields_are_not_dropped_without_spaces(self):
+        with TemporaryDirectory() as folder:
+            report, options = self.parse_notes(folder, '前言', 'boss', '说明正文',
+                metadata=dict(description='Boss1合成角色0Lv100\nBoss1合成角色0技能100'))
+            member = parties_for_target(report, options, allow_local_trials=True)[0].members[0]
+            self.assertEqual((member.level, member.skill_level), (100, 100))
+
+    def test_metadata_correction_conflicting_with_video_build_blocks_the_party(self):
+        with TemporaryDirectory() as folder:
+            report, options = self.parse_notes(folder, '前言', 'boss', '合成角色0：Rank31',
+                metadata=dict(author_comments=[dict(text='Boss1 合成角色0Rank30', reply_id=12)]))
+            self.assertTrue(report['parties'][0]['members'][0]['rank']['conflicts'])
+            self.assertEqual(parties_for_target(report, options, allow_local_trials=True), [])
 
     def test_metadata_rejects_old_month_other_talent_or_unknown_publication(self):
         options = source_options({}, EVENT)

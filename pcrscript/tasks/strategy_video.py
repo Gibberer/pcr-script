@@ -21,7 +21,7 @@ from .strategy_document import Evidence, Fact, empty_member, finalize, export_do
 from .strategy_sources import BORROW_PART, MANUAL_PART, UNVERIFIED_SETTING, discover_sources
 from .strategy_inputs import preferred_sources
 
-PARSER_VERSION = 66
+PARSER_VERSION = 67
 FRAME_OCR_VERSION = 1
 COMBAT_AUDIT_SECONDS = 20
 RECOLLECTION_UNSUPPORTED = re.compile(
@@ -682,6 +682,7 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
     teams = {}
     character_facts = defaultdict(list)
     globals_, manual = [], []
+    metadata_build = []
     records = []
     errors, pages_report = [], []
     source_region = declared_region(source.get('title', '')+' '+source.get('description', ''))
@@ -699,6 +700,8 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
                     (source.get('description', ''), 'source_description')]
         metadata.extend((r.get('text', ''), 'author_comment:'+str(r.get('reply_id')))
                         for r in source.get('author_comments', []))
+        from .subjugation_guides import metadata_build_requirements
+        metadata_build = metadata_build_requirements(metadata, options, names)
         for statement, method in metadata:
             for line in relevant_statements(statement, options).splitlines():
                 if manual_requirement(line):
@@ -1027,8 +1030,10 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
                     source['url'], int(page['cid']), method='unread_requirements', text=reason))))
     # Named author statements can supply fields omitted by combat footage.
     # Only full, unambiguous names are accepted; base names never identify outfits.
-    statements = [(source.get('description', ''), 'video_description')]
-    statements.extend((r.get('text', ''), 'author_comment:'+str(r.get('reply_id'))) for r in source.get('author_comments', []))
+    statements = []
+    if options['task_type'] != 'subjugation':
+        statements = [(source.get('description', ''), 'video_description')]
+        statements.extend((r.get('text', ''), 'author_comment:'+str(r.get('reply_id'))) for r in source.get('author_comments', []))
     parties = []
     for team in teams.values():
         if len({(p['cid'], p['seconds']) for p in team['frames']}) < 2:
@@ -1037,8 +1042,13 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
                        for row in team['identity_evidence']) for member in team['members']):
             continue
         if options['task_type'] == 'subjugation':
-            from .subjugation_guides import constraint_cids
+            from .subjugation_guides import constraint_cids, plan_number
             cids = constraint_cids(pages, team['frames'])
+            frame_cids = {frame['cid'] for frame in team['frames']}
+            numbers = {plan_number(page) for page in pages if page['cid'] in frame_cids}
+            build_rows = [r for r in metadata_build if (r['plan'] is None or not numbers
+                          or None in numbers or r['plan'] in numbers)
+                          and r['difficulty'] in (None, team['scope'].get('difficulty'))]
         chapter = team['scope'].get('chapters')
         auto_proofs = defaultdict(list)
         for value, proof in team.pop('auto_observations'):
@@ -1088,6 +1098,11 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
                     if re.match(re.escape(member['name'])+r'(?=[:：,，;；]|等级|Lv|LV|[1-6]星)', line):
                         for field, value in labeled_fields(line[len(member['name']):]).items():
                             member[field].add(value, Evidence(source['url'], method=method, text=line))
+            if options['task_type'] == 'subjugation':
+                for row in build_rows:
+                    if row['name'] == member['name']:
+                        for field, value in row['fields']:
+                            member[field].add(value, Evidence(source['url'], method=row['method'], text=row['text']))
         team.pop('observations')
         team['region'] = source_region
         team['target_region'] = options.get('region', 'cn')
@@ -1106,6 +1121,9 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
                         or evidence.get('method') in ('source_title', 'source_description', 'source_requirements'))
             relevant_globals = [r for r in globals_ if applicable(r)]
             relevant_manual = [r for r in manual if applicable(r)]
+            relevant_globals.extend(dict(text=row['text'], advisory=False, evidence=asdict(Evidence(
+                source['url'], method='unresolved_'+row['method'], text=row['text'])))
+                for row in build_rows if row['name'] is None)
         team['global_requirements'] = list({r['text']: r for r in relevant_globals if not r['advisory']}.values())
         team['recommendations'] = list({r['text']: r for r in relevant_globals if r['advisory']}.values())
         team['manual_actions'] = list({r['text']: r for r in relevant_manual}.values())
