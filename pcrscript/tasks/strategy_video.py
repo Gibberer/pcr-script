@@ -21,7 +21,7 @@ from .strategy_document import Evidence, Fact, empty_member, finalize, export_do
 from .strategy_sources import BORROW_PART, MANUAL_PART, UNVERIFIED_SETTING, discover_sources
 from .strategy_inputs import preferred_sources
 
-PARSER_VERSION = 62
+PARSER_VERSION = 63
 FRAME_OCR_VERSION = 1
 COMBAT_AUDIT_SECONDS = 20
 RECOLLECTION_UNSUPPORTED = re.compile(
@@ -495,6 +495,10 @@ def choose_pages(source: dict, options: dict) -> list[dict]:
             selected[duplicate] = page
         elif len(selected) < limit:
             selected.append(page)
+    if kind == 'subjugation':
+        missing_requirements = {p['cid'] for p in requirements} - {p['cid'] for p in selected}
+        if missing_requirements:
+            raise ValueError(f'攻略说明页与候选关卡无法在 max_pages_per_video={limit} 上限内完整解析，拒绝该来源')
     return selected
 
 
@@ -723,6 +727,8 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
         page_record = dict(cid=page['cid'], title=page_name, media=media, frames=0, recognized_teams=0)
         pages_report.append(page_record)
         duration = min(float(page.get('duration') or media['duration']), float(options.get('max_video_seconds', 180)))
+        if float(page.get('duration') or media['duration']) > duration:
+            page_record['truncated'] = True
         wide = media.get('height', 0) > 0 and 1.9 < media.get('width', 0)/media['height'] <= 2.4
         seconds_list = sample_seconds(duration, options.get('max_frames_per_page', 50), wide=wide)
         if options['task_type'] in ('event', 'revival') and duration > 5 and len(seconds_list) >= 4:
@@ -744,6 +750,7 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
                 capture.set(cv.CAP_PROP_POS_MSEC, float(seconds)*1000)
                 ok, raw = capture.read()
                 if not ok:
+                    page_record['unread_frames'] = page_record.get('unread_frames', 0)+1
                     continue
                 aspect = raw.shape[1]/raw.shape[0]
                 wide_crop = 1.9 < aspect <= 2.4
@@ -790,6 +797,8 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
                 if full_ocr:
                     texts = frame_texts(frame, image_path, ocr)
                     page_record['full_ocr_frames'] = page_record.get('full_ocr_frames', 0)+1
+                    if any(t.score >= .94 and t.text.strip() for t in texts):
+                        page_record['readable_text_frames'] = page_record.get('readable_text_frames', 0)+1
                     if combat_scene:
                         last_combat_audit = seconds
                         last_caption = caption
@@ -969,6 +978,17 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
                             Evidence(**{**asdict(p), 'method':'combat_set_button'})))
         finally:
             capture.release()
+    if options['task_type'] == 'subjugation':
+        from .subjugation_guides import requirement_pages
+        inspected = {p['cid']: p for p in pages_report}
+        for page in requirement_pages(source, options):
+            record = inspected.get(page['cid'], {})
+            if (record.get('readable_text_frames', 0) == 0 or record.get('skipped') or record.get('truncated')
+                    or record.get('unread_frames') or record.get('unsupported_aspect')):
+                title = page.get('part', page.get('title', ''))
+                reason = '来源说明页未完整解析：'+title
+                globals_.append(dict(text=reason, advisory=False, evidence=asdict(Evidence(
+                    source['url'], int(page['cid']), method='unread_requirements', text=reason))))
     # Named author statements can supply fields omitted by combat footage.
     # Only full, unambiguous names are accepted; base names never identify outfits.
     statements = [(source.get('description', ''), 'video_description')]

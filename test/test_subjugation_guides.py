@@ -225,6 +225,68 @@ class SubjugationGuideTests(TestCase):
                 pages = choose_pages(source, options)
                 self.assertEqual([p['part'] for p in pages], ['Boss通用说明', '2王注意事项', target])
 
+    def test_requirement_page_budget_blocks_the_source_instead_of_truncating_notes(self):
+        pages = [dict(cid=i, part='通用说明'+str(i), duration=2) for i in range(1, 5)]
+        pages.append(dict(cid=5, part='Boss1打法1', duration=4))
+        source = dict(pages=pages)
+        options = source_options({}, EVENT, kind='boss', boss='合成首领', boss_number=1)
+        with self.assertRaisesRegex(ValueError, 'max_pages_per_video=4'):
+            choose_pages(source, options)
+        self.assertEqual([p['cid'] for p in choose_pages(source, dict(options, max_pages_per_video=5))],
+                         [1, 2, 3, 4, 5])
+        with TemporaryDirectory() as folder:
+            options['parsed_dir'] = folder
+            api = Mock()
+            api.getVideoInfo.return_value = dict(code=0, data=dict(bvid='BVSYNTHETIC',
+                title='公主连结10月水属性深渊讨伐战', desc='-', pubdate=START+100, pages=pages))
+            with patch('pcrscript.tasks.strategy_video.discover_sources', return_value=dict(candidates=[dict(bvid='BVSYNTHETIC')])), \
+                 patch('pcrscript.tasks.strategy_video.preferred_sources', return_value=([], [])), \
+                 patch('pcrscript.tasks.strategy_video.parse_video_source') as parse:
+                report = acquire_strategies(options, api=api, index=Mock())
+            self.assertEqual(report['status'], 'blocked')
+            self.assertEqual(report['parties'], [])
+            self.assertTrue(any('max_pages_per_video=4' in e['error'] for e in report['errors']))
+            parse.assert_not_called()
+
+    def test_unread_or_truncated_common_notes_cannot_authorize_a_parsed_combat_party(self):
+        for failure in ('download', 'duration_skip', 'truncated', 'empty', 'partial', 'aspect', 'ocr_empty'):
+            with self.subTest(failure=failure), TemporaryDirectory() as folder:
+                options = source_options({}, EVENT)
+                options.update(parsed_dir=folder, skip_long_media=failure != 'truncated')
+                source = dict(bvid='BVSYNTHETIC', url='https://example.com/synthetic',
+                    title='公主连结 国服 合成深渊', pages=[
+                        dict(cid=1, part='通用说明', duration=601 if failure in ('duration_skip', 'truncated') else 2),
+                        dict(cid=2, part='前哨打法1', duration=4)])
+                boxes = [(100+i*120, 390, 100, 100) for i in range(5)]
+                members = [dict(name=f'合成角色{i}', rectangle=list(b), score=.99) for i, b in enumerate(boxes)]
+                index = SimpleNamespace(names=[m['name'] for m in members], matrix=np.ones((5,1728),np.float32))
+                frames = [(True, np.full((540,960,3), i*20, np.uint8)) for i in range(6)]
+                note_frames = {'download': [], 'duration_skip': [], 'truncated': frames[:2], 'ocr_empty': frames[:2],
+                    'empty': [(False, None)]*2, 'partial': [frames[0], (False, None)],
+                    'aspect': [(True, np.zeros((540,2000,3), np.uint8))]*2}[failure]
+                readable = 2 if failure in ('truncated', 'ocr_empty') else 1 if failure == 'partial' else 0
+                capture = Mock()
+                capture.read.side_effect = note_frames+frames[2:]
+                labels = [[] if failure == 'ocr_empty' else texts('说明正文')]*readable+[texts('前哨关卡', '高难')]*2+[
+                    texts('1:29'), texts('1:28')]
+                def fetch(api, bvid, page, *args, **kwargs):
+                    if failure == 'download' and page['cid'] == 1:
+                        raise OSError('synthetic download failure')
+                    return Path(folder)/'synthetic.avi', dict(duration=page['duration'])
+                with patch('pcrscript.tasks.strategy_video.cv.VideoCapture', return_value=capture), \
+                     patch('pcrscript.tasks.strategy_video.sample_seconds', side_effect=lambda duration, *a, **k: [.5,1.5,2.5,3.5] if duration == 4 else [.5,1.5]), \
+                     patch('pcrscript.tasks.strategy_video.frame_texts', side_effect=labels), \
+                     patch('pcrscript.tasks.strategy_video.battle_rectangles', side_effect=[[]]*(readable+2)+[boxes]*2), \
+                     patch('pcrscript.tasks.strategy_video.combat_team', side_effect=[[]]*(readable+2)+[members]*2), \
+                     patch('pcrscript.tasks.strategy_video.formation_fields', return_value=[]), \
+                     patch('pcrscript.tasks.strategy_video.combat_auto', return_value=True), \
+                     patch('pcrscript.tasks.strategy_video.combat_set', return_value=True):
+                    report = parse_video_source(source, options, index, api=Mock(), ocr=Mock(), media_fetcher=fetch)
+                self.assertEqual(len(report['parties']), 1)
+                self.assertEqual(parties_for_target(report, options, allow_local_trials=True), [])
+                self.assertTrue(any(r['evidence']['cid'] == 1 and '未完整解析' in r['text']
+                    for r in report['parties'][0]['global_requirements']))
+
     def test_boss_detail_accepts_separate_full_name_and_level_but_not_a_truncated_name(self):
         options = dict(boss='合成首领(多部位)')
         labels = texts('BOSS详情', '极难')+[
