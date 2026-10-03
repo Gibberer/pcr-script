@@ -1118,6 +1118,7 @@ def acquire_strategies(options: dict, *, api=None, index=None, ocr=None, check=l
                        accept=None, exclude_sources=()) -> dict:
     """The shared GUI/CLI task path from public sources to evidence-backed files."""
     options = dict(options)
+    exclude_sources = frozenset(exclude_sources)
     if options.get('task_type') not in ('abyss', 'dungeon', 'event', 'revival', 'recollection', 'subjugation'):
         raise ValueError('视频解析task_type必须为abyss、dungeon、event、revival、recollection或subjugation')
     for key, default, upper in [('max_videos', 4, 30), ('max_frames_per_page', 50, 300),
@@ -1133,6 +1134,8 @@ def acquire_strategies(options: dict, *, api=None, index=None, ocr=None, check=l
     scope = {k: options.get(k) for k in ('task_type', 'area', 'stage', 'element', 'difficulty', 'mode', 'region', 'source_urls', 'search_effort')}
     if options['task_type'] == 'subjugation':
         scope.update({k: options.get(k) for k in ('kind', 'boss', 'boss_number', 'event_id', 'period_start', 'period_end')})
+    if exclude_sources:
+        scope['exclude_sources'] = sorted(exclude_sources)
     output = directory/('catalog-'+sha256(json.dumps(scope, sort_keys=True).encode()).hexdigest()[:20]+'.json')
     started = time.monotonic()
     max_seconds = options.get('parse_timeout', 900)
@@ -1153,7 +1156,7 @@ def acquire_strategies(options: dict, *, api=None, index=None, ocr=None, check=l
             candidates.extend(p for p in preferred if p.get('user_provided', True))
             report['errors'].extend(errors)
         if options.get('search', True):
-            catalog = discover_sources(options, api=api, check=bounded_check)
+            catalog = discover_sources(options, api=api, check=bounded_check, exclude_sources=exclude_sources)
             report['search'] = catalog
             candidates.extend(catalog.get('candidates', []))
             candidates.extend(p for p in preferred if not p.get('user_provided', True))

@@ -11,7 +11,7 @@ from ..extras.bilibili_api import BilibiliApi
 from ..run_session import clock as time
 from .strategy_inputs import preferred_sources,validate_urls
 
-PARSER_VERSION = 24
+PARSER_VERSION = 25
 
 MANUAL_PART = re.compile(r'半自动|手动|目押|卡轴|(?:\d+|[一二三四五六七八九十])押|改星|调星|切星|降星|星级变更|TP\s*\+\s*2|大师点', re.I)
 BORROW_PART = re.compile(r'借(?:人|角|用|好友|支援|[A-Za-z]|[\u4e00-\u9fff])|使用支援')
@@ -140,7 +140,8 @@ def relevant(text: str, terms: list[str]) -> bool:
     return any(re.search(r'(?<![a-z0-9])'+re.escape(term)+r'(?![a-z0-9])', text, re.I)
                if term.isascii() else term.casefold() in text.casefold() for term in terms)
 
-def discover_sources(options: dict, *, api=None, check=lambda: None) -> dict:
+def discover_sources(options: dict, *, api=None, check=lambda: None, exclude_sources=()) -> dict:
+    exclude_sources = frozenset(exclude_sources)
     area = options.get('area', '')
     if not isinstance(area, str):
         raise ValueError('area必须为明确的目标名称')
@@ -182,6 +183,8 @@ def discover_sources(options: dict, *, api=None, check=lambda: None) -> dict:
                  max_video_seconds=options.get('max_video_seconds', 180))
     if kind == 'subjugation':
         scope.update({k: options.get(k) for k in ('kind', 'difficulty', 'boss', 'boss_number', 'event_id', 'period_start', 'period_end')})
+    if exclude_sources:
+        scope['exclude_sources'] = sorted(exclude_sources)
     key = hashlib.sha256(json.dumps(scope,sort_keys=True,ensure_ascii=False).encode()).hexdigest()[:24]
     path = Path(options.get('cache_dir','cache/game/strategies/sources'))/(key+'.json')
     now = time.time()
@@ -260,6 +263,10 @@ def discover_sources(options: dict, *, api=None, check=lambda: None) -> dict:
         except (requests.RequestException, ValueError, KeyError, TypeError, AttributeError, RuntimeError) as error:
             # Public responses/errors only; no login credential is accessed.
             errors.append(dict(stage='search',query=query,error=type(error).__name__+': '+str(error)[:240]))
+    # Previously attempted sources must not consume the next batch's metadata
+    # or candidate limits. The exclusion set also scopes the catalog above.
+    found = {bvid: item for bvid, item in found.items()
+             if f'https://www.bilibili.com/video/{bvid}/' not in exclude_sources}
     candidates = []
     excluded = []
     high_abyss = kind == 'abyss' and effort == 'high'

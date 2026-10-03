@@ -43,6 +43,34 @@ def trial_report():
 
 
 class SubjugationGuideTests(TestCase):
+    def test_next_source_batch_reaches_the_fifth_public_search_result(self):
+        with TemporaryDirectory() as folder:
+            ids = [f'BV{i:010d}' for i in range(5)]
+            title = '公主连结 国服10月水属性深渊讨伐战 合成深渊'
+            api = Mock()
+            api.search.return_value = dict(code=0, data=dict(result=[dict(result_type='video',
+                data=[dict(bvid=bvid, title=title) for bvid in ids])]))
+            api.getVideoInfo.side_effect = lambda *, bvid: dict(code=0, data=dict(
+                bvid=bvid, title=title, desc='', pubdate=START+100,
+                pages=[dict(cid=1, page=1, part='前哨高难', duration=2)]))
+            def parse(source, *args, **kwargs):
+                report = trial_report() if source['bvid'] == ids[-1] else dict(parties=[])
+                report['errors'] = []
+                return report
+            runner = SimpleNamespace(options=dict(discover_sources=True, source_urls=[], allow_local_trials=True,
+                sources=dict(cache_dir=str(Path(folder)/'sources'), parsed_dir=str(Path(folder)/'parsed'), max_videos=4)),
+                source_pools={}, inspected_sources={}, event=EVENT, report={}, formation=Mock(),
+                report_progress=Mock(), check_deadline=Mock(), save=Mock())
+            with patch('pcrscript.tasks.task_abyss_subjugation.prepare_avatars'), \
+                 patch('pcrscript.tasks.strategy_video.BilibiliApi', return_value=api), \
+                 patch('pcrscript.tasks.strategy_video.preferred_sources', return_value=([], [])), \
+                 patch('pcrscript.tasks.strategy_video.parse_video_source', side_effect=parse) as parser:
+                self.assertEqual(AbyssSubjugation.source_parties(runner, 'outpost', difficulty='高难'), [])
+                found = AbyssSubjugation.source_parties(runner, 'outpost', difficulty='高难', advance=True)
+            self.assertEqual(len(found), 1)
+            self.assertEqual([c.args[0]['bvid'] for c in parser.call_args_list], ids)
+            self.assertEqual([len(r['report']['inspected_sources']) for r in runner.report['sources']], [4, 1])
+
     def test_actual_boss_and_difficulty_scope_have_separate_source_caches(self):
         runner = SimpleNamespace(options=dict(discover_sources=True, source_urls=[], allow_local_trials=True),
             source_pools={}, inspected_sources={}, event=EVENT, report={}, formation=Mock(),

@@ -16,6 +16,33 @@ def fake_api():
  return a
 
 class SourceTests(TestCase):
+ def test_exclusions_precede_metadata_limits_and_have_distinct_caches(self):
+  for effort in ('normal','high'):
+   with self.subTest(effort=effort),TemporaryDirectory() as folder:
+    api=fake_api();ids=[f'BV{i:010d}' for i in range(30)]
+    title='公主连结 国服 测试区域 深域 风2-10 自动'
+    api.search.return_value={'code':0,'data':{'result':[{'result_type':'video','data':[
+     {'bvid':bvid,'title':title} for bvid in ids]}]}}
+    api.getVideoInfo.side_effect=lambda *,bvid: {'code':0,'data':{
+     'bvid':bvid,'title':title,'pages':[{'cid':1,'page':1,'part':'风2-10','duration':90}]}}
+    options=dict(task_type='abyss',area='测试区域',element='wind',stage='2-10',
+     category_terms=['深域'],max_videos=1,search_effort=effort,cache_dir=folder)
+    first=discover_sources(options,api=api)
+    self.assertEqual([c['bvid'] for c in first['candidates']],ids[:1])
+    api.getVideoInfo.reset_mock()
+    excluded={f'https://www.bilibili.com/video/{bvid}/' for bvid in ids[:24]}
+    following=discover_sources(options,api=api,exclude_sources=excluded)
+    self.assertEqual([c['bvid'] for c in following['candidates']],ids[24:25])
+    self.assertTrue(all(c.kwargs['bvid'] not in ids[:24] for c in api.getVideoInfo.call_args_list))
+    self.assertNotEqual(first['catalog'],following['catalog'])
+    api.search.reset_mock();api.getVideoInfo.reset_mock()
+    cached=discover_sources(options,api=api,exclude_sources=reversed(sorted(excluded)))
+    self.assertTrue(cached['cache_hit'])
+    self.assertEqual(cached['catalog'],following['catalog'])
+    self.assertEqual([c['bvid'] for c in cached['candidates']],ids[24:25])
+    self.assertEqual(discover_sources(options,api=api)['candidates'],first['candidates'])
+    api.search.assert_not_called();api.getVideoInfo.assert_not_called()
+
  def test_recollection_high_search_finds_recent_exact_auto_part_beyond_normal_window(self):
   queries=source_queries(['泽恩的领域','泽恩'],'4','high',kind='recollection')
   self.assertIn('公主连结 追忆的战场 AUTO',queries)
