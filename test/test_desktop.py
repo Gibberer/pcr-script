@@ -232,7 +232,9 @@ class DesktopTests(unittest.TestCase):
              patch('pcrscript.simulator.GeneralSimulator.get_device_states') as adb:
             result = desktop.device_report({'dnpath': str(emulator)})
             self.assertFalse(result['ready'])
-            self.assertIn('synthetic failure', result['message'])
+            self.assertIn('OSError', result['message'])
+            self.assertEqual(result['discovery']['status'], 'query_failed')
+            self.assertIn('不能证明模拟器未启动', result['message'])
             adb.assert_not_called()
 
     def test_run_id_cannot_escape_run_root(self):

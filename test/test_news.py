@@ -77,6 +77,50 @@ class NewsScheduleTests(TestCase):
                 self.assertEqual(TimeLimitTask.event_first_day(event), expected)
 
 
+class AbyssSubjugationScheduleTests(TestCase):
+    def database(self):
+        conn = sqlite3.connect(':memory:')
+        self.addCleanup(conn.close)
+        conn.create_function('ISO', 1, news._iso_datetime)
+        conn.execute('CREATE TABLE abyss_schedule '
+                     '(abyss_id INTEGER, boss_ticket_id INTEGER, talent_id INTEGER, '
+                     'title TEXT, start_time TEXT, end_time TEXT)')
+        conn.executemany('INSERT INTO abyss_schedule VALUES(?,?,?,?,?,?)', [
+            (1, 70001, 1, '合成旧活动', '2026/9/2 12:00:00', '2026/9/7 4:59:59'),
+            (2, 70002, 2, '合成活动', '2026/10/2 12:00:00', '2026/10/7 4:59:59'),
+            (3, 70003, 3, '合成未来活动', '2026/11/2 12:00:00', '2026/11/7 4:59:59'),
+        ])
+        return conn
+
+    def test_active_event_uses_actual_window_and_ticket_identity(self):
+        conn = self.database()
+        for instant, active in ((datetime(2026, 10, 2, 11, 59, 59, tzinfo=CN), False),
+                                (datetime(2026, 10, 2, 12, tzinfo=CN), True),
+                                (datetime(2026, 10, 7, 4, 59, 58, tzinfo=CN), True),
+                                (datetime(2026, 10, 7, 4, 59, 59, tzinfo=CN), False),
+                                (datetime(2026, 10, 7, 5, tzinfo=CN), False)):
+            class TokyoClock(datetime):
+                @classmethod
+                def now(cls, tz=None):
+                    value = instant.astimezone(tz or TOKYO)
+                    return value if tz else value.replace(tzinfo=None)
+            with self.subTest(instant=instant), patch.object(news, 'datetime', TokyoClock):
+                event = news._query_abyss_subjugation(conn)
+                self.assertEqual(event is not None, active)
+                if event:
+                    self.assertEqual(event.extras, dict(abyss_id=2, boss_ticket_id=70002,
+                                                      talent_id=2, title='合成活动'))
+                    self.assertEqual(event.startTimestamp, datetime(2026, 10, 2, 12, tzinfo=CN).timestamp())
+                    self.assertEqual(event.endTimestamp, datetime(2026, 10, 7, 4, 59, 59, tzinfo=CN).timestamp())
+
+    def test_missing_optional_table_skips_only_this_event(self):
+        with closing(sqlite3.connect(':memory:')) as conn:
+            self.assertIsNone(news._query_abyss_subjugation(conn))
+            conn.execute('CREATE TABLE abyss_schedule (broken INTEGER)')
+            with self.assertRaises(sqlite3.OperationalError):
+                news._query_abyss_subjugation(conn)
+
+
 class NewsDatabaseTests(TestCase):
     def setUp(self):
         self.temporary = TemporaryDirectory()

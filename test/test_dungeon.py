@@ -269,18 +269,21 @@ class DungeonTests(TestCase):
                 self.assertIs(task.inspect((0,0),full=False).unique,expected)
 
     def test_character_page_fallback_requires_full_memory_shard_identity(self):
-        search=frame(('重置',689,90))
+        search=frame(('角色一览',120,30), ('重置',689,90), ('测试角色',480,90))
         search.image[145:255,45:305]=(0,0,255)
-        for name,expected in (('测试角色','测试角色'),('测试角色(衣装)','测试角色')):
+        for name,expected in (('测试角色','测试角色'), ('测试角色(衣装)','测试角色'),
+                              ('测试角色(夏日)','测试角色(夏日)')):
             ui=Mock()
-            memory=frame((expected+'的记忆碎片',600,130))
+            memory=frame((expected+('的纯净记忆碎片' if name.endswith('(夏日)') else '的记忆碎片'),600,130))
             equipment=frame(('此专用装备1预定今后登场。',700,330))
-            ui.capture.side_effect=[search,search,equipment]
-            ui.wait.return_value=memory
+            ui.capture.return_value=search
+            ui.wait.side_effect=[search,frame(('角色强化',120,30)),memory,
+                                 equipment if name==expected else search]
             ui.save.return_value='evidence.png'
             with self.subTest(name=name),patch('pcrscript.game_ui.character_equipment.time.sleep'):
                 result=inspect_unreleased_equipment(ui,name)
                 self.assertEqual(result,'evidence.png' if name==expected else None)
+                ui.driver.input.assert_not_called()  # Reuse the already confirmed query.
                 for call in ui.expect_click.call_args_list:
                     self.assertIn(call.args[0],('才能开花','专用装备'))
 
@@ -288,9 +291,9 @@ class DungeonTests(TestCase):
         ui=Mock()
         ui.capture.return_value=frame(('重置',689,90))
         ui.driver.input.side_effect=subprocess.CalledProcessError(137,['adb'])
-        with self.assertRaisesRegex(EventUIError,'专武状态未核实'):
+        with self.assertRaisesRegex(EventUIError,'后台角色搜索输入失败'):
             open_character_memory(ui,'测试角色')
-        ui.save.assert_not_called()
+        ui.save.assert_called_once()
 
     def test_reward_animation_waits_for_next_floor_before_click(self):
         task = object.__new__(DungeonFirstClear)

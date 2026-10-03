@@ -12,7 +12,7 @@
 | `.github/workflows/desktop.yml` | Windows GUI 构建、离线测试与产物上传；已合并版本标签创建 Release |
 | `.github/workflows/python.yml` | 普通 Python 代码、依赖与默认配置变更的离线回归 |
 | `pcrscript/tasks/` | 统一任务实现、基类、注册表及任务辅助逻辑 |
-| `pcrscript/game_ui/` | 可共享的观察、识别与操作能力；`dungeon.py` 读取进度，`character_equipment.py` 只读核验未开放专武 |
+| `pcrscript/game_ui/` | 可共享的观察、识别与操作能力；`dungeon.py` 读取进度，`character_equipment.py` 只读核验专武开放与已支持的强化数值 |
 | `scripts/daily/` | 正式自动化命令入口，可供定时任务调用 |
 | `scripts/legacy/multi_account.py` | 旧版多账号入口，从根目录运行；不属于 GUI 核心下载 |
 | `docs/guides/examples/daily.example.yml` | 可复制到根目录的日常示例配置 |
@@ -46,6 +46,7 @@ GUI 的 `PortableTools.cs` 管理固定版本工具的下载、SHA-256 校验与
 | [task_character_bond.py](../pcrscript/tasks/task_character_bond.py) | `max_character_bonds`（现有礼物与角色剧情） |
 | [task_dungeon.py](../pcrscript/tasks/task_dungeon.py) | `dungeon_first_clear` |
 | [task_abyss.py](../pcrscript/tasks/task_abyss.py) | `abyss_push`（深域按需推进） |
+| [task_abyss_subjugation.py](../pcrscript/tasks/task_abyss_subjugation.py) | `abyss_subjugation`（深渊讨伐战每日首通与扫荡） |
 | [task_recollection_first_clear.py](../pcrscript/tasks/task_recollection_first_clear.py) | `recollection_first_clear`（普通及霸首通） |
 | [task_recollection.py](../pcrscript/tasks/task_recollection.py) | `recollection`（普通报酬及已通关霸扫荡） |
 | [task_caravan.py](../pcrscript/tasks/task_caravan.py) | `caravan` |
@@ -70,13 +71,15 @@ GUI 的 `PortableTools.cs` 管理固定版本工具的下载、SHA-256 校验与
 
 追忆战场的共享页面识别在 `game_ui/recollection.py`，导航、限额及待核对记录在 `tasks/recollection_flow.py`，精确层数来源适配及编队审计在 `tasks/recollection_strategy.py`。首通调用共享视频解析、`EventFormation` 和 `EventCombat`；日常使用游戏一键扫荡预览与消费核对，均经现有通用命令运行。见[追忆战场指南](guides/recollection.md)。
 
+深渊讨伐战在 `game_ui/abyss_subjugation.py` 维护页面与消费字段识别，`tasks/subjugation_guides.py` 通过共享检索和视频解析器核对本期前哨／首领范围及试打条件，`tasks/subjugation_party.py` 适配攻略／当前／保存队伍的活动属性要求。选人、账号试打及近期胜队核验复用公共 `StrategyFormation.source_trial()`、`current_trial()` 与 `EventFormation`；候选遍历、培养差距、五星培养和特别装备准备位于 `tasks/party_preparation.py`，见[公共准备流程](party-preparation.md)。具体任务复用 `EventCombat` 和公会之家产物领取。活动情报来自 `news.py` 的 `abyss_schedule`；GUI/CLI 共用注册任务及 `AbyssSubjugation` 配置。见[使用指南](guides/abyss-subjugation.md)。
+
 地下城识别位于 `game_ui/dungeon.py`，方案校验、跨队冲突与编队布局位于 `tasks/dungeon_party.py`，候选头像盘点位于 `game_ui/roster.py`，均非独立任务。运行与本地方案格式见 [地下城首通](guides/dungeon.md)。
 
-`tasks/strategy_sources.py` 为内部共享的匿名来源搜索/身份核验/缓存能力，不注册为独立任务。深域与地下城首通按各自任务配置调用搜索，攻略链接分别配置于 `Abyss.source_urls`、`Dungeon.source_urls`。候选来源不是战斗方案。`tasks/abyss_party.py` 为本地试打编队检查，`game_ui/abyss.py` 为深域地图识别，均非独立任务。使用方式见 [深域推进](guides/abyss.md)。
+`tasks/strategy_sources.py` 为内部共享的匿名来源搜索/身份核验/缓存能力，不注册为独立任务。深域与地下城首通按各自任务配置调用搜索，攻略链接分别配置于 `Abyss.source_urls`、`Dungeon.source_urls`。候选来源不是战斗方案。`tasks/strategy_formation.py` 为深域与深渊共用的账号编队与替补，`tasks/abyss_party.py` 只保留兼容导入，`game_ui/abyss.py` 为深域地图识别，均非独立任务。使用方式见 [深域推进](guides/abyss.md)。
 
 深域辅助模块：`pcrscript/tasks/abyss_history.py` 保存按账号/关卡隔离的尝试历史；`abyss_retry.py` 根据战斗证据决定重试价值；`party_variants.py` 按数据库技能描述生成本地替代组合，均不独立注册任务。
 
 
-深域与来源共享辅助模块：`tasks/strategy_inputs.py` 统一用户链接及UP评论引用；`tasks/strategy_tables.py` 解析简单通用头像表；两者均非独立任务。`game_ui/character_stars.py` 为默认关闭的五星培养/兑换与回执能力，供深域任务组合使用，非独立注册入口。
+深域与来源共享辅助模块：`tasks/strategy_inputs.py` 统一用户链接及UP评论引用；`tasks/strategy_tables.py` 解析简单通用头像表；两者均非独立任务。`game_ui/character_stars.py` 为默认关闭的五星培养/兑换与回执能力，由公共战前准备组合，非独立注册入口。`game_ui/character_search.py` 统一编队与角色一览的输入确认和重试，不能在人物培养中重新实现不核对回执的搜索。
 
 视频解析辅助模块：`tasks/strategy_video.py` 负责来源到字段证据的获取/关联，`tasks/strategy_document.py` 保留未知与冲突并适配正式任务，`tasks/strategy_party_pool.py` 整理活动首领的自动来源、有限试打和职责替补候选，`tasks/strategy_trial.py` 以账号实时观察核验试打编队；`extras/guide_media.py` 下载/校验视频，`game_ui/avatar_assets.py` 自动准备公共头像与国服身份，`game_ui/guide_vision.py` 提供视频布局识别。均不独立注册任务，由深域、地下城首通、剧情活动及复刻活动复用；深域和地下城支持 `prepare_only`，详见 [视频解析与复核](video-strategies.md)。

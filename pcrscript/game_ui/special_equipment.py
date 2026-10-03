@@ -1,4 +1,4 @@
-"""Read the five EX-equipment panels in a deep-area formation."""
+"""Shared five-member EX-equipment observation and allocation."""
 from __future__ import annotations
 
 import cv2 as cv
@@ -10,6 +10,22 @@ from .screen import EventUI, EventUIError, normalized
 
 SPECIAL_COLUMNS = (158, 337, 516, 694, 873)
 SPECIAL_ROWS = (218, 291, 365)
+
+
+def loadout_items(image):
+    """Keep item appearance as well as occupancy; two full slots may differ."""
+    return [[cv.resize(cv.GaussianBlur(image[y-22:y+22, x-22:x+22], (5, 5), 0),
+                       (8, 8), interpolation=cv.INTER_AREA).flatten().tolist()
+             for y in SPECIAL_ROWS] for x in SPECIAL_COLUMNS]
+
+
+def same_loadout(before, after):
+    if (before.get('order') != after.get('order') or before.get('slots') != after.get('slots')
+            or before.get('unknown') != 0 or after.get('unknown') != 0):
+        return False
+    a, b = np.asarray(before.get('items', [])), np.asarray(after.get('items', []))
+    return bool(a.shape == b.shape == (5, 3, 192)
+                and np.max(np.mean(np.abs(a.astype(float)-b.astype(float)), axis=2)) <= 5)
 
 
 def formation_entry_visible(screen) -> bool:
@@ -82,7 +98,8 @@ def inspect_special_equipment(ui: EventUI, order: list[str]) -> dict:
     ui.expect_click('取消',(35,445,265,520),exact=True)
     ui.wait(lambda s:s.find('队伍编组',(300,0,650,70),exact=True),'特别装备返回编队')
     return dict(order=list(order),slots=slots,empty=sum(v is False for col in slots for v in col),
-                unknown=sum(v is None for col in slots for v in col),evidence=evidence)
+                unknown=sum(v is None for col in slots for v in col),evidence=evidence,
+                items=loadout_items(panel.image))
 
 
 def auto_equip_special(ui: EventUI, order: list[str]) -> dict:
@@ -129,4 +146,5 @@ def auto_equip_special(ui: EventUI, order: list[str]) -> dict:
                 unknown=sum(v is None for col in final for v in col),
                 before_power=before_power,after_power=after_power,changed=changed,
                 evidence=evidence,before_evidence=before_evidence,
-                settings_evidence=settings_evidence,selected_evidence=selected_evidence)
+                settings_evidence=settings_evidence,selected_evidence=selected_evidence,
+                items=loadout_items(committed.image))

@@ -70,6 +70,24 @@ TeamBattle:
   battle_timeout: 220
   max_real_attacks: 3
   max_simulations: 12
+AbyssSubjugation:
+  discover_sources: true
+  source_urls: []
+  normal_team: [1, 1] # 当前编组未核验通过时检查这个保存位置，前哨复用选定的五人队伍
+  boss_teams: [[1, 1], [1, 2], [2, 1], [2, 2], [3, 1], [3, 2], [4, 1], [4, 2], [5, 1], [5, 2]]
+  max_stamina: 400
+  max_boss_tickets: 99
+  max_normal_trials: 6
+  max_simulations: 30
+  max_source_batches: 3
+  auto_equip_special: true
+  allow_five_star_upgrade: false
+  allow_divine_amulets: false
+  timeout: 7200
+  battle_timeout: 240
+  allow_local_trials: true
+  auto_collect_house_stamina: true
+  preview_only: false
 # 需要首页的任务由调度器自动返回首页，无需穿插 tohomepage。
 Task: #配置执行任务,配置任务名称，如果需要传入参数在下面增加参数，可以根据不同的账号序号配置任务。
   1: # 多账号相关，可以针对账号配置不同的任务，如果是单账号日常不需要关注。
@@ -96,6 +114,8 @@ Task: #配置执行任务,配置任务名称，如果需要传入参数在下面
       - campaign_clean  # 新版活动重复日：困难扫荡、剧情、任务、兑换（首通暂不执行）
       - True # 是否扫荡活动困难关卡
       - False # 是否将剩余体力花费在活动普通章节上
+    -
+      - abyss_subjugation # 开放期内前哨首通/扫荡，未通关首领优先，全部通关后高难扫荡
     -
       - quick_clean #快捷扫荡
       - 2 #使用预设2，这里需要注意当只有困难关卡双倍掉落时会强行切换为使用预设3。所以建议把该预设设置为通常关卡，预设3设置为困难关卡。

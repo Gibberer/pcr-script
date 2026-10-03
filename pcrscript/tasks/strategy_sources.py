@@ -11,7 +11,7 @@ from ..extras.bilibili_api import BilibiliApi
 from ..run_session import clock as time
 from .strategy_inputs import preferred_sources,validate_urls
 
-PARSER_VERSION = 23
+PARSER_VERSION = 24
 
 MANUAL_PART = re.compile(r'半自动|手动|目押|卡轴|(?:\d+|[一二三四五六七八九十])押|改星|调星|切星|降星|星级变更|TP\s*\+\s*2|大师点', re.I)
 BORROW_PART = re.compile(r'借(?:人|角|用|好友|支援|[A-Za-z]|[\u4e00-\u9fff])|使用支援')
@@ -171,12 +171,17 @@ def discover_sources(options: dict, *, api=None, check=lambda: None) -> dict:
     if type(limit) is not int or not 1 <= limit <= 30 or type(ttl) not in (int,float) or not 0 <= ttl <= 720:
         raise ValueError('max_videos应为1–30，max_age_hours应为0–720')
     queries = source_queries(terms, stage, effort, kind=kind, element=options.get('element'))
+    if kind == 'subjugation':
+        from .subjugation_guides import queries as subjugation_queries
+        queries = subjugation_queries(options)
     scope = dict(task_type=kind,area=area,stage=stage,category_terms=categories,
                  terms=terms,region=region,max_videos=limit,queries=queries,source_urls=urls,
                  element=options.get('element'),search_effort=effort,
                  skip_manual_media=bool(options.get('skip_manual_media')),
                  skip_long_media=bool(options.get('skip_long_media')),
                  max_video_seconds=options.get('max_video_seconds', 180))
+    if kind == 'subjugation':
+        scope.update({k: options.get(k) for k in ('kind', 'difficulty', 'boss', 'boss_number', 'event_id', 'period_start', 'period_end')})
     key = hashlib.sha256(json.dumps(scope,sort_keys=True,ensure_ascii=False).encode()).hexdigest()[:24]
     path = Path(options.get('cache_dir','cache/game/strategies/sources'))/(key+'.json')
     now = time.time()
@@ -286,6 +291,12 @@ def discover_sources(options: dict, *, api=None, check=lambda: None) -> dict:
             pages = [dict(cid=p.get('cid'),page=p.get('page'),title=clean(p.get('part')),duration=p.get('duration'))
                      for p in data.get('pages',[]) if isinstance(p,dict)]
             detail_text = title+' '+description+' '+' '.join(p['title'] for p in pages)
+            if kind == 'subjugation':
+                from .subjugation_guides import source_rejection
+                reason = source_rejection(dict(title=title, description=description, published_at=data.get('pubdate')), options)
+                if reason:
+                    excluded.append(dict(bvid=bvid, reason=reason))
+                    continue
             if not relevant(detail_text,terms) or (categories and not relevant(detail_text,categories)):
                 excluded.append(dict(bvid=bvid,reason='视频详情与目标玩法/区域不匹配'))
                 continue

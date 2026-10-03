@@ -17,7 +17,7 @@ from pcrscript.tasks.strategy_document import Evidence, empty_member, finalize, 
 from pcrscript.tasks.strategy_video import choose_pages, observed_scope, parse_video_source, acquire_strategies, task_source_options, texts_in_view, sample_seconds, frame_texts, combat_button_texts, combat_hud_visible, combat_caption_signature
 from pcrscript.tasks.strategy_party_pool import boss_parties, next_boss_party
 from pcrscript.tasks.strategy_trial import TrialFormation
-from pcrscript.tasks.event_strategy import CharacterStatus
+from pcrscript.tasks.event_strategy import CharacterStatus, EventParty, MemberRequirement
 from pcrscript.tasks.task_abyss import AbyssPush, source_for_stage
 from pcrscript.tasks.abyss_party import AbyssFormation
 from pcrscript.tasks.task_dungeon import DungeonFirstClear
@@ -352,8 +352,8 @@ class VideoStrategyTests(TestCase):
 
     def test_fields_never_default_and_weapon_stars_are_not_rarity(self):
         self.assertEqual(labeled_fields(''), {})
-        self.assertEqual(labeled_fields('专310'), {'unique': True})
-        self.assertEqual(labeled_fields('专武2:5星'), {'unique2': True})
+        self.assertEqual(labeled_fields('专310'), {'unique': True, 'unique_level': 310})
+        self.assertEqual(labeled_fields('专武2:5星'), {'unique2': True, 'unique2_stars': 5})
         self.assertEqual(labeled_fields('5星 Lv100 Rank10 技能100 专武1有 专武2无 SET关'),
                          dict(stars=5, level=100, rank=10, skill_level=100, unique=True, unique2=False, instant=False))
         self.assertNotIn('level', labeled_fields('属性等级180'))
@@ -411,10 +411,13 @@ class VideoStrategyTests(TestCase):
             def source_trial(self, stage, source, *, recover=True):
                 if not source.get('document'):
                     self.trial_source = source
-                    return object(), {'order': source['names']}
+                    actual = [CharacterStatus(n, 100, 10, 5, True, False, 100, identity_verified=True) for n in source['names']]
+                    party = EventParty('synthetic', 'local', [MemberRequirement(a.name, 100, 10, 5, True, False) for a in actual])
+                    return party, {'order': source['names'], 'observed': [asdict(a) for a in actual]}
                 return super().source_trial(stage, source, recover=recover)
 
         stub = object.__new__(TrialStub)
+        stub.observed = {}
         party, audit = stub.source_trial(stage, candidate)
         self.assertIsNotNone(party)
         self.assertEqual(stub.trial_source['instant'], [True]*5)

@@ -223,8 +223,8 @@ class AbyssTests(TestCase):
             {'character':'替补','reasons':['专武状态未知']}]}))
         choices=[dict(order=['原角1','替补'],incoming='替补',outgoing=outgoing)
                  for outgoing in ('原角2','原角3')]
-        with patch('pcrscript.tasks.abyss_party.character_roles',return_value={}), \
-             patch('pcrscript.tasks.abyss_party.alternatives',return_value=choices):
+        with patch('pcrscript.tasks.strategy_formation.character_roles',return_value={}), \
+             patch('pcrscript.tasks.strategy_formation.alternatives',return_value=choices):
             party,audit=formation.alternative_trial(AbyssStage('fire',5,6),
                                                      {'order':['原角1','原角2','原角3']},set())
         self.assertIsNone(party)
@@ -517,7 +517,7 @@ class AbyssTests(TestCase):
         detail=Mock();detail.blue_button.return_value=True
         task.open_stage=Mock(return_value=(AbyssStage('fire',3,1),detail))
         task.search=Mock()
-        task.formation=Mock()
+        task.formation=Mock(observed={})
         task.formation.current_trial.return_value=(EventParty('synthetic','local',[]),{'order':['a','b','c','d','e']})
         task.formation.alternative_trial.side_effect=[(EventParty('synthetic','local',[]),{'order':['a','b','c','d',name]}) for name in ['f','g','h','i']]
         task.equip_special=Mock(return_value={'slots':[[True]*3 for _ in range(5)],'empty':0,'unknown':0})

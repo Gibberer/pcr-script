@@ -10,8 +10,9 @@ from typing import Any
 from .event_strategy import EventParty, MemberRequirement
 from ..game_ui.screen import normalized
 
-VERSION = 2
-BUILD_FIELDS = ('level', 'rank', 'stars', 'unique', 'unique2', 'skill_level', 'instant')
+VERSION = 3
+OPTIONAL_BUILD_FIELDS = ('unique_level', 'unique2_stars')
+BUILD_FIELDS = ('level', 'rank', 'stars', 'unique', 'unique2', 'skill_level', 'instant') + OPTIONAL_BUILD_FIELDS
 
 
 @dataclass
@@ -61,7 +62,14 @@ def missing_fields(party: dict) -> list[str]:
         for key in BUILD_FIELDS:
             fact = member.get(key, {})
             value = fact.get('value')
+            if key in OPTIONAL_BUILD_FIELDS and value is None and not fact.get('conflicts'):
+                continue
             valid = type(value) is bool if key in ('unique', 'unique2', 'instant') else type(value) is int and value > 0
+            if key == 'unique2_stars':
+                valid = type(value) is int and 0 <= value <= 5
+            if key in OPTIONAL_BUILD_FIELDS:
+                flag = 'unique' if key == 'unique_level' else 'unique2'
+                valid = valid and member.get(flag, {}).get('value') is True
             if key == 'stars':
                 valid = type(value) is int and 1 <= value <= 6
             if not valid or not fact.get('evidence') or fact.get('conflicts'):
@@ -76,7 +84,7 @@ def missing_fields(party: dict) -> list[str]:
         reasons.append('来源包含尚不支持的手动操作/轴')
     auto = party.get('auto', {})
     fixed_auto = (party.get('scope', {}).get('difficulty') in ('special', 'special_plus', 'very_hard')
-                  or party.get('task_type') == 'recollection')
+                  or party.get('task_type') in ('recollection', 'subjugation'))
     valid_auto = type(auto.get('value')) is bool if fixed_auto else auto.get('value') is True
     if not valid_auto or not auto.get('evidence') or auto.get('conflicts'):
         reasons.append('来源未确认固定AUTO设置或存在切换' if fixed_auto
@@ -102,7 +110,7 @@ def to_event_party(party: dict) -> EventParty:
     if reasons:
         raise ValueError('攻略未满足自动执行条件：'+'；'.join(reasons))
     return EventParty(party['id'], party['source'], [MemberRequirement(
-        member['name'], **{key: member[key]['value'] for key in BUILD_FIELDS}) for member in party['members']],
+        member['name'], **{key: member.get(key, {}).get('value') for key in BUILD_FIELDS}) for member in party['members']],
         auto=party['auto']['value'])
 
 

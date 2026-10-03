@@ -30,10 +30,17 @@ def select_driver(config: dict[str, Any]) -> Driver:
         raise ValueError("Extra.dnpath、adb_path、adb_serial 和 adb_unicode_console_path 必须是字符串")
     dnpath = str(extra.get("dnpath") or "").strip()
     if dnpath:
-        drivers = DNSimulator(dnpath, useADB=False).get_dirvers() or []
+        simulator = DNSimulator(dnpath, useADB=False)
+        drivers = simulator.get_dirvers() or []
         if not drivers:
-            raise RuntimeError("未发现雷电模拟器窗口，请在与模拟器相同的 Windows 会话运行")
-        return drivers[0]
+            raise RuntimeError(simulator.discovery_error())
+        driver = drivers[0]
+        driver.adb_path = str(extra.get('adb_path') or 'adb').strip()
+        bundled_adb = Path(dnpath)/'adb.exe'
+        if driver.adb_path == 'adb' and bundled_adb.is_file():
+            driver.adb_path = str(bundled_adb)
+        driver.adb_fallback_serial = str(extra.get('adb_serial') or '').strip()
+        return driver
     adb_path = str(extra.get("adb_path") or "adb").strip()
     unicode_console_path = str(extra.get("adb_unicode_console_path") or "").strip()
     unicode_console_index = extra.get("adb_unicode_console_index", 0)

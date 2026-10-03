@@ -23,6 +23,7 @@ def runtime_defaults_path() -> Path:
 PROTOCOL = 1
 LABELS = {
     'abyss_push': '深域关卡 · 尽力推进',
+    'abyss_subjugation': '深渊讨伐战 · 每日首通与扫荡',
     'upgrade_all_characters': '强化所有角色装备和等级到上限',
     'max_character_bonds': '角色好感度与剧情解锁',
     'dungeon_first_clear': '地下城 · 首次通关',
@@ -52,6 +53,7 @@ PARAMETER_LABELS = {
     'estimate_combat_duration': '预估战斗时长（秒）',
 }
 DESCRIPTIONS = {
+    'abyss_subjugation': '活动开放期间，优先取得本期国服攻略并核验五人身份、培养及 SET/AUTO，同队首通前哨各难度并扫荡剩余次数；首领模拟核验后消耗讨伐委托证推进未通关首领。全部首通后扫荡一个高难首领，核对次数与券余额。可领取公会之家现有体力，不购买体力、回复次数或重置首领进度。',
     'abyss_push': '按五种属性推进深域NEXT关卡。按来源优先选队并核验当前培养，开战前自动装备特别装备；结合伤害、减员和历史失败记录调整阵容与重试次数。可选升5星并用女神秘石兑换所需碎片，默认关闭；不购买体力或重置次数。攻略搜索结果仅为候选来源，尚不能自动解析完整培养要求。',
     'upgrade_all_characters': '使用角色页一键强化，分批提升全部可强化角色至最高可用品级，并强化等级、技能和普通装备。使用现有玛那、装备与原矿；不购买资源、不改变星数或专武开关。',
     'max_character_bonds': '按好感度从低到高检查持有角色，使用现有礼物尽量提升至当前上限，逐篇跳过新开放的角色剧情并核对首读及属性奖励。记录每位角色的礼物消耗与未完成原因；不购买礼物。',
@@ -127,20 +129,18 @@ def catalog() -> list[dict[str, Any]]:
 
 def device_report(options: dict[str, Any]) -> dict[str, Any]:
     """Connection check only; reuse production discovery, never capture/start a game."""
-    from contextlib import redirect_stdout
-    import io
     from pcrscript.simulator import DNSimulator, GeneralSimulator
     ensure_idle()
     emulator = str(options.get('dnpath') or '').strip()
     if emulator:
         if not (Path(emulator) / 'ldconsole.exe').is_file():
             raise ValueError('此目录没有 ldconsole.exe，请选择雷电模拟器安装目录，而非桌面快捷方式。')
-        diagnostics = io.StringIO()
-        with redirect_stdout(diagnostics):
-            devices = DNSimulator(emulator, useADB=False).get_devices() or []
+        simulator = DNSimulator(emulator, useADB=False)
+        devices = simulator.get_devices() or []
         message = ('雷电模拟器连接正常，在线实例：' + '、'.join(devices) + '。请登录游戏首页，并确认分辨率为 960×540。') if devices else (
-            '未发现已启动的雷电模拟器实例，请先启动模拟器，等待 Android 桌面显示后重试。' + diagnostics.getvalue().strip())
-        return dict(protocol=PROTOCOL, ready=bool(devices), devices=[], message=message)
+            simulator.discovery_error())
+        return dict(protocol=PROTOCOL, ready=bool(devices), devices=[], message=message,
+                    discovery=simulator.last_discovery)
     states = GeneralSimulator(str(options.get('adb_path') or 'adb')).get_device_states()
     devices = [serial for serial, state in states.items() if state == 'device']
     serial = str(options.get('adb_serial') or '').strip()

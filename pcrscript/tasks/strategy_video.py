@@ -21,7 +21,7 @@ from .strategy_document import Evidence, Fact, empty_member, finalize, export_do
 from .strategy_sources import BORROW_PART, MANUAL_PART, UNVERIFIED_SETTING, discover_sources
 from .strategy_inputs import preferred_sources
 
-PARSER_VERSION = 50
+PARSER_VERSION = 60
 FRAME_OCR_VERSION = 1
 COMBAT_AUDIT_SECONDS = 20
 RECOLLECTION_UNSUPPORTED = re.compile(
@@ -468,6 +468,9 @@ def choose_pages(source: dict, options: dict) -> list[dict]:
                     and relevant_requirement(p)
                     and (not (ranges := recollection_ranges(p.get('part', p.get('title', '')), area))
                          or any(a <= wanted['floor'] <= b for a, b in ranges))]
+    elif kind == 'subjugation':
+        from .subjugation_guides import choose_pages as subjugation_pages
+        targets = subjugation_pages(source, options)
     elif kind in ('event', 'revival'):
         wanted = {'difficulty': options.get('difficulty'), 'mode': options.get('mode')}
         targets = [p for p in pages if (scope := page_scope(p, kind)) == wanted]
@@ -638,15 +641,22 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
     pages = choose_pages(source, options)
     fingerprint = sha256(json.dumps(dict(version=PARSER_VERSION, source=source, pages=pages,
                          scope={k: options.get(k) for k in ('task_type', 'stage', 'element', 'area', 'difficulty', 'mode', 'region', 'max_frames_per_page', 'max_video_seconds', 'skip_manual_media', 'skip_long_media')},
+                         event={k: options.get(k) for k in ('kind', 'boss', 'boss_number', 'event_id', 'period_start', 'period_end')}
+                               if options['task_type'] == 'subjugation' else {},
                          index=sha256(index.matrix.tobytes()+json.dumps(index.names, ensure_ascii=False).encode()).hexdigest()), ensure_ascii=False, sort_keys=True).encode()).hexdigest()
     cache = root/(fingerprint[:24]+'.json')
     saved = read_json(cache)
-    if saved.get('fingerprint') == fingerprint and not saved.get('errors') and saved.get('parties') and 0 <= time.time()-saved.get('parsed_at', 0) < options.get('max_age_hours', 24)*3600:
+    if (saved.get('fingerprint') == fingerprint and not saved.get('errors')
+            and (saved.get('parties') or options['task_type'] == 'subjugation')
+            and 0 <= time.time()-saved.get('parsed_at', 0) < options.get('max_age_hours', 24)*3600):
         paths = [e.get('image') for p in saved.get('parties', []) for m in p['members']
                  for key in ('stars', 'unique', 'unique2', 'instant') for e in m[key].get('evidence', []) if e.get('image')]
         if all(Path(p).is_file() for p in paths):
             return dict(saved, cache_hit=True)
-    ocr = ocr or RapidOCR()
+    # Match the game's OCR worker limits. Default ONNX sessions can otherwise
+    # spin a full thread pool for each engine throughout multi-page parsing.
+    ocr = ocr or RapidOCR(params={"EngineConfig.onnxruntime.intra_op_num_threads": 2,
+                                 "EngineConfig.onnxruntime.inter_op_num_threads": 1})
     from ..game_ui.equipment import EquipmentBadges
     badges = EquipmentBadges()
     names = sorted({str(n) for n in index.names if not str(n).startswith('unit:')}, key=len, reverse=True)
@@ -657,8 +667,11 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
     errors, pages_report = [], []
     source_region = declared_region(source.get('title', '')+' '+source.get('description', ''))
     text_source = '\n'.join([source.get('description', '')]+[r.get('text', '') for r in source.get('author_comments', [])])
-    if options['task_type'] == 'recollection':
+    if options['task_type'] in ('recollection', 'subjugation'):
         unsupported = source.get('title', '')+'\n'+text_source
+        if options['task_type'] == 'subjugation':
+            from .subjugation_guides import relevant_statements
+            unsupported = relevant_statements(unsupported, options)
         if RECOLLECTION_UNSUPPORTED.search(unsupported):
             globals_.append(dict(text=unsupported[:500], advisory=False, evidence=asdict(Evidence(
                 source['url'], method='source_requirements', text=unsupported[:500]))))
@@ -672,7 +685,7 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
     for page in pages:
         check()
         page_name = page.get('part', page.get('title', ''))
-        if options['task_type'] == 'recollection' and RECOLLECTION_UNSUPPORTED.search(page_name):
+        if options['task_type'] in ('recollection', 'subjugation') and RECOLLECTION_UNSUPPORTED.search(page_name):
             globals_.append(dict(text=page_name, advisory=False, evidence=asdict(Evidence(
                 source['url'], int(page['cid']), method='part_requirements', text=page_name))))
         requirements_page = bool(re.search(r'练度|培养|角色需求|配置要求', page_name))
@@ -718,6 +731,8 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
         previous = None
         last_scope = ({}, False)
         recollection_scope = RecollectionScopeContext()
+        from .subjugation_guides import ScopeContext
+        subjugation_scope = ScopeContext()
         combat_seen = 0
         last_combat_audit = float('-inf')
         last_combat_box = float('-inf')
@@ -768,7 +783,7 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
                     last_caption = frozenset()
                 caption_changed = bool(caption) and (
                     len(caption & last_caption)/max(1, len(caption | last_caption)) < .5)
-                full_ocr = (not combat_scene or combat_seen <= 2
+                full_ocr = (options['task_type'] == 'subjugation' or not combat_scene or combat_seen <= 2
                             or seconds-last_combat_audit >= COMBAT_AUDIT_SECONDS
                             or caption_changed)
                 if full_ocr:
@@ -786,14 +801,14 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
                 if options['task_type'] in ('event', 'revival') and not wide_crop:
                     records.extend(dict(row, evidence=asdict(proof)) for row in event_record_rows(frame, texts, index))
                 detected_region = declared_region('\n'.join(t.text for t in texts if t.score >= .95))
-                if options['task_type'] == 'recollection' and detected_region == 'unknown':
+                if options['task_type'] in ('recollection', 'subjugation') and detected_region == 'unknown':
                     detected_region = recollection_client_region(texts)
                 if detected_region != 'unknown':
                     source_region = detected_region if source_region == 'unknown' else source_region if source_region == detected_region else 'conflict'
                 global_rows, manual_rows = text_constraints(texts, proof)
                 globals_.extend(global_rows)
                 manual.extend(manual_rows)
-                if options['task_type'] == 'recollection':
+                if options['task_type'] in ('recollection', 'subjugation'):
                     globals_.extend(dict(text=t.text, advisory=False, evidence=asdict(proof)) for t in texts
                                     if t.score >= .94 and RECOLLECTION_UNSUPPORTED.search(t.text)
                                     and t.text not in ('特别装备设定', '可变更队伍角色的特别装备。'))
@@ -806,6 +821,11 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
                 scope, verified = observed_scope(texts, page, options['task_type'],
                     battle_scope=last_scope[0] if combat_scene and combat_seen > 1 else None)
                 scope_evidence = None
+                if options['task_type'] == 'subjugation':
+                    from .subjugation_guides import visible_scope
+                    scope, verified = visible_scope(texts, page, options)
+                    scope, verified, scope_evidence = subjugation_scope.resolve(
+                        scope, verified, texts, seconds, combat_scene, asdict(proof))
                 if options['task_type'] == 'recollection' and not page_scope(page, 'recollection'):
                     scope, verified, scope_evidence = recollection_scope.resolve(
                         scope, verified, texts, seconds, combat_scene, asdict(proof))
@@ -815,7 +835,7 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
                     continue
                 if verified:
                     last_scope = scope, verified
-                elif options['task_type'] == 'recollection':
+                elif options['task_type'] in ('recollection', 'subjugation'):
                     # Unlinked compilation frames cannot inherit a floor.
                     scope, verified = {}, False
                 elif options['task_type'] != 'abyss' or page_scope(page, options['task_type']):
@@ -832,6 +852,14 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
                         continue
                 elif options['task_type'] == 'recollection':
                     if scope != dict(area=options.get('area'), floor=int(options['stage'])):
+                        continue
+                elif options['task_type'] == 'subjugation':
+                    target = dict(kind=options['kind'], difficulty=options['difficulty'])
+                    if options['kind'] == 'boss':
+                        target['boss'] = options['boss']
+                    higher = (options['kind'] == 'boss' and scope == dict(
+                        kind='boss', difficulty='极难', boss=options['boss']))
+                    if scope != target and not higher:
                         continue
                 elif options['task_type'] in ('event', 'revival'):
                     area = options.get('area', '')
@@ -888,6 +916,16 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
                                       notes=text_source, excluded_stages=[],
                                       global_requirements=[], manual_actions=[])
                 team = teams[key]
+                if options['task_type'] == 'subjugation' and verified:
+                    from .subjugation_guides import damage_reference
+                    reference = damage_reference(page, scope, subjugation_scope.maximum, source['url'])
+                    if reference:
+                        previous_reference = team.get('damage_reference')
+                        if previous_reference and previous_reference['damage'] != reference['damage']:
+                            team['damage_reference_conflict'] = True
+                            team.pop('damage_reference', None)
+                        elif not team.get('damage_reference_conflict'):
+                            team['damage_reference'] = reference
                 if scope_evidence and scope_evidence not in team.setdefault('scope_evidence', []):
                     team['scope_evidence'].append(scope_evidence)
                 if row:
@@ -997,9 +1035,22 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
             proof = Evidence(source['url'], method='video_title_full_set', text=source['title'])
             for member in team['members']:
                 member['instant'].add(True, proof)
-        team['global_requirements'] = list({r['text']: r for r in globals_ if not r['advisory']}.values())
-        team['recommendations'] = list({r['text']: r for r in globals_ if r['advisory']}.values())
-        team['manual_actions'] = list({r['text']: r for r in manual}.values())
+        relevant_globals, relevant_manual = globals_, manual
+        if options['task_type'] == 'subjugation':
+            # Different front/boss parts are independent plans. A gear dialog
+            # or manual axis in another plan cannot attach to this party;
+            # common training parts and source-wide declarations still apply.
+            cids = {p['cid'] for p in team['frames']} | {p['cid'] for p in pages
+                if re.search(r'练度|培养|角色需求|配置要求', p.get('part', p.get('title', '')))}
+            def applicable(row):
+                evidence = row.get('evidence', {})
+                return (evidence.get('cid') is None or evidence.get('cid') in cids
+                        or evidence.get('method') in ('source_title', 'source_description', 'source_requirements'))
+            relevant_globals = [r for r in globals_ if applicable(r)]
+            relevant_manual = [r for r in manual if applicable(r)]
+        team['global_requirements'] = list({r['text']: r for r in relevant_globals if not r['advisory']}.values())
+        team['recommendations'] = list({r['text']: r for r in relevant_globals if r['advisory']}.values())
+        team['manual_actions'] = list({r['text']: r for r in relevant_manual}.values())
         parties.append(finalize(team))
     from ..game_ui.screen import normalized
     for party in list(parties):
@@ -1027,11 +1078,12 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
     return report
 
 
-def acquire_strategies(options: dict, *, api=None, index=None, ocr=None, check=lambda: None) -> dict:
+def acquire_strategies(options: dict, *, api=None, index=None, ocr=None, check=lambda: None,
+                       accept=None, exclude_sources=()) -> dict:
     """The shared GUI/CLI task path from public sources to evidence-backed files."""
     options = dict(options)
-    if options.get('task_type') not in ('abyss', 'dungeon', 'event', 'revival', 'recollection'):
-        raise ValueError('视频解析task_type必须为abyss、dungeon、event、revival或recollection')
+    if options.get('task_type') not in ('abyss', 'dungeon', 'event', 'revival', 'recollection', 'subjugation'):
+        raise ValueError('视频解析task_type必须为abyss、dungeon、event、revival、recollection或subjugation')
     for key, default, upper in [('max_videos', 4, 30), ('max_frames_per_page', 50, 300),
                                 ('max_video_seconds', 180, 3600),
                                 ('max_download_seconds', 180, 900),
@@ -1043,6 +1095,8 @@ def acquire_strategies(options: dict, *, api=None, index=None, ocr=None, check=l
     report = dict(status='running', parties=[], parsed_sources=[], pending=[], errors=[])
     directory = Path(options.get('parsed_dir', 'cache/game/strategies/parsed'))
     scope = {k: options.get(k) for k in ('task_type', 'area', 'stage', 'element', 'difficulty', 'mode', 'region', 'source_urls', 'search_effort')}
+    if options['task_type'] == 'subjugation':
+        scope.update({k: options.get(k) for k in ('kind', 'boss', 'boss_number', 'event_id', 'period_start', 'period_end')})
     output = directory/('catalog-'+sha256(json.dumps(scope, sort_keys=True).encode()).hexdigest()[:20]+'.json')
     started = time.monotonic()
     max_seconds = options.get('parse_timeout', 900)
@@ -1075,9 +1129,13 @@ def acquire_strategies(options: dict, *, api=None, index=None, ocr=None, check=l
             bvid = candidate.get('bvid')
             if not bvid or bvid in seen:
                 continue
+            url = f'https://www.bilibili.com/video/{bvid}/'
+            if url in exclude_sources:
+                continue
             if parsed_count >= options.get('max_videos', 4):
                 break
             seen.add(bvid)
+            report.setdefault('inspected_sources', []).append(url)
             try:
                 # Both searched and supplied sources use the same canonical metadata schema.
                 response = api.getVideoInfo(bvid=bvid)
@@ -1090,6 +1148,22 @@ def acquire_strategies(options: dict, *, api=None, index=None, ocr=None, check=l
                 source = dict(provider='bilibili', bvid=bvid, url=f'https://www.bilibili.com/video/{bvid}/',
                               title=title, description=description, pages=data.get('pages', []),
                               published_at=data.get('pubdate'), author_comments=candidate.get('author_comments', []))
+                if options['task_type'] == 'subjugation':
+                    from .subjugation_guides import source_rejection
+                    reason = source_rejection(source, options)
+                    if reason:
+                        report.setdefault('skipped_sources', []).append(dict(bvid=bvid, reason=reason))
+                        continue
+                    # Search hits use the same author-only supplement lookup
+                    # as explicitly supplied links; never drop known conditions.
+                    supplements, errors = preferred_sources([source['url']], api,
+                        directory=options.get('source_cache_dir', 'cache/game/strategies/user_sources'),
+                        timeout=options.get('request_timeout', 20), follow_comments=False)
+                    report['errors'].extend(errors)
+                    if supplements:
+                        source['author_comments'] = supplements[0].get('author_comments', [])
+                        source['comment_scope'] = supplements[0].get('comment_scope')
+                        source['comment_pending'] = supplements[0].get('comment_pending')
                 if not choose_pages(source, options):
                     report.setdefault('skipped_sources', []).append(dict(bvid=bvid, reason='没有目标关卡候选分P'))
                     continue
@@ -1102,6 +1176,8 @@ def acquire_strategies(options: dict, *, api=None, index=None, ocr=None, check=l
                 else:
                     report['parties'].extend(parsed['parties'])
                 report['errors'].extend(parsed['errors'])
+                if accept is not None and accept(report):
+                    break
             except (requests.RequestException, RuntimeError, ValueError, OSError) as error:
                 report['errors'].append(dict(bvid=bvid, error=str(error)))
         report['status'] = 'complete' if any(p['readiness'] == 'ready' for p in report['parties']) else 'partial' if report['parties'] else 'blocked'

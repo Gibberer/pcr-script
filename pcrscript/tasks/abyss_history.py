@@ -6,10 +6,7 @@ import time
 from uuid import uuid4
 
 from ..run_session import atomic_json
-
-
-def team_key(names):
-    return '|'.join(sorted(names))
+from .event_strategy import team_key
 
 
 def previous_stage_key(stage):

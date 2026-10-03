@@ -181,6 +181,10 @@ class EventCombat:
         s = self.ui.wait(lambda frame: frame.find(expected_auto, (400, 330, 550, 385)), expected_auto, timeout=5)
         self.ui.save('battle_after_settings'+suffix, s)
         self.ui.expect_click('返回', (260, 405, 410, 465), exact=True)
+        # The return animation can leave the old panel in the next capture.
+        # Observe its closure before the main loop can request a menu again.
+        self.ui.wait(lambda frame: not frame.find('主菜单', (300, 30, 660, 150), exact=True)
+                     and not frame.find('进行中战斗'), '返回战斗', timeout=10)
         return True
 
     def run(self, party: EventParty | None = None, order: Sequence[str] | None = None, resume: bool = False) -> BattleResult:

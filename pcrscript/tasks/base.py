@@ -107,6 +107,7 @@ class EventNews:
     clanBattle: Optional[Event] = None  # 公会战
     secretDungeon: Optional[Event] = None # 特别地下城
     revival: Optional[Event] = None # 单独查询复刻，避免与同期新活动互相覆盖
+    abyssSubjugation: Optional[Event] = None  # 深渊讨伐战，区别于常驻深域
 
 
 class TimeLimitTask(BaseTask):

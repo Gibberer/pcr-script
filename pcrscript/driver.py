@@ -1,4 +1,5 @@
 from abc import ABCMeta, abstractmethod
+from contextlib import contextmanager
 from typing import Tuple
 from win32 import win32gui, win32api
 import ctypes
@@ -118,11 +119,28 @@ class ADBDriver(Driver):
     def _assert_adb_allowed(self):
         pass
 
+@contextmanager
+def _physical_input_context():
+    """Keep native geometry and messages in pixels for DPI-unaware CLIs."""
+    set_context = getattr(ctypes.windll.user32, 'SetThreadDpiAwarenessContext', None)
+    previous = None
+    if set_context is not None:
+        set_context.argtypes = [ctypes.c_void_p]
+        set_context.restype = ctypes.c_void_p
+        previous = set_context(ctypes.c_void_p(-4))  # PER_MONITOR_AWARE_V2
+    try:
+        yield
+    finally:
+        if previous:
+            set_context(previous)
+
+
 class Win32Driver(ADBDriver):
     '''
     使用Win32API操作设备
     '''
 
+    @_physical_input_context()
     def click(self, x, y):
         try:
             hwin = self.get_hwnd(type=WHType.Mouse)
@@ -133,13 +151,17 @@ class Win32Driver(ADBDriver):
             tx = int(x * width/bw)
             ty = int(y * height/bh)
             positon = win32api.MAKELONG(tx, ty)
+            win32api.SendMessage(hwin, win32con.WM_MOUSEMOVE, 0, positon)
+            time.sleep(.05)
             win32api.SendMessage(hwin, win32con.WM_LBUTTONDOWN, win32con.MK_LBUTTON, positon)
-            win32api.SendMessage(hwin, win32con.WM_LBUTTONUP, win32con.MK_LBUTTON,positon)
+            time.sleep(.1)
+            win32api.SendMessage(hwin, win32con.WM_LBUTTONUP, 0,positon)
         except Exception as e:
             self.reset_hwnd()
             print(f"fallback adb click:{e}")
             super().click(x,y)
     
+    @_physical_input_context()
     def swipe(self, start, end=None, duration=500):
         try:
             if not end:
@@ -155,6 +177,8 @@ class Win32Driver(ADBDriver):
             end_y = int(end[1] * height/bh)
             start_position = win32api.MAKELONG(start_x, start_y)
             end_position = win32api.MAKELONG(end_x, end_y)
+            win32api.SendMessage(hwin, win32con.WM_MOUSEMOVE, 0, start_position)
+            time.sleep(.05)
             win32api.SendMessage(hwin, win32con.WM_LBUTTONDOWN, win32con.MK_LBUTTON, start_position)
             # linear tween
             total_duration = duration
@@ -164,10 +188,11 @@ class Win32Driver(ADBDriver):
                 rate = duration/total_duration
                 mx = int(rate*start_x + (1-rate)*end_x)
                 my = int(rate*start_y + (1-rate)*end_y)
-                win32api.SendMessage(hwin, win32con.WM_MOUSEMOVE, 0, win32api.MAKELONG(mx,my))
+                win32api.SendMessage(hwin, win32con.WM_MOUSEMOVE, win32con.MK_LBUTTON, win32api.MAKELONG(mx,my))
             if duration > 0:
                 time.sleep(0.1)
-            win32api.SendMessage(hwin, win32con.WM_LBUTTONUP, win32con.MK_LBUTTON, end_position)
+            win32api.SendMessage(hwin, win32con.WM_MOUSEMOVE, win32con.MK_LBUTTON, end_position)
+            win32api.SendMessage(hwin, win32con.WM_LBUTTONUP, 0, end_position)
         except Exception as e:
             self.reset_hwnd()
             print(f"fallback adb swipe:{e}")
@@ -217,6 +242,20 @@ class DNDriver(Win32Driver):
     '''
     基于ADB的雷电模拟器扩展驱动
     '''
+    supports_scrollbar_fallback = True
+
+    def screenshot(self, output="screen_shot.png"):
+        frame = super().screenshot(output=output)
+        # GDI can retain the near-black loading surface while Android has
+        # already rendered the next screen. Verify the same device via ADB.
+        if float(np.mean(frame)) < 5:
+            try:
+                return self._scroll_fallback_driver().screenshot(output=output)
+            except (RuntimeError, OSError, subprocess.SubprocessError):
+                # A legitimate loading screen must still work without ADB.
+                # Keep it and wait; never guess an ambiguous connection.
+                pass
+        return frame
 
     def __init__(self, device_name, dnpath, index, click_by_mouse=False):
         super().__init__(device_name)
@@ -272,11 +311,40 @@ class DNDriver(Win32Driver):
             return (self.window_width, self.window_height)
         return super().get_screen_size()
 
-    def swipe(self, start, end=None, duration=500):
+    def swipe(self, start, end=None, duration=500, *, fallback=False):
+        if fallback:
+            self._scroll_fallback_driver().swipe(start, end, duration)
+            return
         if self.click_by_mouse:
             super().swipe(start, end, duration)
         else:
             super(Win32Driver, self).swipe(start, end, duration)
+
+    def _scroll_fallback_driver(self):
+        """Bind an observed failed drag to a verified background connection."""
+        if getattr(self, '_scroll_adb', None) is not None:
+            return self._scroll_adb
+        from .simulator import GeneralSimulator
+        devices = GeneralSimulator(self.adb_path).get_devices()
+        serial = getattr(self, 'adb_fallback_serial', '')
+        if serial:
+            if serial not in devices:
+                raise RuntimeError('指定的后台 ADB 回退设备未连接')
+        elif not str(self.device_name).isdigit() and self.device_name in devices:
+            serial = self.device_name
+        else:
+            output = subprocess.check_output([os.path.join(self.dnpath, 'ldconsole.exe'), 'list2'],
+                                             encoding='mbcs', errors='replace', timeout=15)
+            running = [row[0] for line in output.splitlines()
+                       if len(row := line.split(',')) >= 9 and row[4] == '1']
+            if len(devices) != 1 or running != [str(self.index)]:
+                raise RuntimeError('后台 ADB 回退无法唯一关联雷电实例；请指定 Extra.adb_serial')
+            serial = devices[0]
+        driver = ADBDriver(serial, self.adb_path)
+        if driver.get_screen_size() != self.get_screen_size():
+            raise RuntimeError('后台 ADB 回退与雷电窗口尺寸不符')
+        self._scroll_adb = driver
+        return driver
     
     def click(self, x, y):
         if self.click_by_mouse:
