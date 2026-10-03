@@ -16,6 +16,10 @@ PARSER_VERSION = 25
 MANUAL_PART = re.compile(r'半自动|手动|目押|卡轴|(?:\d+|[一二三四五六七八九十])押|改星|调星|切星|降星|星级变更|TP\s*\+\s*2|大师点', re.I)
 BORROW_PART = re.compile(r'借(?:人|角|用|好友|支援|[A-Za-z]|[\u4e00-\u9fff])|使用支援')
 UNVERIFIED_SETTING = re.compile(r'TP\s*\+\s*2|大师点', re.I)
+SWITCH_DIRECTIVE = re.compile(
+    r'(?:AUTO|SET|自动|立即发动)\s*[:：=]?\s*(?:全部|全员|所有人|都|要|需|先|再)?\s*'
+    r'(?:开|关|ON\b|OFF\b|true\b|false\b|[01](?!\d)|不|别|勿|禁|取消|改为|改成|设为|设置|切换)|'
+    r'(?:关|开|禁用|启用|取消|不|别|勿|只|仅|除)[^，,；;。\n]{0,12}(?:AUTO|SET|自动|立即发动)', re.I)
 ABYSS_ELEMENT_LABELS = {'fire': '火', 'water': '水', 'wind': '风', 'light': '光', 'dark': '暗'}
 
 

@@ -37,29 +37,46 @@ class NativeInputTests(TestCase):
         with patch.object(Win32Driver, 'screenshot', return_value=loading):
             self.assertIs(driver.screenshot(), loading)
 
-    def test_scroll_fallback_binds_only_the_unique_running_instance_and_connection(self):
+    def test_scroll_fallback_binds_only_the_configured_connection(self):
         driver = self.driver()
         driver.adb_path, driver.dnpath, driver.device_name, driver.index = 'adb.exe', 'synthetic', '0', 0
+        driver.adb_fallback_serial = 'synthetic-serial'
         peer = Mock(get_screen_size=Mock(return_value=(960,540)))
-        with patch('pcrscript.simulator.GeneralSimulator.get_devices', return_value=['synthetic-serial']), \
-                patch('pcrscript.driver.subprocess.check_output', return_value='0,test,1,101,1,1,1,960,540\n'), \
-                patch('pcrscript.driver.ADBDriver', return_value=peer):
+        with patch('pcrscript.simulator.GeneralSimulator.get_devices', return_value=['phone', 'synthetic-serial']), \
+                patch('pcrscript.driver.ADBDriver', return_value=peer) as adb:
             driver.swipe((907,237), (907,310), 300, fallback=True)
+        adb.assert_called_once_with('synthetic-serial', 'adb.exe')
         peer.swipe.assert_called_once_with((907,237), (907,310), 300)
 
-    def test_scroll_fallback_rejects_ambiguous_devices_instances_and_sizes(self):
-        for devices, running, size in ((['a','b'], '0,test,1,101,1,1,1,960,540\n', (960,540)),
-                (['a'], '0,test,1,101,1,1,1,960,540\n1,other,1,102,1,2,2,960,540\n', (960,540)),
-                (['a'], '0,test,1,101,1,1,1,960,540\n', (1280,720))):
+    def test_scroll_fallback_rejects_missing_connection_and_wrong_size(self):
+        for devices, size in ((['b'], (960,540)), (['a'], (1280,720))):
             driver = self.driver()
             driver.adb_path, driver.dnpath, driver.device_name, driver.index = 'adb.exe', 'synthetic', '0', 0
+            driver.adb_fallback_serial = 'a'
             peer = Mock(get_screen_size=Mock(return_value=size))
             with self.subTest(devices=devices, size=size), \
                     patch('pcrscript.simulator.GeneralSimulator.get_devices', return_value=devices), \
-                    patch('pcrscript.driver.subprocess.check_output', return_value=running), \
                     patch('pcrscript.driver.ADBDriver', return_value=peer):
                 with self.assertRaises(RuntimeError):
                     driver.swipe((907,237), (907,310), 300, fallback=True)
+                peer.swipe.assert_not_called()
+
+    def test_single_same_sized_phone_is_not_a_verified_leidian_connection(self):
+        for name in ('0', 'phone'):
+            with self.subTest(name=name):
+                driver = self.driver()
+                driver.adb_path, driver.dnpath, driver.device_name, driver.index = 'adb.exe', 'synthetic', name, 0
+                loading = np.zeros((540,960,3), np.uint8)
+                peer = Mock(get_screen_size=Mock(return_value=(960,540)))
+                with patch('pcrscript.simulator.GeneralSimulator.get_devices', return_value=['phone']), \
+                     patch('pcrscript.driver.subprocess.check_output', return_value='0,test,1,101,1,1,1,960,540\n'), \
+                     patch('pcrscript.driver.ADBDriver', return_value=peer) as adb, \
+                     patch.object(Win32Driver, 'screenshot', return_value=loading):
+                    with self.assertRaisesRegex(RuntimeError, 'Extra.adb_serial'):
+                        driver.swipe((907,237), (907,310), 300, fallback=True)
+                    self.assertIs(driver.screenshot(), loading)
+                adb.assert_not_called()
+                peer.screenshot.assert_not_called()
                 peer.swipe.assert_not_called()
 
     def context(self):

@@ -324,22 +324,13 @@ class DNDriver(Win32Driver):
         """Bind an observed failed drag to a verified background connection."""
         if getattr(self, '_scroll_adb', None) is not None:
             return self._scroll_adb
+        serial = getattr(self, 'adb_fallback_serial', '')
+        if not serial:
+            raise RuntimeError('后台 ADB 回退未明确关联雷电实例；请指定 Extra.adb_serial')
         from .simulator import GeneralSimulator
         devices = GeneralSimulator(self.adb_path).get_devices()
-        serial = getattr(self, 'adb_fallback_serial', '')
-        if serial:
-            if serial not in devices:
-                raise RuntimeError('指定的后台 ADB 回退设备未连接')
-        elif not str(self.device_name).isdigit() and self.device_name in devices:
-            serial = self.device_name
-        else:
-            output = subprocess.check_output([os.path.join(self.dnpath, 'ldconsole.exe'), 'list2'],
-                                             encoding='mbcs', errors='replace', timeout=15)
-            running = [row[0] for line in output.splitlines()
-                       if len(row := line.split(',')) >= 9 and row[4] == '1']
-            if len(devices) != 1 or running != [str(self.index)]:
-                raise RuntimeError('后台 ADB 回退无法唯一关联雷电实例；请指定 Extra.adb_serial')
-            serial = devices[0]
+        if serial not in devices:
+            raise RuntimeError('指定的后台 ADB 回退设备未连接')
         driver = ADBDriver(serial, self.adb_path)
         if driver.get_screen_size() != self.get_screen_size():
             raise RuntimeError('后台 ADB 回退与雷电窗口尺寸不符')

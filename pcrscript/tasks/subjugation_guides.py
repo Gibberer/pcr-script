@@ -142,16 +142,18 @@ def damage_reference(page, scope, maximum, source):
     if scope.get('kind') != 'boss':
         return {}
     title = page.get('part', page.get('title', ''))
+    amount = r'(?<![\d.])(\d+(?:\.\d+)?)\s*(亿|万)'
     amounts = {int(float(m[1]) * (100000000 if m[2] == '亿' else 10000))
-               for m in re.finditer(r'(?<![\d.])(\d+(?:\.\d+)?)\s*(亿|万)', title)}
+               for m in re.finditer(amount, title)}
+    damage_label = re.search(r'(?:伤害|输出)\s*[:：=]?\s*'+amount+'|'+amount+r'\s*(?:伤害|输出)', title)
     cut_values = {'一': 1, '二': 2, '两': 2, '三': 3, '四': 4, '五': 5,
                   '六': 6, '七': 7, '八': 8, '九': 9, '十': 10}
     cuts = {int(m[1]) if m[1].isdigit() else cut_values[m[1]]
-            for m in re.finditer(r'(?<!\d)([1-9]\d*|[一二两三四五六七八九十])\s*刀', title)}
+            for m in re.finditer(r'(?<!\d)([1-9]\d*|[一二两三四五六七八九十])\s*刀\s*(?:击杀|击破|打完|打死|收掉)', title)}
     if len(amounts) > 1 or len(cuts) > 1:
         return {}
     cut = next(iter(cuts), None)
-    damage = next(iter(amounts), None)
+    damage = next(iter(amounts), None) if damage_label else None
     if damage is None and cut and maximum:
         damage = (maximum+cut-1)//cut
     if damage is None or damage <= 0:

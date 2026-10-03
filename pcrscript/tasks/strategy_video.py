@@ -18,10 +18,10 @@ from ..extras.guide_media import fetch_video
 from ..game_ui.avatar_assets import ensure_avatar_index, atomic_json, read_json
 from ..game_ui.guide_vision import GuideText, combat_team, formation_team, wide_special_equipment_team, combat_set, combat_auto, battle_rectangles, match_portrait, read_text, requirement_cells, labeled_fields, formation_fields
 from .strategy_document import Evidence, Fact, empty_member, finalize, export_document
-from .strategy_sources import BORROW_PART, MANUAL_PART, UNVERIFIED_SETTING, discover_sources
+from .strategy_sources import BORROW_PART, MANUAL_PART, SWITCH_DIRECTIVE, UNVERIFIED_SETTING, discover_sources
 from .strategy_inputs import declared_region, preferred_sources, source_statements
 
-PARSER_VERSION = 70
+PARSER_VERSION = 71
 FRAME_OCR_VERSION = 1
 COMBAT_AUDIT_SECONDS = 20
 RECOLLECTION_UNSUPPORTED = re.compile(
@@ -593,13 +593,14 @@ def requirement_scope(texts) -> list[int] | None:
     return [values[0], values[0]] if values and len(set(values)) == 1 else None
 
 
-def manual_requirement(text):
-    return bool(MANUAL_PART.search(text) or BORROW_PART.search(text) or re.search(
+def manual_requirement(text, *, unparsed_settings=False):
+    return bool(unparsed_settings and SWITCH_DIRECTIVE.search(text)
+        or MANUAL_PART.search(text) or BORROW_PART.search(text) or re.search(
         r'手动|目押|卡[秒帧]|连点|关闭自动|关AUTO|轴[:：]|改星|调星|切星|降星|星级变更|\d[:：]\d{2}.*(?:开|关|点|放)',
         text, re.I))
 
 
-def text_constraints(texts, proof: Evidence) -> tuple[list[dict], list[dict]]:
+def text_constraints(texts, proof: Evidence, *, unparsed_settings=False) -> tuple[list[dict], list[dict]]:
     global_requirements, manual = [], []
     for t in texts:
         if t.score < .94:
@@ -609,7 +610,7 @@ def text_constraints(texts, proof: Evidence) -> tuple[list[dict], list[dict]]:
         if re.search(r'属性等级|属性技能|公主骑士|\bMP\d|突破', t.text, re.I):
             row['advisory'] = bool(re.search(r'建议|推荐|可选', t.text))
             global_requirements.append(row)
-        if manual_requirement(t.text):
+        if manual_requirement(t.text, unparsed_settings=unparsed_settings):
             manual.append(row)
     return global_requirements, manual
 
@@ -696,7 +697,7 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
         metadata_build = metadata_build_requirements(metadata, options, names)
         for statement, method in metadata:
             for line in relevant_statements(statement, options).splitlines():
-                if manual_requirement(line):
+                if manual_requirement(line, unparsed_settings=True):
                     manual.append(dict(text=line, evidence=asdict(Evidence(
                         source['url'], method=method, text=line))))
         source_setting = bool(manual)
@@ -716,7 +717,7 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
                 source['url'], int(page['cid']), method='part_requirements', text=page_name))))
         requirements_page = bool(re.search(r'练度|培养|角色需求|配置要求', page_name))
         original_part = page.get('original_part', page_name)
-        manual_part = manual_requirement(original_part)
+        manual_part = manual_requirement(original_part, unparsed_settings=options['task_type'] == 'subjugation')
         if manual_part:
             manual.append(dict(text=original_part, evidence=asdict(Evidence(
                 source['url'], int(page['cid']), method='part_title', text=original_part))))
@@ -836,7 +837,8 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
                     detected_region = recollection_client_region(texts)
                 if detected_region != 'unknown':
                     source_region = detected_region if source_region == 'unknown' else source_region if source_region == detected_region else 'conflict'
-                global_rows, manual_rows = text_constraints(texts, proof)
+                global_rows, manual_rows = text_constraints(texts, proof,
+                    unparsed_settings=options['task_type'] == 'subjugation')
                 globals_.extend(global_rows)
                 manual.extend(manual_rows)
                 if options['task_type'] in ('recollection', 'subjugation'):

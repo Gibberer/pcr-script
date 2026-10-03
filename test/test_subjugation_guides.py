@@ -230,7 +230,10 @@ class SubjugationGuideTests(TestCase):
 
     def test_target_relevant_metadata_manual_and_borrow_requirements_block_parties(self):
         for field in ('description', 'author_comments'):
-            for statement in ('Boss2 手动轴', '需要借角色', 'Boss2 1:05关闭自动', 'Boss1 手动轴'):
+            for statement in ('Boss2 手动轴', '需要借角色', 'Boss2 1:05关闭自动', 'Boss1 手动轴',
+                              'Boss2 AUTO关闭', 'Boss2 合成角色0关SET', 'Boss2 SET OFF',
+                              'Boss2 AUTO改为关闭', 'Boss2 合成角色0不SET', 'Boss2 SET不要开',
+                              'Boss2 关闭所有人的SET', 'Boss1 AUTO关闭'):
                 with self.subTest(field=field, statement=statement), TemporaryDirectory() as folder:
                     options = source_options({}, EVENT, kind='boss', boss='合成首领', boss_number=2)
                     options.update(parsed_dir=folder, skip_manual_media=False)
@@ -322,6 +325,8 @@ class SubjugationGuideTests(TestCase):
                  ('前言', 'boss', '等级突破要求', 0),
                  ('', 'boss', '需要借角色', 0),
                  ('Boss1打法2说明', 'boss', '特别装备五星要求', 0),
+                 ('Boss1打法2说明', 'boss', '合成角色0关SET', 0),
+                 ('前言', 'boss', 'AUTO关闭', 0),
                  ('Boss3打法1共用必看', 'boss', '等级突破要求', 0)]
         for first_title, kind, constraint, eligible in cases:
             with self.subTest(first_title=first_title, constraint=constraint), TemporaryDirectory() as folder:
@@ -634,7 +639,7 @@ class SubjugationGuideTests(TestCase):
 
     def test_damage_reference_uses_only_the_verified_plan_and_preserves_evidence(self):
         scope = dict(kind='boss', boss='合成首领', difficulty='极难')
-        page = dict(cid=1, part='【2王】全SET，3.7亿')
+        page = dict(cid=1, part='【2王】全SET，伤害3.7亿')
         reference = damage_reference(page, scope, 1000000000, 'https://example.com/synthetic')
         self.assertEqual(reference['damage'], 370000000)
         self.assertEqual(reference['scope'], scope)
@@ -651,6 +656,23 @@ class SubjugationGuideTests(TestCase):
         candidate = parties_for_target(dict(parties=[raw]), options, allow_local_trials=True)[0]
         self.assertEqual(candidate.damage_reference, reference)
         self.assertEqual(candidate.allow_deaths, 0)
+
+    def test_unrelated_title_amounts_cannot_authorize_nonlethal_battles(self):
+        scope = dict(kind='boss', boss='合成首领', difficulty='极难')
+        for title in ('10万粉丝纪念 Boss2', 'Boss2 3.7亿', '初次通关分数5亿 Boss2',
+                      'Boss2 3万玛那', 'Boss2 伤害3亿或4亿', 'Boss2 生命值10亿'):
+            with self.subTest(title=title):
+                reference = damage_reference(dict(cid=1, part=title), scope, 1000000000,
+                                             'https://example.com/synthetic')
+                self.assertEqual(reference, {})
+                runner = SimpleNamespace(last_result=dict(win=False, damage=100000000,
+                    retry=dict(action='continue'), samples=[dict(seconds=s, dark_portraits=0) for s in (7,4,1)]))
+                readiness = AbyssSubjugation.boss_trial_readiness(runner,
+                    SimpleNamespace(damage_reference=reference), dict(boss='合成首领', health=(1000000000,1000000000)),
+                    SimpleNamespace(outcome='settled', reason=''))
+                self.assertFalse(readiness['accepted'])
+        for title in ('Boss2 伤害：3.7亿', 'Boss2 3.7亿伤害', 'Boss2 输出3.7亿'):
+            self.assertEqual(damage_reference(dict(cid=1, part=title), scope, 1000000000, '')['damage'], 370000000)
 
     def test_visible_front_detail_links_only_continuous_battle_countdown(self):
         context = ScopeContext()
