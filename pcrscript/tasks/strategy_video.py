@@ -19,9 +19,9 @@ from ..game_ui.avatar_assets import ensure_avatar_index, atomic_json, read_json
 from ..game_ui.guide_vision import GuideText, combat_team, formation_team, wide_special_equipment_team, combat_set, combat_auto, battle_rectangles, match_portrait, read_text, requirement_cells, labeled_fields, formation_fields
 from .strategy_document import Evidence, Fact, empty_member, finalize, export_document
 from .strategy_sources import BORROW_PART, MANUAL_PART, UNVERIFIED_SETTING, discover_sources
-from .strategy_inputs import preferred_sources
+from .strategy_inputs import declared_region, preferred_sources, source_statements
 
-PARSER_VERSION = 69
+PARSER_VERSION = 70
 FRAME_OCR_VERSION = 1
 COMBAT_AUDIT_SECONDS = 20
 RECOLLECTION_UNSUPPORTED = re.compile(
@@ -508,15 +508,6 @@ def choose_pages(source: dict, options: dict) -> list[dict]:
     return selected
 
 
-def declared_region(text: str) -> str:
-    # Creator overlays can recruit for several servers. A guild advert does
-    # not declare the server in which the demonstrated battle was recorded.
-    text = re.sub(r'(?:国服|國服|日服|台服|臺服)\s*(?:公会|公會|行会|行會)', '', text)
-    values = {code for code, pattern in [('cn', '国服|國服'), ('jp', '日服'), ('tw', '台服|臺服')]
-              if re.search(pattern, text)}
-    return next(iter(values)) if len(values) == 1 else 'conflict' if values else 'unknown'
-
-
 def observed_scope(texts, page: dict, kind: str, *, battle_scope: dict | None = None) -> tuple[dict, bool]:
     metadata = page_scope(page, kind)
     if kind == 'recollection':
@@ -689,8 +680,9 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
     metadata_build = []
     records = []
     errors, pages_report = [], []
-    source_region = declared_region(source.get('title', '')+' '+source.get('description', ''))
-    text_source = '\n'.join([source.get('description', '')]+[r.get('text', '') for r in source.get('author_comments', [])])
+    metadata = source_statements(source)
+    source_region = declared_region('\n'.join(statement for statement, _ in metadata))
+    text_source = '\n'.join(statement for statement, _ in metadata[1:])
     if options['task_type'] in ('recollection', 'subjugation'):
         unsupported = source.get('title', '')+'\n'+text_source
         if options['task_type'] == 'subjugation':
@@ -700,10 +692,6 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
             globals_.append(dict(text=unsupported[:500], advisory=False, evidence=asdict(Evidence(
                 source['url'], method='source_requirements', text=unsupported[:500]))))
     if options['task_type'] == 'subjugation':
-        metadata = [(source.get('title', ''), 'source_title'),
-                    (source.get('description', ''), 'source_description')]
-        metadata.extend((r.get('text', ''), 'author_comment:'+str(r.get('reply_id')))
-                        for r in source.get('author_comments', []))
         from .subjugation_guides import metadata_build_requirements
         metadata_build = metadata_build_requirements(metadata, options, names)
         for statement, method in metadata:
@@ -1235,10 +1223,6 @@ def acquire_strategies(options: dict, *, api=None, index=None, ocr=None, check=l
                               published_at=data.get('pubdate'), author_comments=candidate.get('author_comments', []))
                 if options['task_type'] == 'subjugation':
                     from .subjugation_guides import source_rejection
-                    reason = source_rejection(source, options)
-                    if reason:
-                        report.setdefault('skipped_sources', []).append(dict(bvid=bvid, reason=reason))
-                        continue
                     # Search hits use the same author-only supplement lookup
                     # as explicitly supplied links; never drop known conditions.
                     supplements, errors = preferred_sources([source['url']], api,
@@ -1258,6 +1242,10 @@ def acquire_strategies(options: dict, *, api=None, index=None, ocr=None, check=l
                     source['comment_scope'] = supplement['comment_scope']
                     source['comment_complete'] = True
                     source['comment_scan'] = supplement.get('comment_scan')
+                    reason = source_rejection(source, options)
+                    if reason:
+                        report.setdefault('skipped_sources', []).append(dict(bvid=bvid, reason=reason))
+                        continue
                 if not choose_pages(source, options):
                     report.setdefault('skipped_sources', []).append(dict(bvid=bvid, reason='没有目标关卡候选分P'))
                     continue

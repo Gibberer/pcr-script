@@ -11,6 +11,22 @@ import requests
 SOURCE_CACHE_VERSION = 4
 
 
+def source_statements(source):
+    """One metadata view for applicability, requirements and their provenance."""
+    return [(source.get('title', ''), 'source_title'),
+            (source.get('description', source.get('desc', '')), 'source_description')]+[
+        (row.get('text', ''), 'author_comment:'+str(row.get('reply_id')))
+        for row in source.get('author_comments', [])]
+
+
+def declared_region(text: str) -> str:
+    # Guild recruitment does not declare the recorded battle's server.
+    text = re.sub(r'(?:国服|國服|日服|台服|臺服)\s*(?:公会|公會|行会|行會)', '', text)
+    values = {code for code, pattern in [('cn', '国服|國服'), ('jp', '日服'), ('tw', '台服|臺服')]
+              if re.search(pattern, text)}
+    return next(iter(values)) if len(values) == 1 else 'conflict' if values else 'unknown'
+
+
 def author_comment_clues(response, owner_id, video_url):
     """Keep author identity and reply provenance; viewers are not the author."""
     if response.get('code') != 0:

@@ -476,6 +476,46 @@ class SubjugationGuideTests(TestCase):
         self.assertEqual(source_options({'sources': {'parse_timeout': 600}}, EVENT,
                                         kind='boss')['parse_timeout'], 600)
 
+    def test_author_corrections_are_part_of_source_applicability(self):
+        options = source_options({}, EVENT)
+        source = dict(title='公主连结 国服2026年10月水属性深渊讨伐战', published_at=START+100)
+        for text in ('更正：录像实际为日服', '更正：这是台服攻略', '更正：这是2026年9月攻略',
+                     '实际是火属性深渊', '补充：国服10月水属性深渊'):
+            with self.subTest(text=text):
+                reason = source_rejection(dict(source, author_comments=[dict(text=text, reply_id=12)]), options)
+                self.assertEqual(reason is None, text.startswith('补充'))
+
+    def test_author_region_corrections_conflict_with_original_labels(self):
+        for text, region in (('实际是日服录像', 'conflict'), ('实际是臺服录像', 'conflict'),
+                             ('确认国服', 'cn'), ('台服公会招募', 'cn')):
+            with self.subTest(text=text), TemporaryDirectory() as folder:
+                report, options = self.parse_notes(folder, '前言', 'boss', '说明正文',
+                    metadata=dict(author_comments=[dict(text=text, reply_id=12)]))
+                self.assertEqual(report['parties'][0]['region'], region)
+                self.assertEqual(len(parties_for_target(report, options, allow_local_trials=True)), int(region == 'cn'))
+
+    def test_production_rechecks_applicability_after_author_supplements(self):
+        for supplied in (False, True):
+            for correction in ('实际为日服攻略', '实际为2026年9月攻略', '实际为火属性深渊'):
+                with self.subTest(supplied=supplied, correction=correction), TemporaryDirectory() as folder:
+                    url = 'https://www.bilibili.com/video/BV1234567890/'
+                    options = source_options({}, EVENT)
+                    options.update(search=not supplied, source_urls=[url] if supplied else [],
+                        parsed_dir=folder, source_cache_dir=str(Path(folder)/'inputs'))
+                    api = Mock()
+                    api.getVideoInfo.return_value = dict(code=0, data=dict(bvid='BV1234567890',
+                        title='公主连结 国服10月水属性深渊讨伐战', pubdate=START+100,
+                        aid=1, owner=dict(mid=7), pages=[dict(cid=1, part='前哨高难', duration=2)]))
+                    api.getVideoComments.return_value = dict(code=0, data=dict(page=dict(num=1,size=20,count=1),
+                        replies=[dict(rpid=12, rcount=0, member=dict(mid=7), content=dict(message=correction))]))
+                    with patch('pcrscript.tasks.strategy_video.discover_sources', return_value=dict(
+                            candidates=[dict(bvid='BV1234567890')])), \
+                         patch('pcrscript.tasks.strategy_video.parse_video_source', return_value=dict(trial_report(), errors=[])) as parse:
+                        report = acquire_strategies(options, api=api, index=Mock())
+                    self.assertEqual(report['parties'], [])
+                    self.assertTrue(report['skipped_sources'])
+                    parse.assert_not_called()
+
     def test_front_pages_retain_original_labels_without_assigning_high_tier(self):
         source = dict(pages=[dict(cid=i, part=p) for i, p in enumerate(
             ('[Boss 1]全自动', '前哨打法1', '前哨打法2', '属性练度'))])

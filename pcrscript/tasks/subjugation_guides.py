@@ -6,6 +6,7 @@ import re
 
 from .event_strategy import EventParty, MemberRequirement
 from .strategy_document import missing_fields, to_event_party
+from .strategy_inputs import declared_region, source_statements
 from ..constants import SERVER_TIMEZONE
 from ..game_ui.screen import normalized
 
@@ -54,7 +55,10 @@ def queries(options):
 
 
 def source_rejection(source, options):
-    text = source.get('title', '')+' '+source.get('description', source.get('desc', ''))
+    text = '\n'.join(statement for statement, _ in source_statements(source))
+    region = declared_region(text)
+    if region not in ('unknown', options.get('region', 'cn')):
+        return '来源服区与目标不符或声明冲突'
     if not re.search(r'深[渊淵域]讨伐战|深淵討伐戰', text):
         return '来源没有确认深渊讨伐战玩法'
     published = source.get('published_at', source.get('pubdate'))
