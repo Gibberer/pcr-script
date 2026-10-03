@@ -137,22 +137,31 @@ class SubjugationGuideTests(TestCase):
                 self.assertEqual(fetcher.call_count, 2)
 
     def test_another_plan_gear_dialog_is_isolated_but_common_requirements_still_apply(self):
-        for first_title, eligible in (('前哨打法1', 1), ('前哨练度', 0)):
-            with self.subTest(first_title=first_title), TemporaryDirectory() as folder:
-                options = source_options({}, EVENT)
+        cases = [('前哨打法1', 'outpost', '特别装备五星要求', 1),
+                 ('前哨练度', 'outpost', '特别装备五星要求', 0),
+                 ('前哨注意事项', 'outpost', '特别装备五星要求', 0),
+                 ('前哨其他信息', 'outpost', '等级突破要求', 0),
+                 ('前哨打法1通用说明', 'outpost', '特别装备五星要求', 0),
+                 ('Boss通用说明', 'boss', '特别装备五星要求', 0),
+                 ('Boss通用说明', 'boss', '1:05关闭自动', 0)]
+        for first_title, kind, constraint, eligible in cases:
+            with self.subTest(first_title=first_title, constraint=constraint), TemporaryDirectory() as folder:
+                options = source_options({}, EVENT, kind=kind, boss='合成首领', boss_number=1)
                 options['parsed_dir'] = folder
                 source = dict(bvid='BVSYNTHETIC', url='https://example.com/synthetic',
                     title='公主连结 国服 合成深渊',
                     author_comments=[dict(text='3王需要等级突破')],
                     pages=[dict(cid=1, part=first_title, duration=2),
-                           dict(cid=2, part='前哨打法2', duration=4)])
+                           dict(cid=2, part=('前哨' if kind == 'outpost' else 'Boss1')+'打法2', duration=4)])
                 boxes = [(100+i*120, 390, 100, 100) for i in range(5)]
                 members = [dict(name=f'合成角色{i}', rectangle=list(b), score=.99) for i, b in enumerate(boxes)]
                 index = SimpleNamespace(names=[m['name'] for m in members], matrix=np.ones((5,1728),np.float32))
                 capture = Mock()
                 capture.read.side_effect = [(True, np.full((540,960,3), i*20, np.uint8)) for i in range(6)]
-                labels = [texts('特别装备五星要求')]*2+[texts('前哨关卡', '高难')]*2+[
-                    texts('1:29'), texts('1:28')]
+                detail = texts('前哨关卡', '高难') if kind == 'outpost' else texts(
+                    'BOSS详情', '高难', '合成首领', '80000000/80000000')
+                labels = [texts(constraint)]*2+[detail]*2+[
+                    texts(timer, '79000000/80000000') for timer in ('1:29', '1:28')]
                 with patch('pcrscript.tasks.strategy_video.cv.VideoCapture', return_value=capture), \
                      patch('pcrscript.tasks.strategy_video.sample_seconds', side_effect=[[.5,1.5],[.5,1.5,2.5,3.5]]), \
                      patch('pcrscript.tasks.strategy_video.frame_texts', side_effect=labels), \
@@ -165,6 +174,9 @@ class SubjugationGuideTests(TestCase):
                         media_fetcher=lambda *a, **k: (Path(folder)/'synthetic.avi',dict(duration=4)))
                 self.assertEqual(len(report['parties']), 1)
                 self.assertEqual(len(parties_for_target(report, options, allow_local_trials=True)), eligible)
+                if not eligible:
+                    rows = report['parties'][0]['global_requirements']+report['parties'][0]['manual_actions']
+                    self.assertTrue(any(r['text'] == constraint and r['evidence']['cid'] == 1 for r in rows))
 
     def test_metadata_rejects_old_month_other_talent_or_unknown_publication(self):
         options = source_options({}, EVENT)
@@ -203,6 +215,15 @@ class SubjugationGuideTests(TestCase):
         self.assertEqual([p['part'] for p in pages], ['[Boss 2]全自动', '2王备用'])
         self.assertEqual(visible_scope([], pages[0], options), ({}, False))
         self.assertEqual(visible_scope(texts('BOSS详情', '高难', '别的首领等级475'), pages[0], options), ({}, False))
+
+    def test_common_notes_survive_named_and_numbered_boss_selection(self):
+        for target in ('合成首领打法1', 'Boss2打法1'):
+            with self.subTest(target=target):
+                source = dict(pages=[dict(cid=i, part=title) for i, title in enumerate((
+                    'Boss通用说明', '2王注意事项', '3王培养要求', '前哨注意事项', target))])
+                options = source_options({}, EVENT, kind='boss', boss='合成首领', boss_number=2)
+                pages = choose_pages(source, options)
+                self.assertEqual([p['part'] for p in pages], ['Boss通用说明', '2王注意事项', target])
 
     def test_boss_detail_accepts_separate_full_name_and_level_but_not_a_truncated_name(self):
         options = dict(boss='合成首领(多部位)')

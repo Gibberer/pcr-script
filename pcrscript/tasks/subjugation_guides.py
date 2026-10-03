@@ -89,10 +89,25 @@ def choose_pages(source, options):
     # Numbered Boss parts are candidates only; their frames must prove the name.
     number = options.get('boss_number')
     numbered = [p for p in pages if type(number) is int and 1 <= number <= 3
-        and re.search(r'Boss\s*'+str(number)+r'\b|(?<!\d)'+str(number)+r'\s*王|首领\s*'+str(number)+r'\b',
+        and re.search(r'Boss\s*'+str(number)+r'(?!\d)|(?<!\d)'+str(number)+r'\s*王|首领\s*'+str(number)+r'(?!\d)',
                       p.get('part', p.get('title', '')), re.I)]
     return exact or numbered or [p for p in pages if re.search(r'Boss|首领|王', p.get('part', p.get('title', '')), re.I)] or (
         pages if len(pages) == 1 else [])
+
+
+def requirement_pages(source, options):
+    """Retain relevant notes even when a named/numbered combat part is found."""
+    result = []
+    for page in source.get('pages', []):
+        title = page.get('part', page.get('title', ''))
+        if not re.search(r'练度|培养|需求|要求|说明|事项|须知|补充|通用|共同|共用', title):
+            continue
+        if not relevant_statements(title, options):
+            continue
+        if options['kind'] == 'outpost' and re.match(r'\s*(?:[【\[]\s*)?(?:Boss|首领)', title, re.I):
+            continue
+        result.append(page)
+    return result
 
 
 def visible_scope(texts, page, options):
@@ -214,6 +229,17 @@ def target_scope(options):
     if wanted['kind'] == 'boss':
         wanted['boss'] = options['boss']
     return wanted
+
+
+def constraint_cids(pages, frames):
+    """Unknown/common notes apply; only explicitly numbered plans are isolated."""
+    result = {frame['cid'] for frame in frames}
+    for page in pages:
+        title = page.get('part', page.get('title', ''))
+        separate = re.search(r'(?:打法|方案|阵容|配队)\s*(?:\d+|[一二三四五六七八九十]+)', title)
+        if not separate or re.search(r'通用|共同|共用|所有|全部', title):
+            result.add(page['cid'])
+    return result
 
 
 def applicable_scope(scope, options, *, allow_higher=False):

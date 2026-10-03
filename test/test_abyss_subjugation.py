@@ -133,6 +133,9 @@ class Game:
         if self.page == 'formation':
             return screen(('队伍编组', 480, 42), ('当前的成员', 110, 390),
                           ('取消', 715, 455), ('战斗开始', 855, 455), blue=('战斗开始',))
+        if self.page in ('special', 'special_auto'):
+            return screen(('自动特别装备设定' if self.page == 'special_auto' else '特别装备设定', 480, 42),
+                          ('取消', 370 if self.page == 'special_auto' else 145, 479))
         if self.page == 'confirmation':
             cost_label = '消耗体力' if self.kind == 'outpost' else '消耗讨伐委托证'
             cost = self.quantity*25 if self.kind == 'outpost' else self.quantity
@@ -184,6 +187,10 @@ class Game:
                 self.page = 'normal' if self.kind == 'outpost' else 'boss'
             elif text == '战斗开始':
                 self.page = 'battle'
+        elif self.page in ('special', 'special_auto'):
+            if text != '取消':
+                raise AssertionError('Uncommitted equipment must only be cancelled')
+            self.page = 'special' if self.page == 'special_auto' else 'formation'
         elif self.page == 'confirmation':
             if text == '取消':
                 self.page = 'normal' if self.kind == 'outpost' else 'boss'
@@ -326,6 +333,19 @@ class SubjugationTests(TestCase):
         self.assertEqual(set(report['outpost_parties']), set(field.DIFFICULTIES))
         self.assertEqual(task.source_parties.call_count, 15)
         self.assertNotIn('pending', task.state)
+
+    def test_resume_cancels_equipment_settings_and_preview_without_committing(self):
+        for page in ('special_auto', 'special'):
+            with self.subTest(page=page):
+                game = Game()
+                game.page = page
+                task = self.task(game, preview_only=True)
+                report = task.run(EVENT)
+                self.assertEqual(report['status'], 'preview', report['pending'])
+                self.assertEqual(game.page, 'home')
+                self.assertEqual(game.normal_commits+game.real_battles, 0)
+                equipment_clicks = [c for c in game.clicks if c[0] in ('special_auto', 'special')]
+                self.assertEqual([c[1] for c in equipment_clicks], ['取消']*(2 if page == 'special_auto' else 1))
 
     def test_second_run_targets_remaining_first_clears_before_sweeping(self):
         game = Game()

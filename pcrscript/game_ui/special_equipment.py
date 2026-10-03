@@ -34,6 +34,17 @@ def formation_entry_visible(screen) -> bool:
     return '特别' in words and '装备' in words
 
 
+def cancel_special_equipment(ui: EventUI, screen) -> bool:
+    """Dismiss one identified settings/preview panel without committing gear."""
+    automatic = screen.find('自动特别装备设定', (320, 15, 650, 65), exact=True)
+    if not automatic and not screen.find('特别装备设定', (320, 15, 650, 65), exact=True):
+        return False
+    ui.expect_click('取消', (35, 445, 480 if automatic else 265, 520), exact=True)
+    title = '自动特别装备设定' if automatic else '特别装备设定'
+    ui.wait(lambda s: not s.find(title, (320, 15, 650, 65), exact=True), '取消'+title, timeout=10)
+    return True
+
+
 def occupied_slots(image) -> list[list[bool | None]]:
     """Colored item art is distinct from the monochrome empty-slot icon."""
     result=[]
@@ -124,6 +135,8 @@ def auto_equip_special(ui: EventUI, order: list[str]) -> dict:
     selected=preview_slots(panel.image,preview.image,before)
     selected_evidence=str(ui.save('abyss_special_selected_'+tag,preview))
     if any(v is None for col in selected for v in col):
+        cancel_special_equipment(ui, preview)
+        ui.wait(lambda s:s.find('队伍编组',(300,0,650,70),exact=True),'取消未知特别装备预览')
         raise EventUIError('特别装备自动选择后槽位无法识别，未提交')
     changed=equipment_changed(panel.image,preview.image)
     if changed:

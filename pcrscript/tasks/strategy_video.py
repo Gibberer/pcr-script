@@ -21,7 +21,7 @@ from .strategy_document import Evidence, Fact, empty_member, finalize, export_do
 from .strategy_sources import BORROW_PART, MANUAL_PART, UNVERIFIED_SETTING, discover_sources
 from .strategy_inputs import preferred_sources
 
-PARSER_VERSION = 61
+PARSER_VERSION = 62
 FRAME_OCR_VERSION = 1
 COMBAT_AUDIT_SECONDS = 20
 RECOLLECTION_UNSUPPORTED = re.compile(
@@ -469,7 +469,8 @@ def choose_pages(source: dict, options: dict) -> list[dict]:
                     and (not (ranges := recollection_ranges(p.get('part', p.get('title', '')), area))
                          or any(a <= wanted['floor'] <= b for a, b in ranges))]
     elif kind == 'subjugation':
-        from .subjugation_guides import choose_pages as subjugation_pages
+        from .subjugation_guides import choose_pages as subjugation_pages, requirement_pages
+        requirements = requirement_pages(source, options)
         targets = subjugation_pages(source, options)
     elif kind in ('event', 'revival'):
         wanted = {'difficulty': options.get('difficulty'), 'mode': options.get('mode')}
@@ -1033,11 +1034,11 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
                 member['instant'].add(True, proof)
         relevant_globals, relevant_manual = globals_, manual
         if options['task_type'] == 'subjugation':
-            # Different front/boss parts are independent plans. A gear dialog
-            # or manual axis in another plan cannot attach to this party;
-            # common training parts and source-wide declarations still apply.
-            cids = {p['cid'] for p in team['frames']} | {p['cid'] for p in pages
-                if re.search(r'练度|培养|角色需求|配置要求', p.get('part', p.get('title', '')))}
+            # Keep every selected notes page unless it explicitly belongs to
+            # a different numbered plan. Absence of a recognized notes title
+            # cannot remove an observed preparation or manual requirement.
+            from .subjugation_guides import constraint_cids
+            cids = constraint_cids(pages, team['frames'])
             def applicable(row):
                 evidence = row.get('evidence', {})
                 return (evidence.get('cid') is None or evidence.get('cid') in cids

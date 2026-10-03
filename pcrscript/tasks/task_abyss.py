@@ -17,6 +17,7 @@ from .strategy_document import abyss_candidate
 from .party_preparation import upgrade_party_stars, prepare_special, read_numeric_equipment, rank_candidates
 from ..game_ui.character_stars import star_change_dialog_ready
 from ..game_ui.character_equipment import inspect_unreleased_equipment
+from ..game_ui.special_equipment import cancel_special_equipment
 from ..game_ui.abyss import AREAS, AbyssStage, map_element, next_stage, detail_stage, remaining, advanced
 from ..game_ui.screen import EventScreen, EventUI, EventUIError
 from ..game_ui.guild_house import collect_produced_stamina
@@ -421,12 +422,8 @@ class AbyssPush(BaseTask):
                 # Rebuild a stopped shard purchase from fresh balance and
                 # inventory; a stale quantity must never be confirmed.
                 self.ui.expect_click('取消', (250, 440, 490, 515), exact=True)
-            elif screen.find('自动特别装备设定', (320, 15, 650, 65), exact=True):
-                self.ui.expect_click('取消', (35, 445, 265, 520), exact=True)
-            elif screen.find('特别装备设定', (320, 15, 650, 65), exact=True):
-                # A previous uncommitted auto-selection is rebuilt from the
-                # current five cards and equipment state on this run.
-                self.ui.expect_click('取消', (35, 445, 265, 520), exact=True)
+            elif cancel_special_equipment(self.ui, screen):
+                continue
             elif screen.find('确认所需的女神的秘石个数', (300, 105, 660, 175), exact=True):
                 from ..game_ui.character_stars import price_tier_notice
                 body=screen.text((330,205,640,315))

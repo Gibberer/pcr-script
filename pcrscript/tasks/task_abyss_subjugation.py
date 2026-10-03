@@ -15,6 +15,7 @@ from .subjugation_party import (SubjugationFormation, prepare_avatars, recover_e
 from .party_preparation import source_candidates, prepare_special, party_fingerprint, numeric_equipment_unknown
 from ..constants import SERVER_TIMEZONE
 from ..game_ui import abyss_subjugation as field
+from ..game_ui.special_equipment import cancel_special_equipment
 from ..game_ui.avatar_assets import atomic_json, read_json
 from ..game_ui.screen import EventUI, EventUIError, normalized
 from ..game_ui.team_battle import meets_reference
@@ -158,6 +159,8 @@ class AbyssSubjugation(TimeLimitTask):
                 self.click(s, '取消', (290, 340, 445, 405))
             elif field.limited_shop(s):
                 self.click(s, '取消', (500, 430, 690, 520))
+            elif cancel_special_equipment(self.ui, s):
+                continue
             elif s.find('角色详情', (300, 0, 650, 70), exact=True):
                 self.click(s, self.formation.detail_close_pattern, (320, 450, 650, 515))
             elif field.saved_teams(s) or field.boss_selector(s):
