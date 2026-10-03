@@ -8,7 +8,7 @@ import time
 from urllib.parse import urlsplit,urljoin
 import requests
 
-SOURCE_CACHE_VERSION = 3
+SOURCE_CACHE_VERSION = 4
 
 
 def author_comment_clues(response, owner_id, video_url):
@@ -21,14 +21,7 @@ def author_comment_clues(response, owner_id, video_url):
     for key,kind in (('replies',list),('hots',list),('top',dict),('top_replies',(dict,list))):
         if data.get(key) is not None and not isinstance(data[key],kind):
             raise ValueError('评论列表结构未知：'+key)
-    queue=[];seen=set();clues=[]
-    for key in ('replies','hots'):
-        queue.extend(data.get(key) or [])
-    queue.extend(v for v in (data.get('top') or {}).values() if isinstance(v,dict))
-    for key in ('upper','admin','vote'):
-        item=(data.get('top_replies') or {}).get(key) if isinstance(data.get('top_replies'),dict) else None
-        if isinstance(item,dict):queue.append(item)
-    if isinstance(data.get('top_replies'),list):queue.extend(data['top_replies'])
+    queue=comment_roots(data);seen=set();clues=[]
     while queue:
         item=queue.pop(0)
         if not isinstance(item,dict) or item.get('rpid') in seen:continue
@@ -50,6 +43,65 @@ def author_comment_clues(response, owner_id, video_url):
                           images=[p['img_src'] for p in content.get('pictures',[]) if p.get('img_src')],
                           links=list(dict.fromkeys(normalized_links))))
     return clues
+
+
+def comment_roots(data):
+    queue=[]
+    for key in ('replies','hots'):
+        queue.extend(data.get(key) or [])
+    queue.extend(v for v in (data.get('top') or {}).values() if isinstance(v,dict))
+    for key in ('upper','admin','vote'):
+        item=(data.get('top_replies') or {}).get(key) if isinstance(data.get('top_replies'),dict) else None
+        if isinstance(item,dict):queue.append(item)
+    if isinstance(data.get('top_replies'),list):queue.extend(data['top_replies'])
+    return queue
+
+
+def complete_author_comments(api, avid, owner_id, video_url, *, max_pages=10, check=lambda: None):
+    """Read all counted root/child replies within one bounded request budget."""
+    if type(max_pages) is not int or not 1 <= max_pages <= 100:
+        raise ValueError('max_comment_pages必须为1到100')
+    requests_used=0;clues={}
+    def read_pages(fetch, *, expected_count=None):
+        nonlocal requests_used
+        rows={};page=1;total=expected_count
+        while True:
+            check()
+            if requests_used >= max_pages:
+                raise ValueError(f'作者评论未读完：达到 max_comment_pages={max_pages}')
+            requests_used+=1
+            response=fetch(page)
+            for clue in author_comment_clues(response,owner_id,video_url):
+                clues[(clue['reply_id'],clue['text'])]=clue
+            data=response['data'];pagination=data.get('page') or {}
+            count,size=pagination.get('count'),pagination.get('size')
+            if (type(count) is not int or count < 0 or type(size) is not int or not 1 <= size <= 100
+                    or pagination.get('num') != page or total is not None and count != total):
+                raise ValueError('作者评论分页总量未知或读取期间变化')
+            total=count
+            for row in comment_roots(data):
+                if not isinstance(row,dict) or type(row.get('rpid')) not in (int,str) or not str(row['rpid']).isdigit():
+                    raise ValueError('作者评论身份未知')
+                rows[str(row['rpid'])]=row
+            if page*size >= total:
+                break
+            page+=1
+        if len(rows) != total:
+            raise ValueError('作者评论数量与分页总量不符，未确认完整读取')
+        return rows
+    roots=read_pages(lambda page: api.getVideoComments(avid,page=page))
+    child_count=0
+    for root in roots.values():
+        count=root.get('rcount');inline=root.get('replies') or []
+        if type(count) is not int or count < 0 or not isinstance(inline,list):
+            raise ValueError('楼中楼数量未知')
+        ids={str(row['rpid']) for row in inline if isinstance(row,dict) and row.get('rpid') is not None}
+        if len(ids) > count or len(ids) != len(inline):
+            raise ValueError('楼中楼预览数量不符')
+        if len(ids) < count:
+            read_pages(lambda page: api.getVideoCommentReplies(avid,root['rpid'],page=page), expected_count=count)
+        child_count+=count
+    return list(clues.values()),dict(complete=True,pages=requests_used,root_count=len(roots),reply_count=child_count)
 
 
 def source_options(local):
@@ -83,14 +135,17 @@ class GuideHTML(HTMLParser):
         if not self.skip and data.strip():self.text.append(data.strip())
 
 
-def preferred_sources(urls,api,*,directory='cache/game/strategies/user_sources',timeout=20,follow_comments=True):
+def preferred_sources(urls,api,*,directory='cache/game/strategies/user_sources',timeout=20,follow_comments=True,
+                      require_complete_comments=False,max_comment_pages=10,check=lambda: None):
     result=[];errors=[];root=Path(directory);root.mkdir(parents=True,exist_ok=True)
     for priority,url in enumerate(validate_urls(urls)):
+        check()
         path=root/(sha256(url.encode()).hexdigest()[:24]+'.json')
         try:
             if path.exists():
                 saved=json.loads(path.read_text(encoding='utf-8'))
                 if (saved.get('version')==SOURCE_CACHE_VERSION and not saved.get('comment_pending')
+                        and (not require_complete_comments or saved.get('comment_complete') is True)
                         and saved.get('url')==url and 0<=time.time()-saved['fetched_at']<86400):
                     result.append(dict(saved,priority=priority));continue
             bvid=re.search(r'/(BV[0-9A-Za-z]{10})(?:[/?#]|$)',url)
@@ -100,11 +155,18 @@ def preferred_sources(urls,api,*,directory='cache/game/strategies/user_sources',
                 entry=dict(provider='bilibili',bvid=bvid[1],title=data['title'],description=data.get('desc',''),
                            published_at=data.get('pubdate'),pages=data.get('pages',[]))
                 try:
-                    entry['author_comments']=author_comment_clues(
-                        api.getVideoComments(data['aid']),data['owner']['mid'],url)
-                    entry['comment_scope']='热门第一页、置顶及已返回的楼中楼；不是全部评论'
+                    entry['comment_complete']=False
+                    if require_complete_comments:
+                        entry['author_comments'],entry['comment_scan']=complete_author_comments(
+                            api,data['aid'],data['owner']['mid'],url,max_pages=max_comment_pages,check=check)
+                        entry['comment_complete']=True
+                        entry['comment_scope']='按分页总量核对全部可见主评论及楼中楼'
+                    else:
+                        entry['author_comments']=author_comment_clues(
+                            api.getVideoComments(data['aid']),data['owner']['mid'],url)
+                        entry['comment_scope']='热门第一页、置顶及已返回的楼中楼；不是全部评论'
                 except (requests.RequestException,ValueError,KeyError,TypeError,AttributeError) as error:
-                    entry['comment_pending']='评论未获取：'+type(error).__name__
+                    entry['comment_pending']='评论未获取：'+type(error).__name__+': '+str(error)[:180]
             else:
                 response=requests.get(url,timeout=timeout,headers={'User-Agent':'Mozilla/5.0'})
                 response.raise_for_status()
@@ -128,7 +190,8 @@ def preferred_sources(urls,api,*,directory='cache/game/strategies/user_sources',
                         references.setdefault(link,[]).append(dict(source=source['url'],reply_id=comment['reply_id']))
         # One hop only: links are evidence, never an unbounded crawler.
         linked,failures=preferred_sources(list(references)[:8],api,directory=directory,
-                                         timeout=timeout,follow_comments=False) if references else ([],[])
+            timeout=timeout,follow_comments=False,require_complete_comments=require_complete_comments,
+            max_comment_pages=max_comment_pages,check=check) if references else ([],[])
         for item in linked:
             item.update(user_provided=False,discovered_via=references[item['url']],priority=len(result))
             result.append(item)

@@ -64,7 +64,7 @@ class SubjugationGuideTests(TestCase):
                 report_progress=Mock(), check_deadline=Mock(), save=Mock())
             with patch('pcrscript.tasks.task_abyss_subjugation.prepare_avatars'), \
                  patch('pcrscript.tasks.strategy_video.BilibiliApi', return_value=api), \
-                 patch('pcrscript.tasks.strategy_video.preferred_sources', return_value=([dict(author_comments=[], comment_scope='synthetic')], [])), \
+                 patch('pcrscript.tasks.strategy_video.preferred_sources', return_value=([dict(author_comments=[], comment_scope='synthetic', comment_complete=True)], [])), \
                  patch('pcrscript.tasks.strategy_video.parse_video_source', side_effect=parse) as parser:
                 self.assertEqual(AbyssSubjugation.source_parties(runner, 'outpost', difficulty='高难'), [])
                 found = AbyssSubjugation.source_parties(runner, 'outpost', difficulty='高难', advance=True)
@@ -132,7 +132,7 @@ class SubjugationGuideTests(TestCase):
             comment = dict(text='3王需要等级突破', reply_id=12, owner_id='34')
             parsed = dict(parties=[], errors=[], source='https://example.com/synthetic')
             with patch('pcrscript.tasks.strategy_video.discover_sources', return_value=dict(candidates=[dict(bvid='BVSYNTHETIC')])), \
-                 patch('pcrscript.tasks.strategy_video.preferred_sources', return_value=([dict(author_comments=[comment], comment_scope='synthetic')], [])), \
+                 patch('pcrscript.tasks.strategy_video.preferred_sources', return_value=([dict(author_comments=[comment], comment_scope='synthetic', comment_complete=True)], [])), \
                  patch('pcrscript.tasks.strategy_video.parse_video_source', return_value=parsed) as parse:
                 acquire_strategies(options, api=api, index=Mock())
                 self.assertEqual(parse.call_args.args[0]['author_comments'], [comment])
@@ -140,7 +140,7 @@ class SubjugationGuideTests(TestCase):
     def test_unread_comments_block_both_search_hits_and_supplied_links(self):
         for supplied in (False, True):
             for response in (dict(code=-352), dict(code=0, data=None),
-                             requests.ConnectionError('synthetic offline'), dict(code=0, data=dict(replies=[]))):
+                             requests.ConnectionError('synthetic offline'), dict(code=0, data=dict(replies=[], page=dict(num=1,size=20,count=0)))):
                 with self.subTest(supplied=supplied, response=response), TemporaryDirectory() as folder:
                     url = 'https://www.bilibili.com/video/BV1234567890/'
                     options = source_options({}, EVENT)
@@ -159,7 +159,7 @@ class SubjugationGuideTests(TestCase):
                             candidates=[dict(bvid='BV1234567890')])), \
                          patch('pcrscript.tasks.strategy_video.parse_video_source', return_value=parsed) as parse:
                         report = acquire_strategies(options, api=api, index=Mock())
-                    if response == dict(code=0, data=dict(replies=[])):
+                    if isinstance(response,dict) and (response.get('data') or {}).get('page'):
                         self.assertEqual(len(report['parties']), 1)
                         parse.assert_called_once()
                     else:
@@ -168,20 +168,21 @@ class SubjugationGuideTests(TestCase):
                         parse.assert_not_called()
 
     def test_empty_supplement_result_cannot_reuse_a_candidates_prior_comments(self):
-        with TemporaryDirectory() as folder:
-            options = source_options({}, EVENT)
-            options['parsed_dir'] = folder
-            api = Mock()
-            api.getVideoInfo.return_value = dict(code=0, data=dict(bvid='BV1234567890',
-                title='公主连结 国服10月水属性深渊讨伐战', pubdate=START+100,
-                pages=[dict(cid=1, part='前哨高难', duration=2)]))
-            with patch('pcrscript.tasks.strategy_video.discover_sources', return_value=dict(
-                    candidates=[dict(bvid='BV1234567890', author_comments=[])])), \
-                 patch('pcrscript.tasks.strategy_video.preferred_sources', return_value=([], [])), \
-                 patch('pcrscript.tasks.strategy_video.parse_video_source', return_value=dict(trial_report(), errors=[])) as parse:
-                report = acquire_strategies(options, api=api, index=Mock())
-            self.assertEqual(report['parties'], [])
-            parse.assert_not_called()
+        for supplements in ([], [dict(author_comments=[],comment_scope='only first page',comment_complete=False)]):
+            with self.subTest(supplements=supplements), TemporaryDirectory() as folder:
+                options = source_options({}, EVENT)
+                options['parsed_dir'] = folder
+                api = Mock()
+                api.getVideoInfo.return_value = dict(code=0, data=dict(bvid='BV1234567890',
+                    title='公主连结 国服10月水属性深渊讨伐战', pubdate=START+100,
+                    pages=[dict(cid=1, part='前哨高难', duration=2)]))
+                with patch('pcrscript.tasks.strategy_video.discover_sources', return_value=dict(
+                        candidates=[dict(bvid='BV1234567890', author_comments=[])])), \
+                     patch('pcrscript.tasks.strategy_video.preferred_sources', return_value=(supplements, [])), \
+                     patch('pcrscript.tasks.strategy_video.parse_video_source', return_value=dict(trial_report(), errors=[])) as parse:
+                    report = acquire_strategies(options, api=api, index=Mock())
+                self.assertEqual(report['parties'], [])
+                parse.assert_not_called()
 
     def test_parser_rejects_pending_author_comments_before_media_or_cache(self):
         options = source_options({}, EVENT)
@@ -279,6 +280,7 @@ class SubjugationGuideTests(TestCase):
                  ('前哨注意事项', 'outpost', '特别装备五星要求', 0),
                  ('前哨其他信息', 'outpost', '等级突破要求', 0),
                  ('前哨打法1通用说明', 'outpost', '特别装备五星要求', 0),
+                 ('前哨打法1/2', 'outpost', '特别装备五星要求', 0),
                  ('Boss通用说明', 'boss', '特别装备五星要求', 0),
                  ('Boss通用说明', 'boss', '1:05关闭自动', 0),
                  ('必看', 'boss', '1:05关闭自动', 0),
@@ -295,13 +297,13 @@ class SubjugationGuideTests(TestCase):
                     rows = report['parties'][0]['global_requirements']+report['parties'][0]['manual_actions']
                     self.assertTrue(any(r['text'] == constraint and r['evidence']['cid'] == 1 for r in rows))
 
-    def parse_notes(self, folder, title, kind, constraint, *, combat_title=None, metadata=None):
-        options = source_options({}, EVENT, kind=kind, boss='合成首领', boss_number=1)
+    def parse_notes(self, folder, title, kind, constraint, *, combat_title=None, metadata=None, boss_number=1):
+        options = source_options({}, EVENT, kind=kind, boss='合成首领', boss_number=boss_number)
         options['parsed_dir'] = folder
         source = dict(bvid='BVSYNTHETIC', url='https://example.com/synthetic',
             title='公主连结 国服 合成深渊', author_comments=[dict(text='3王需要等级突破')],
             pages=[dict(cid=1, part=title, duration=2),
-                   dict(cid=2, part=combat_title or ('前哨' if kind == 'outpost' else 'Boss1')+'打法2', duration=4)])
+                   dict(cid=2, part=combat_title or ('前哨' if kind == 'outpost' else f'Boss{boss_number}')+'打法2', duration=4)])
         source.update(metadata or {})
         boxes = [(100+i*120, 390, 100, 100) for i in range(5)]
         members = [dict(name=f'合成角色{i}', rectangle=list(b), score=.99) for i, b in enumerate(boxes)]
@@ -326,6 +328,7 @@ class SubjugationGuideTests(TestCase):
     def test_common_character_fields_follow_the_current_plan_scope(self):
         for title, combat, expected in (('前言', 'Boss1打法2', 30),
                                        ('Boss1方案二说明', 'Boss1打法2', 30),
+                                       ('Boss1方案1-3说明', 'Boss1打法2', 30),
                                        ('Boss1方案一说明', 'Boss1打法2', None),
                                        ('Boss1方案一说明', 'Boss1', 30)):
             with self.subTest(title=title, combat=combat), TemporaryDirectory() as folder:
@@ -382,6 +385,22 @@ class SubjugationGuideTests(TestCase):
                 metadata=dict(author_comments=[dict(text='Boss1 合成角色0Rank30', reply_id=12)]))
             self.assertTrue(report['parties'][0]['members'][0]['rank']['conflicts'])
             self.assertEqual(parties_for_target(report, options, allow_local_trials=True), [])
+
+    def test_combined_boss_scopes_preserve_manual_and_build_requirements(self):
+        for prefix,targets in (('Boss1/Boss2',{1,2}), ('Boss1-3',{1,2,3}),
+                               ('【1王、2王】',{1,2}), ('首领1至3',{1,2,3}), ('1-3王',{1,2,3})):
+            for number in (2,3):
+                for manual in (False,True):
+                    with self.subTest(prefix=prefix,number=number,manual=manual),TemporaryDirectory() as folder:
+                        statement=prefix+(' 手动轴' if manual else ' 合成角色0：3星')
+                        report,options=self.parse_notes(folder,'前言','boss','说明正文',boss_number=number,
+                            metadata=dict(author_comments=[dict(text=statement,reply_id=12)]))
+                        parties=parties_for_target(report,options,allow_local_trials=True)
+                        if manual and number in targets:
+                            self.assertEqual(parties,[])
+                        else:
+                            self.assertEqual(len(parties),1)
+                            self.assertEqual(parties[0].members[0].stars,3 if number in targets else None)
 
     def test_metadata_rejects_old_month_other_talent_or_unknown_publication(self):
         options = source_options({}, EVENT)
@@ -456,7 +475,7 @@ class SubjugationGuideTests(TestCase):
             api.getVideoInfo.return_value = dict(code=0, data=dict(bvid='BVSYNTHETIC',
                 title='公主连结10月水属性深渊讨伐战', desc='-', pubdate=START+100, pages=pages))
             with patch('pcrscript.tasks.strategy_video.discover_sources', return_value=dict(candidates=[dict(bvid='BVSYNTHETIC')])), \
-                 patch('pcrscript.tasks.strategy_video.preferred_sources', return_value=([dict(author_comments=[], comment_scope='synthetic')], [])), \
+                 patch('pcrscript.tasks.strategy_video.preferred_sources', return_value=([dict(author_comments=[], comment_scope='synthetic', comment_complete=True)], [])), \
                  patch('pcrscript.tasks.strategy_video.parse_video_source') as parse:
                 report = acquire_strategies(options, api=api, index=Mock())
             self.assertEqual(report['status'], 'blocked')

@@ -21,7 +21,7 @@ from .strategy_document import Evidence, Fact, empty_member, finalize, export_do
 from .strategy_sources import BORROW_PART, MANUAL_PART, UNVERIFIED_SETTING, discover_sources
 from .strategy_inputs import preferred_sources
 
-PARSER_VERSION = 67
+PARSER_VERSION = 68
 FRAME_OCR_VERSION = 1
 COMBAT_AUDIT_SECONDS = 20
 RECOLLECTION_UNSUPPORTED = re.compile(
@@ -650,8 +650,8 @@ def event_record_rows(frame, texts, index):
 def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None,
                        media_fetcher=fetch_video, check=lambda: None) -> dict:
     """Return candidates plus field evidence, including incomplete/contradictory ones."""
-    if options['task_type'] == 'subjugation' and source.get('comment_pending'):
-        raise ValueError('作者评论补充未读取完成：'+str(source['comment_pending']))
+    if options['task_type'] == 'subjugation' and (source.get('comment_pending') or source.get('comment_complete') is False):
+        raise ValueError('作者评论补充未读取完成：'+str(source.get('comment_pending') or '仅取得部分评论'))
     from rapidocr import RapidOCR
     from .strategy_tables import universal_row
     api = api or BilibiliApi(timeout=options.get('request_timeout', 20), browser_session=True)
@@ -1192,7 +1192,9 @@ def acquire_strategies(options: dict, *, api=None, index=None, ocr=None, check=l
         if options.get('source_urls'):
             preferred, errors = preferred_sources(options['source_urls'], api,
                         directory=options.get('source_cache_dir', 'cache/game/strategies/user_sources'),
-                        timeout=options.get('request_timeout', 20))
+                        timeout=options.get('request_timeout', 20), check=bounded_check,
+                        require_complete_comments=options['task_type'] == 'subjugation',
+                        max_comment_pages=options.get('max_comment_pages', 10))
             candidates.extend(p for p in preferred if p.get('user_provided', True))
             report['errors'].extend(errors)
         if options.get('search', True):
@@ -1237,16 +1239,21 @@ def acquire_strategies(options: dict, *, api=None, index=None, ocr=None, check=l
                     # as explicitly supplied links; never drop known conditions.
                     supplements, errors = preferred_sources([source['url']], api,
                         directory=options.get('source_cache_dir', 'cache/game/strategies/user_sources'),
-                        timeout=options.get('request_timeout', 20), follow_comments=False)
+                        timeout=options.get('request_timeout', 20), follow_comments=False,
+                        require_complete_comments=True,max_comment_pages=options.get('max_comment_pages', 10),
+                        check=bounded_check)
                     report['errors'].extend(errors)
                     if not supplements:
                         raise ValueError('作者评论补充未读取完成：没有来源返回')
                     supplement = supplements[0]
-                    if (supplement.get('comment_pending') or not supplement.get('comment_scope')
+                    if (supplement.get('comment_pending') or supplement.get('comment_complete') is not True
+                            or not supplement.get('comment_scope')
                             or not isinstance(supplement.get('author_comments'), list)):
                         raise ValueError('作者评论补充未读取完成：'+str(supplement.get('comment_pending') or '读取状态未知'))
                     source['author_comments'] = supplement['author_comments']
                     source['comment_scope'] = supplement['comment_scope']
+                    source['comment_complete'] = True
+                    source['comment_scan'] = supplement.get('comment_scan')
                 if not choose_pages(source, options):
                     report.setdefault('skipped_sources', []).append(dict(bvid=bvid, reason='没有目标关卡候选分P'))
                     continue

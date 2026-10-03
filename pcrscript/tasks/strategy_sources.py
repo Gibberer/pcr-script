@@ -238,7 +238,7 @@ def discover_sources(options: dict, *, api=None, check=lambda: None, exclude_sou
                 continue
     errors = []
     check()
-    preferred,preferred_errors=preferred_sources(urls,api,timeout=timeout)
+    preferred,preferred_errors=preferred_sources(urls,api,timeout=timeout,check=check)
     errors.extend(dict(stage='preferred_source',**e) for e in preferred_errors)
     for query in queries:
         check()

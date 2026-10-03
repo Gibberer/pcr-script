@@ -109,9 +109,6 @@ def requirement_pages(source, options):
         title = page.get('part', page.get('title', ''))
         if title.strip() and not relevant_statements(title, options):
             continue
-        if (options['kind'] == 'outpost' and not SHARED_REQUIREMENTS.search(title)
-                and re.match(r'\s*(?:[【\[]\s*)?(?:Boss|首领)', title, re.I)):
-            continue
         result.append(page)
     return result
 
@@ -158,6 +155,22 @@ def damage_reference(page, scope, maximum, source):
                 evidence=[dict(source=source, cid=page['cid'], method='part_title', text=title)])
 
 
+def leading_boss_scope(line):
+    """Read a complete leading boss list/range; ambiguous scopes remain common."""
+    atom = r'(?:(?:Boss|首领)\s*)?[1-3](?!\d)(?:\s*王)?'
+    match = re.match(r'\s*[【\[]?\s*('+atom+r'(?:\s*[/、,，&和及与\-－~～至到]\s*'+atom+r')*)', line, re.I)
+    if (not match or not re.search(r'Boss|首领|王', match[1], re.I) or '前哨' in line
+            or re.match(r'\s*[/、,，&和及与\-－~～至到]', line[match.end():])):
+        return None, 0
+    markers = list(re.finditer(r'[1-3]', match[1]))
+    bosses = {int(m[0]) for m in markers}
+    for first, second in zip(markers, markers[1:]):
+        if re.search(r'[\-－~～至到]', match[1][first.end():second.start()]):
+            low, high = sorted((int(first[0]), int(second[0])))
+            bosses.update(range(low, high+1))
+    return bosses, match.end()
+
+
 def relevant_statements(text, options):
     """Keep common requirements and those explicitly scoped to this target."""
     result = []
@@ -165,11 +178,15 @@ def relevant_statements(text, options):
         if SHARED_REQUIREMENTS.search(line):
             result.append(line)
             continue
-        marker = re.match(r'\s*(?:[【\[]\s*)?(?:Boss\s*([1-3])(?!\d)|([1-3])\s*王|首领\s*([1-3])(?!\d))', line, re.I)
-        if marker and (options['kind'] == 'outpost' or options.get('boss_number') is not None
-                       and int(marker[1] or marker[2] or marker[3]) != options['boss_number']):
+        bosses, _ = leading_boss_scope(line)
+        if bosses is not None and (options['kind'] == 'outpost' or options.get('boss_number') is not None
+                                   and options['boss_number'] not in bosses):
             continue
-        if re.match(r'\s*(?:[【\[]\s*)?前哨', line) and options['kind'] == 'boss':
+        boss_label = re.search(r'Boss|首领|[1-3]王', line, re.I)
+        if (options['kind'] == 'outpost' and '前哨' not in line
+                and re.match(r'\s*[【\[]?\s*(?:Boss(?![A-Za-z0-9])|首领)(?!\s*[1-3])', line, re.I)):
+            continue
+        if re.match(r'\s*(?:[【\[]\s*)?前哨', line) and options['kind'] == 'boss' and not boss_label:
             continue
         result.append(line)
     return '\n'.join(result)
@@ -190,6 +207,9 @@ def metadata_build_requirements(metadata, options, names):
             if not BUILD_LABEL.search(line):
                 continue
             content = normalized(line)
+            _, scope_end = leading_boss_scope(content)
+            if scope_end:
+                content = content[scope_end:].lstrip('】]：:')
             while (match := prefix.match(content)):
                 content = content[match.end():]
             name = next((original for label, original in identities if content.startswith(label)), None)
@@ -279,10 +299,10 @@ def plan_number(page):
     title = page.get('part', page.get('title', ''))
     if SHARED_REQUIREMENTS.search(title):
         return None
-    numbers = re.findall(r'(?:打法|方案|阵容|配队)\s*(\d+|[一二三四五六七八九十]+)', title)
-    if len(numbers) != 1:
+    numbers = list(re.finditer(r'(?:打法|方案|阵容|配队)\s*(\d+|[一二三四五六七八九十]+)', title))
+    if len(numbers) != 1 or re.match(r'\s*[/、,，&和及与\-－~～至到]\s*(?:\d|[一二三四五六七八九十])', title[numbers[0].end():]):
         return None
-    value = numbers[0]
+    value = numbers[0][1]
     return int(value) if value.isdecimal() else dict(zip('一二三四五六七八九十', range(1, 11))).get(value)
 
 
