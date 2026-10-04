@@ -89,25 +89,44 @@ def result_exit(screen):
     return None
 
 
-def reconcile_mastery_batch(ui, record, *, settled):
+def reconcile_mastery_batch(ui, record, *, settled, observed=None, recover_unsubmitted=False):
     """Resolve a durable pending draw without ever submitting another draw."""
-    if (not callable(settled) or record.get('kind') != 'mastery_gacha'
+    if (not callable(settled) or observed is not None and not callable(observed)
+            or record.get('kind') != 'mastery_gacha'
             or type(record.get('before')) is not int or record['before'] < 1
             or type(record.get('cost')) is not int or record['cost'] != min(record['before'],500)
             or record.get('expected_after') != record['before']-record['cost']):
         raise ValueError('精通待核对消费记录无效')
+    can_recover_unchanged = (record.get('submission_tracked') is True
+        and (record.get('submitted') is False
+             or recover_unsubmitted and record.get('submitted') is True))
+    def unchanged_home(screen):
+        controls = [screen.find(pattern,roi,exact=True) for pattern,roi in (
+            ('精通扭蛋',(35,0,205,65)),('持有的券',(485,420,615,465)),
+            ('批量抽取',(700,325,910,390)))]
+        return (not record.get('result_evidence')
+            and all(item and item.score >= .95 for item in controls)
+            and screen.blue_button(controls[-1])
+            and not screen.find('正在进行数据连接|连接中|加载中')
+            and _complete_balance(ui,screen) == record['before'])
     def complete(screen):
         if screen.find('正在进行数据连接|连接中|加载中'):
             return False
         if not (gacha_home(screen) or gacha_result(screen)):
             return False
+        if gacha_result(screen) and not record.get('result_evidence'):
+            # Seeing results forbids unchanged-balance cancellation on later
+            # restarts as well. Persist this proof before exiting the result.
+            record['result_evidence'] = str(ui.save('mastery_gacha_result_'+uuid4().hex[:8],screen))
+            if observed is not None:
+                observed(record)
         value = _complete_balance(ui, screen)
         if value is None:
             # Leaving results is non-consuming and exposes a second, larger
             # balance field. A pending draw remains durable across this exit.
             return bool(result_exit(screen))
         if (gacha_home(screen) and value == record['before']
-                and record.get('submitted') is False and record.get('submission_tracked') is True):
+                and can_recover_unchanged and unchanged_home(screen)):
             return True
         if value != record['expected_after']:
             raise EventUIError('精通抽取结果余额不一致，保留待核对记录，未追加抽取')
@@ -117,21 +136,22 @@ def reconcile_mastery_batch(ui, record, *, settled):
         for _ in range(2):
             time.sleep(.5)
             screen = ui.capture()
-            if (not gacha_home(screen) or screen.find('正在进行数据连接|连接中|加载中')
-                    or _complete_balance(ui,screen) != record['before']):
+            if not unchanged_home(screen):
                 raise EventUIError('未提交精通抽取的页面或余额变化，保留待核对记录')
         resolved = dict(record,after=record['before'],outcome='cancelled_unsubmitted',
             home_evidence=str(ui.save('mastery_gacha_unsubmitted_'+uuid4().hex[:8],screen)))
         settled(resolved)
         return resolved
-    evidence = str(ui.save('mastery_gacha_result_'+uuid4().hex[:8], screen))
+    evidence = record.get('result_evidence') or str(ui.save('mastery_gacha_result_'+uuid4().hex[:8], screen))
     if gacha_result(screen):
         button = result_exit(screen)
         if button is None:
             raise EventUIError('精通结果退出按钮未知，保留待核对记录')
         roi = (265,395,480,470) if normalized(button.text)=='取消' else (360,395,605,460)
         ui.expect_click(normalized(button.text),roi,exact=True)
-    home = ui.wait(lambda s: gacha_home(s) and complete(s), '精通结果返回首页', timeout=30)
+    home = ui.wait(lambda s: gacha_home(s) and complete(s)
+                   and _complete_balance(ui,s) == record['expected_after'],
+                   '精通结果返回首页', timeout=30)
     resolved = dict(record, after=_complete_balance(ui, home), result_evidence=evidence,
                     home_evidence=str(ui.save('mastery_gacha_home_'+uuid4().hex[:8], home)))
     settled(resolved)
@@ -300,14 +320,20 @@ def node_confirmation_snapshot(screen):
     return dict(version=1,materials_digest=digest,rows=sorted(rows,key=lambda row:(row[2],row[1],row[0])))
 
 
-def reconcile_cancelled_mastery_node(ui, record, screen, *, settled):
+def reconcile_cancelled_mastery_node(ui, record, screen, *, settled, recover_unchanged=False):
     """Observe an unchanged node after an interrupted or delivered cancellation."""
-    if (record.get('submitted') is not False
+    view = record.get('confirmation_view')
+    lost_confirmation = (recover_unchanged and record.get('submitted') is True
+        and isinstance(view,dict) and view.get('version') == 1
+        and isinstance(view.get('materials_digest'),str)
+        and re.fullmatch(r'[0-9a-f]{64}',view['materials_digest'])
+        and isinstance(view.get('rows'),list) and bool(view['rows']))
+    if (not lost_confirmation and record.get('submitted') is not False
             and (record.get('cancellation_requested') is not True
                  or not isinstance(record.get('confirmation_view'),dict))):
         raise EventUIError('精通取消恢复缺少原预览与取消记录，保留待核对消费')
     for check in range(3):
-        if (screen.find('强化确认|正在进行数据连接|连接中|加载中')
+        if (screen.find('强化确认|确认|取消|正在进行数据连接|连接中|加载中')
                 or node_state(screen,record['role'],ui=ui) != record['before']):
             raise EventUIError('取消精通预览后节点或材料不一致，保留待核对记录')
         if check < 2:
@@ -431,4 +457,4 @@ def draw_mastery_batch(ui, *, remaining_budget, begin, submitted, settled):
     # This button submits immediately; never replay it while awaiting a result.
     ui.click(button)
     ui.wait(gacha_result, '精通批量抽取结果', timeout=45)
-    return reconcile_mastery_batch(ui, record, settled=settled)
+    return reconcile_mastery_batch(ui, record, settled=settled, observed=submitted)

@@ -237,6 +237,7 @@ class MaxCharacterBonds(BaseTask):
         unknown_frames = 0
         scan_direction = 'to_top'
         previous = None
+        prerequisites = {}
         for step in range(max_steps):
             self.check()
             s = self.ui.capture()
@@ -269,26 +270,40 @@ class MaxCharacterBonds(BaseTask):
                     empty_pages = 0
                     scan_direction = 'to_top'
                     previous = None
+                    prerequisites.clear()
+                    record.pop('story_requirements', None)
                 else:
                     locked = locked_story(s)
-                    if locked:
+                    if locked and normalized(locked.text) not in prerequisites:
                         self.ui.click((480, min(locked.center[1]+35, 415)))
                         requirement = self.ui.wait(lambda f: f.find('解锁条件', (330,110,630,180),exact=True),
                                                    '角色剧情解锁条件',timeout=5)
                         reason = requirement.text((250,190,710,325))
-                        record['stories'] = 'blocked_by_prerequisite'
-                        record['story_requirement'] = reason
-                        record['story_requirement_evidence'] = str(self.ui.save('story_requirement_'+name,requirement))
-                        self.report['pending'].append(name+'：剧情前置条件未满足：'+reason)
+                        episode = normalized(locked.text)
+                        prerequisites[episode] = dict(episode=episode,requirement=reason,
+                            evidence=str(self.ui.save('story_requirement_'+name+'_'+episode,requirement)))
+                        record['story_requirements'] = list(prerequisites.values())
+                        self.save()
                         self.ui.expect_click('关闭',(370,330,590,410),exact=True)
-                        return
+                        self.ui.wait(lambda f:f.find('角色剧情',(320,15,620,70),exact=True),
+                                     '关闭解锁条件返回角色剧情')
+                        continue
                     crop = cv.resize(s.image[125:430, 300:680], (38, 31), interpolation=cv.INTER_AREA)
                     if previous is not None and float(np.mean(np.abs(crop.astype(int)-previous.astype(int)))) < 1.5:
                         if scan_direction == 'to_top':
                             scan_direction = 'to_bottom'
                             previous = None
                             continue
-                        record['stories'] = 'checked_to_end'
+                        if prerequisites:
+                            requirements = list(prerequisites.values())
+                            record['stories'] = 'blocked_by_prerequisite'
+                            record['story_requirements'] = requirements
+                            record['story_requirement'] = requirements[0]['requirement']
+                            record['story_requirement_evidence'] = requirements[0]['evidence']
+                            reasons = list(dict.fromkeys(row['requirement'] for row in requirements))
+                            self.report['pending'].append(name+'：剧情前置条件未满足：'+'；'.join(reasons))
+                        else:
+                            record['stories'] = 'checked_to_end'
                         return
                     previous = crop
                     empty_pages += 1

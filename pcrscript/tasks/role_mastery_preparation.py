@@ -117,16 +117,17 @@ def prepare_role_mastery(task, options):
         task.report_progress('核对上次精通消费')
         screen = restore_pending_mastery_page(task,pending)
         if pending['kind']=='mastery_gacha':
-            mastery.reconcile_mastery_batch(ui,pending,settled=settled)
+            mastery.reconcile_mastery_batch(ui,pending,settled=settled,observed=submitted,
+                                            recover_unsubmitted=True)
         elif pending['kind']=='mastery_claim':
             mastery.reconcile_mastery_rewards(ui,pending,observed=submitted,settled=settled,
                                               recover_unsubmitted=True)
         elif pending['kind']=='mastery_node':
             if screen.find('强化确认',(300,15,660,70),exact=True):
                 mastery.cancel_mastery_confirmation(ui,pending,screen,observed=submitted,settled=settled)
-            elif ((pending.get('submitted') is False or pending.get('cancellation_requested') is True)
-                    and mastery.node_state(screen,pending['role'],ui=ui) == pending['before']):
-                mastery.reconcile_cancelled_mastery_node(ui,pending,screen,settled=settled)
+            elif mastery.node_state(screen,pending['role'],ui=ui) == pending['before']:
+                mastery.reconcile_cancelled_mastery_node(ui,pending,screen,settled=settled,
+                                                         recover_unchanged=True)
             else:
                 mastery.reconcile_mastery_node(ui,pending,settled=settled)
         else:
