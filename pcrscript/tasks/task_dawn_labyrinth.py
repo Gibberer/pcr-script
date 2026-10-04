@@ -175,6 +175,24 @@ class DawnLabyrinth(BaseTask):
         if (remaining == pending['before'] and not pending.get('receipt')
                 and pending.get('cancelled_confirmation')):
             outcome = 'cancelled_sweep'
+        elif (remaining == pending['before'] and not pending.get('receipt')
+                and pending.get('submission_tracked') is True and pending.get('submitted') is False):
+            # Only a journal created before the dispatch phase can be released
+            # from home. A submitted/legacy record needs its existing receipt
+            # or matching cancelled confirmation, even if the balance is stale.
+            for step in range(3):
+                if step:
+                    time.sleep(1)
+                    screen = self.capture()
+                title = screen.find(maze.TITLE, (45, 0, 270, 75), exact=True)
+                departure = screen.find('出发', (480, 250, 695, 330), exact=True)
+                if (not maze.home(screen) or not title or title.score < .95
+                        or not departure or departure.score < .95
+                        or screen.find('确认|关闭|取消|确定|正在进行数据连接|连接中|加载中')
+                        or self.balance(screen) != pending['before']):
+                    raise SweepBlocked('未提交迷宫跳过的首页或余额不稳定，保留待核对记录')
+            pending['unsubmitted_balance'] = str(self.ui.save('sweep_unsubmitted_balance', screen))
+            outcome = 'cancelled_unsubmitted_sweep'
         elif remaining == pending['after'] and pending.get('receipt'):
             outcome = 'recovered_sweep'
             self.report['spent'] += pending['cost']
@@ -462,16 +480,19 @@ class DawnLabyrinth(BaseTask):
         path = self.ui.save(f"sweep_{self.report['sweeps'] + 1:03d}_{suffix}", screen)
         previous = self.report.get('pending_spend', {})
         self.report['pending_spend'] = dict(before=before, after=preview[1], cost=cost,
-                                            preview=str(path))
+                                            preview=str(path), submitted=False, submission_tracked=True)
         if catalogue:
             self.report['pending_spend']['catalogue'] = True
             self.report['pending_spend']['guild'] = normalized(selected[0].text)
         elif bulk:
             self.report['pending_spend']['guild'] = normalized(maze.bulk_guild(screen).text)
             self.report['pending_spend']['catalogue_preview'] = previous.get('preview')
-        # Persist before the one irreversible click. A timeout, error or
-        # cancellation must retain this record and cannot retry the confirmation.
+        # Catalogue input only opens a second preview. Track the actual spend
+        # separately, and persist its dispatch phase before the irreversible click.
         self.save_report()
+        if not catalogue:
+            self.report['pending_spend']['submitted'] = True
+            self.save_report()
         emit('dawn_labyrinth.spend', before=before, after=preview[1], cost=cost)
         self.ui.click(button)
         return preview[1]

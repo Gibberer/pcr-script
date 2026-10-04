@@ -564,6 +564,8 @@ class LabyrinthTaskTests(TestCase):
             if getattr(button, 'center', (0, 0))[1] == 480:
                 saved = json.loads((self.folder / 'report.json').read_text(encoding='utf-8'))
                 self.assertEqual(saved['pending_spend']['cost'], 1)
+                self.assertIs(saved['pending_spend']['submitted'], True)
+                self.assertIs(saved['pending_spend']['submission_tracked'], True)
                 raise RunCancelled('synthetic stop after dispatch')
         self.task.ui.click.side_effect = click
         with self.assertRaises(RunCancelled):
@@ -579,6 +581,83 @@ class LabyrinthTaskTests(TestCase):
         self.task.ui.save.return_value = self.folder / 'synthetic.png'
         self.frames(frames)
         return self.task.run()
+
+    def test_unsubmitted_sweep_recovers_from_home_without_counting_cancelled_cost(self):
+        for mode in ('direct', 'catalogue', 'bulk'):
+            with self.subTest(mode=mode):
+                self.robot.task_config['DawnLabyrinth']['account_key'] = 'synthetic-'+mode
+                self.task = DawnLabyrinth(self.robot)
+                self.task.ui = Mock(output=self.folder, last=None)
+                self.task.ui.save.return_value = self.folder/'synthetic.png'
+                self.task.ui.number.side_effect = lambda s, roi: s.number(roi)
+                values = ([home(1), guild(), preview(1, 0)] if mode == 'direct' else
+                          [home(1), guild(), catalogue(1), catalogue(1, selected=False),
+                           catalogue(1), catalogue(1), bulk(1, 1)])
+                self.frames(values)
+                save = self.task.save_report
+                interrupted = False
+                def stop_after_journal():
+                    nonlocal interrupted
+                    save()
+                    pending = self.task.report.get('pending_spend', {})
+                    if (not interrupted and pending.get('submitted') is False
+                            and (mode == 'catalogue' or not pending.get('catalogue'))):
+                        interrupted = True
+                        raise RunCancelled('synthetic stop before dispatch phase')
+                with patch.object(self.task, 'save_report', side_effect=stop_after_journal):
+                    with self.assertRaises(RunCancelled):
+                        self.task.run()
+                saved = json.loads(self.task.state_path.read_text(encoding='utf-8'))['pending_spend']
+                self.assertIs(saved['submitted'], False)
+                self.assertIs(saved['submission_tracked'], True)
+                self.assertEqual(self.clicks().count('挑战'), 0)
+                self.assertEqual(self.clicks().count('跳过'), 1)
+                report = self.restart([home(1), home(1), home(1), guild(), preview(1, 0), result(), home(0)])
+                self.assertEqual((report['status'], report['spent'], report['sweeps']), ('complete', 1, 1), report)
+                self.assertEqual(report['history'][0]['outcome'], 'cancelled_unsubmitted_sweep')
+                self.assertIn('unsubmitted_balance', report['history'][0])
+                self.assertNotIn('pending_spend', report)
+                self.assertEqual(self.clicks().count('跳过'), 2)
+                self.assertEqual(json.loads(self.task.state_path.read_text(encoding='utf-8')), {})
+
+    def test_unsubmitted_sweep_needs_three_stable_nonloading_home_balances(self):
+        loading = home(1)
+        loading.items.extend(screen(('正在进行数据连接', 480, 250)).items)
+        unknown = home(1)
+        unknown.items[-1].score = .94
+        modal = home(1)
+        modal.items.extend(screen(('确认', 480, 480)).items)
+        for index, changed in enumerate((home(0), loading, unknown, modal, guild())):
+            with self.subTest(index=index):
+                self.robot.task_config['DawnLabyrinth']['account_key'] = f'synthetic-changed-{index}'
+                self.task = DawnLabyrinth(self.robot)
+                self.task.ui = Mock(output=self.folder, last=None)
+                self.task.ui.save.return_value = self.folder/'synthetic.png'
+                pending = dict(before=1, after=0, cost=1, submitted=False, submission_tracked=True)
+                self.task.report['pending_spend'] = pending
+                self.task.save_report()
+                report = self.restart([home(1), home(1), changed])
+                self.assertEqual((report['status'], report['spent']), ('partial', 0), report)
+                self.assertEqual(report['pending_spend'], pending)
+                self.task.ui.click.assert_not_called()
+                self.assertEqual(json.loads(self.task.state_path.read_text(encoding='utf-8'))['pending_spend'], pending)
+
+    def test_unchanged_home_balance_cannot_release_submitted_or_legacy_sweep(self):
+        for index, flags in enumerate((dict(submitted=True, submission_tracked=True),
+                                       dict(submitted=False), {},
+                                       dict(submitted=False, submission_tracked=False))):
+            with self.subTest(flags=flags):
+                self.robot.task_config['DawnLabyrinth']['account_key'] = f'synthetic-legacy-{index}'
+                self.task = DawnLabyrinth(self.robot)
+                pending = dict(before=1, after=0, cost=1, **flags)
+                self.task.report['pending_spend'] = pending
+                self.task.ui = Mock(output=self.folder)
+                self.task.save_report()
+                for _ in range(2):
+                    report = self.restart([home(1)])
+                    self.assertEqual((report['status'], report['spent']), ('partial', 0), report)
+                    self.assertEqual(report['pending_spend'], pending)
+                    self.task.ui.click.assert_not_called()
 
     def test_new_run_keeps_unresolved_consumption_and_never_spends_again(self):
         self.frames([home(3), guild(), preview(), home(2)])
@@ -1068,6 +1147,8 @@ class LabyrinthTaskTests(TestCase):
             if getattr(button, 'text', '') == '挑战':
                 saved = json.loads((self.folder / 'report.json').read_text(encoding='utf-8'))
                 self.assertEqual(saved['pending_spend']['cost'], 1)
+                self.assertIs(saved['pending_spend']['submitted'], True)
+                self.assertIs(saved['pending_spend']['submission_tracked'], True)
                 self.assertNotIn('catalogue', saved['pending_spend'])
                 raise RunCancelled('synthetic dispatch cancellation')
         self.task.ui.click.side_effect = click

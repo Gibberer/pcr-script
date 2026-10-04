@@ -636,21 +636,56 @@ class FirstClearTaskTests(TestCase):
         self.assertEqual(to_home.return_value.run.call_count,1)
         self.assertEqual(self.clicks(),[(30,30)])
 
+    def test_navigation_cancelled_between_equipment_audits_preserves_no_spend(self):
+        with patch.object(self.task, 'get_formation', return_value=Mock()), \
+                patch.object(self.task, 'wait', return_value=home(11)), \
+                patch('pcrscript.tasks.task_home.ToHomePage') as to_home, \
+                patch('pcrscript.game_ui.ordinary_equipment.inspect_ordinary_equipment',
+                      return_value=self.core_proof()), \
+                patch('pcrscript.game_ui.character_equipment.inspect_unique_equipment') as unique:
+            to_home.return_value.run.side_effect = [None, RunCancelled('synthetic navigation cancellation')]
+            with self.assertRaises(RunCancelled):
+                DawnLabyrinthFirstClear.prepare_core_equipment(self.task, self.guild(), 11)
+        unique.assert_not_called()
+        self.assertEqual(to_home.return_value.run.call_count, 2)
+        self.assertNotIn('pending_spend', self.task.report)
+        self.assertEqual((self.task.report['entries'], self.task.report['spent']), (0, 0))
+
     def test_all_core_checks_recheck_balance_and_unlock_before_authorizing_entry(self):
         formation = Mock()
         target = self.guild()
+        current_page = 'maze'
+        inspected = []
+        def return_home(**kwargs):
+            nonlocal current_page
+            current_page = 'home'
+        def ordinary(ui, name, **kwargs):
+            nonlocal current_page
+            self.assertEqual(current_page, 'home')
+            current_page = 'ordinary'
+            inspected.append(('ordinary', name))
+            return self.core_proof()
+        def unique(ui, name):
+            nonlocal current_page
+            self.assertEqual(current_page, 'home')
+            current_page = 'unique'
+            inspected.append(('unique', name))
+            return dict(values=dict(unique=True,unique2=False),evidence=['synthetic-unique'])
         with patch.object(self.task,'get_formation',return_value=formation), \
                 patch.object(self.task,'wait',side_effect=[home(11),target]), \
                 patch.object(self.task,'enter',return_value=home(11)), \
                 patch.object(self.task,'difficulty_one',return_value=target), \
                 patch.object(self.task,'check_unlock',return_value=target) as unlock, \
-                patch('pcrscript.tasks.task_home.ToHomePage'), \
+                patch('pcrscript.tasks.task_home.ToHomePage') as to_home, \
                 patch('pcrscript.game_ui.ordinary_equipment.inspect_ordinary_equipment',
-                      side_effect=lambda ui,name,**kwargs: self.core_proof()), \
+                      side_effect=ordinary), \
                 patch('pcrscript.game_ui.character_equipment.inspect_unique_equipment',
-                      return_value=dict(values=dict(unique=True,unique2=False),evidence=['synthetic-unique'])), \
+                      side_effect=unique), \
                 patch('pcrscript.tasks.task_dawn_labyrinth_first_clear.time.time',return_value=1001):
+            to_home.return_value.run.side_effect = return_home
             self.assertIs(DawnLabyrinthFirstClear.prepare_core_equipment(self.task,target,11),target)
+        self.assertEqual(inspected, [(kind,name) for name in ('佩可莉姆','可可萝','凯露')
+                                     for kind in ('ordinary','unique')])
         self.assertEqual(set(formation.departure_equipment),{'佩可莉姆','可可萝','凯露'})
         unlock.assert_called_once_with(target)
         self.assertNotIn('pending_spend',self.task.report)

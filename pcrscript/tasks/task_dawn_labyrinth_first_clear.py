@@ -202,6 +202,7 @@ class DawnLabyrinthFirstClear(DawnLabyrinth):
                     raise SweepBlocked(name+'仍有已开放的普通装备槽未穿戴，未出发')
                 if ordinary['level'] < 365 or ordinary['rank'] < 38:
                     raise SweepBlocked(name+'未满足当前首通路线的等级365、Rank38要求，未出发')
+                ToHomePage(self.robot).run(timeout=60)
                 unique = inspect_unique_equipment(self.ui, name)
                 if unique is None or any(type(unique['values'].get(key)) is not bool for key in ('unique', 'unique2')):
                     raise SweepBlocked(name+'的独立专武状态未核验，未出发')
