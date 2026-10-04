@@ -18,7 +18,7 @@ from pcrscript.game_ui import recollection as field
 from pcrscript.game_ui.screen import EventScreen, EventUIError, TextBox
 from pcrscript.tasks import Recollection, RecollectionFirstClear
 from pcrscript.tasks.event_strategy import CharacterStatus
-from pcrscript.tasks.event_battle import BattleResult
+from pcrscript.tasks.event_battle import BattleResult, EventCombat
 from pcrscript.tasks.recollection_flow import validate_options
 from pcrscript.tasks.recollection_strategy import parties_for_floor, RecollectionFormation
 from pcrscript.tasks.strategy_document import Evidence, empty_member, finalize
@@ -83,7 +83,7 @@ class LiveTargetTests(TestCase):
         task.ui = Mock()
         task.ui.save.return_value = Path('synthetic.png')
         task.save = Mock()
-        frame = Mock()
+        frame = screen(('未知画面', 480, 50))
         with patch('pcrscript.tasks.task_recollection_first_clear.combat_sample',
                    side_effect=[None, dict(seconds=80, hp=50, max_hp=100, dark_portraits=0)]), \
              patch('pcrscript.tasks.task_recollection_first_clear.time.monotonic', return_value=10):
@@ -97,6 +97,17 @@ class LiveTargetTests(TestCase):
         self.assertEqual(pending['samples'][0]['evidence'], 'synthetic.png')
         self.assertEqual(pending['attempts_before'], 3)
         self.assertNotIn('outcome', pending)
+
+    def test_battle_start_observation_is_saved_even_when_sampling_is_throttled(self):
+        task = object.__new__(RecollectionFirstClear)
+        task.state = dict(pending_battle=dict(submitted=True, submission_tracked=True))
+        task._next_sample = float('inf')
+        task.ui = Mock(save=Mock(return_value=Path('synthetic.png')))
+        task.save = Mock()
+        task.observe_battle(screen(('1:20', 800, 25), ('菜单', 900, 25)))
+        self.assertEqual(task.state['pending_battle']['battle_started'], 'synthetic.png')
+        self.assertFalse(task.unstarted_battle(task.state['pending_battle']))
+        task.save.assert_called_once()
 
     def test_live_signature_requires_detail_floor_name_level_and_full_health(self):
         s = detail(field.AREAS['miroku'], 1)
@@ -367,6 +378,32 @@ class UI:
     def swipe(self,*args):pass
     def number(self,s,roi):return s.number(roi)
     def save(self,name,s=None):return self.output/(name+'.png')
+
+
+class BattleDispatchGame(Game):
+    """Known target and start-input boundary, with no live device or assets."""
+    def __init__(self, area):
+        super().__init__()
+        self.area = area
+        self.floor = self.max_floor[area]
+        self.starts = 0
+
+    def capture(self, **kwargs):
+        if self.page == 'battle':
+            return screen(('1:20', 800, 25), ('菜单', 900, 25))
+        value = super().capture(**kwargs)
+        if self.page == 'detail':
+            value.items += screen(('合成首领', 265, 259), ('等级.100', 340, 259),
+                                  ('80000000/80000000', 550, 295)).items
+        return value
+
+    def click(self, value, **kwargs):
+        if self.page == 'formation' and getattr(value, 'text', '') == '战斗开始':
+            self.clicks.append((self.page, value.text, value.center))
+            self.starts += 1
+            self.page = 'battle'
+        else:
+            super().click(value, **kwargs)
 
 
 class RecollectionTests(TestCase):
@@ -956,6 +993,182 @@ class RecollectionTests(TestCase):
             self.assertEqual(task.run()['status'],'blocked')
             task.combat.run.assert_not_called()
             self.assertIn('pending_battle',task.state)
+
+    def dispatch_task(self, root, game):
+        key = next(k for k, v in field.AREAS.items() if v == game.area)
+        task = self.make_task(root, game, RecollectionFirstClear, areas=[key])
+        party = parties_for_floor(dict(parties=[source_party(game.area, game.floor)]), game.area, game.floor)[0]
+        names = [m.name for m in party.members]
+        task.formation = Mock()
+        task.formation.select.return_value = (True, dict(order=names))
+        task.formation.inspect_current.return_value = [CharacterStatus(n, identity_verified=True) for n in names]
+        task.source_parties = Mock(return_value=[party])
+        task.combat = EventCombat(task)
+        task.combat.match = Mock(return_value=None)
+        # Battle settings are covered separately; retain the production start,
+        # observation, dispatch journal and post-battle progress checks here.
+        def configure(*args, **kwargs):
+            task.combat_settings_confirmed('synthetic-settings.png')
+            game.win()
+            return True
+        task.combat.configure_paused = Mock(side_effect=configure)
+        return task
+
+    def test_unsubmitted_first_clear_restores_and_reaudits_the_same_party(self):
+        for area in (field.AREAS['memory'], field.AREAS['kaiser']):
+            for phase, restored_page in ((False, 'formation'), (False, 'home'), (True, 'formation')):
+                with self.subTest(area=area, phase=phase, page=restored_page), TemporaryDirectory() as root:
+                    game = BattleDispatchGame(area)
+                    task = self.dispatch_task(root, game)
+                    save = task.save
+                    interrupted = False
+                    def stop_before_input():
+                        nonlocal interrupted
+                        save()
+                        if not interrupted and task.state.get('pending_battle', {}).get('submitted') is phase:
+                            interrupted = True
+                            raise RunCancelled('synthetic stop after battle journal, before start input')
+                    with patch.object(task, 'save', side_effect=stop_before_input):
+                        with self.assertRaises(RunCancelled):
+                            task.run()
+                    saved = json.loads(task.state_path.read_text(encoding='utf-8'))['pending_battle']
+                    self.assertIs(saved['submitted'], phase)
+                    self.assertIs(saved['submission_tracked'], True)
+                    self.assertEqual((game.starts, game.tickets), (0, 100))
+                    game.page = restored_page
+                    resumed = self.dispatch_task(root, game)
+                    report = resumed.run()
+                    self.assertEqual(report['status'], 'complete', report)
+                    self.assertEqual((report['battles'], game.starts), (1, 1))
+                    self.assertEqual(report['history'][0]['outcome'], 'cancelled_unsubmitted_battle')
+                    self.assertFalse(report['history'][0]['progressed'])
+                    self.assertTrue(report['history'][1]['progressed'])
+                    self.assertIs(report['history'][1]['submitted'], True)
+                    self.assertEqual(game.tickets, 100)
+                    self.assertFalse(resumed.state)
+                    resumed.formation.select.assert_called_once()
+
+    def test_unsubmitted_formation_cancel_survives_a_second_interruption(self):
+        with TemporaryDirectory() as root:
+            game = BattleDispatchGame(field.AREAS['kaiser'])
+            task = self.dispatch_task(root, game)
+            original = game.click
+            def stop_start(value, **kwargs):
+                if getattr(value, 'text', '') == '战斗开始':
+                    raise RunCancelled('synthetic undelivered start')
+                return original(value, **kwargs)
+            game.click = stop_start
+            with self.assertRaises(RunCancelled):
+                task.run()
+            resumed = self.dispatch_task(root, game)
+            def stop_cancel(value, **kwargs):
+                if game.page == 'formation' and getattr(value, 'text', '') == '取消':
+                    saved = json.loads(resumed.state_path.read_text(encoding='utf-8'))['pending_battle']
+                    self.assertIn('unsubmitted_formation', saved)
+                    original(value, **kwargs)
+                    raise RunCancelled('synthetic stop after formation cancel delivery')
+                return original(value, **kwargs)
+            game.click = stop_cancel
+            with self.assertRaises(RunCancelled):
+                resumed.run()
+            self.assertEqual(game.starts, 0)
+            game.page = 'home'
+            game.click = original
+            final = self.dispatch_task(root, game)
+            report = final.run()
+            self.assertEqual(report['status'], 'complete', report)
+            self.assertEqual((game.starts, report['battles']), (1, 1))
+            self.assertEqual(report['history'][0]['outcome'], 'cancelled_unsubmitted_battle')
+            self.assertFalse(final.state)
+
+    def test_unchanged_floor_cannot_release_submitted_legacy_or_observed_battles(self):
+        flags = [dict(submitted=True, submission_tracked=True), dict(submitted=False), {},
+                 dict(submitted=1, submission_tracked=True)]
+        flags += [dict(submitted=False, submission_tracked=True, **{key: proof}) for key, proof in (
+            ('battle_started', 'synthetic.png'), ('samples', [dict(seconds=80)]),
+            ('settings_verified', True), ('settings_evidence', 'synthetic.png'),
+            ('result_evidence', 'synthetic.png'), ('outcome', 'settled'))]
+        for flag in flags:
+            with self.subTest(flag=flag), TemporaryDirectory() as root:
+                game = BattleDispatchGame(field.AREAS['kaiser'])
+                game.page = 'detail'
+                task = self.dispatch_task(root, game)
+                record = dict(area=game.area, floor=game.floor, attempts_before=3, party='synthetic',
+                              target=field.boss_signature(game.capture()), **flag)
+                task.state['pending_battle'] = record
+                task.save()
+                for _ in range(2):
+                    resumed = self.dispatch_task(root, game)
+                    self.assertEqual(resumed.run()['status'], 'blocked')
+                    self.assertEqual(resumed.state['pending_battle'], record)
+                    resumed.formation.select.assert_not_called()
+                    self.assertEqual(game.starts, 0)
+
+    def test_unsubmitted_battle_recovery_requires_stable_target_and_counters(self):
+        with TemporaryDirectory() as root:
+            game = BattleDispatchGame(field.AREAS['kaiser'])
+            game.page = 'detail'
+            before = game.capture()
+            cases = [deepcopy(before) for _ in range(5)]
+            cases[0].items += screen(('已完成', 156, 421)).items
+            next(item for item in cases[1].items if item.text == '3/3').text = '2/3'
+            next(item for item in cases[2].items if item.text == '合成首领').text = '另一首领'
+            cases[3].items += screen(('正在进行数据连接', 480, 45)).items
+            next(item for item in cases[4].items if item.text == '初次通关').score = .94
+            for changed in cases:
+                with self.subTest(changed=changed.text()):
+                    task = self.dispatch_task(root, game)
+                    record = dict(area=game.area, floor=game.floor, attempts_before=3, party='synthetic',
+                                  target=field.boss_signature(before), submitted=False, submission_tracked=True)
+                    task.state['pending_battle'] = record
+                    task.save()
+                    task.select_floor = Mock(return_value=before)
+                    task.ui.capture = Mock(side_effect=[before, changed])
+                    with self.assertRaises(EventUIError):
+                        task.reconcile_battle()
+                    self.assertEqual(task.state['pending_battle'], record)
+                    self.assertEqual(game.starts, 0)
+
+    def test_unsubmitted_formation_recovery_requires_three_nonloading_frames(self):
+        with TemporaryDirectory() as root:
+            game = BattleDispatchGame(field.AREAS['kaiser'])
+            task = self.dispatch_task(root, game)
+            game.page = 'detail'
+            record = dict(area=game.area, floor=game.floor, attempts_before=3, party='synthetic',
+                          target=field.boss_signature(game.capture()), submitted=True, submission_tracked=True)
+            game.page = 'formation'
+            before = game.capture()
+            changed = [deepcopy(before) for _ in range(4)]
+            changed[0].items += screen(('正在进行数据连接', 480, 60)).items
+            changed[1].items += screen(('菜单', 900, 25)).items
+            changed[2].image[429:478, 800:901] = 140
+            changed[3].items[0].score = .94
+            for value in changed:
+                with self.subTest(value=value.text()):
+                    task = self.dispatch_task(root, game)
+                    task.state['pending_battle'] = record
+                    task.save()
+                    task.ui.capture = Mock(side_effect=[before, before, value])
+                    self.assertEqual(task.run()['status'], 'blocked')
+                    self.assertEqual(task.state['pending_battle'], record)
+                    self.assertFalse(game.clicks)
+
+    def test_unsubmitted_battle_without_original_target_or_attempts_stays_pending(self):
+        for missing in ('target', 'attempts_before'):
+            with self.subTest(missing=missing), TemporaryDirectory() as root:
+                game = BattleDispatchGame(field.AREAS['kaiser'])
+                game.page = 'detail'
+                task = self.dispatch_task(root, game)
+                record = dict(area=game.area, floor=game.floor, attempts_before=3, party='synthetic',
+                              target=field.boss_signature(game.capture()), submitted=False, submission_tracked=True)
+                record.pop(missing)
+                task.state['pending_battle'] = record
+                task.save()
+                resumed = self.dispatch_task(root, game)
+                self.assertEqual(resumed.run()['status'], 'blocked')
+                self.assertEqual(resumed.state['pending_battle'], record)
+                resumed.formation.select.assert_not_called()
+                self.assertEqual(game.starts, 0)
 
     def test_failure_result_recovers_exact_counter_without_replaying_failed_party(self):
         with TemporaryDirectory() as root:

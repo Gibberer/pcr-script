@@ -200,6 +200,9 @@ class EventCombat:
             start = formation.find("战斗开始", (740, 390, 950, 510), exact=True)
             if not formation.blue_button(start):
                 return BattleResult("blocked", "战斗开始按钮不可用，未消耗挑战次数")
+            starting = getattr(self.r, 'combat_starting', None)
+            if callable(starting):
+                starting(formation)
             self.ui.click(start)
         deadline = time.monotonic()+self.r.options.get("battle_timeout", 220)
         started = None

@@ -119,6 +119,9 @@ class RecollectionTask(BaseTask):
     def settle_battle_result(self, screen):
         raise RecollectionBlocked('存在未结算首通战斗，请先运行追忆战场首通核对结果')
 
+    def leave_formation(self, screen):
+        self.click(screen, '取消', (630, 410, 780, 500))
+
     def settle_sweep_summary(self, screen):
         summary = field.sweep_summary(screen)
         plan = self.state.get('pending_sweep')
@@ -154,7 +157,7 @@ class RecollectionTask(BaseTask):
                 if not cancel_special_equipment(self.ui, s):
                     raise RecollectionBlocked('未能取消特别装备弹窗，未开战')
             elif s.find('队伍编组', (250, 0, 710, 80), exact=True):
-                self.click(s, '取消', (630, 410, 780, 500))
+                self.leave_formation(s)
             elif field.detail_scope(s) or field.dominion_index(s):
                 self.ui.click((30, 30))
             elif s.find('追忆战宝箱详情', (250, 0, 720, 80), exact=True):

@@ -38,7 +38,15 @@ class RecollectionFirstClear(RecollectionTask):
 
     def observe_battle(self, screen):
         record = self.state.get('pending_battle')
-        if not record or time.monotonic() < self._next_sample:
+        if not record:
+            return
+        marker = (screen.find('菜单', (840, 0, 960, 60), exact=True)
+                  or screen.find(r'\d:\d{2}', (750, 0, 850, 55), exact=True)
+                  or (screen.find('进行中战斗') and screen.find('主菜单')))
+        if marker and marker.score >= .95 and not record.get('battle_started'):
+            record['battle_started'] = str(self.ui.save('battle_started', screen))
+            self.save()
+        if time.monotonic() < self._next_sample:
             return
         samples = record.setdefault('samples', [])
         if len(samples) >= 120:
@@ -58,6 +66,41 @@ class RecollectionFirstClear(RecollectionTask):
         if record := self.state.get('pending_battle'):
             record.update(settings_verified=True, settings_evidence=evidence)
             self.save()
+
+    def combat_starting(self, screen):
+        record = self.state.get('pending_battle')
+        if not record or record.get('submission_tracked') is not True or record.get('submitted') is not False:
+            raise RecollectionBlocked('首通开战提交阶段未知，未重复开战')
+        record.update(submitted=True, dispatch_evidence=str(self.ui.save('battle_dispatch', screen)))
+        self.save()
+
+    @staticmethod
+    def unstarted_battle(record):
+        return (record.get('submission_tracked') is True and type(record.get('submitted')) is bool
+                and not any(record.get(key) for key in ('battle_started', 'samples', 'settings_verified',
+                    'settings_evidence', 'result_outcome', 'result_evidence', 'outcome')))
+
+    def leave_formation(self, screen):
+        record = self.state.get('pending_battle')
+        if record and self.unstarted_battle(record):
+            # A requested start may never reach the device. Prove the original
+            # battle is still unstarted before leaving this formation; save the
+            # proof before cancellation so an interrupted cancel can resume.
+            for step in range(3):
+                if step:
+                    time.sleep(1)
+                    screen = self.capture()
+                title = screen.find('队伍编组', (250, 0, 710, 80), exact=True)
+                start = screen.find('战斗开始', (740, 390, 950, 510), exact=True)
+                cancel = screen.find('取消', (630, 410, 780, 500), exact=True)
+                if (not title or title.score < .95 or not start or start.score < .95
+                        or not screen.blue_button(start) or not cancel or cancel.score < .95
+                        or screen.find('正在进行数据连接|连接中|加载|进行中战斗|主菜单|战斗失败|WIN')
+                        or screen.find(r'菜单|\d:\d{2}', (750, 0, 960, 60))):
+                    raise RecollectionBlocked('首通恢复编队状态不稳定，保留待核对战斗')
+            record['unsubmitted_formation'] = str(self.ui.save('battle_unsubmitted_formation', screen))
+            self.save()
+        super().leave_formation(screen)
 
     def combat_result_button(self, screen):
         button = field.battle_result_button(screen)
@@ -151,6 +194,31 @@ class RecollectionFirstClear(RecollectionTask):
         record = self.state['pending_battle']
         s = self.select_floor(record['area'], record['floor'])
         clear = field.clear_status(s) if s is not None else None
+        if (clear is False and self.unstarted_battle(record)
+                and (record['submitted'] is False or record.get('unsubmitted_formation'))):
+            target = record.get('target')
+            scope = dict(area=record['area'], floor=record['floor'])
+            if (not isinstance(target, dict) or target.get('scope') != scope
+                    or record['area'] != field.AREAS['memory']
+                    and type(record.get('attempts_before')) is not int):
+                raise RecollectionBlocked('未提交首通的原目标或次数证据不完整，保留记录')
+            for step in range(3):
+                if step:
+                    time.sleep(1)
+                    s = self.capture()
+                stamp = s.find('初次通关', (110, 300, 360, 420), exact=True)
+                if (field.detail_scope(s) != scope or field.clear_status(s) is not False
+                        or not stamp or stamp.score < .95 or field.boss_signature(s) != target
+                        or field.detail_attempts(s) != record.get('attempts_before')
+                        or s.find('正在进行数据连接|连接中|加载|确认|取消|关闭')):
+                    raise RecollectionBlocked('未提交首通的层数、首领或次数不稳定，保留记录')
+            record.update(outcome='cancelled_unsubmitted_battle', progressed=False,
+                          attempts_after=field.detail_attempts(s),
+                          after=str(self.ui.save('battle_unsubmitted_detail', s)))
+            self.report['history'].append(record)
+            self.state.pop('pending_battle')
+            self.save()
+            return
         if clear is None or (not clear and record.get('result_outcome') != 'failed'):
             raise RecollectionBlocked('上次首通战斗尚未确认结果，保留进度并停止自动重试')
         remaining = field.detail_attempts(s)
@@ -226,7 +294,7 @@ class RecollectionFirstClear(RecollectionTask):
         record = dict(area=area, floor=floor, party=party.name, source=party.source,
                       maximum_hp=signature.get('maximum_hp') if signature else None,
                       build_basis=party.build_basis, formation=details, attempts_before=remaining,
-                      trial_context=context,
+                      trial_context=context, target=signature, submitted=False, submission_tracked=True,
                       before=str(self.ui.save(f'battle_before_{len(self.report["history"])}', self.capture())))
         self.state['pending_battle'] = record
         self._next_sample = 0
@@ -274,7 +342,8 @@ class RecollectionFirstClear(RecollectionTask):
                 self.report['pending'].append(area+'本周次数已用完，保留首通进度')
                 return
             attempted = {row['party'] for row in self.report['history']
-                         if row['area'] == area and row['floor'] == floor and not row['progressed']}
+                         if row['area'] == area and row['floor'] == floor and not row['progressed']
+                         and row.get('outcome') != 'cancelled_unsubmitted_battle'}
             progressed = False
             blocked = []
             any_candidates = False
