@@ -77,11 +77,17 @@ def mission_home(passes=0, badge=True):
     return value
 
 
-def missions(claim=True, selected=True):
-    return screen(('任务', 480, 42), ('全部', 190, 88), ('普通', 480, 88), ('公会', 774, 88),
+def missions(claim=True, selected=True, title=None):
+    value = screen(('任务', 480, 42), ('全部', 190, 88), ('普通', 480, 88), ('公会', 774, 88),
                   ('已超过持有数上限的道具将被送往礼物箱。', 480, 427),
                   ('取消', 367, 475), ('全部收取', 592, 475),
                   blue=tuple((['全部'] if selected else [])+(['全部收取'] if claim else [])))
+    if title:
+        row = screen((title,300,180),('1/1',650,180),('收取',840,180),
+                     blue=('收取',) if claim else ())
+        value.items.extend(row.items)
+        value.image[140:220]=row.image[140:220]
+    return value
 
 
 def mission_receipt():
@@ -339,7 +345,8 @@ class LabyrinthTaskTests(TestCase):
 
     def test_missions_follow_up_rewards_require_a_new_receipt_each_time(self):
         self.frames([mission_home(), missions(), missions(), mission_receipt(),
-                     missions(), mission_receipt(), missions(claim=False), mission_home(badge=False)])
+                     missions(), mission_home(), missions(), missions(),
+                     mission_receipt(), missions(claim=False), mission_home(badge=False)])
         report = self.task.run()
         self.assertEqual(report['status'], 'complete')
         self.assertEqual(report['missions']['batches'], 2)
@@ -601,6 +608,96 @@ class LabyrinthTaskTests(TestCase):
         self.assertEqual(report['status'], 'partial', report)
         self.assertIn('pending_mission_claim', report)
         self.assertNotIn('全部收取', self.clicks())
+
+    def interrupted_mission_claim(self):
+        ready=missions(title='完成合成迷宫任务')
+        self.frames([mission_home(),ready,ready])
+        def click(button):
+            if getattr(button,'text','')=='全部收取':
+                raise RunCancelled('synthetic interruption before delivery')
+        self.task.ui.click.side_effect=click
+        with self.assertRaises(RunCancelled):
+            self.task.run()
+        return ready
+
+    def test_claim_interrupted_before_delivery_recovers_stable_unchanged_task_page(self):
+        ready=self.interrupted_mission_claim()
+        saved=json.loads(self.task.state_path.read_text(encoding='utf-8'))['pending_mission_claim']
+        self.assertEqual(saved['missions_view'],maze.mission_claim_snapshot(ready))
+        self.assertEqual(saved['passes_before'],0)
+        report=self.restart([mission_home(),ready,ready,ready,ready,mission_receipt(),
+                             missions(claim=False),mission_home(badge=False)])
+        self.assertEqual(report['status'],'complete',report)
+        self.assertEqual(self.clicks().count('全部收取'),1)
+        self.assertEqual(report['history'][0]['outcome'],'recovered_unclaimed_missions')
+        self.assertNotIn('pending_mission_claim',report)
+        self.assertEqual(json.loads(self.task.state_path.read_text(encoding='utf-8')), {})
+
+    def test_claim_recovery_requires_original_content_and_unchanged_pass_balance(self):
+        ready=self.interrupted_mission_claim()
+        for balance,view in ((1,ready),(0,missions(title='另一合成迷宫任务'))):
+            with self.subTest(balance=balance,view=view.text()):
+                report=self.restart([mission_home(balance),view,view])
+                self.assertEqual(report['status'],'partial',report)
+                self.assertIn('pending_mission_claim',report)
+                self.assertNotIn('全部收取',self.clicks())
+                self.assertNotIn('出发',self.clicks())
+
+    def test_claim_recovery_preserves_pending_when_fresh_page_is_loading_or_changes(self):
+        ready=self.interrupted_mission_claim()
+        loading=missions(title='完成合成迷宫任务')
+        loading.items.extend(screen(('正在进行数据连接',480,300)).items)
+        for fresh in (loading,missions(title='不同的合成任务'),missions(claim=False)):
+            with self.subTest(view=fresh.text()):
+                report=self.restart([mission_home(),ready,ready,fresh])
+                self.assertEqual(report['status'],'partial',report)
+                self.assertIn('pending_mission_claim',report)
+                self.assertNotIn('全部收取',self.clicks())
+
+    def test_claim_snapshot_requires_confident_task_content_and_enabled_claim_controls(self):
+        ready=missions(title='完成合成迷宫任务')
+        self.assertIsNotNone(maze.mission_claim_snapshot(ready))
+        self.assertIsNone(maze.mission_claim_snapshot(missions()))
+        self.assertIsNone(maze.mission_claim_snapshot(missions(claim=False,title='完成合成迷宫任务')))
+        ready.items[-3].score=.94
+        self.assertIsNone(maze.mission_claim_snapshot(ready))
+
+    def test_later_claim_interruption_uses_balance_observed_after_prior_reward(self):
+        first=missions(title='完成合成迷宫任务1')
+        second=missions(title='完成合成迷宫任务2')
+        self.frames([mission_home(),first,first,mission_receipt(),second,
+                     mission_home(1),second,second])
+        claims=0
+        def click(button):
+            nonlocal claims
+            if getattr(button,'text','')=='全部收取':
+                claims+=1
+                if claims==2:raise RunCancelled('synthetic later-claim interruption')
+        self.task.ui.click.side_effect=click
+        with self.assertRaises(RunCancelled):
+            self.task.run()
+        saved=json.loads(self.task.state_path.read_text(encoding='utf-8'))['pending_mission_claim']
+        self.assertEqual(saved['passes_before'],1)
+        self.assertEqual(saved['missions_view'],maze.mission_claim_snapshot(second))
+        report=self.restart([mission_home(1),second,second,second,second,mission_receipt(),
+            missions(claim=False),mission_home(1,badge=False),guild(),preview(1,0),
+            result(),mission_home(0,badge=False)])
+        self.assertEqual(report['status'],'complete',report)
+        self.assertEqual(report['history'][0]['outcome'],'recovered_unclaimed_missions')
+        self.assertEqual(self.clicks().count('全部收取'),1)
+        self.assertEqual(report['spent'],1)
+
+    def test_later_claim_rechecks_original_task_after_observing_the_balance(self):
+        first=missions(title='完成合成迷宫任务1')
+        second=missions(title='完成合成迷宫任务2')
+        changed=missions(title='不同的合成任务')
+        self.frames([mission_home(),first,first,mission_receipt(),second,
+                     mission_home(1),changed,changed])
+        report=self.task.run()
+        self.assertEqual(report['status'],'partial',report)
+        self.assertEqual(self.clicks().count('全部收取'),1)
+        self.assertNotIn('pending_mission_claim',report)
+        self.assertNotIn('出发',self.clicks())
 
     def test_new_run_uses_a_saved_receipt_and_counts_it_against_the_budget(self):
         self.frames([home(3), guild(), preview(), result(), home(1)])

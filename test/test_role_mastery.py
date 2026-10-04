@@ -1,5 +1,5 @@
 from unittest import TestCase
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 import numpy as np
 from pcrscript.game_ui.screen import EventScreen, EventUIError, TextBox
 from pcrscript.game_ui.role_mastery import integer_text, ticket_balance, draw_mastery_batch, reconcile_mastery_batch
@@ -82,6 +82,37 @@ class SharedMaterialDevice(NodeDevice):
             self.values[self.node]=pending['expected_value']
             self.dialog=False;self.payments.append(self.node)
         else:super().click(point)
+
+
+class RestartedMasteryDevice(NodeDevice):
+    """A restarted app loses its page and selected node, but retains resources."""
+    def __init__(self,task,quest):
+        super().__init__(task)
+        self.page='home';self.balance='0';self.quest=quest;self.navigation=[]
+    def capture(self):
+        if self.page=='role':return super().capture()
+        if self.page=='gacha':return screen(balance=self.balance)
+        if self.page=='quest':return self.quest
+        labels = ([('角色',200,505),('剧情',420,505),('冒险',535,505)]
+                  if self.page=='home' else [('公主骑士强化',140,30),('职能精通',830,75)])
+        return EventScreen(np.full((540,960,3),240,np.uint8),[
+            TextBox(t,1,[[x-20,y-10],[x+20,y-10],[x+20,y+10],[x-20,y+10]]) for t,x,y in labels])
+    def click(self,point):
+        self.navigation.append(getattr(point,'text',point))
+        if point==(306,505):
+            assert self.page=='home';self.page='strength'
+        elif point==(30,30):
+            assert self.page in ('quest','gacha');self.page='role'
+        elif isinstance(point,tuple) and point[1]==130:
+            assert self.page=='role'
+        else:
+            assert self.page=='role'
+            super().click(point)
+    def expect_click(self,pattern,*args,**kwargs):
+        self.navigation.append(pattern)
+        expected={'职能精通':('strength','role'),'精通扭蛋':('role','gacha'),'任务':('role','quest')}
+        assert pattern in expected, 'Recovery must not click a spending control'
+        before,after=expected[pattern];assert self.page==before;self.page=after
 
 
 class RoleMasteryTests(TestCase):
@@ -286,6 +317,71 @@ class RoleMasteryTests(TestCase):
         task=Mock(state={},report=dict(pending=[]),save=Mock())
         task.ui=NodeDevice(task);task.capture=task.ui.capture
         return task
+
+    def restarted_task(self,record):
+        task=Mock(state=dict(pending_mastery=record),report=dict(pending=[]),save=Mock())
+        task.ui=RestartedMasteryDevice(task,self.quest_screen(False))
+        task.capture=task.ui.capture
+        return task
+
+    def pending_node(self,submitted=True):
+        before=node_state(node_screen(name=ROLE_NODES['buff'][2]),'buff')
+        return dict(kind='mastery_node',role='buff',node=2,before=before,
+                    expected_level=3,expected_value='7.5%',submitted=submitted)
+
+    def test_restart_recovers_paid_node_from_home_and_reselects_original_node(self):
+        task=self.restarted_task(self.pending_node());task.ui.levels[2]=3
+        with patch('pcrscript.tasks.task_home.ToHomePage.run') as home:
+            report=prepare_role_mastery(task,validate_mastery_preparation({}))
+        home.assert_called_once_with(timeout=60)
+        self.assertEqual(task.ui.node,2)
+        self.assertEqual(task.ui.navigation,[(306,505),'职能精通',(494,130),NODE_POINTS[2]])
+        self.assertEqual(report['history'][0]['after']['value'],'7.5%')
+        self.assertNotIn('pending_mastery',task.state)
+        self.assertEqual(task.ui.payments,[])
+
+    def test_restart_recovers_gacha_from_home_without_another_draw(self):
+        record=dict(kind='mastery_gacha',before=150,cost=150,expected_after=0)
+        task=self.restarted_task(record)
+        with patch('pcrscript.tasks.task_home.ToHomePage.run'):
+            report=prepare_role_mastery(task,validate_mastery_preparation({}))
+        self.assertEqual(task.ui.navigation,[(306,505),'职能精通','精通扭蛋'])
+        self.assertEqual(report['tickets_spent'],150)
+        self.assertNotIn('pending_mastery',task.state)
+
+    def test_restart_recovers_saved_claim_receipt_via_task_list_without_claim(self):
+        record=dict(kind='mastery_claim',receipt_evidence='synthetic.png',rewards='合成材料')
+        task=self.restarted_task(record)
+        with patch('pcrscript.tasks.task_home.ToHomePage.run'):
+            prepare_role_mastery(task,validate_mastery_preparation({}))
+        self.assertEqual(task.ui.navigation,[(306,505),'职能精通','任务'])
+        self.assertNotIn('pending_mastery',task.state)
+
+    def test_restart_with_wrong_ticket_balance_retains_pending_without_drawing(self):
+        record=dict(kind='mastery_gacha',before=150,cost=150,expected_after=0)
+        task=self.restarted_task(record);task.ui.balance='150'
+        with patch('pcrscript.tasks.task_home.ToHomePage.run'),self.assertRaises(EventUIError):
+            prepare_role_mastery(task,validate_mastery_preparation({}))
+        self.assertEqual(task.state['pending_mastery'],record)
+        self.assertEqual(task.ui.navigation,[(306,505),'职能精通','精通扭蛋'])
+
+    def test_restart_cancels_unchanged_node_journal_before_preview_was_opened(self):
+        task=self.restarted_task(self.pending_node(submitted=False))
+        with patch('pcrscript.tasks.task_home.ToHomePage.run'):
+            report=prepare_role_mastery(task,validate_mastery_preparation({}))
+        self.assertEqual(report['history'][0]['outcome'],'cancelled_preview')
+        self.assertNotIn('pending_mastery',task.state)
+        self.assertEqual(task.ui.payments,[])
+
+    def test_unknown_submission_dialog_is_preserved_without_home_navigation(self):
+        task=self.preparation_task();task.state['pending_mastery']=self.pending_node()
+        task.ui.dialog=True
+        with patch('pcrscript.tasks.task_home.ToHomePage.run') as home,self.assertRaises(EventUIError):
+            prepare_role_mastery(task,validate_mastery_preparation({}))
+        home.assert_not_called()
+        self.assertIn('pending_mastery',task.state)
+        self.assertTrue(task.ui.dialog)
+        self.assertEqual(task.ui.payments,[])
 
     def test_production_preparation_trains_four_nodes_then_repeat_spends_nothing(self):
         task=self.preparation_task();options=validate_mastery_preparation({'roles':{'buff':3}})

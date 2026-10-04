@@ -192,6 +192,19 @@ class DawnLabyrinth(BaseTask):
             raise EventUIError('持有通行证数量无法确认，未追加消费')
         return value
 
+    def open_mission_list(self, screen):
+        if not maze.home(screen) or maze.mission_receipt(screen):
+            raise EventUIError('迷宫任务奖励入口上下文未知')
+        entry = screen.find('任务', (790, 220, 935, 285), exact=True)
+        if not entry or entry.score < .95:
+            raise EventUIError('迷宫任务奖励入口无法核对')
+        self.ui.click(entry)
+        screen = self.wait(maze.missions_page, '迷宫任务列表')
+        self.ui.click(screen.find('全部',(40,60,325,115),exact=True))
+        return self.wait(lambda s: maze.missions_page(s)
+                         and s.blue_button(s.find('全部', (40, 60, 325, 115), exact=True)),
+                         '迷宫全部任务')
+
     def collect_mission_rewards(self, screen=None):
         """Claim free maze missions only after the exploration/sweep has settled."""
         screen = screen if screen is not None else self.capture()
@@ -212,15 +225,8 @@ class DawnLabyrinth(BaseTask):
             missions.update(status='complete', passes_after=before)
             return screen
         self.report_progress('领取黎明界迷宫任务奖励')
-        entry = screen.find('任务', (790, 220, 935, 285), exact=True)
-        if not entry or entry.score < .95:
-            raise EventUIError('迷宫任务奖励入口无法核对')
-        self.ui.click(entry)
-        screen = self.wait(maze.missions_page, '迷宫任务列表')
-        self.ui.click(screen.find('全部', (40, 60, 325, 115), exact=True))
-        screen = self.wait(lambda s: maze.missions_page(s)
-                           and s.blue_button(s.find('全部', (40, 60, 325, 115), exact=True)),
-                           '迷宫全部任务')
+        screen = self.open_mission_list(screen)
+        claim_before = before
         for _ in range(self.mission_limit):
             button = screen.find('全部收取', (480, 440, 705, 515), exact=True)
             if button is None or button.score < .95:
@@ -247,9 +253,47 @@ class DawnLabyrinth(BaseTask):
                 self.ui.save('missions_home', screen)
                 return screen
             if self.report.get('pending_mission_claim'):
-                raise EventUIError('上次迷宫任务领奖尚未核对，未重复领取')
+                pending = self.report['pending_mission_claim']
+                snapshot = pending.get('missions_view')
+                if (not snapshot or type(pending.get('passes_before')) is not int
+                        or pending['passes_before'] != before
+                        or maze.mission_claim_snapshot(screen) != snapshot):
+                    raise EventUIError('上次迷宫任务领奖尚未核对，未重复领取')
+                # A durable preview can precede the actual input. Only the
+                # same still-unclaimed task content and unchanged balance
+                # across fresh, non-loading observations release that record.
+                for _ in range(2):
+                    time.sleep(1)
+                    screen = self.capture()
+                    if maze.mission_claim_snapshot(screen) != snapshot:
+                        raise EventUIError('迷宫领奖恢复时任务内容或状态变化，保留待核对记录')
+                self.report['history'].append(dict(self.report.pop('pending_mission_claim'),
+                    outcome='recovered_unclaimed_missions',
+                    recovery_evidence=str(self.ui.save('missions_unclaimed_recovered',screen))))
+                self.save_report()
+                button = screen.find('全部收取',(480,440,705,515),exact=True)
+            if missions['batches']:
+                # Earlier free rewards can add passes. Observe the actual
+                # balance before journaling each subsequent claim as well.
+                snapshot = maze.mission_claim_snapshot(screen)
+                self.ui.click(screen.find('取消',(255,440,465,515),exact=True))
+                home = self.wait(lambda s:maze.home(s) and not maze.missions_page(s)
+                                 and not maze.mission_receipt(s),'核对后续领奖前的通行证')
+                claim_before = self.balance(home)
+                if claim_before < before:
+                    raise EventUIError('后续领奖前通行证减少，停止追加操作')
+                screen = self.open_mission_list(home)
+                if snapshot and maze.mission_claim_snapshot(screen) != snapshot:
+                    raise EventUIError('后续领奖前任务内容变化，未领取')
+                button = screen.find('全部收取',(480,440,705,515),exact=True)
+                if not button or button.score < .95:
+                    raise EventUIError('后续迷宫领奖按钮无法核对')
+                if not screen.blue_button(button):
+                    continue
             preview = self.ui.save(f"missions_{missions['batches'] + 1:02d}_preview", screen)
-            self.report['pending_mission_claim'] = dict(preview=str(preview))
+            self.report['pending_mission_claim'] = dict(preview=str(preview),
+                missions_view=maze.mission_claim_snapshot(screen),
+                passes_before=claim_before)
             self.save_report()
             self.ui.click(button)
             receipt = self.wait(maze.mission_receipt, '迷宫任务领取回执')

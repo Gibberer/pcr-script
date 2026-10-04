@@ -31,6 +31,68 @@ def validate_mastery_preparation(options):
     return value
 
 
+def enter_role_mastery(task, screen=None):
+    """Reuse the ordinary, non-consuming route before preparation or recovery."""
+    ui = task.ui
+    screen = task.capture() if screen is None else screen
+    if mastery.quest_page(screen) or mastery.gacha_home(screen):
+        ui.click((30,30))
+    elif mastery.gacha_result(screen):
+        button = mastery.result_exit(screen)
+        if button is None:
+            raise EventUIError('精通结果退出按钮未知')
+        ui.click(button)
+        ui.wait(mastery.gacha_home,'精通抽取首页')
+        ui.click((30,30))
+    elif not mastery.role_page(screen):
+        if screen.find('强化确认|收取报酬'):
+            raise EventUIError('精通待核对弹窗无法安全离开，保留记录')
+        from .task_home import ToHomePage
+        ToHomePage(task.robot).run(timeout=60)
+        # Confirm the known neighbours of the illustrated strength tab.
+        ui.wait(lambda s:s.find('角色',(145,475,260,540),exact=True)
+                and s.find('剧情',(375,475,470,540),exact=True)
+                and s.find('冒险',(475,475,595,540),exact=True), '强化入口导航栏')
+        ui.click((306,505))
+        ui.wait(lambda s:s.find('公主骑士强化',(30,0,280,70),exact=True),'公主骑士强化')
+        ui.expect_click('职能精通',(760,45,930,100),exact=True)
+    return ui.wait(mastery.role_page,'职能精通')
+
+
+def restore_pending_mastery_page(task, pending):
+    """Restore the ledger's observation context, never a spending control."""
+    kind = pending.get('kind')
+    if kind not in ('mastery_gacha','mastery_claim','mastery_node'):
+        raise EventUIError('未知精通待核对记录')
+    if kind == 'mastery_node':
+        role, node = pending.get('role'), pending.get('node')
+        if (role not in mastery.ROLE_NODES or type(node) is not int or not 0 <= node < 4
+                or not isinstance(pending.get('before'),dict)):
+            raise EventUIError('精通待核对职能或节点无效，未导航')
+    ui = task.ui
+    screen = task.capture()
+    if kind == 'mastery_gacha' and (mastery.gacha_home(screen) or mastery.gacha_result(screen)):
+        return screen
+    if kind == 'mastery_claim' and (mastery.quest_page(screen) or mastery.quest_receipt(screen)):
+        return screen
+    if kind == 'mastery_node' and screen.find('强化确认',(300,15,660,70),exact=True):
+        # Preserve the existing confirmation for the submission-aware handler.
+        return screen
+    enter_role_mastery(task, screen)
+    if kind == 'mastery_gacha':
+        ui.expect_click('精通扭蛋',(70,150,225,225),exact=True)
+        return ui.wait(mastery.gacha_home,'恢复精通抽取余额页')
+    if kind == 'mastery_claim':
+        ui.expect_click('任务',(760,15,835,75),exact=True)
+        return ui.wait(mastery.quest_page,'恢复强化任务奖励列表')
+    ui.click((mastery.ROLE_TABS[role][1],130))
+    ui.wait(lambda s:mastery.role_page(s,role),'恢复待核对精通职能')
+    ui.click(mastery.NODE_POINTS[node])
+    expected = '【'+mastery.ROLE_TABS[role][0]+'】'+mastery.ROLE_NODES[role][node]+r'Lv\d+'
+    return ui.wait(lambda s:mastery.role_page(s,role) and s.find(
+        expected,(580,145,945,190),exact=True),'恢复待核对精通节点')
+
+
 def prepare_role_mastery(task, options):
     """Use only held materials/tickets; pending operations prevent replay."""
     ui = task.ui
@@ -53,12 +115,12 @@ def prepare_role_mastery(task, options):
         task.save()
     if pending := task.state.get('pending_mastery'):
         task.report_progress('核对上次精通消费')
+        screen = restore_pending_mastery_page(task,pending)
         if pending['kind']=='mastery_gacha':
             mastery.reconcile_mastery_batch(ui,pending,settled=settled)
         elif pending['kind']=='mastery_claim':
             mastery.reconcile_mastery_rewards(ui,pending,observed=submitted,settled=settled)
         elif pending['kind']=='mastery_node':
-            screen = task.capture()
             if screen.find('强化确认',(300,15,660,70),exact=True):
                 # A persisted submission must never be sent twice. Preserve
                 # an uncertain dialog rather than guessing whether it arrived.
@@ -71,6 +133,13 @@ def prepare_role_mastery(task, options):
                 task.state.pop('pending_mastery')
                 report['history'].append(dict(pending,outcome='cancelled_preview'))
                 task.save()
+            elif (pending.get('submitted') is False
+                    and mastery.node_state(screen,pending['role'],ui=ui) == pending['before']):
+                # The first journal write can precede opening the preview.
+                # An unchanged selected node with no submission is cancellable.
+                task.state.pop('pending_mastery')
+                report['history'].append(dict(pending,outcome='cancelled_preview'))
+                task.save()
             else:
                 mastery.reconcile_mastery_node(ui,pending,settled=settled)
         else:
@@ -78,30 +147,7 @@ def prepare_role_mastery(task, options):
     if not options['roles']:
         return report
 
-    screen = task.capture()
-    if mastery.quest_page(screen):
-        ui.click((30,30))
-    elif mastery.gacha_home(screen):
-        ui.click((30,30))
-    elif mastery.gacha_result(screen):
-        button=mastery.result_exit(screen)
-        if button is None:
-            raise EventUIError('精通结果退出按钮未知')
-        ui.click(button)
-        ui.wait(mastery.gacha_home,'精通抽取首页')
-        ui.click((30,30))
-    elif not mastery.role_page(screen):
-        from .task_home import ToHomePage
-        ToHomePage(task.robot).run(timeout=60)
-        # The illustrated strength tab can be omitted by full-frame OCR.
-        # Confirm its three neighbours on the known CN home footer first.
-        ui.wait(lambda s:s.find('角色',(145,475,260,540),exact=True)
-                and s.find('剧情',(375,475,470,540),exact=True)
-                and s.find('冒险',(475,475,595,540),exact=True), '强化入口导航栏')
-        ui.click((306,505))
-        ui.wait(lambda s:s.find('公主骑士强化',(30,0,280,70),exact=True),'公主骑士强化')
-        ui.expect_click('职能精通',(760,45,930,100),exact=True)
-    ui.wait(mastery.role_page,'职能精通')
+    enter_role_mastery(task)
     if options['claim_earned_rewards']:
         mastery.collect_mastery_rewards(ui,begin=begin,observed=submitted,settled=settled)
     actions = 0
