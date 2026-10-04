@@ -113,10 +113,8 @@ class DawnLabyrinth(BaseTask):
                 self.ui.click(screen.find('取消', (255, 440, 465, 515), exact=True))
                 continue
             if maze.receipt(screen):
-                if (self.report.get('pending_spend')
-                        and screen.find(r'(?:迷宫)?(?:跳过|扫荡)结果', (140, 0, 820, 110), exact=True)):
-                    self.report['pending_spend']['receipt'] = str(self.ui.save('sweep_resumed_receipt', screen))
-                    self.save_report()
+                if self.report.get('pending_spend'):
+                    self.record_sweep_result('sweep_resumed_receipt', screen)
                 close = screen.find('确认|关闭', (320, 395, 750, 520), exact=True)
                 if close:
                     self.ui.click(close)
@@ -172,14 +170,15 @@ class DawnLabyrinth(BaseTask):
             return
         remaining = self.balance(screen)
         self.report['remaining_passes'] = remaining
-        if (remaining == pending['before'] and not pending.get('receipt')
+        if (remaining == pending['before'] and not pending.get('receipt') and not pending.get('result_evidence')
                 and pending.get('cancelled_confirmation')):
             outcome = 'cancelled_sweep'
-        elif (remaining == pending['before'] and not pending.get('receipt')
-                and pending.get('submission_tracked') is True and pending.get('submitted') is False):
-            # Only a journal created before the dispatch phase can be released
-            # from home. A submitted/legacy record needs its existing receipt
-            # or matching cancelled confirmation, even if the balance is stale.
+        elif (remaining == pending['before'] and not pending.get('receipt') and not pending.get('result_evidence')
+                and pending.get('submission_tracked') is True and type(pending.get('submitted')) is bool):
+            # The dispatch journal is saved before input, so either phase may
+            # survive an undelivered click. Recovery alone verifies fresh stable
+            # home frames; normal settlement still waits for a result. A saved
+            # result forbids cancellation even if the home balance is stale.
             for step in range(3):
                 if step:
                     time.sleep(1)
@@ -190,7 +189,7 @@ class DawnLabyrinth(BaseTask):
                         or not departure or departure.score < .95
                         or screen.find('确认|关闭|取消|确定|正在进行数据连接|连接中|加载中')
                         or self.balance(screen) != pending['before']):
-                    raise SweepBlocked('未提交迷宫跳过的首页或余额不稳定，保留待核对记录')
+                    raise SweepBlocked('迷宫跳过恢复时首页或余额不稳定，保留待核对记录')
             pending['unsubmitted_balance'] = str(self.ui.save('sweep_unsubmitted_balance', screen))
             outcome = 'cancelled_unsubmitted_sweep'
         elif remaining == pending['after'] and pending.get('receipt'):
@@ -203,6 +202,18 @@ class DawnLabyrinth(BaseTask):
                                             remaining=remaining,
                                             balance_evidence=str(self.ui.save('sweep_recovered_balance', screen))))
         self.save_report()
+
+    def record_sweep_result(self, name, screen):
+        proof = str(self.ui.save(name, screen))
+        pending = self.report.get('pending_spend')
+        if pending:
+            # Persist any result observation before dismissing it. A generic
+            # reward page cannot settle a sweep, but prevents treating a later
+            # unchanged balance as proof that input was never delivered.
+            pending.setdefault('result_evidence', proof)
+            if screen.find(r'(?:迷宫)?(?:跳过|扫荡)结果', (140, 0, 820, 110), exact=True):
+                pending['receipt'] = proof
+            self.save_report()
 
     def balance(self, screen):
         value = maze.read_held_passes(self.ui, screen)
@@ -551,10 +562,7 @@ class DawnLabyrinth(BaseTask):
                 continue
             if maze.receipt(screen):
                 result_seen = True
-                proof = self.ui.save(f"sweep_{self.report['sweeps'] + 1:03d}_result_{step:02d}", screen)
-                if screen.find(r'(?:迷宫)?(?:跳过|扫荡)结果', (140, 0, 820, 110), exact=True):
-                    self.report['pending_spend']['receipt'] = str(proof)
-                    self.save_report()
+                self.record_sweep_result(f"sweep_{self.report['sweeps'] + 1:03d}_result_{step:02d}", screen)
                 button = screen.find('全部开启|全部打开|开启全部|打开全部|确认|关闭|返回迷宫|返回',
                                      (200, 395, 930, 525), exact=True)
                 if button:
