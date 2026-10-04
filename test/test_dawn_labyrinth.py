@@ -77,7 +77,7 @@ def mission_home(passes=0, badge=True):
     return value
 
 
-def missions(claim=True, selected=True, title=None):
+def missions(claim=True, selected=True, title='完成合成迷宫任务'):
     value = screen(('任务', 480, 42), ('全部', 190, 88), ('普通', 480, 88), ('公会', 774, 88),
                   ('已超过持有数上限的道具将被送往礼物箱。', 480, 427),
                   ('取消', 367, 475), ('全部收取', 592, 475),
@@ -599,10 +599,9 @@ class LabyrinthTaskTests(TestCase):
         self.assertNotIn('出发', self.clicks())
 
     def test_new_run_does_not_repeat_an_unconfirmed_mission_claim(self):
-        self.frames([mission_home(), missions(), missions(), missions()])
-        ticks = count(0, 10)
-        with patch('pcrscript.tasks.task_dawn_labyrinth.time.monotonic', side_effect=lambda: next(ticks)):
-            self.assertEqual(self.task.run()['status'], 'partial')
+        # Legacy records contain no task proof; they cannot authorize replay.
+        self.task.report['pending_mission_claim']=dict(preview='synthetic.png')
+        self.task.save_report()
         report = self.restart([mission_home(), missions(), missions(), mission_receipt(),
                                missions(claim=False), mission_home(badge=False)])
         self.assertEqual(report['status'], 'partial', report)
@@ -657,10 +656,21 @@ class LabyrinthTaskTests(TestCase):
     def test_claim_snapshot_requires_confident_task_content_and_enabled_claim_controls(self):
         ready=missions(title='完成合成迷宫任务')
         self.assertIsNotNone(maze.mission_claim_snapshot(ready))
-        self.assertIsNone(maze.mission_claim_snapshot(missions()))
+        self.assertIsNone(maze.mission_claim_snapshot(missions(title=None)))
         self.assertIsNone(maze.mission_claim_snapshot(missions(claim=False,title='完成合成迷宫任务')))
         ready.items[-3].score=.94
         self.assertIsNone(maze.mission_claim_snapshot(ready))
+
+    def test_missing_or_low_confidence_task_snapshot_blocks_before_journal_and_claim(self):
+        missing=missions(title=None)
+        low=missions();low.items[-3].score=.94
+        for view in (missing,low):
+            with self.subTest(view=view.text()):
+                report=self.restart([mission_home(),view,view])
+                self.assertEqual(report['status'],'blocked',report)
+                self.assertNotIn('pending_mission_claim',report)
+                self.assertNotIn('全部收取',self.clicks())
+                self.assertEqual(json.loads(self.task.state_path.read_text(encoding='utf-8')), {})
 
     def test_later_claim_interruption_uses_balance_observed_after_prior_reward(self):
         first=missions(title='完成合成迷宫任务1')

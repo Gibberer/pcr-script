@@ -109,7 +109,7 @@ def prepare_role_mastery(task, options):
         if not task.state.get('pending_mastery'):
             raise EventUIError('精通核账缺少对应待核对记录')
         report['history'].append(record)
-        if record['kind']=='mastery_gacha':
+        if record['kind']=='mastery_gacha' and record.get('outcome') != 'cancelled_unsubmitted':
             report['tickets_spent'] += record['cost']
         task.state.pop('pending_mastery')
         task.save()
@@ -119,7 +119,8 @@ def prepare_role_mastery(task, options):
         if pending['kind']=='mastery_gacha':
             mastery.reconcile_mastery_batch(ui,pending,settled=settled)
         elif pending['kind']=='mastery_claim':
-            mastery.reconcile_mastery_rewards(ui,pending,observed=submitted,settled=settled)
+            mastery.reconcile_mastery_rewards(ui,pending,observed=submitted,settled=settled,
+                                              recover_unsubmitted=True)
         elif pending['kind']=='mastery_node':
             if screen.find('强化确认',(300,15,660,70),exact=True):
                 # A persisted submission must never be sent twice. Preserve
@@ -197,7 +198,8 @@ def prepare_role_mastery(task, options):
                         break
                     ui.expect_click('精通扭蛋',(70,150,225,225),exact=True)
                     ui.wait(mastery.gacha_home,'精通材料抽取')
-                    mastery.draw_mastery_batch(ui,remaining_budget=remaining,begin=begin,settled=settled)
+                    mastery.draw_mastery_batch(ui,remaining_budget=remaining,begin=begin,
+                                              submitted=submitted,settled=settled)
                     actions += 1
                     ui.click((30,30));ui.wait(mastery.role_page,'抽取后返回精通')
                     ui.click((mastery.ROLE_TABS[role][1],130))

@@ -4,7 +4,8 @@ from __future__ import annotations
 import re
 from uuid import uuid4
 
-from .screen import EventUIError, normalized
+from .screen import EventUIError, normalized, claimable_task_snapshot
+from ..run_session import clock as time
 
 
 ROLE_TABS = {
@@ -95,6 +96,8 @@ def reconcile_mastery_batch(ui, record, *, settled):
             or record.get('expected_after') != record['before']-record['cost']):
         raise ValueError('精通待核对消费记录无效')
     def complete(screen):
+        if screen.find('正在进行数据连接|连接中|加载中'):
+            return False
         if not (gacha_home(screen) or gacha_result(screen)):
             return False
         value = _complete_balance(ui, screen)
@@ -102,10 +105,24 @@ def reconcile_mastery_batch(ui, record, *, settled):
             # Leaving results is non-consuming and exposes a second, larger
             # balance field. A pending draw remains durable across this exit.
             return bool(result_exit(screen))
+        if (gacha_home(screen) and value == record['before']
+                and record.get('submitted') is False and record.get('submission_tracked') is True):
+            return True
         if value != record['expected_after']:
             raise EventUIError('精通抽取结果余额不一致，保留待核对记录，未追加抽取')
         return True
     screen = ui.wait(complete, '精通抽取余额核对', timeout=45)
+    if gacha_home(screen) and _complete_balance(ui,screen) == record['before']:
+        for _ in range(2):
+            time.sleep(.5)
+            screen = ui.capture()
+            if (not gacha_home(screen) or screen.find('正在进行数据连接|连接中|加载中')
+                    or _complete_balance(ui,screen) != record['before']):
+                raise EventUIError('未提交精通抽取的页面或余额变化，保留待核对记录')
+        resolved = dict(record,after=record['before'],outcome='cancelled_unsubmitted',
+            home_evidence=str(ui.save('mastery_gacha_unsubmitted_'+uuid4().hex[:8],screen)))
+        settled(resolved)
+        return resolved
     evidence = str(ui.save('mastery_gacha_result_'+uuid4().hex[:8], screen))
     if gacha_result(screen):
         button = result_exit(screen)
@@ -142,7 +159,14 @@ def quest_receipt(screen):
                 and screen.find('关闭',(350,440,610,520),exact=True))
 
 
-def reconcile_mastery_rewards(ui, record, *, observed, settled):
+def quest_claim_snapshot(screen):
+    if (not quest_page(screen) or quest_receipt(screen)
+            or not screen.blue_button(screen.find('全部收取',(730,405,950,468),exact=True))):
+        return None
+    return claimable_task_snapshot(screen,(310,65,920,350))
+
+
+def reconcile_mastery_rewards(ui, record, *, observed, settled, recover_unsubmitted=False):
     """A reward receipt resolves a pending claim; never submit another claim."""
     if record.get('kind') != 'mastery_claim' or not all(callable(x) for x in (observed,settled)):
         raise ValueError('精通任务奖励待核对记录无效')
@@ -150,6 +174,18 @@ def reconcile_mastery_rewards(ui, record, *, observed, settled):
     if quest_page(screen) and record.get('receipt_evidence') and isinstance(record.get('rewards'),str):
         settled(record)
         return record
+    if recover_unsubmitted and quest_page(screen) and record.get('quest_view'):
+        snapshot = record['quest_view']
+        if quest_claim_snapshot(screen) == snapshot:
+            for _ in range(2):
+                time.sleep(.5)
+                screen = ui.capture()
+                if quest_claim_snapshot(screen) != snapshot:
+                    raise EventUIError('强化任务领奖恢复时内容或状态变化，保留待核对记录')
+            row = dict(record,outcome='cancelled_unclaimed',
+                recovery_evidence=str(ui.save('mastery_claim_unclaimed_'+uuid4().hex[:8],screen)))
+            settled(row)
+            return row
     screen = ui.wait(quest_receipt,'核对强化任务奖励回执',timeout=30)
     row = dict(record,receipt_evidence=str(ui.save('mastery_claim_receipt_'+uuid4().hex[:8],screen)),
                rewards=screen.text((250,100,720,440)))
@@ -176,9 +212,14 @@ def collect_mastery_rewards(ui, *, begin, observed, settled):
         if not screen.blue_button(button):
             ui.save('mastery_claim_empty_'+uuid4().hex[:8],screen)
             break
-        row = dict(kind='mastery_claim',before_evidence=str(
+        snapshot = quest_claim_snapshot(screen)
+        if snapshot is None:
+            raise EventUIError('强化任务内容或可领取状态不完整，未保存领奖记录或领取')
+        row = dict(kind='mastery_claim',quest_view=snapshot,submitted=False,before_evidence=str(
             ui.save('mastery_claim_before_'+uuid4().hex[:8],screen)))
         begin(row)
+        row['submitted'] = True
+        observed(row)
         # Immediate, free claim. The durable pending record prevents replay.
         ui.click(button)
         claimed.append(reconcile_mastery_rewards(ui,row,observed=observed,settled=settled))
@@ -295,11 +336,11 @@ def reconcile_mastery_node(ui, record, *, settled):
     return resolved
 
 
-def draw_mastery_batch(ui, *, remaining_budget, begin, settled):
-    """Draw the displayed batch (up to 500); both callbacks must be durable."""
+def draw_mastery_batch(ui, *, remaining_budget, begin, submitted, settled):
+    """Draw the displayed batch with durable preparation and submission states."""
     if type(remaining_budget) is not int or remaining_budget < 1:
         raise ValueError('精通批量抽取的剩余授权必须为正整数')
-    if not callable(begin) or not callable(settled):
+    if not all(callable(x) for x in (begin,submitted,settled)):
         raise ValueError('精通抽取需要持久化消费回调')
     screen = ui.capture()
     before = _complete_balance(ui,screen)
@@ -313,8 +354,11 @@ def draw_mastery_batch(ui, *, remaining_budget, begin, settled):
         raise EventUIError('精通券余额、批量消耗、剩余上限或按钮无法核对，未抽取')
     tag = uuid4().hex[:8]
     record = dict(kind='mastery_gacha', before=before, expected_after=before-amount, cost=amount,
+                  submitted=False,submission_tracked=True,
                   before_evidence=str(ui.save('mastery_gacha_before_'+tag, screen)))
     begin(record)
+    record['submitted'] = True
+    submitted(record)
     # This button submits immediately; never replay it while awaiting a result.
     ui.click(button)
     ui.wait(gacha_result, '精通批量抽取结果', timeout=45)

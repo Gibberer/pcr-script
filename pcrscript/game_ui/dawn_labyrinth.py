@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import re
 
-from .screen import EventScreen, EventUIError, normalized
+from .screen import EventScreen, EventUIError, normalized, claimable_task_snapshot
 
 import cv2 as cv
 import numpy as np
@@ -51,16 +51,7 @@ def mission_claim_snapshot(screen: EventScreen) -> dict | None:
             or not screen.blue_button(screen.find('全部',(40,60,325,115),exact=True))
             or not screen.blue_button(screen.find('全部收取',(480,440,705,515),exact=True))):
         return None
-    items = [item for item in screen.items
-             if 50 <= item.center[0] <= 920 and 120 <= item.center[1] <= 405]
-    if (not items or any(item.score < .95 for item in items)
-            or not any(normalized(item.text) == '收取' and screen.blue_button(item) for item in items)
-            or not any(normalized(item.text) != '收取' for item in items)):
-        return None
-    rows = [[normalized(item.text), *map(int,item.center),
-             screen.blue_button(item) if normalized(item.text) == '收取' else None]
-            for item in items]
-    return dict(version=1, rows=sorted(rows,key=lambda row:(row[2],row[1],row[0])))
+    return claimable_task_snapshot(screen,(50,120,920,405))
 
 
 def sweep_confirmation(screen: EventScreen) -> bool:

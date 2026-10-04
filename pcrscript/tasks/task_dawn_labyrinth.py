@@ -290,9 +290,12 @@ class DawnLabyrinth(BaseTask):
                     raise EventUIError('后续迷宫领奖按钮无法核对')
                 if not screen.blue_button(button):
                     continue
+            snapshot = maze.mission_claim_snapshot(screen)
+            if snapshot is None:
+                raise EventUIError('迷宫任务内容或可领取状态不完整，未保存领奖记录或领取')
             preview = self.ui.save(f"missions_{missions['batches'] + 1:02d}_preview", screen)
             self.report['pending_mission_claim'] = dict(preview=str(preview),
-                missions_view=maze.mission_claim_snapshot(screen),
+                missions_view=snapshot,
                 passes_before=claim_before)
             self.save_report()
             self.ui.click(button)

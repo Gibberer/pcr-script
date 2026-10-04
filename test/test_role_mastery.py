@@ -4,7 +4,7 @@ import numpy as np
 from pcrscript.game_ui.screen import EventScreen, EventUIError, TextBox
 from pcrscript.game_ui.role_mastery import integer_text, ticket_balance, draw_mastery_batch, reconcile_mastery_batch
 from pcrscript.game_ui.role_mastery import node_state, reinforce_mastery_node, ROLE_NODES, NODE_POINTS
-from pcrscript.game_ui.role_mastery import collect_mastery_rewards,reconcile_mastery_rewards
+from pcrscript.game_ui.role_mastery import collect_mastery_rewards,reconcile_mastery_rewards,quest_claim_snapshot
 from pcrscript.tasks.role_mastery_preparation import validate_mastery_preparation, prepare_role_mastery
 
 
@@ -116,11 +116,14 @@ class RestartedMasteryDevice(NodeDevice):
 
 
 class RoleMasteryTests(TestCase):
-    def quest_screen(self,enabled=True,receipt=False):
+    def quest_screen(self,enabled=True,receipt=False,title='完成合成强化任务'):
         labels = ([('收取报酬',480,42),('收取了以下道具。',480,90),('合成材料×100',480,180),('关闭',480,480)]
                   if receipt else [('强化任务',130,30),('全部收取',840,435)])
         image=np.full((540,960,3),240,np.uint8)
         if enabled:image[417:453,800:880]=(230,170,50)
+        if not receipt and title:
+            labels.extend(((title,500,180),('1/1',700,180),('收取',855,180)))
+            if enabled:image[162:198,815:895]=(230,170,50)
         return EventScreen(image,[TextBox(t,1,[[x-20,y-10],[x+20,y-10],[x+20,y+10],[x-20,y+10]]) for t,x,y in labels])
 
     def test_free_earned_rewards_journal_before_claim_and_read_receipt(self):
@@ -132,8 +135,9 @@ class RoleMasteryTests(TestCase):
         ui.click.side_effect=lambda point:timeline.append('claim' if isinstance(point,TextBox) else 'back')
         ui.expect_click.side_effect=lambda *a,**kw:timeline.append('close')
         rows=collect_mastery_rewards(ui,begin=lambda r:timeline.append('begin'),
-            observed=lambda r:timeline.append('receipt'),settled=lambda r:timeline.append('settled'))
-        self.assertEqual(timeline,['begin','claim','receipt','close','settled','back'])
+            observed=lambda r:timeline.append('receipt' if r.get('receipt_evidence') else 'submitted'),
+            settled=lambda r:timeline.append('settled'))
+        self.assertEqual(timeline,['begin','submitted','claim','receipt','close','settled','back'])
         self.assertEqual(len(rows),1)
         self.assertEqual(rows[0]['rewards'],'合成材料×100')
 
@@ -206,8 +210,9 @@ class RoleMasteryTests(TestCase):
         ui.click.side_effect=lambda *args:timeline.append('click')
         begin=lambda record:timeline.append(('begin',record['before']))
         settled=lambda record:timeline.append(('settled',record['after']))
-        row=draw_mastery_batch(ui,remaining_budget=500,begin=begin,settled=settled)
-        self.assertEqual(timeline,[('begin',3650),'click',('settled',3150)])
+        row=draw_mastery_batch(ui,remaining_budget=500,begin=begin,
+            submitted=lambda record:timeline.append(('submitted',record['submitted'])),settled=settled)
+        self.assertEqual(timeline,[('begin',3650),('submitted',True),'click',('settled',3150)])
         self.assertEqual(row['cost'],500)
         self.assertEqual(ui.click.call_count,1)
 
@@ -215,7 +220,7 @@ class RoleMasteryTests(TestCase):
         for after in ('3,149','3,650','1.5'):
             ui=self.ui(after);settled=Mock()
             with self.assertRaises(EventUIError):
-                draw_mastery_batch(ui,remaining_budget=500,begin=Mock(),settled=settled)
+                draw_mastery_batch(ui,remaining_budget=500,begin=Mock(),submitted=Mock(),settled=settled)
             settled.assert_not_called()
             self.assertEqual(ui.click.call_count,1)
             if after!='1.5':ui.expect_click.assert_not_called()
@@ -224,19 +229,19 @@ class RoleMasteryTests(TestCase):
         ui=self.ui()
         for budget in (True,0,None):
             with self.assertRaises(ValueError):
-                draw_mastery_batch(ui,remaining_budget=budget,begin=Mock(),settled=Mock())
+                draw_mastery_batch(ui,remaining_budget=budget,begin=Mock(),submitted=Mock(),settled=Mock())
         with self.assertRaises(OSError):
-            draw_mastery_batch(ui,remaining_budget=500,begin=Mock(side_effect=OSError()),settled=Mock())
+            draw_mastery_batch(ui,remaining_budget=500,begin=Mock(side_effect=OSError()),submitted=Mock(),settled=Mock())
         ui.click.assert_not_called()
 
     def test_last_partial_batch_consumes_only_displayed_held_tickets(self):
         ui=self.ui('0');before=screen(balance='150');before.items[-1].text='消耗150张'
         ui.capture.return_value=before
-        row=draw_mastery_batch(ui,remaining_budget=150,begin=Mock(),settled=Mock())
+        row=draw_mastery_batch(ui,remaining_budget=150,begin=Mock(),submitted=Mock(),settled=Mock())
         self.assertEqual((row['cost'],row['before'],row['after']),(150,150,0))
         ui=self.ui();ui.capture.return_value=before
         with self.assertRaises(EventUIError):
-            draw_mastery_batch(ui,remaining_budget=149,begin=Mock(),settled=Mock())
+            draw_mastery_batch(ui,remaining_budget=149,begin=Mock(),submitted=Mock(),settled=Mock())
         ui.click.assert_not_called()
 
     def test_zero_result_uses_numeric_fallback_and_confirmation_without_redraw(self):
@@ -278,6 +283,99 @@ class RoleMasteryTests(TestCase):
                                             expected_after=3150,cost=1000),settled=settled)
         ui.wait.assert_not_called()
         settled.assert_not_called()
+
+    def test_gacha_interrupted_after_initial_journal_recovers_without_spending_budget(self):
+        before=screen(balance='150');before.items[-1].text='消耗150张'
+        ui=Mock(capture=Mock(return_value=before));saved=[];submitted=Mock()
+        def begin(record):
+            saved.append(dict(record))
+            raise RuntimeError('interrupted after gacha journal')
+        with self.assertRaisesRegex(RuntimeError,'gacha journal'):
+            draw_mastery_batch(ui,remaining_budget=150,begin=begin,submitted=submitted,settled=Mock())
+        self.assertIs(saved[0]['submitted'],False)
+        submitted.assert_not_called();ui.click.assert_not_called()
+        task=self.restarted_task(saved[0]);task.ui.balance='150'
+        with patch('pcrscript.tasks.task_home.ToHomePage.run'),patch('pcrscript.game_ui.role_mastery.time.sleep'):
+            report=prepare_role_mastery(task,validate_mastery_preparation({}))
+        self.assertNotIn('pending_mastery',task.state)
+        self.assertEqual(report['tickets_spent'],0)
+        self.assertEqual(report['history'][0]['outcome'],'cancelled_unsubmitted')
+        self.assertEqual(report['history'][0]['after'],150)
+        self.assertEqual(task.ui.navigation,[(306,505),'职能精通','精通扭蛋'])
+
+    def test_uncertain_or_legacy_gacha_submission_cannot_clear_an_unchanged_balance(self):
+        before=screen(balance='150')
+        for flags in ({'submitted':True,'submission_tracked':True},{'submitted':False},{}):
+            with self.subTest(flags=flags):
+                ui=Mock(capture=Mock(return_value=before));settled=Mock()
+                ui.wait.side_effect=lambda predicate,*a,**kw:before if predicate(before) else None
+                with self.assertRaises(EventUIError):
+                    reconcile_mastery_batch(ui,dict(kind='mastery_gacha',before=150,cost=150,
+                        expected_after=0,**flags),settled=settled)
+                settled.assert_not_called();ui.click.assert_not_called()
+
+    def test_unsubmitted_gacha_requires_fresh_stable_balance_and_no_connection_overlay(self):
+        before=screen(balance='150');loading=screen(balance='150')
+        loading.items.append(TextBox('正在进行数据连接',1,[[400,90],[600,90],[600,110],[400,110]]))
+        for changed in (screen(balance='149'),loading):
+            with self.subTest(changed=changed.text()):
+                ui=Mock(capture=Mock(return_value=changed));settled=Mock()
+                ui.wait.side_effect=lambda predicate,*a,**kw:before if predicate(before) else None
+                with patch('pcrscript.game_ui.role_mastery.time.sleep'),self.assertRaises(EventUIError):
+                    reconcile_mastery_batch(ui,dict(kind='mastery_gacha',before=150,cost=150,
+                        expected_after=0,submitted=False,submission_tracked=True),settled=settled)
+                settled.assert_not_called();ui.click.assert_not_called()
+
+    def test_gacha_submission_journal_failure_prevents_the_input(self):
+        ui=self.ui()
+        with self.assertRaises(OSError):
+            draw_mastery_batch(ui,remaining_budget=500,begin=Mock(),
+                submitted=Mock(side_effect=OSError('cannot save submission')),settled=Mock())
+        ui.click.assert_not_called()
+
+    def test_claim_interrupted_after_journal_recovers_original_tasks_from_home_without_click(self):
+        ready=self.quest_screen();ui=Mock(capture=Mock(return_value=ready));saved=[]
+        def begin(record):
+            saved.append(dict(record));raise RuntimeError('interrupted after claim journal')
+        observed=Mock()
+        with self.assertRaisesRegex(RuntimeError,'claim journal'):
+            collect_mastery_rewards(ui,begin=begin,observed=observed,settled=Mock())
+        self.assertEqual(saved[0]['quest_view'],quest_claim_snapshot(ready))
+        observed.assert_not_called();ui.click.assert_not_called()
+        task=self.restarted_task(saved[0]);task.ui.quest=ready
+        with patch('pcrscript.tasks.task_home.ToHomePage.run'),patch('pcrscript.game_ui.role_mastery.time.sleep'):
+            report=prepare_role_mastery(task,validate_mastery_preparation({}))
+        self.assertNotIn('pending_mastery',task.state)
+        self.assertEqual(report['history'][0]['outcome'],'cancelled_unclaimed')
+        self.assertEqual(task.ui.navigation,[(306,505),'职能精通','任务'])
+
+    def test_claim_recovery_preserves_unknown_result_when_original_task_changes_or_loads(self):
+        ready=self.quest_screen();loading=self.quest_screen()
+        loading.items.append(TextBox('正在进行数据连接',1,[[400,290],[600,290],[600,310],[400,310]]))
+        for changed in (self.quest_screen(title='另一项合成强化任务'),loading,self.quest_screen(False)):
+            with self.subTest(changed=changed.text()):
+                ui=Mock();ui.capture.side_effect=[ready,changed];settled=Mock()
+                with patch('pcrscript.game_ui.role_mastery.time.sleep'),self.assertRaises(EventUIError):
+                    reconcile_mastery_rewards(ui,dict(kind='mastery_claim',quest_view=quest_claim_snapshot(ready)),
+                        observed=Mock(),settled=settled,recover_unsubmitted=True)
+                settled.assert_not_called();ui.click.assert_not_called()
+
+    def test_missing_or_low_confidence_mastery_task_content_prevents_journal_and_claim(self):
+        low=self.quest_screen();low.items[2].score=.94
+        for ready in (self.quest_screen(title=None),low):
+            with self.subTest(ready=ready.text()):
+                ui=Mock(capture=Mock(return_value=ready));begin=Mock()
+                with self.assertRaises(EventUIError):
+                    collect_mastery_rewards(ui,begin=begin,observed=Mock(),settled=Mock())
+                begin.assert_not_called();ui.click.assert_not_called()
+
+    def test_current_claim_waits_for_receipt_without_using_cross_run_cancellation(self):
+        ready=self.quest_screen();ui=Mock(capture=Mock(return_value=ready));settled=Mock()
+        ui.wait.side_effect=EventUIError('receipt still unknown')
+        with self.assertRaises(EventUIError):
+            reconcile_mastery_rewards(ui,dict(kind='mastery_claim',quest_view=quest_claim_snapshot(ready)),
+                observed=Mock(),settled=settled)
+        settled.assert_not_called();ui.click.assert_not_called()
 
     def test_node_reader_distinguishes_level_from_stars_and_reads_increment(self):
         row=node_state(node_screen(),'buff')
