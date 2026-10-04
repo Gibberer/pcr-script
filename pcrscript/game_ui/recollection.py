@@ -123,10 +123,12 @@ def detail_attempts(s: EventScreen) -> int | None:
 def boss_signature(s: EventScreen) -> dict | None:
     """Read the live floor and its boss, never infer a floor from a guide range."""
     scope = detail_scope(s)
-    if not scope or scope['area'] == AREAS['memory']:
+    if not scope:
         return None
     header = s.find(re.escape(scope['area'])+str(scope['floor'])+'层', (30, 65, 650, 125), exact=True)
-    labels = s.all('.+', (220, 230, 440, 272))
+    # Ordinary multipart bosses have a longer name; the level is farther right,
+    # while the weakness label remains outside the name/level region.
+    labels = s.all('.+', (220, 230, 500 if scope['area'] == AREAS['memory'] else 440, 272))
     if not header or header.score < .95 or not labels or any(t.score < .95 for t in labels):
         return None
     name = ''.join(normalized(t.text) for t in sorted(labels, key=lambda t: t.center[0]))

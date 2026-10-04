@@ -128,6 +128,22 @@ class LiveTargetTests(TestCase):
         self.assertFalse(live_target_scope(labels,dict(target,image=''),proof)[1])
         self.assertFalse(live_target_scope([GuideText(t.text,.94,t.rectangle) for t in labels],target,proof)[1])
 
+    def test_ordinary_signature_reads_long_boss_name_and_level_without_weakness(self):
+        s=detail(field.AREAS['memory'],9)
+        s.items+=screen(('合成首领（多部位）',323,258),('等级.100',446,258),
+                        ('弱点',539,258),('80000000/80000000',552,295)).items
+        signature=field.boss_signature(s)
+        self.assertEqual(signature,dict(scope=dict(area=field.AREAS['memory'],floor=9),
+            boss='合成首领(多部位)',level=100,maximum_hp=80000000))
+        for index in (1,-4,-3,-1):
+            uncertain=deepcopy(s);uncertain.items[index].score=.94
+            self.assertIsNone(field.boss_signature(uncertain))
+        # Weakness text is a separate field, never part of the target identity.
+        s.items[-2].score=.83
+        self.assertEqual(field.boss_signature(s),signature)
+        s.items[-1].text='70000000/80000000'
+        self.assertIsNone(field.boss_signature(s))
+
     def test_live_target_evidence_always_requires_explicit_account_trials(self):
         raw = source_party(field.AREAS['miroku'], 1)
         raw['scope_evidence'] = [dict(method='combat_matches_live_target')]
@@ -797,12 +813,19 @@ class RecollectionTests(TestCase):
 
     def test_verified_failure_survives_restart_and_changed_conditions_can_retry(self):
         from test_recollection_retry import synthetic_trial, RecollectionRetryTests
-        signature,_,details=synthetic_trial()
-        signature['scope']=dict(area=field.AREAS['memory'],floor=9)
+        _,_,details=synthetic_trial()
         raw=source_party();party=parties_for_floor(dict(parties=[raw]),'记忆领域',9)[0]
         names=details['order']
         with TemporaryDirectory() as root:
             game=Game()
+            original_capture=game.capture
+            def capture(**kwargs):
+                s=original_capture(**kwargs)
+                if game.page=='detail' and game.area==field.AREAS['memory']:
+                    s.items+=screen(('合成首领（多部位）',323,258),('等级.100',446,258),
+                                    ('弱点',539,258),('80000000/80000000',552,295)).items
+                return s
+            game.capture=capture
             def make_task(**options):
                 task=self.make_task(root,game,RecollectionFirstClear,**options)
                 task.formation=Mock()
@@ -815,13 +838,17 @@ class RecollectionTests(TestCase):
                 game.page='detail'
                 return BattleResult('retreated','减员超出队伍容许值，尝试下一队')
             task.combat=Mock(run=Mock(side_effect=fail))
-            with patch('pcrscript.game_ui.recollection.boss_signature',return_value=signature), \
-                 patch('pcrscript.game_ui.screen.EventScreen.number',return_value=500000), \
+            with patch('pcrscript.game_ui.screen.EventScreen.number',return_value=500000), \
                  patch('pcrscript.game_ui.special_equipment.inspect_special_equipment',
                        return_value=details['special_equipment']):
                 first=task.battle('记忆领域',9,party)
                 self.assertFalse(first['progressed'])
                 self.assertEqual(len(task.state['failed_trials']),1)
+                self.assertEqual(first['trial_context']['target'],dict(
+                    scope=dict(area=field.AREAS['memory'],floor=9),boss='合成首领(多部位)',
+                    level=100,maximum_hp=80000000))
+                self.assertIsNone(first['attempts_before'])
+                self.assertIsNone(first['attempts_after'])
                 same=make_task();same.combat=Mock()
                 result=same.battle('记忆领域',9,party)
                 self.assertEqual(result['outcome'],'blocked')
