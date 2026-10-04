@@ -228,12 +228,12 @@ def receipt(s: EventScreen) -> bool:
 def sweep_summary(screen: EventScreen):
     title = screen.find('扫荡结果', (300, 0, 660, 70), exact=True)
     quantity = screen.find(r'扫荡次数\d+次', (300, 65, 660, 115), exact=True)
-    stages = screen.find(r'\d+只击破[!！]', (300, 95, 660, 165), exact=True)
+    defeats = screen.find(r'\d+只击破[!！]', (300, 95, 660, 165), exact=True)
     button = screen.find('确认', (350, 440, 615, 525), exact=True)
-    if not all(box and box.score >= .95 for box in (title, quantity, stages, button)):
+    if not all(box and box.score >= .95 for box in (title, quantity, defeats, button)):
         return None
     return dict(quantity=int(re.search(r'\d+', normalized(quantity.text))[0]),
-                stages=int(re.search(r'\d+', normalized(stages.text))[0]))
+                defeats=int(re.search(r'\d+', normalized(defeats.text))[0]))
 
 
 def sweep_stage_count(ui, screen: EventScreen):

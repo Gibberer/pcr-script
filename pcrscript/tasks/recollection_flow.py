@@ -122,8 +122,9 @@ class RecollectionTask(BaseTask):
     def settle_sweep_summary(self, screen):
         summary = field.sweep_summary(screen)
         plan = self.state.get('pending_sweep')
-        if (not summary or not plan or summary['quantity'] != plan['quantity']
-                or summary['stages'] != len(plan['targets'])):
+        total = plan.get('cost') if isinstance(plan, dict) else None
+        if (not summary or type(total) is not int or total < 1
+                or summary['quantity'] != total or summary['defeats'] != total):
             raise RecollectionBlocked('扫荡汇总与待核对消费不符，未继续结算或再次扫荡')
         plan['summary_receipt'] = str(self.ui.save('sweep_summary_receipt', screen))
         self.save()

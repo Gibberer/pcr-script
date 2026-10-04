@@ -292,8 +292,9 @@ class Game:
                     if area in self.selected:cv.rectangle(s.image,(835,85+65*i),(867,113+65*i),(230,155,25),-1)
             return s
         if self.page == 'sweep_summary':
-            return screen(('扫荡结果',480,42),(f'扫荡次数{self.quantity}次',480,91),
-                          (f'{len(self.selected)}只击破！',480,136),('确认',480,480))
+            total=self.quantity*len(self.selected)
+            return screen(('扫荡结果',480,42),(f'扫荡次数{total}次',480,91),
+                          (f'{total}只击破！',480,136),('确认',480,480))
         if self.page == 'receipt':
             if self.lose_receipt:return screen(('未知状态',480,40))
             return screen(('扫荡结果',480,42),('获得了以下报酬',480,85),('关闭',480,480))
@@ -380,24 +381,54 @@ class RecollectionTests(TestCase):
             self.assertNotIn('pending_sweep',task.state)
 
     def test_interrupted_native_summary_recovers_without_second_sweep(self):
+        for areas,budget in ((['kaiser'],1),(['kaiser','zen'],6)):
+            with self.subTest(areas=areas,budget=budget),TemporaryDirectory() as root:
+                game=Game();game.native_sweep_summary=True
+                original=game.click
+                def interrupt(value,**kwargs):
+                    if game.page=='sweep_summary':
+                        raise EventUIError('synthetic interruption before closing summary')
+                    return original(value,**kwargs)
+                game.click=interrupt
+                first=self.make_task(root,game,areas=areas,max_sweeps=budget)
+                self.assertEqual(first.run()['status'],'blocked')
+                self.assertIn('pending_sweep',first.state)
+                self.assertEqual((game.commits,game.tickets),(1,100-budget))
+                game.click=original
+                recovered=self.make_task(root,game,areas=areas,sweep_dominion=False,claim_rewards=False)
+                report=recovered.run()
+                self.assertEqual((report['status'],report['spent']),('complete',budget),report)
+                self.assertEqual((game.commits,game.tickets),(1,100-budget))
+                self.assertNotIn('pending_sweep',recovered.state)
+
+    def test_multiple_dominion_summary_settles_aggregate_executions_and_defeats(self):
         with TemporaryDirectory() as root:
             game=Game();game.native_sweep_summary=True
-            original=game.click
-            def interrupt(value,**kwargs):
-                if game.page=='sweep_summary':
-                    raise EventUIError('synthetic interruption before closing summary')
-                return original(value,**kwargs)
-            game.click=interrupt
-            first=self.make_task(root,game,areas=['kaiser'],max_sweeps=1)
-            self.assertEqual(first.run()['status'],'blocked')
-            self.assertIn('pending_sweep',first.state)
-            self.assertEqual((game.commits,game.tickets),(1,99))
-            game.click=original
-            recovered=self.make_task(root,game,areas=['kaiser'],sweep_dominion=False,claim_rewards=False)
-            report=recovered.run()
-            self.assertEqual((report['status'],report['spent']),('complete',1),report)
-            self.assertEqual((game.commits,game.tickets),(1,99))
-            self.assertNotIn('pending_sweep',recovered.state)
+            task=self.make_task(root,game,max_sweeps=6)
+            report=task.run()
+            self.assertEqual((report['status'],report['spent']),('complete',6),report)
+            self.assertEqual((game.commits,game.tickets),(1,94))
+            self.assertEqual([game.remaining[field.AREAS[key]] for key in ('kaiser','zen')],[0,0])
+            self.assertEqual((report['history'][0]['quantity'],report['history'][0]['cost']),(3,6))
+            self.assertIn('summary_receipt',report['history'][0])
+            self.assertNotIn('pending_sweep',task.state)
+
+    def test_wrong_summary_total_preserves_consumption_record_across_restarts(self):
+        for executions,defeats in ((3,2),(6,2),(3,6),(7,7)):
+            with self.subTest(executions=executions,defeats=defeats),TemporaryDirectory() as root:
+                game=Game();game.native_sweep_summary=True;capture=game.capture
+                def wrong_summary(**kwargs):
+                    if game.page=='sweep_summary':
+                        return screen(('扫荡结果',480,42),(f'扫荡次数{executions}次',480,91),
+                                      (f'{defeats}只击破！',480,136),('确认',480,480))
+                    return capture(**kwargs)
+                game.capture=wrong_summary
+                for _ in range(2):
+                    task=self.make_task(root,game,max_sweeps=6)
+                    self.assertEqual(task.run()['status'],'blocked')
+                    self.assertEqual((game.commits,game.tickets,game.page),(1,94,'sweep_summary'))
+                    self.assertIn('pending_sweep',task.state)
+                self.assertFalse(any(page=='sweep_summary' and name=='确认' for page,name,_ in game.clicks))
 
     def setUp(self):
         ticks=count()
@@ -975,7 +1006,7 @@ class RecognitionAndStrategyTests(TestCase):
     def test_native_sweep_summary_requires_all_confident_fields(self):
         summary=screen(('扫荡结果',480,42),('扫荡次数1次',480,91),
                        ('1只击破！',480,136),('确认',480,480))
-        self.assertEqual(field.sweep_summary(summary),dict(quantity=1,stages=1))
+        self.assertEqual(field.sweep_summary(summary),dict(quantity=1,defeats=1))
         for index in range(4):
             uncertain=deepcopy(summary);uncertain.items[index].score=.94
             self.assertIsNone(field.sweep_summary(uncertain))
