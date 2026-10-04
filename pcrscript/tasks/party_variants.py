@@ -3,7 +3,7 @@ import re
 import sqlite3
 from contextlib import closing
 from ..game_ui.screen import normalized
-from .abyss_history import team_key
+from .event_strategy import team_key
 
 
 def character_roles(database='cache/redive_cn.db'):

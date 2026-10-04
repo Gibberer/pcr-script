@@ -10,7 +10,7 @@ from pcrscript.actions import ClickAction
 from pcrscript.tasks import (
     BaseTask, ImageTask, TimeLimitTask, Caravan, GetGift, CampaignClean,
     RevivalEventOnce, DungeonFirstClear, UpgradeAllCharacters, ShopBuy, GetQuestReward,
-    Event, EventNews, FreeGacha, DawnLabyrinth, DawnLabyrinthFirstClear, Recollection, RecollectionFirstClear, find_taskclass,
+    Event, EventNews, FreeGacha, DawnLabyrinth, DawnLabyrinthFirstClear, Recollection, RecollectionFirstClear, AbyssSubjugation, find_taskclass,
 )
 from pcrscript.tasks.registry import registered_tasks
 
@@ -46,7 +46,7 @@ class TaskBaseTests(TestCase):
         with patch('pcrscript.tasks.image.ImageTask.__init__', side_effect=AssertionError('image base used')):
             for cls in (Caravan, GetGift, CampaignClean, RevivalEventOnce, DungeonFirstClear,
                         UpgradeAllCharacters, ShopBuy, GetQuestReward, DawnLabyrinth, DawnLabyrinthFirstClear,
-                        Recollection, RecollectionFirstClear):
+                        Recollection, RecollectionFirstClear, AbyssSubjugation):
                 task = cls(robot)
                 self.assertIsInstance(task, BaseTask)
                 self.assertNotIsInstance(task, ImageTask)
@@ -58,7 +58,7 @@ class TaskBaseTests(TestCase):
                      'clear_campaign_first_time', 'revival_event_once', 'dungeon_first_clear',
                      'upgrade_all_characters', 'max_character_bonds', 'abyss_push',
                      'shop_buy', 'get_quest_reward', 'team_battle', 'dawn_labyrinth', 'dawn_labyrinth_first_clear',
-                     'recollection', 'recollection_first_clear'}
+                     'recollection', 'recollection_first_clear', 'abyss_subjugation'}
         for name in set(registered_tasks()) - ocr_names:
             self.assertTrue(issubclass(find_taskclass(name), ImageTask), name)
 

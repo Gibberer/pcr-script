@@ -11,12 +11,21 @@ from ..extras.bilibili_api import BilibiliApi
 from ..run_session import clock as time
 from .strategy_inputs import preferred_sources,validate_urls
 
-PARSER_VERSION = 23
+PARSER_VERSION = 25
 
 MANUAL_PART = re.compile(r'半自动|手动|目押|卡轴|(?:\d+|[一二三四五六七八九十])押|改星|调星|切星|降星|星级变更|TP\s*\+\s*2|大师点', re.I)
 BORROW_PART = re.compile(r'借(?:人|角|用|好友|支援|[A-Za-z]|[\u4e00-\u9fff])|使用支援')
 UNVERIFIED_SETTING = re.compile(r'TP\s*\+\s*2|大师点', re.I)
+SWITCH_LABEL = re.compile(r'AUTO|SET|自动|立即发动', re.I)
+SWITCH_ACTION = re.compile(r'开(?!服|放|场|局)|关(?!卡)|不|别|勿|禁|停|取消|改|设为|设置|切换|只|仅|除|点亮|熄灭|亮着|暗着|'
+    r'(?<![A-Za-z])(?:on|off|true|false|enabled?|disabled?)(?![A-Za-z])|[:：=]\s*[01](?!\d)', re.I)
 ABYSS_ELEMENT_LABELS = {'fire': '火', 'water': '水', 'wind': '风', 'light': '光', 'dark': '暗'}
+
+
+def unparsed_switch_requirement(text):
+    """A control and an action in one clause remain unparsed, regardless of qualifiers."""
+    return any(SWITCH_LABEL.search(clause) and SWITCH_ACTION.search(clause)
+               for clause in re.split(r'[\r\n;；。!?！？|｜]+', text))
 
 
 def abyss_chapter_collection(text: str, stage: str) -> bool:
@@ -140,7 +149,8 @@ def relevant(text: str, terms: list[str]) -> bool:
     return any(re.search(r'(?<![a-z0-9])'+re.escape(term)+r'(?![a-z0-9])', text, re.I)
                if term.isascii() else term.casefold() in text.casefold() for term in terms)
 
-def discover_sources(options: dict, *, api=None, check=lambda: None) -> dict:
+def discover_sources(options: dict, *, api=None, check=lambda: None, exclude_sources=()) -> dict:
+    exclude_sources = frozenset(exclude_sources)
     area = options.get('area', '')
     if not isinstance(area, str):
         raise ValueError('area必须为明确的目标名称')
@@ -171,12 +181,19 @@ def discover_sources(options: dict, *, api=None, check=lambda: None) -> dict:
     if type(limit) is not int or not 1 <= limit <= 30 or type(ttl) not in (int,float) or not 0 <= ttl <= 720:
         raise ValueError('max_videos应为1–30，max_age_hours应为0–720')
     queries = source_queries(terms, stage, effort, kind=kind, element=options.get('element'))
+    if kind == 'subjugation':
+        from .subjugation_guides import queries as subjugation_queries
+        queries = subjugation_queries(options)
     scope = dict(task_type=kind,area=area,stage=stage,category_terms=categories,
                  terms=terms,region=region,max_videos=limit,queries=queries,source_urls=urls,
                  element=options.get('element'),search_effort=effort,
                  skip_manual_media=bool(options.get('skip_manual_media')),
                  skip_long_media=bool(options.get('skip_long_media')),
                  max_video_seconds=options.get('max_video_seconds', 180))
+    if kind == 'subjugation':
+        scope.update({k: options.get(k) for k in ('kind', 'difficulty', 'boss', 'boss_number', 'event_id', 'period_start', 'period_end')})
+    if exclude_sources:
+        scope['exclude_sources'] = sorted(exclude_sources)
     key = hashlib.sha256(json.dumps(scope,sort_keys=True,ensure_ascii=False).encode()).hexdigest()[:24]
     path = Path(options.get('cache_dir','cache/game/strategies/sources'))/(key+'.json')
     now = time.time()
@@ -230,7 +247,7 @@ def discover_sources(options: dict, *, api=None, check=lambda: None) -> dict:
                 continue
     errors = []
     check()
-    preferred,preferred_errors=preferred_sources(urls,api,timeout=timeout)
+    preferred,preferred_errors=preferred_sources(urls,api,timeout=timeout,check=check)
     errors.extend(dict(stage='preferred_source',**e) for e in preferred_errors)
     for query in queries:
         check()
@@ -255,6 +272,10 @@ def discover_sources(options: dict, *, api=None, check=lambda: None) -> dict:
         except (requests.RequestException, ValueError, KeyError, TypeError, AttributeError, RuntimeError) as error:
             # Public responses/errors only; no login credential is accessed.
             errors.append(dict(stage='search',query=query,error=type(error).__name__+': '+str(error)[:240]))
+    # Previously attempted sources must not consume the next batch's metadata
+    # or candidate limits. The exclusion set also scopes the catalog above.
+    found = {bvid: item for bvid, item in found.items()
+             if f'https://www.bilibili.com/video/{bvid}/' not in exclude_sources}
     candidates = []
     excluded = []
     high_abyss = kind == 'abyss' and effort == 'high'
@@ -286,6 +307,12 @@ def discover_sources(options: dict, *, api=None, check=lambda: None) -> dict:
             pages = [dict(cid=p.get('cid'),page=p.get('page'),title=clean(p.get('part')),duration=p.get('duration'))
                      for p in data.get('pages',[]) if isinstance(p,dict)]
             detail_text = title+' '+description+' '+' '.join(p['title'] for p in pages)
+            if kind == 'subjugation':
+                from .subjugation_guides import source_rejection
+                reason = source_rejection(dict(title=title, description=description, published_at=data.get('pubdate')), options)
+                if reason:
+                    excluded.append(dict(bvid=bvid, reason=reason))
+                    continue
             if not relevant(detail_text,terms) or (categories and not relevant(detail_text,categories)):
                 excluded.append(dict(bvid=bvid,reason='视频详情与目标玩法/区域不匹配'))
                 continue

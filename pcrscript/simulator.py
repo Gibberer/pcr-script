@@ -52,6 +52,7 @@ class DNSimulator(GeneralSimulator):
         self.path = path
         self.fastclick = fastclick
         self.useADB = useADB
+        self.last_discovery = None
         if not useADB:
             self.fastclick = True
 
@@ -120,17 +121,55 @@ class DNSimulator(GeneralSimulator):
     def get_devices(self) -> List[str]:
         if self.useADB:
             return super().get_devices()
+        report = self.discover_windows()
+        if report['status'] == 'query_failed':
+            return None  # Window discovery must never silently switch to ADB.
+        return [str(row['index']) for row in report['devices'] if row['visible']]
+
+    def discover_windows(self):
+        """Read-only evidence from this execution context, without window titles."""
+        report = dict(driver='leidian', console=os.path.join(self.path, 'ldconsole.exe'),
+                      status='not_visible', devices=[], malformed_rows=0)
+        try:
+            output = subprocess.check_output([report['console'], 'list2'],
+                encoding='mbcs', errors='replace', timeout=15)
+        except (OSError, subprocess.SubprocessError) as error:
+            report.update(status='query_failed', error=type(error).__name__)
+            if isinstance(error, subprocess.CalledProcessError):
+                report['exit_code'] = f'0x{error.returncode & 0xffffffff:08X}'
+            elif isinstance(error, subprocess.TimeoutExpired):
+                report['timeout_seconds'] = error.timeout
         else:
-            try:
-                output = subprocess.check_output(
-                    [os.path.join(self.path, 'ldconsole.exe'), 'list2'],
-                    encoding='mbcs', errors='replace', timeout=15)
-                if output:
-                    infos = list(map(lambda x : x.split(','), output.split('\n')))
-                    return [info[0] for info in infos if len(info) >= 9 and int(info[2]) > 0 and int(info[4]) == 1]
-            except Exception as e:
-                print(e)
-                return None  # useADB=False must never fall back to ADB discovery
+            for line in output.splitlines():
+                if not line.strip():
+                    continue
+                fields = line.split(',')
+                try:
+                    index, window, bound, running = (int(fields[i]) for i in (0, 2, 3, 4))
+                    width, height = (int(fields[i]) for i in (7, 8))
+                except (ValueError, IndexError):
+                    report['malformed_rows'] += 1
+                    continue
+                report['devices'].append(dict(index=index, window_handle=window,
+                    bound_handle=bound, android_started=running == 1,
+                    width=width, height=height, visible=window > 0 and bound > 0 and running == 1))
+            if any(row['visible'] for row in report['devices']):
+                report['status'] = 'visible'
+        self.last_discovery = report
+        return report
+
+    def discovery_error(self):
+        report = self.last_discovery or {}
+        if report.get('status') == 'query_failed':
+            detail = 'list2 查询失败：'+report.get('error', 'unknown')
+            if report.get('exit_code'):
+                detail += ' '+report['exit_code']
+        else:
+            detail = ('list2 返回 '+str(len(report.get('devices', [])))+' 个实例，当前环境无可用窗口'
+                      +'，无效记录 '+str(report.get('malformed_rows', 0)))
+        return (detail+'。这不能证明模拟器未启动；请核对 Extra.dnpath、Windows 会话和沙箱/权限隔离。'
+                'Agent 先运行 scripts/agent/game.py --diagnose；按 docs/run-diagnostics.md '
+                '在获准的正常会话重试同一只读截图，勿自动重启或改用其他设备。')
 
     def get_dirvers(self) -> List[Driver]:
         devices = self.get_devices()

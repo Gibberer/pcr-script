@@ -3,10 +3,13 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 import re
-import sqlite3
 import yaml
 
 from ..game_ui.screen import normalized
+
+
+def team_key(names):
+    return '|'.join(sorted(map(normalized, names)))
 
 
 @dataclass
@@ -22,6 +25,8 @@ class MemberRequirement:
     equipment: int = 0
     exact_rank: bool = True
     exact_stars: bool = True
+    unique_level: int | None = None
+    unique2_stars: int | None = None
 
 
 @dataclass
@@ -38,10 +43,12 @@ class CharacterStatus:
     identity_verified: bool = False
     equipment_evidence: str = ""
     observed_at: float | None = None
+    unique_level: int | None = None
+    unique2_stars: int | None = None
 
 
 def readiness(requirement: MemberRequirement, actual: CharacterStatus) -> list[str]:
-    """Unknown is not equivalent to ready. Unique equipment has no level gate."""
+    """Check every declared threshold; unknown live equipment is never ready."""
     reasons = []
     if not actual.identity_verified:
         reasons.append("角色版本尚未由头像/技能确认")
@@ -64,6 +71,16 @@ def readiness(requirement: MemberRequirement, actual: CharacterStatus) -> list[s
             reasons.append(f"{label}开启状态未知（攻略要求{'开启' if need else '未开启'}）")
         elif have is not need:
             reasons.append(f"{label}开启状态不符：攻略{'开启' if need else '未开启'}，实际{'开启' if have else '未开启'}")
+    for key, equipped, label in (("unique_level", "unique", "专武1等级"),
+                                 ("unique2_stars", "unique2", "专武2强化阶段")):
+        need, have = getattr(requirement, key), getattr(actual, key)
+        if need is not None:
+            if type(need) is not int or (not 0 <= need <= 5 if key == 'unique2_stars' else need <= 0):
+                reasons.append(f"攻略{label}数值无效")
+            elif getattr(requirement, equipped) is not True:
+                reasons.append(f"攻略{label}与装备开启状态冲突")
+            elif getattr(actual, equipped) is not True or have is None or have < need:
+                reasons.append(f"{label} {have if have is not None else '未知'} / 至少 {need}")
     return reasons
 
 
@@ -78,6 +95,7 @@ class EventParty:
     build_basis: str = 'source'
     assumptions: list[str] = field(default_factory=list)
     auto: bool = True
+    damage_reference: dict = field(default_factory=dict)
 
 
 def load_parties(path: str | Path, event_title: str, difficulty: str, mode: int) -> list[EventParty]:
@@ -102,28 +120,13 @@ def load_parties(path: str | Path, event_title: str, difficulty: str, mode: int)
 
 
 def skill_names(name: str, database: str | Path = "cache/redive_cn.db") -> dict[str, str]:
-    """Map displayed skill names to base/evolved skills in the local game DB."""
-    with sqlite3.connect(database) as conn:
-        conn.row_factory = sqlite3.Row
-        rows = conn.execute("SELECT unit_id,unit_name FROM unit_profile").fetchall()
-        unit = next((r for r in rows if normalized(r["unit_name"]) == normalized(name)), None)
-        if not unit:
-            return {}
-        skills = conn.execute("SELECT * FROM unit_skill_data WHERE unit_id=?", (unit["unit_id"],)).fetchone()
-        if not skills:
-            return {}
-        result = {}
-        for key in ("main_skill_1", "main_skill_evolution_1", "main_skill_2", "main_skill_evolution_2"):
-            if key in skills.keys() and skills[key]:
-                value = conn.execute("SELECT name FROM skill_data WHERE skill_id=?", (skills[key],)).fetchone()
-                if value:
-                    result[key] = normalized(value[0])
-        return result
+    """Reuse the CN character catalogue; a DB definition is not an account state."""
+    from ..character_data import character
+    return (character(name, database) or {}).get('skills', {})
 
 
 def costume_skills(base: str, database: str | Path = 'cache/redive_cn.db') -> dict[str, dict[str, str]]:
-    """Resolve candidates from the game DB, never from an assumed outfit."""
-    with sqlite3.connect(database) as conn:
-        names = [normalized(row[0]) for row in conn.execute('SELECT unit_name FROM unit_profile')
-                 if normalized(row[0]).split('(')[0] == normalized(base).split('(')[0]]
-    return {name: skill_names(name, database) for name in names}
+    from ..character_data import characters
+    base = normalized(base).split('(')[0]
+    return {name: info['skills'] for name, info in characters(database).items()
+            if info and name.split('(')[0] == base}

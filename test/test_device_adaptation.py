@@ -20,6 +20,56 @@ from pcrscript.simulator import DNSimulator, GeneralSimulator
 
 
 class DeviceAdaptationTests(TestCase):
+    def test_zero_window_handles_are_context_evidence_not_a_closed_emulator(self):
+        raw = '0,private window title,0,0,0,-1,-1,960,540,240\n'
+        with patch('pcrscript.simulator.subprocess.check_output', return_value=raw), \
+                patch('pcrscript.simulator.GeneralSimulator.get_devices') as adb:
+            simulator = DNSimulator('C:/synthetic', useADB=False)
+            self.assertEqual(simulator.get_devices(), [])
+            self.assertEqual(simulator.last_discovery['status'], 'not_visible')
+            self.assertEqual(simulator.last_discovery['devices'][0]['width'], 960)
+            self.assertNotIn('private window title', str(simulator.last_discovery))
+            with self.assertRaisesRegex(RuntimeError, '不能证明模拟器未启动.*沙箱'):
+                select_driver({'Extra': {'dnpath': 'C:/synthetic'}})
+            adb.assert_not_called()
+
+    def test_bad_list2_row_does_not_hide_a_later_live_window(self):
+        raw = 'bad,row\n0,hidden,0,0,0,-1,-1,960,540,240\n2,live,101,102,1,7,8,960,540,240\n'
+        with patch('pcrscript.simulator.subprocess.check_output', return_value=raw):
+            simulator = DNSimulator('C:/synthetic', useADB=False)
+            self.assertEqual(simulator.get_devices(), ['2'])
+        self.assertEqual(simulator.last_discovery['malformed_rows'], 1)
+        self.assertEqual(simulator.last_discovery['status'], 'visible')
+
+    def test_list2_errors_retain_cause_without_switching_transport(self):
+        errors = [FileNotFoundError('private path'), PermissionError('private path'),
+                  subprocess.TimeoutExpired('list2', 15),
+                  subprocess.CalledProcessError(3221225480, 'list2')]
+        for error in errors:
+            with self.subTest(error=type(error).__name__), \
+                    patch('pcrscript.simulator.subprocess.check_output', side_effect=error), \
+                    patch('pcrscript.simulator.GeneralSimulator.get_devices') as adb:
+                simulator = DNSimulator('C:/synthetic', useADB=False)
+                self.assertIsNone(simulator.get_devices())
+                report = simulator.last_discovery
+                self.assertEqual(report['status'], 'query_failed')
+                self.assertEqual(report['error'], type(error).__name__)
+                self.assertNotIn('private path', str(report))
+                if isinstance(error, subprocess.CalledProcessError):
+                    self.assertIn('0xC0000008', simulator.discovery_error())
+                adb.assert_not_called()
+
+    def test_agent_device_diagnosis_never_constructs_a_game_runner(self):
+        from scripts.agent import game
+        with patch('sys.argv', ['game.py', '--diagnose']), \
+                patch('pcrscript.run_session.assert_inspection_allowed') as guard, \
+                patch('pcrscript.runtime.load_config', return_value={'Extra': {'dnpath': 'C:/synthetic'}}), \
+                patch('pcrscript.simulator.subprocess.check_output', return_value=''), \
+                patch.object(game, 'runner_from_config') as runner, patch('builtins.print'):
+            game.main()
+        guard.assert_called_once()
+        runner.assert_not_called()
+
     def test_daily_cli_only_runs_tasks_after_zero_launch_status(self):
         config = {'Extra': {'dnpath': 'C:/synthetic'}, 'Task': {1: [['normal_gacha']]}}
         for code in (-1, 1, 7, 0):
@@ -124,6 +174,20 @@ class DeviceAdaptationTests(TestCase):
             driver.click(123, 45)
         self.assertEqual(command.call_args.args[0],
                          ['C:/tools/adb.exe', '-s', 'phone-1', 'shell', 'input', 'tap', '123', '45'])
+
+    def test_leidian_uses_its_bundled_adb_without_overriding_an_explicit_path(self):
+        with TemporaryDirectory() as root:
+            bundled = Path(root)/'adb.exe'
+            bundled.touch()
+            peer = Mock()
+            with patch('pcrscript.runtime.DNSimulator.get_dirvers', return_value=[peer]), \
+                    patch('pcrscript.runtime.GeneralSimulator.get_devices') as discovery:
+                self.assertIs(select_driver({'Extra': {'dnpath': root}}), peer)
+                self.assertEqual(peer.adb_path, str(bundled))
+                self.assertIs(select_driver({'Extra': {'dnpath': root,
+                    'adb_path': 'C:/explicit/adb.exe'}}), peer)
+                self.assertEqual(peer.adb_path, 'C:/explicit/adb.exe')
+            discovery.assert_not_called()
 
     def test_adb_can_route_unicode_input_through_explicit_leidian_console(self):
         with TemporaryDirectory() as root:

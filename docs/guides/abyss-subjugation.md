@@ -1,0 +1,69 @@
+# 深渊讨伐战每日任务
+
+任务名为 `abyss_subjugation`，GUI 的每日日常与通用 CLI 共用实现。程序从国服数据库取得本期活动编号、名称和开放时间，按国服 UTC+8 筛选，再核对游戏画面；不在开放期时跳过。游戏机制及实测范围见[深渊讨伐战知识](../game-knowledge/abyss-subjugation.md)。
+
+任务从本期适用攻略产生候选，结合账号持有角色与培养选择可执行方案。新战斗必须有来源；攻略缺失或全部候选不合格时保留资源并报告原因。游戏当前编组、保存队伍位置及旧运行的账号快照不会独立成为候选。搜索、头像准备、解析和缓存刷新由程序完成，不要求 Agent 提供队伍文件。
+
+## 运行与配置
+
+新工程的默认日常包含本任务。已有配置可在 GUI 添加“深渊讨伐战”，或在 `Task` 中加入 `[abyss_subjugation]`。单独执行：
+
+```powershell
+./.venv/Scripts/python.exe -X utf8 scripts/daily/task.py abyss_subjugation --config daily_config.yml
+```
+
+省略字段使用根目录 [runtime_defaults.yml](../../runtime_defaults.yml)：
+
+```yaml
+AbyssSubjugation:
+  first_clear: true
+  discover_sources: true
+  source_urls: []
+  timeout: 7200
+  battle_timeout: 240
+  max_stamina: 400
+  max_boss_tickets: 99
+  max_normal_trials: 6
+  max_simulations: 30
+  max_source_batches: 3
+  allow_local_trials: true
+  auto_equip_special: true
+  allow_five_star_upgrade: false
+  allow_divine_amulets: false
+  auto_collect_house_stamina: true
+  preview_only: false
+```
+
+`first_clear` 控制是否开始新首通和首领模拟；关闭后仅执行已经满足条件的扫荡。`allow_local_trials` 只控制已有攻略的账号适配：补核缺失的培养字段、缺员替补，以及同一目标最高难度攻略用于较低难度。关闭它仍可执行当前难度培养要求完整的攻略，不等于关闭首通。
+
+旧配置中的 `normal_team`、`boss_teams` 已停用，GUI 与执行入口共用迁移并移除保存位置。任何未指定 `first_clear` 且设有 `allow_local_trials: false` 的配置都保留旧版“只扫荡”意图，补入 `first_clear: false`，包括没有保存位置的手工配置。若希望只采用完整攻略首通，明确设置 `first_clear: true`、`allow_local_trials: false`。
+
+## 选队与培养
+
+程序按当前前哨或首领的实际难度取得来源，核对本期、服区、首领、五人衣装及固定 SET/AUTO；未支持的手动轴、借角、全局培养或特别装备要求会阻止采用。`source_urls` 可指定公开链接，但仍通过相同核验。首领来源每批默认最多解析 5 分钟，可用 `sources.parse_timeout` 调整。
+
+每个目标有独立的有界候选流程：按已观察的持有情况和培养差距排序，先核验各批攻略原阵容，再在允许账号适配时尝试有依据的缺员替补。每个目标至多检索 `max_source_batches` 批；失败后继续尚未尝试的候选，不重开搜索预算。公开来源缓存按当前目标及解析器版本重新核验，旧账号队伍快照不恢复为开战依据。
+
+来源明确的 Rank、星数、技能和专武要求必须满足；只有缺失字段才绑定账号观察，报告保留缺项与适配假设。五人身份、属性和专武状态未知时停止。完整攻略队伍与账号适配队伍在模拟后都固定已核验的培养要求，不能在实战前以新的账号状态覆盖要求。选人、培养差距与战前装备复用[公共准备流程](../party-preparation.md)。
+
+`auto_equip_special: true` 在试打前分配现有特别装备，可能从其他角色调装备；关闭时仍只读检查。首领实战前须核对与模拟时相同的五人及配装，变化后不能沿用模拟授权。
+
+`allow_five_star_upgrade` 默认关闭，开启后只培养拟上场且允许升到五星的成员；`allow_divine_amulets` 独立控制碎片兑换。其他成员的精确星级和其他培养要求须先满足。报告的 `party_audits[].cultivation` 区分检查、补装和强化。专武 1/2 补装、强化及按攻略定向普通培养的消费执行器尚未完成，不满足已声明要求时拒绝该候选；不调用全账号强化代替。
+
+## 首通、模拟与资源
+
+前哨按实际通关状态逐难度首通，再扫荡剩余机会。明确失败且次数、券均未扣除时，可继续下一份攻略；每难度最多 `max_normal_trials` 次。本日失败记录包括五人、培养、SET/AUTO 和伤害依据，设置不同的来源方案不会仅因同样五人就被跳过。
+
+首领按普通、困难、高难、极难补齐三个首领的首通。先免费模拟，确认击杀，或确认存活至时限且达到同一攻略的参考伤害后才实战。较低难度的参考伤害最多取当前首领生命上限，此时须模拟击杀。没有参考值或经过替补的队伍须先模拟击杀；替补不会继承原攻略的伤害承诺。持续减员只允许公共重试判断支持的一次免费重试，之后继续其他攻略候选。实战减员或伤害不足时停止连续扣券，重新选取候选并模拟。
+
+全部首领各难度确认首通后，剩余券扫荡一个极难首领，默认选最左侧。第二天根据当前进度接续，不按登录天数推断已通关。历史伤害本身不证明首通，须结合扫荡可用、后续难度解锁或已核账胜利。
+
+`max_stamina` 和 `max_boss_tickets` 是本次合计消费上限，还受持有资源、游戏次数及活动结束时间限制。体力不足时可领取一次公会之家已有产物，再重读余额。任务不购买体力、不重置次数或首领进度、不训练专武。`preview_only: true` 只观察，不开始新战斗、领取体力或提交扫荡；已有待核对消费仍先恢复。
+
+## 结果与中断恢复
+
+报告与证据位于忽略目录 `cache/daily/runs/<run>/tasks/<序号>-abyss_subjugation/`。`complete` 表示本次前哨机会和持有挑战券已核对使用完；首领是否全部首通另看 `all_bosses_cleared`。`partial`、`blocked` 保留未完成原因，不代表全部通关。
+
+消费前持久化待核对记录，前哨以次数减少及券增加确认，首领以券扣除和通关／血量进展确认；回执丢失先核账，不重放。未提交的扫荡确认页先取消，余额一致才解除记录；跨国服 05:00 的未核对前哨消费不能仅凭刷新后的次数解除。旧运行的消费记录继续核账，账号编组缓存不恢复。
+
+状态位于 `cache/daily/abyss_subjugation_state/`，按设备或 `account_key` 与活动编号隔离；切换账号设置不同的 `account_key`。设备接管须等暂停确认，见[运行诊断](../run-diagnostics.md)。冷缓存和真实连续战斗的验收缺口见[工程待办](../pending-validation.md)。

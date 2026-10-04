@@ -72,6 +72,23 @@ TeamBattle:
   battle_timeout: 220
   max_real_attacks: 3
   max_simulations: 12
+AbyssSubjugation:
+  first_clear: true
+  discover_sources: true
+  source_urls: []
+  timeout: 7200
+  battle_timeout: 240
+  max_stamina: 400
+  max_boss_tickets: 99
+  max_normal_trials: 6
+  max_simulations: 30
+  max_source_batches: 3
+  auto_equip_special: true
+  allow_five_star_upgrade: false
+  allow_divine_amulets: false
+  preview_only: false
+  allow_local_trials: true
+  auto_collect_house_stamina: true
 Task:
   1:
     - [free_gacha, false]
@@ -84,6 +101,7 @@ Task:
     - [get_quest_reward]
     - [revival_event_once]
     - [campaign_clean, true, false]
+    - [abyss_subjugation]
     - [quick_clean, 2]
     - [team_battle]
     - [luna_tower_clean]

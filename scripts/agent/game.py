@@ -16,6 +16,7 @@ from scripts._game import runner_from_config
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", default="daily_config.yml")
+    parser.add_argument("--diagnose", action="store_true", help="只读设备发现诊断，不启动模拟器、不截图或输入")
     parser.add_argument("--audit", action="store_true", help="核对本期 SP＋模式1的第一套作业，不开战")
     parser.add_argument("--click", nargs=2, type=int)
     parser.add_argument("--swipe", nargs=4, type=int)
@@ -24,6 +25,22 @@ def main():
     args = parser.parse_args()
     from pcrscript.run_session import assert_inspection_allowed
     assert_inspection_allowed()
+    if args.diagnose:
+        if args.audit or args.click or args.swipe or args.input:
+            parser.error("设备诊断不能与游戏操作同时使用")
+        from pcrscript.runtime import load_config
+        from pcrscript.simulator import DNSimulator, GeneralSimulator
+        extra = load_config(args.config).get('Extra', {})
+        path = str(extra.get('dnpath') or '').strip()
+        if path:
+            report = DNSimulator(path, useADB=False).discover_windows()
+        else:
+            adb_path = str(extra.get('adb_path') or 'adb').strip()
+            report = dict(driver='adb', executable=adb_path,
+                          selected_serial=str(extra.get('adb_serial') or '').strip(),
+                          devices=GeneralSimulator(adb_path).get_device_states())
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+        return
     runner = runner_from_config(args.config, "cache/agent/story_event")
     if args.audit:
         if args.click or args.swipe or args.input:
@@ -53,7 +70,9 @@ def main():
             time.sleep(1)
         screen = runner.ui.capture()
         path = runner.ui.save(args.name, screen)
-        report = {"screenshot": str(path), "text": screen.text()}
+        report = {"screenshot": str(path.resolve()), "text": screen.text(),
+                  "driver": type(runner.ui.driver).__name__,
+                  "frame_size": [runner.ui.width, runner.ui.height]}
     print(json.dumps(report, ensure_ascii=False, indent=2))
 
 

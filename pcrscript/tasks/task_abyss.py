@@ -8,15 +8,16 @@ from pathlib import Path
 import re
 from .base import BaseTask, TaskReport
 from .registry import register
-from .abyss_party import AbyssFormation
+from .strategy_formation import StrategyFormation
 from .event_battle import EventCombat
 from .abyss_history import AbyssHistory, team_key, previous_stage_key
 from .abyss_retry import combat_sample, retry_decision
 from .strategy_video import acquire_strategies, task_source_options
 from .strategy_document import abyss_candidate
-from ..game_ui.character_stars import upgrade_to_five, star_change_dialog_ready
+from .party_preparation import upgrade_party_stars, prepare_special, read_numeric_equipment, rank_candidates
+from ..game_ui.character_stars import star_change_dialog_ready
 from ..game_ui.character_equipment import inspect_unreleased_equipment
-from ..game_ui.special_equipment import inspect_special_equipment, auto_equip_special
+from ..game_ui.special_equipment import cancel_special_equipment
 from ..game_ui.abyss import AREAS, AbyssStage, map_element, next_stage, detail_stage, remaining, advanced
 from ..game_ui.screen import EventScreen, EventUI, EventUIError
 from ..game_ui.guild_house import collect_produced_stamina
@@ -91,7 +92,7 @@ def source_trial_seed(document, stage):
             and auto.get('value') is True and auto.get('evidence') and not auto.get('conflicts'))
 
 
-def source_for_stage(parties, stage, failed, previous, *, allow_local_trials=False):
+def source_for_stage(parties, stage, failed, previous, *, allow_local_trials=False, observed=None):
     applicable=[p for p in parties if p['element']==stage.element and p.get('chapters')
                 and p['chapters'][0]<=stage.chapter<=p['chapters'][1]
                 and (not p.get('stages') or stage.key in p['stages'])
@@ -99,6 +100,17 @@ def source_for_stage(parties, stage, failed, previous, *, allow_local_trials=Fal
                      or allow_local_trials and source_trial_seed(p['document'], stage))
                 and stage.key not in p.get('excluded_stages',[])]
     applicable.sort(key=lambda p: p.get('document', {}).get('readiness') != 'ready')
+    if observed:
+        from .event_strategy import EventParty, MemberRequirement
+        from .strategy_document import BUILD_FIELDS
+        choices = []
+        for index, source in enumerate(applicable):
+            raw = source.get('document', {}).get('members', [])
+            members = ([MemberRequirement(m['name'], **{k: m.get(k, {}).get('value') for k in BUILD_FIELDS}) for m in raw]
+                       if raw else [MemberRequirement(n, None, None, None, None, None) for n in source['names']])
+            choices.append(EventParty(str(index), source.get('source', ''), members,
+                build_basis='source' if source.get('document', {}).get('readiness') == 'ready' else 'local_trial'))
+        applicable = [applicable[int(p.name)] for p in rank_candidates(choices, observed)]
     return next((p for p in applicable if team_key(p['names']) not in failed
                  or source_set_alternative(p,previous)
                  or equipment_retrial(p['names'],previous)),None) or (applicable[0] if applicable else None)
@@ -162,11 +174,12 @@ class AbyssPush(BaseTask):
         super().__init__(robot)
         self.options = validate_options(self.task_options() if options is None else options)
         self.ui = EventUI(self.driver, self.options.get('output', 'cache/daily/abyss'))
-        self.formation = AbyssFormation(self.ui)
+        self.formation = StrategyFormation(self.ui)
         self.combat = EventCombat(self)
         self.deadline = time.monotonic()+self.options['timeout']
         self.formation.check_deadline=self.check_deadline
         self.formation.recover_equipment=self.recover_equipment
+        self.formation.prepare_build=self.upgrade_trial
         self.report: TaskReport = dict(status='running', battles=[], areas={}, pending=[], source_searches=[])
         self.total_battles = 0
         self.history = AbyssHistory(self.options.get('history_dir','cache/game/strategies/abyss_history'),
@@ -187,6 +200,11 @@ class AbyssPush(BaseTask):
         # rebuilt, creating a loop of one newly stale member per visit.
         together=list(dict.fromkeys(list(names)+list(known)))
         for name in together:
+            prior = self.formation.observed.get(name)
+            partial = prior is not None and ((prior.unique is None) != (prior.unique2 is None))
+            if partial or name in getattr(self.formation, 'numeric_equipment_names', ()):
+                read_numeric_equipment(self.formation, name)
+                continue
             proof=inspect_unreleased_equipment(self.ui,name)
             if proof:
                 if not hasattr(self.formation,'unreleased'):self.formation.unreleased={}
@@ -237,32 +255,21 @@ class AbyssPush(BaseTask):
         self._battle_samples.append(sample)
 
     def upgrade_trial(self,stage,party,audit):
-        if not self.options['allow_five_star_upgrade'] or self.options['audit_only']:
-            return party,audit
-        names=[a['name'] for a in audit.get('observed',[]) if a.get('stars') and a['stars']<5]
-        if not names:return party,audit
-        self.enter(stage.element)
-        for name in names:
-            upgrade={};self.report.setdefault('star_upgrades',[]).append(upgrade)
-            self.log('拟上场角色升至5星：'+name)
-            upgrade_to_five(self.ui,name,upgrade,self.save_report,allow_amulets=self.options['allow_divine_amulets'])
-            self.formation.observed.pop(name,None)
-        screen=self.enter(stage.element);_,detail=self.open_stage(screen)
-        self.ui.click(detail.find('挑战',(750,420,940,490),exact=True))
-        self.wait_formation('升星后返回编队')
-        ready,selection=self.formation.select(party)
-        if not ready:return None,dict(unready=['升星后编队未恢复'],selection=selection)
-        new_party,new_audit=self.formation.current_trial(stage)
-        if new_party:
-            settings={m.name:m.instant for m in party.members}
-            for member in new_party.members:member.instant=settings[member.name]
-        for key in ('source','adjustment','set_adjustment'):
-            if key in audit:new_audit[key]=audit[key]
-        return new_party,new_audit
+        def reopen():
+            screen=self.enter(stage.element);_,detail=self.open_stage(screen)
+            self.ui.click(detail.find('挑战',(750,420,940,490),exact=True))
+            self.wait_formation('升星后返回编队')
+        source = audit.get('source', {}).get('document', {})
+        from .strategy_document import BUILD_FIELDS
+        from .event_strategy import MemberRequirement
+        declared = [MemberRequirement(m['name'], **{key: m.get(key, {}).get('value')
+                    for key in BUILD_FIELDS}) for m in source.get('members', [])]
+        return upgrade_party_stars(self.formation, party, audit, options=self.options,
+            report=self.report, save=self.save_report, leave=lambda: self.enter(stage.element),
+            reopen=reopen, stage=stage, declared=declared)
 
-    def equip_special(self, order):
-        return (inspect_special_equipment(self.ui,order) if self.options['audit_only']
-                else auto_equip_special(self.ui,order))
+    def equip_special(self, order, party):
+        return prepare_special(self.formation, party, order, auto=not self.options['audit_only'])
 
     def log(self, message: str) -> None:
         print('[深域] '+message, flush=True)
@@ -415,12 +422,8 @@ class AbyssPush(BaseTask):
                 # Rebuild a stopped shard purchase from fresh balance and
                 # inventory; a stale quantity must never be confirmed.
                 self.ui.expect_click('取消', (250, 440, 490, 515), exact=True)
-            elif screen.find('自动特别装备设定', (320, 15, 650, 65), exact=True):
-                self.ui.expect_click('取消', (35, 445, 265, 520), exact=True)
-            elif screen.find('特别装备设定', (320, 15, 650, 65), exact=True):
-                # A previous uncommitted auto-selection is rebuilt from the
-                # current five cards and equipment state on this run.
-                self.ui.expect_click('取消', (35, 445, 265, 520), exact=True)
+            elif cancel_special_equipment(self.ui, screen):
+                continue
             elif screen.find('确认所需的女神的秘石个数', (300, 105, 660, 175), exact=True):
                 from ..game_ui.character_stars import price_tier_notice
                 body=screen.text((330,205,640,315))
@@ -514,7 +517,7 @@ class AbyssPush(BaseTask):
             return
         if (self.options['search_effort'] != 'high'
                 and source_for_stage(self.source_parties, stage, set(), [],
-                                     allow_local_trials=self.options['allow_local_trials'])):
+                                     allow_local_trials=self.options['allow_local_trials'], observed=self.formation.observed)):
             return
         self.log('自动获取并解析攻略：'+stage.title)
         report = acquire_strategies(task_source_options('abyss', self.options, stage=stage),
@@ -525,7 +528,10 @@ class AbyssPush(BaseTask):
         # Agent-built account index. Observed account labels remain in memory.
         if report.get('avatar_assets'):
             from ..game_ui.avatar_assets import ensure_avatar_index
+            from .party_preparation import prepare_character_database
             self.formation.avatars, _ = ensure_avatar_index(self.options.get('sources', {}).get('avatars'))
+            self.report['character_database'] = prepare_character_database(self.formation,
+                self.options.get('sources', {}).get('avatars'), check=self.check_deadline)
         self.save_report()
 
     def push_area(self, element: str) -> None:
@@ -592,7 +598,7 @@ class AbyssPush(BaseTask):
             failed=self.history.failed_teams(stage)
             retry=previous[-1].get('retry',{}) if previous else {}
             source=(None if prior_win else source_for_stage(self.source_parties,stage,failed,previous,
-                                    allow_local_trials=self.options['allow_local_trials']))
+                                    allow_local_trials=self.options['allow_local_trials'], observed=self.formation.observed))
             # A failed guide team is still useful as a verified starting point
             # for choosing a different member. Re-entering an attribute may
             # otherwise use the previous attribute's saved five as a trial.
@@ -637,7 +643,7 @@ class AbyssPush(BaseTask):
                     self.search(stage)
                     searched.add(stage.key)
                     source=source_for_stage(self.source_parties,stage,failed,previous,
-                                            allow_local_trials=self.options['allow_local_trials'])
+                                            allow_local_trials=self.options['allow_local_trials'], observed=self.formation.observed)
                     if source:
                         party,audit=self.formation.source_trial(stage,source)
                         if party is None:
@@ -682,7 +688,7 @@ class AbyssPush(BaseTask):
             record['last_audit']=audit
             if party is None:
                 record.update(status='blocked',reason='升星后队伍未核验，未开战');return
-            special=self.equip_special(audit['order'])
+            special=self.equip_special(audit['order'],party)
             audit['special_equipment']=special
             record['last_audit']=audit
             self.save_report()

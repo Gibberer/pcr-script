@@ -18,10 +18,10 @@ from ..extras.guide_media import fetch_video
 from ..game_ui.avatar_assets import ensure_avatar_index, atomic_json, read_json
 from ..game_ui.guide_vision import GuideText, combat_team, formation_team, wide_special_equipment_team, combat_set, combat_auto, battle_rectangles, match_portrait, read_text, requirement_cells, labeled_fields, formation_fields
 from .strategy_document import Evidence, Fact, empty_member, finalize, export_document
-from .strategy_sources import BORROW_PART, MANUAL_PART, UNVERIFIED_SETTING, discover_sources
-from .strategy_inputs import preferred_sources
+from .strategy_sources import BORROW_PART, MANUAL_PART, UNVERIFIED_SETTING, discover_sources, unparsed_switch_requirement
+from .strategy_inputs import declared_region, preferred_sources, source_statements
 
-PARSER_VERSION = 50
+PARSER_VERSION = 72
 FRAME_OCR_VERSION = 1
 COMBAT_AUDIT_SECONDS = 20
 RECOLLECTION_UNSUPPORTED = re.compile(
@@ -468,6 +468,11 @@ def choose_pages(source: dict, options: dict) -> list[dict]:
                     and relevant_requirement(p)
                     and (not (ranges := recollection_ranges(p.get('part', p.get('title', '')), area))
                          or any(a <= wanted['floor'] <= b for a, b in ranges))]
+    elif kind == 'subjugation':
+        from .subjugation_guides import choose_pages as subjugation_pages, requirement_pages
+        requirements = requirement_pages(source, options)
+        required_cids = {p['cid'] for p in requirements}
+        targets = [p for p in subjugation_pages(source, options) if p['cid'] in required_cids]
     elif kind in ('event', 'revival'):
         wanted = {'difficulty': options.get('difficulty'), 'mode': options.get('mode')}
         targets = [p for p in pages if (scope := page_scope(p, kind)) == wanted]
@@ -483,6 +488,15 @@ def choose_pages(source: dict, options: dict) -> list[dict]:
     limit = options.get('max_pages_per_video', 4)
     if type(limit) is not int or not 1 <= limit <= 30:
         raise ValueError('max_pages_per_video必须为1到30')
+    if kind == 'subjugation':
+        target_cids = {p['cid'] for p in targets}
+        # Parse all potentially relevant parts, including blank/unknown titles.
+        # A budget cannot turn an unread condition into permission to fight.
+        ordered = [p for p in requirements if p['cid'] not in target_cids] + targets
+        selected = list({p['cid']: p for p in ordered}.values())
+        if len(selected) > limit:
+            raise ValueError(f'攻略说明页与候选关卡无法在 max_pages_per_video={limit} 上限内完整解析，拒绝该来源')
+        return selected
     # Reserve a combat slot; a stage part mentioning training uses one CID.
     selected = list({p['cid']: p for p in requirements[:max(0, limit-1)]}.values())
     for page in targets:
@@ -492,15 +506,6 @@ def choose_pages(source: dict, options: dict) -> list[dict]:
         elif len(selected) < limit:
             selected.append(page)
     return selected
-
-
-def declared_region(text: str) -> str:
-    # Creator overlays can recruit for several servers. A guild advert does
-    # not declare the server in which the demonstrated battle was recorded.
-    text = re.sub(r'(?:国服|國服|日服|台服|臺服)\s*(?:公会|公會|行会|行會)', '', text)
-    values = {code for code, pattern in [('cn', '国服|國服'), ('jp', '日服'), ('tw', '台服|臺服')]
-              if re.search(pattern, text)}
-    return next(iter(values)) if len(values) == 1 else 'conflict' if values else 'unknown'
 
 
 def observed_scope(texts, page: dict, kind: str, *, battle_scope: dict | None = None) -> tuple[dict, bool]:
@@ -588,7 +593,14 @@ def requirement_scope(texts) -> list[int] | None:
     return [values[0], values[0]] if values and len(set(values)) == 1 else None
 
 
-def text_constraints(texts, proof: Evidence) -> tuple[list[dict], list[dict]]:
+def manual_requirement(text, *, unparsed_settings=False):
+    return bool(unparsed_settings and unparsed_switch_requirement(text)
+        or MANUAL_PART.search(text) or BORROW_PART.search(text) or re.search(
+        r'手动|目押|卡[秒帧]|连点|关闭自动|关AUTO|轴[:：]|改星|调星|切星|降星|星级变更|\d[:：]\d{2}.*(?:开|关|点|放)',
+        text, re.I))
+
+
+def text_constraints(texts, proof: Evidence, *, unparsed_settings=False) -> tuple[list[dict], list[dict]]:
     global_requirements, manual = [], []
     for t in texts:
         if t.score < .94:
@@ -598,7 +610,7 @@ def text_constraints(texts, proof: Evidence) -> tuple[list[dict], list[dict]]:
         if re.search(r'属性等级|属性技能|公主骑士|\bMP\d|突破', t.text, re.I):
             row['advisory'] = bool(re.search(r'建议|推荐|可选', t.text))
             global_requirements.append(row)
-        if re.search(r'手动|目押|卡[秒帧]|连点|关闭自动|关AUTO|轴[:：]|改星|调星|切星|降星|星级变更|\d[:：]\d{2}.*(?:开|关|点|放)', t.text, re.I):
+        if manual_requirement(t.text, unparsed_settings=unparsed_settings):
             manual.append(row)
     return global_requirements, manual
 
@@ -630,6 +642,12 @@ def event_record_rows(frame, texts, index):
 def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None,
                        media_fetcher=fetch_video, check=lambda: None) -> dict:
     """Return candidates plus field evidence, including incomplete/contradictory ones."""
+    if options['task_type'] == 'subjugation':
+        if source.get('comment_pending') or source.get('comment_complete') is False:
+            raise ValueError('作者评论补充未读取完成：'+str(source.get('comment_pending') or '仅取得部分评论'))
+        for comment in source.get('author_comments', []):
+            if comment.get('images'):
+                raise ValueError(f'作者评论{comment.get("reply_id")}含未解析图片，不能确认攻略要求完整')
     from rapidocr import RapidOCR
     from .strategy_tables import universal_row
     api = api or BilibiliApi(timeout=options.get('request_timeout', 20), browser_session=True)
@@ -638,46 +656,68 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
     pages = choose_pages(source, options)
     fingerprint = sha256(json.dumps(dict(version=PARSER_VERSION, source=source, pages=pages,
                          scope={k: options.get(k) for k in ('task_type', 'stage', 'element', 'area', 'difficulty', 'mode', 'region', 'max_frames_per_page', 'max_video_seconds', 'skip_manual_media', 'skip_long_media')},
+                         event={k: options.get(k) for k in ('kind', 'boss', 'boss_number', 'event_id', 'period_start', 'period_end')}
+                               if options['task_type'] == 'subjugation' else {},
                          index=sha256(index.matrix.tobytes()+json.dumps(index.names, ensure_ascii=False).encode()).hexdigest()), ensure_ascii=False, sort_keys=True).encode()).hexdigest()
     cache = root/(fingerprint[:24]+'.json')
     saved = read_json(cache)
-    if saved.get('fingerprint') == fingerprint and not saved.get('errors') and saved.get('parties') and 0 <= time.time()-saved.get('parsed_at', 0) < options.get('max_age_hours', 24)*3600:
+    if (saved.get('fingerprint') == fingerprint and not saved.get('errors')
+            and (saved.get('parties') or options['task_type'] == 'subjugation')
+            and 0 <= time.time()-saved.get('parsed_at', 0) < options.get('max_age_hours', 24)*3600):
         paths = [e.get('image') for p in saved.get('parties', []) for m in p['members']
                  for key in ('stars', 'unique', 'unique2', 'instant') for e in m[key].get('evidence', []) if e.get('image')]
         if all(Path(p).is_file() for p in paths):
             return dict(saved, cache_hit=True)
-    ocr = ocr or RapidOCR()
+    # Match the game's OCR worker limits. Default ONNX sessions can otherwise
+    # spin a full thread pool for each engine throughout multi-page parsing.
+    ocr = ocr or RapidOCR(params={"EngineConfig.onnxruntime.intra_op_num_threads": 2,
+                                 "EngineConfig.onnxruntime.inter_op_num_threads": 1})
     from ..game_ui.equipment import EquipmentBadges
     badges = EquipmentBadges()
     names = sorted({str(n) for n in index.names if not str(n).startswith('unit:')}, key=len, reverse=True)
     teams = {}
     character_facts = defaultdict(list)
     globals_, manual = [], []
+    metadata_build = []
     records = []
     errors, pages_report = [], []
-    source_region = declared_region(source.get('title', '')+' '+source.get('description', ''))
-    text_source = '\n'.join([source.get('description', '')]+[r.get('text', '') for r in source.get('author_comments', [])])
-    if options['task_type'] == 'recollection':
+    metadata = source_statements(source)
+    source_region = declared_region('\n'.join(statement for statement, _ in metadata))
+    text_source = '\n'.join(statement for statement, _ in metadata[1:])
+    if options['task_type'] in ('recollection', 'subjugation'):
         unsupported = source.get('title', '')+'\n'+text_source
+        if options['task_type'] == 'subjugation':
+            from .subjugation_guides import relevant_statements
+            unsupported = relevant_statements(unsupported, options)
         if RECOLLECTION_UNSUPPORTED.search(unsupported):
             globals_.append(dict(text=unsupported[:500], advisory=False, evidence=asdict(Evidence(
                 source['url'], method='source_requirements', text=unsupported[:500]))))
-    title_setting = UNVERIFIED_SETTING.search(source.get('title') or '')
-    source_setting = title_setting or UNVERIFIED_SETTING.search(source.get('description') or '')
-    if source_setting:
-        setting_text = (source.get('title') if title_setting else source.get('description')) or ''
-        manual.append(dict(text=setting_text[:240], evidence=asdict(Evidence(
-            source['url'], int(pages[0]['cid']) if pages else 0,
-            method='source_title' if title_setting else 'source_description', text=setting_text[:240]))))
+    if options['task_type'] == 'subjugation':
+        from .subjugation_guides import metadata_build_requirements
+        metadata_build = metadata_build_requirements(metadata, options, names)
+        for statement, method in metadata:
+            for line in relevant_statements(statement, options).splitlines():
+                if manual_requirement(line, unparsed_settings=True):
+                    manual.append(dict(text=line, evidence=asdict(Evidence(
+                        source['url'], method=method, text=line))))
+        source_setting = bool(manual)
+    else:
+        title_setting = UNVERIFIED_SETTING.search(source.get('title') or '')
+        source_setting = title_setting or UNVERIFIED_SETTING.search(source.get('description') or '')
+        if source_setting:
+            setting_text = (source.get('title') if title_setting else source.get('description')) or ''
+            manual.append(dict(text=setting_text[:240], evidence=asdict(Evidence(
+                source['url'], int(pages[0]['cid']) if pages else 0,
+                method='source_title' if title_setting else 'source_description', text=setting_text[:240]))))
     for page in pages:
         check()
         page_name = page.get('part', page.get('title', ''))
-        if options['task_type'] == 'recollection' and RECOLLECTION_UNSUPPORTED.search(page_name):
+        if options['task_type'] in ('recollection', 'subjugation') and RECOLLECTION_UNSUPPORTED.search(page_name):
             globals_.append(dict(text=page_name, advisory=False, evidence=asdict(Evidence(
                 source['url'], int(page['cid']), method='part_requirements', text=page_name))))
         requirements_page = bool(re.search(r'练度|培养|角色需求|配置要求', page_name))
         original_part = page.get('original_part', page_name)
-        manual_part = bool(MANUAL_PART.search(original_part) or BORROW_PART.search(original_part))
+        manual_part = manual_requirement(original_part, unparsed_settings=options['task_type'] == 'subjugation')
         if manual_part:
             manual.append(dict(text=original_part, evidence=asdict(Evidence(
                 source['url'], int(page['cid']), method='part_title', text=original_part))))
@@ -687,7 +727,7 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
                 continue
         if source_setting and options.get('skip_manual_media'):
             pages_report.append(dict(cid=page['cid'], title=page_name,
-                                     skipped='标题或简介含未核实TP+2大师点条件，自动任务不下载此分P'))
+                                     skipped='来源声明手动、借角或未核实TP+2/大师点条件，自动任务不下载此分P'))
             continue
         page_duration = float(page.get('duration') or 0)
         if (options.get('skip_long_media') and page_duration > 0
@@ -709,6 +749,8 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
         page_record = dict(cid=page['cid'], title=page_name, media=media, frames=0, recognized_teams=0)
         pages_report.append(page_record)
         duration = min(float(page.get('duration') or media['duration']), float(options.get('max_video_seconds', 180)))
+        if float(page.get('duration') or media['duration']) > duration:
+            page_record['truncated'] = True
         wide = media.get('height', 0) > 0 and 1.9 < media.get('width', 0)/media['height'] <= 2.4
         seconds_list = sample_seconds(duration, options.get('max_frames_per_page', 50), wide=wide)
         if options['task_type'] in ('event', 'revival') and duration > 5 and len(seconds_list) >= 4:
@@ -718,6 +760,8 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
         previous = None
         last_scope = ({}, False)
         recollection_scope = RecollectionScopeContext()
+        from .subjugation_guides import ScopeContext
+        subjugation_scope = ScopeContext()
         combat_seen = 0
         last_combat_audit = float('-inf')
         last_combat_box = float('-inf')
@@ -728,6 +772,7 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
                 capture.set(cv.CAP_PROP_POS_MSEC, float(seconds)*1000)
                 ok, raw = capture.read()
                 if not ok:
+                    page_record['unread_frames'] = page_record.get('unread_frames', 0)+1
                     continue
                 aspect = raw.shape[1]/raw.shape[0]
                 wide_crop = 1.9 < aspect <= 2.4
@@ -768,12 +813,14 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
                     last_caption = frozenset()
                 caption_changed = bool(caption) and (
                     len(caption & last_caption)/max(1, len(caption | last_caption)) < .5)
-                full_ocr = (not combat_scene or combat_seen <= 2
+                full_ocr = (options['task_type'] == 'subjugation' or not combat_scene or combat_seen <= 2
                             or seconds-last_combat_audit >= COMBAT_AUDIT_SECONDS
                             or caption_changed)
                 if full_ocr:
                     texts = frame_texts(frame, image_path, ocr)
                     page_record['full_ocr_frames'] = page_record.get('full_ocr_frames', 0)+1
+                    if any(t.score >= .94 and t.text.strip() for t in texts):
+                        page_record['readable_text_frames'] = page_record.get('readable_text_frames', 0)+1
                     if combat_scene:
                         last_combat_audit = seconds
                         last_caption = caption
@@ -786,18 +833,20 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
                 if options['task_type'] in ('event', 'revival') and not wide_crop:
                     records.extend(dict(row, evidence=asdict(proof)) for row in event_record_rows(frame, texts, index))
                 detected_region = declared_region('\n'.join(t.text for t in texts if t.score >= .95))
-                if options['task_type'] == 'recollection' and detected_region == 'unknown':
+                if options['task_type'] in ('recollection', 'subjugation') and detected_region == 'unknown':
                     detected_region = recollection_client_region(texts)
                 if detected_region != 'unknown':
                     source_region = detected_region if source_region == 'unknown' else source_region if source_region == detected_region else 'conflict'
-                global_rows, manual_rows = text_constraints(texts, proof)
+                global_rows, manual_rows = text_constraints(texts, proof,
+                    unparsed_settings=options['task_type'] == 'subjugation')
                 globals_.extend(global_rows)
                 manual.extend(manual_rows)
-                if options['task_type'] == 'recollection':
+                if options['task_type'] in ('recollection', 'subjugation'):
                     globals_.extend(dict(text=t.text, advisory=False, evidence=asdict(proof)) for t in texts
                                     if t.score >= .94 and RECOLLECTION_UNSUPPORTED.search(t.text)
                                     and t.text not in ('特别装备设定', '可变更队伍角色的特别装备。'))
-                if not wide_crop and (requirements_page or any('角色需求' in t.text or '练度' in t.text for t in texts)):
+                if (options['task_type'] != 'subjugation' and not wide_crop
+                        and (requirements_page or any('角色需求' in t.text or '练度' in t.text for t in texts))):
                     chapter_scope = requirement_scope(texts)
                     for row in requirement_cells(frame, texts, index):
                         evidence = Evidence(**{**asdict(proof), 'text': row['text'], 'rectangle': row['rectangle'],
@@ -806,6 +855,11 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
                 scope, verified = observed_scope(texts, page, options['task_type'],
                     battle_scope=last_scope[0] if combat_scene and combat_seen > 1 else None)
                 scope_evidence = None
+                if options['task_type'] == 'subjugation':
+                    from .subjugation_guides import visible_scope
+                    scope, verified = visible_scope(texts, page, options)
+                    scope, verified, scope_evidence = subjugation_scope.resolve(
+                        scope, verified, texts, seconds, combat_scene, asdict(proof))
                 if options['task_type'] == 'recollection' and not page_scope(page, 'recollection'):
                     scope, verified, scope_evidence = recollection_scope.resolve(
                         scope, verified, texts, seconds, combat_scene, asdict(proof))
@@ -815,7 +869,7 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
                     continue
                 if verified:
                     last_scope = scope, verified
-                elif options['task_type'] == 'recollection':
+                elif options['task_type'] in ('recollection', 'subjugation'):
                     # Unlinked compilation frames cannot inherit a floor.
                     scope, verified = {}, False
                 elif options['task_type'] != 'abyss' or page_scope(page, options['task_type']):
@@ -840,6 +894,14 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
                     scope = dict(scope, area=area) if scope else {}
                 # Full-name text rows and formation badges also occur outside battle.
                 field_scope = scope if verified else {'chapters': requirement_scope(texts)}
+                if options['task_type'] == 'subjugation':
+                    if not verified:
+                        field_scope = {'subjugation_cid': int(page['cid'])}
+                    if not wide_crop and not combat_scene:
+                        for row in requirement_cells(frame, texts, index):
+                            evidence = Evidence(**{**asdict(proof), 'text': row['text'], 'rectangle': row['rectangle'],
+                                                   'confidence': row['confidence'], 'method': 'avatar_labeled_cell'})
+                            character_facts[row['name']].append((row['field'], row['value'], evidence, field_scope))
                 for t in texts:
                     if t.score < .95:
                         continue
@@ -851,6 +913,10 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
                 for row in (formation_fields(frame, texts, index, badges) if not wide_crop else []):
                     evidence = Evidence(**{**asdict(proof), 'text': row['text'], 'rectangle': row['rectangle'], 'method': 'formation_badge', 'confidence': row['confidence']})
                     character_facts[row['name']].append((row['field'], row['value'], evidence, field_scope))
+                if options['task_type'] == 'subjugation':
+                    from .subjugation_guides import applicable_scope
+                    if not applicable_scope(scope, options, allow_higher=True):
+                        continue
                 formation_found = False
                 if not found:
                     found = formation_team(small, texts, index)
@@ -888,6 +954,16 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
                                       notes=text_source, excluded_stages=[],
                                       global_requirements=[], manual_actions=[])
                 team = teams[key]
+                if options['task_type'] == 'subjugation' and verified:
+                    from .subjugation_guides import damage_reference
+                    reference = damage_reference(page, scope, subjugation_scope.maximum, source['url'])
+                    if reference:
+                        previous_reference = team.get('damage_reference')
+                        if previous_reference and previous_reference['damage'] != reference['damage']:
+                            team['damage_reference_conflict'] = True
+                            team.pop('damage_reference', None)
+                        elif not team.get('damage_reference_conflict'):
+                            team['damage_reference'] = reference
                 if scope_evidence and scope_evidence not in team.setdefault('scope_evidence', []):
                     team['scope_evidence'].append(scope_evidence)
                 if row:
@@ -934,10 +1010,24 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
                             Evidence(**{**asdict(p), 'method':'combat_set_button'})))
         finally:
             capture.release()
+    if options['task_type'] == 'subjugation':
+        inspected = {p['cid']: p for p in pages_report}
+        # A selected page with an unfamiliar title may still hold common
+        # conditions. The later CID filter isolates only explicit other plans.
+        for page in pages:
+            record = inspected.get(page['cid'], {})
+            if (record.get('readable_text_frames', 0) == 0 or record.get('skipped') or record.get('truncated')
+                    or record.get('unread_frames') or record.get('unsupported_aspect')):
+                title = page.get('part', page.get('title', ''))
+                reason = '来源页面未完整解析：'+title
+                globals_.append(dict(text=reason, advisory=False, evidence=asdict(Evidence(
+                    source['url'], int(page['cid']), method='unread_requirements', text=reason))))
     # Named author statements can supply fields omitted by combat footage.
     # Only full, unambiguous names are accepted; base names never identify outfits.
-    statements = [(source.get('description', ''), 'video_description')]
-    statements.extend((r.get('text', ''), 'author_comment:'+str(r.get('reply_id'))) for r in source.get('author_comments', []))
+    statements = []
+    if options['task_type'] != 'subjugation':
+        statements = [(source.get('description', ''), 'video_description')]
+        statements.extend((r.get('text', ''), 'author_comment:'+str(r.get('reply_id'))) for r in source.get('author_comments', []))
     parties = []
     for team in teams.values():
         if len({(p['cid'], p['seconds']) for p in team['frames']}) < 2:
@@ -945,6 +1035,14 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
         if any(not any(row['name'] == member['name'] and row['confidence'] >= .92
                        for row in team['identity_evidence']) for member in team['members']):
             continue
+        if options['task_type'] == 'subjugation':
+            from .subjugation_guides import constraint_cids, plan_number
+            cids = constraint_cids(pages, team['frames'])
+            frame_cids = {frame['cid'] for frame in team['frames']}
+            numbers = {plan_number(page) for page in pages if page['cid'] in frame_cids}
+            build_rows = [r for r in metadata_build if (r['plan'] is None or not numbers
+                          or None in numbers or r['plan'] in numbers)
+                          and r['difficulty'] in (None, team['scope'].get('difficulty'))]
         chapter = team['scope'].get('chapters')
         auto_proofs = defaultdict(list)
         for value, proof in team.pop('auto_observations'):
@@ -962,7 +1060,11 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
         for member in team['members']:
             observations = team['observations'][member['name']]
             for field, value, evidence, chapters in character_facts[member['name']]:
-                if isinstance(chapters, dict):
+                if options['task_type'] == 'subjugation' and evidence.cid not in cids:
+                    continue
+                if options['task_type'] == 'subjugation' and isinstance(chapters, dict) and 'subjugation_cid' in chapters:
+                    exact, chapters = chapters['subjugation_cid'] in cids, None
+                elif isinstance(chapters, dict):
                     exact = bool(chapters) and all(team['scope'].get(k) == v for k, v in chapters.items())
                     chapters = chapters.get('chapters') if set(chapters) == {'chapters'} else None
                 else:
@@ -990,6 +1092,11 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
                     if re.match(re.escape(member['name'])+r'(?=[:：,，;；]|等级|Lv|LV|[1-6]星)', line):
                         for field, value in labeled_fields(line[len(member['name']):]).items():
                             member[field].add(value, Evidence(source['url'], method=method, text=line))
+            if options['task_type'] == 'subjugation':
+                for row in build_rows:
+                    if row['name'] == member['name']:
+                        for field, value in row['fields']:
+                            member[field].add(value, Evidence(source['url'], method=row['method'], text=row['text']))
         team.pop('observations')
         team['region'] = source_region
         team['target_region'] = options.get('region', 'cn')
@@ -997,9 +1104,23 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
             proof = Evidence(source['url'], method='video_title_full_set', text=source['title'])
             for member in team['members']:
                 member['instant'].add(True, proof)
-        team['global_requirements'] = list({r['text']: r for r in globals_ if not r['advisory']}.values())
-        team['recommendations'] = list({r['text']: r for r in globals_ if r['advisory']}.values())
-        team['manual_actions'] = list({r['text']: r for r in manual}.values())
+        relevant_globals, relevant_manual = globals_, manual
+        if options['task_type'] == 'subjugation':
+            # Keep every selected notes page unless it explicitly belongs to
+            # a different numbered plan. Absence of a recognized notes title
+            # cannot remove an observed preparation or manual requirement.
+            def applicable(row):
+                evidence = row.get('evidence', {})
+                return (evidence.get('cid') is None or evidence.get('cid') in cids
+                        or evidence.get('method') in ('source_title', 'source_description', 'source_requirements'))
+            relevant_globals = [r for r in globals_ if applicable(r)]
+            relevant_manual = [r for r in manual if applicable(r)]
+            relevant_globals.extend(dict(text=row['text'], advisory=False, evidence=asdict(Evidence(
+                source['url'], method='unresolved_'+row['method'], text=row['text'])))
+                for row in build_rows if row['name'] is None)
+        team['global_requirements'] = list({r['text']: r for r in relevant_globals if not r['advisory']}.values())
+        team['recommendations'] = list({r['text']: r for r in relevant_globals if r['advisory']}.values())
+        team['manual_actions'] = list({r['text']: r for r in relevant_manual}.values())
         parties.append(finalize(team))
     from ..game_ui.screen import normalized
     for party in list(parties):
@@ -1027,11 +1148,13 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
     return report
 
 
-def acquire_strategies(options: dict, *, api=None, index=None, ocr=None, check=lambda: None) -> dict:
+def acquire_strategies(options: dict, *, api=None, index=None, ocr=None, check=lambda: None,
+                       accept=None, exclude_sources=()) -> dict:
     """The shared GUI/CLI task path from public sources to evidence-backed files."""
     options = dict(options)
-    if options.get('task_type') not in ('abyss', 'dungeon', 'event', 'revival', 'recollection'):
-        raise ValueError('视频解析task_type必须为abyss、dungeon、event、revival或recollection')
+    exclude_sources = frozenset(exclude_sources)
+    if options.get('task_type') not in ('abyss', 'dungeon', 'event', 'revival', 'recollection', 'subjugation'):
+        raise ValueError('视频解析task_type必须为abyss、dungeon、event、revival、recollection或subjugation')
     for key, default, upper in [('max_videos', 4, 30), ('max_frames_per_page', 50, 300),
                                 ('max_video_seconds', 180, 3600),
                                 ('max_download_seconds', 180, 900),
@@ -1043,6 +1166,10 @@ def acquire_strategies(options: dict, *, api=None, index=None, ocr=None, check=l
     report = dict(status='running', parties=[], parsed_sources=[], pending=[], errors=[])
     directory = Path(options.get('parsed_dir', 'cache/game/strategies/parsed'))
     scope = {k: options.get(k) for k in ('task_type', 'area', 'stage', 'element', 'difficulty', 'mode', 'region', 'source_urls', 'search_effort')}
+    if options['task_type'] == 'subjugation':
+        scope.update({k: options.get(k) for k in ('kind', 'boss', 'boss_number', 'event_id', 'period_start', 'period_end')})
+    if exclude_sources:
+        scope['exclude_sources'] = sorted(exclude_sources)
     output = directory/('catalog-'+sha256(json.dumps(scope, sort_keys=True).encode()).hexdigest()[:20]+'.json')
     started = time.monotonic()
     max_seconds = options.get('parse_timeout', 900)
@@ -1059,11 +1186,13 @@ def acquire_strategies(options: dict, *, api=None, index=None, ocr=None, check=l
         if options.get('source_urls'):
             preferred, errors = preferred_sources(options['source_urls'], api,
                         directory=options.get('source_cache_dir', 'cache/game/strategies/user_sources'),
-                        timeout=options.get('request_timeout', 20))
+                        timeout=options.get('request_timeout', 20), check=bounded_check,
+                        require_complete_comments=options['task_type'] == 'subjugation',
+                        max_comment_pages=options.get('max_comment_pages', 10))
             candidates.extend(p for p in preferred if p.get('user_provided', True))
             report['errors'].extend(errors)
         if options.get('search', True):
-            catalog = discover_sources(options, api=api, check=bounded_check)
+            catalog = discover_sources(options, api=api, check=bounded_check, exclude_sources=exclude_sources)
             report['search'] = catalog
             candidates.extend(catalog.get('candidates', []))
             candidates.extend(p for p in preferred if not p.get('user_provided', True))
@@ -1075,9 +1204,13 @@ def acquire_strategies(options: dict, *, api=None, index=None, ocr=None, check=l
             bvid = candidate.get('bvid')
             if not bvid or bvid in seen:
                 continue
+            url = f'https://www.bilibili.com/video/{bvid}/'
+            if url in exclude_sources:
+                continue
             if parsed_count >= options.get('max_videos', 4):
                 break
             seen.add(bvid)
+            report.setdefault('inspected_sources', []).append(url)
             try:
                 # Both searched and supplied sources use the same canonical metadata schema.
                 response = api.getVideoInfo(bvid=bvid)
@@ -1090,6 +1223,31 @@ def acquire_strategies(options: dict, *, api=None, index=None, ocr=None, check=l
                 source = dict(provider='bilibili', bvid=bvid, url=f'https://www.bilibili.com/video/{bvid}/',
                               title=title, description=description, pages=data.get('pages', []),
                               published_at=data.get('pubdate'), author_comments=candidate.get('author_comments', []))
+                if options['task_type'] == 'subjugation':
+                    from .subjugation_guides import source_rejection
+                    # Search hits use the same author-only supplement lookup
+                    # as explicitly supplied links; never drop known conditions.
+                    supplements, errors = preferred_sources([source['url']], api,
+                        directory=options.get('source_cache_dir', 'cache/game/strategies/user_sources'),
+                        timeout=options.get('request_timeout', 20), follow_comments=False,
+                        require_complete_comments=True,max_comment_pages=options.get('max_comment_pages', 10),
+                        check=bounded_check)
+                    report['errors'].extend(errors)
+                    if not supplements:
+                        raise ValueError('作者评论补充未读取完成：没有来源返回')
+                    supplement = supplements[0]
+                    if (supplement.get('comment_pending') or supplement.get('comment_complete') is not True
+                            or not supplement.get('comment_scope')
+                            or not isinstance(supplement.get('author_comments'), list)):
+                        raise ValueError('作者评论补充未读取完成：'+str(supplement.get('comment_pending') or '读取状态未知'))
+                    source['author_comments'] = supplement['author_comments']
+                    source['comment_scope'] = supplement['comment_scope']
+                    source['comment_complete'] = True
+                    source['comment_scan'] = supplement.get('comment_scan')
+                    reason = source_rejection(source, options)
+                    if reason:
+                        report.setdefault('skipped_sources', []).append(dict(bvid=bvid, reason=reason))
+                        continue
                 if not choose_pages(source, options):
                     report.setdefault('skipped_sources', []).append(dict(bvid=bvid, reason='没有目标关卡候选分P'))
                     continue
@@ -1102,6 +1260,8 @@ def acquire_strategies(options: dict, *, api=None, index=None, ocr=None, check=l
                 else:
                     report['parties'].extend(parsed['parties'])
                 report['errors'].extend(parsed['errors'])
+                if accept is not None and accept(report):
+                    break
             except (requests.RequestException, RuntimeError, ValueError, OSError) as error:
                 report['errors'].append(dict(bvid=bvid, error=str(error)))
         report['status'] = 'complete' if any(p['readiness'] == 'ready' for p in report['parties']) else 'partial' if report['parties'] else 'blocked'

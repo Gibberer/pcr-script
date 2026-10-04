@@ -13,6 +13,8 @@ public partial class MainWindow
     {
         ["Dungeon"] = "地下城首通", ["CharacterUpgrade"] = "角色强化", ["CharacterBond"] = "好感度与角色剧情",
         ["Abyss"] = "深域推进", ["elements"] = "推进属性列表",
+        ["AbyssSubjugation"] = "深渊讨伐战", ["auto_equip_special"] = "战前分配现有特别装备",
+        ["max_source_batches"] = "攻略候选检索批数上限",
         ["max_failures_per_stage"] = "首次探索失败上限", ["max_repeat_failures_per_stage"] = "历史失败关卡补试上限", ["source_urls"] = "优先攻略链接（B站或攻略网页）", ["history_dir"] = "深域尝试历史目录", ["allow_five_star_upgrade"] = "危险操作：允许拟上场角色升至5星", ["allow_divine_amulets"] = "危险操作：允许消耗女神秘石兑换碎片", ["discover_sources"] = "检索对应关卡攻略",
         ["sources"] = "攻略搜索选项", ["task_type"] = "玩法标识", ["stage"] = "目标关卡", ["category_terms"] = "玩法关键词",
         ["browser_session"] = "使用隔离浏览器会话", ["browser_channel"] = "浏览器通道", ["browser_cache_dir"] = "浏览器会话缓存目录",

@@ -275,8 +275,8 @@ class FirstClearTests(TestCase):
                 detail = frame(('角色详情', 480, 30), (name, 600, 80),
                                ('100', 560, 115), ('10', 790, 115), ('技能', 680, 150))
                 ui = Mock(output=Path(folder))
-                ui.capture.side_effect = [frame(), skills, skills]
-                ui.wait.side_effect = [detail, frame(('队伍编组', 480, 40))]
+                ui.capture.side_effect = [frame(), skills, skills, skills, skills]
+                ui.wait.side_effect = [detail, skills, frame(('队伍编组', 480, 40))]
                 index.query.return_value = [name]
                 formation.ui = ui
                 actual = formation.inspect((200, 200), rectangle=(150, 150, 100, 100),

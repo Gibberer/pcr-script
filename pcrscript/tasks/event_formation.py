@@ -7,7 +7,6 @@ from ..game_ui.screen import EventUI, EventScreen
 from dataclasses import asdict
 import json
 import re
-import subprocess
 from uuid import uuid4
 from pcrscript.run_session import clock as time
 
@@ -16,8 +15,9 @@ import numpy as np
 
 from .event_strategy import CharacterStatus, skill_names, readiness
 from ..game_ui.screen import EventUIError, normalized
-from ..game_ui.avatars import AvatarIndex, card_rectangles, search_card_rectangles, face_crop
+from ..game_ui.avatars import AvatarIndex, card_rectangles, search_card_rectangles, face_crop, feature
 from ..game_ui.equipment import EquipmentBadges
+from ..game_ui.character_search import search_character, search_text_confirmed, search_input_confirmation
 
 
 def count_stars(image: Screenshot) -> int | None:
@@ -33,18 +33,6 @@ def skill_title_pattern(title: str) -> str:
     # Musical decoration is sometimes omitted by OCR. Keep every actual word
     # and the evolution '+' exact; only the decorative note is optional.
     return re.escape(normalized(title)).replace('♪', '[♪♫]?')
-
-
-def search_text_confirmed(base: str, screen: EventScreen) -> bool:
-    """Confirm the typed term inside the search field despite faint glyphs."""
-    entered = normalized(' '.join(item.text for item in screen.items
-                                  if item.score >= .75
-                                  and 300 <= item.center[0] <= 640
-                                  and 110 <= item.center[1] <= 165))
-    for expected, mistaken in (('千爱瑠', '干爱瑠'), ('千歌', '干歌')):
-        if base == expected:
-            entered = entered.replace(mistaken, expected)
-    return base in entered
 
 
 class EventFormation:
@@ -65,6 +53,25 @@ class EventFormation:
     def search_rectangles(self, image: Screenshot) -> list[Region]:
         return search_card_rectangles(image, top=self.search_top)
 
+    def select_card(self, pos):
+        """Wait for selection and delayed search-result refresh together."""
+        expected_count = len(self.occupied_slots(self.ui.capture(ocr=False)))+1
+        self.ui.click(pos)
+        previous = None
+        def settled(screen):
+            nonlocal previous
+            if len(self.occupied_slots(screen)) != expected_count:
+                previous = None
+                return False
+            # Roster-name OCR can omit an unchanged short label between frames.
+            # The search field's reset plus the selected-member count is the
+            # refresh boundary; noisy labels must not prevent it from settling.
+            stamp = normalized(screen.text((300, 105, 640, 165)))
+            stable = stamp == previous
+            previous = stamp
+            return stable
+        self.ui.wait(settled, '选人后搜索结果稳定', timeout=15)
+
     @staticmethod
     def search_identity_candidate(screen, rectangle, identity, wanted):
         identity = normalized(identity) if identity is not None else None
@@ -74,7 +81,11 @@ class EventFormation:
         # A stale or mistaken avatar match must not hide a card whose own
         # visible name is exact. inspect() still verifies its skills before
         # the character can join the party.
-        return normalized(screen.text((x, y-4, x+w, y+26))) == wanted
+        displayed = normalized(screen.text((x, y-4, x+w, y+26)))
+        # Cards often omit outfit suffixes. A same-base label nominates a
+        # candidate for inspection, where mismatched avatar identities force
+        # both ordinary skill names to prove the requested outfit.
+        return displayed in (wanted, wanted.split('(')[0])
 
     def resolve_requirement(self, requirement, actual):
         return requirement
@@ -85,6 +96,8 @@ class EventFormation:
     def __init__(self, ui: EventUI) -> None:
         self.ui = ui
         self.observed = {}
+        self.equipment_details = {}
+        self.database = 'cache/redive_cn.db'
         self.avatars = AvatarIndex()
         self.badges = EquipmentBadges()
 
@@ -138,15 +151,40 @@ class EventFormation:
             actual.equipment_evidence = str(self.ui.save("equipment_"+name+evidence_suffix, evidence))
         if equipment is not None:
             actual.unique, actual.unique2 = equipment
+        details = getattr(self, 'equipment_details', {}).get(normalized(name))
+        if (actual.identity_verified and details and
+                0 <= time.time()-details.get('observed_at', 0) < 300):
+            values = details['values']
+            for flag, stat in (('unique', 'unique_level'), ('unique2', 'unique2_stars')):
+                # A positive live badge must agree with the inspected slot.
+                # Numeric levels cannot transfer to another slot or empty gear.
+                live = getattr(actual, flag)
+                if live is None and type(values.get(flag)) is bool:
+                    setattr(actual, flag, values[flag])
+                if getattr(actual, flag) is True and values.get(flag) is True:
+                    setattr(actual, stat, values.get(stat))
         actual.evidence = str(self.ui.save("character_"+normalized(name)+evidence_suffix, s))
         if full and (verify_skills or not actual.identity_verified
                      or (not reusable_skill and not self.infer_costume_from_skills)):
             self.ui.click(s.find("技能", (620, 132, 770, 170), exact=True))
+            self.ui.wait(lambda frame: frame.find("连结爆发|技能|EX技能", (485, 175, 900, 438), exact=True),
+                         "角色技能列表", timeout=15)
+            # The detail dialog retains its last skill-list scroll position.
+            # Read the top first so a long UB description cannot hide one of
+            # the ordinary skills or leave fewer than three audited levels.
+            previous = None
+            for _ in range(6):
+                top = self.ui.capture()
+                text = normalized(top.text((485, 175, 900, 438)))
+                if text == previous:
+                    break
+                previous = text
+                self.ui.scrollbar(top, (903, 190, 912, 414), -1)
             candidates = None
             if self.infer_costume_from_skills and expected_name is None:
                 from .event_strategy import costume_skills
-                candidates = costume_skills(displayed)
-            wanted = skill_names(name)
+                candidates = costume_skills(displayed, getattr(self, 'database', 'cache/redive_cn.db'))
+            wanted = skill_names(name, getattr(self, 'database', 'cache/redive_cn.db'))
             search_skills = {value for skills in candidates.values() for value in skills.values()} if candidates else set(wanted.values())
             found_names = set()
             levels = {}
@@ -161,13 +199,29 @@ class EventFormation:
                 for label in s.all("等级", (790, 180, 840, 435)):
                     y = label.center[1]
                     value = s.number((842, y-14, 897, y+14))
-                    skill = normalized(s.text((570, y-18, 785, y+18)))
+                    roi = (570, y-18, 785, y+18)
+                    skill = normalized(s.text(roi))
+                    if (value is not None and s.find('技能', (575, y-50, 800, y-12), exact=True)
+                            and not any(re.fullmatch(skill_title_pattern(v), skill) for v in search_skills)):
+                        local = self.ui.read_region(s, roi, classify=False)
+                        for title in search_skills:
+                            if local.find(skill_title_pattern(title), roi, exact=True):
+                                found_names.add(title)
+                                skill = title
+                                break
                     if value is not None and skill:
                         levels[skill] = value
+                versions = candidates.values() if candidates else (wanted,)
+                if len(levels) >= 3 and any(all(
+                        any(skills.get(key) in found_names for key in
+                            (f'main_skill_{i}', f'main_skill_evolution_{i}'))
+                        for i in (1, 2)) for skills in versions):
+                    break
                 if text == previous:
                     break
                 previous = text
-                self.ui.swipe((820, 401), (820, 210))
+                if not self.ui.scrollbar(s, (903, 190, 912, 414), 1):
+                    break
             actual.skill_level = min(levels.values()) if len(levels) >= 3 else None
             # The UI omits costume suffixes. The two ordinary skill names
             # independently establish the variant, even if OCR only says 怜.
@@ -254,50 +308,25 @@ class EventFormation:
         failures = []
         for member in party.members:
             print(f"[剧情活动] 搜索并核对 {member.name}", flush=True)
-            base = normalized(member.name).split('(')[0]
-            input_failed = False
-            for _ in range(3):
-                self.ui.click((691, 135))  # Reset only the text-search field.
-                self.ui.click((480, 136), delay=1)
-                try:
-                    self.ui.driver.input(base)
-                except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):
-                    # An ldconsole process can fail before acknowledging its
-                    # input. Start the next attempt by resetting the field;
-                    # a blind retry could append the same name twice.
-                    input_failed = True
-                    continue
-                # ldconsole acknowledges before Android applies the input.
-                # Keep focus until the field itself confirms the text;
-                # defocusing early can discard a queued single-character name.
-                until = time.monotonic()+8
-                while True:
-                    time.sleep(.5)
-                    s = self.ui.capture()
-                    if not s.find('队伍编组', (300, 0, 650, 70)):
-                        raise EventUIError('角色搜索后未处于编队页面')
-                    if search_text_confirmed(base, s) or time.monotonic() >= until:
-                        break
-                self.ui.click(self.defocus, delay=1)
-                s = self.ui.capture()
-                if search_text_confirmed(base, s):
-                    break
-            else:
-                s = self.ui.capture()
-                self.ui.save('search_input_unconfirmed', s)
-                if input_failed:
-                    raise EventUIError('后台角色搜索输入失败，未判断缺少角色：'+member.name)
-                raise EventUIError('搜索词未确认写入，不能判断缺少角色：'+member.name)
+            s = search_character(self.ui, member.name, defocus=self.defocus)
             self.ui.save("search_"+normalized(member.name), s)
             if not s.find("队伍编组", (300, 0, 650, 70)):
                 raise EventUIError("角色搜索后未处于编队页面")
             rects = self.search_rectangles(s.image)
-            identities = [normalized(name) if name is not None else None for name in
-                          self.avatars.query([face_crop(s.image, rect) for rect in rects])]
+            pictures = [face_crop(s.image, rect) for rect in rects]
+            identities = [normalized(name) if name is not None else None for name in self.avatars.query(pictures)]
             wanted = normalized(member.name)
-            ranked = sorted(zip(rects, identities), key=lambda pair: pair[1] != wanted)
+            scores = [0]*len(rects)
+            matrix = getattr(self.avatars, 'matrix', None)
+            if isinstance(matrix, np.ndarray):
+                rows = [i for i, name in enumerate(self.avatars.names) if normalized(name) == wanted]
+                if rows and pictures:
+                    scores = (np.stack([feature(p) for p in pictures]) @ matrix[rows].T).max(axis=1)
+            # Similarity only orders candidates. A low-confidence portrait
+            # still needs both ordinary skills to establish the full costume.
+            ranked = sorted(zip(rects, identities, scores), key=lambda pair: (pair[1] != wanted, -pair[2]))
             found = False
-            for rect, identity in ranked:
+            for rect, identity, _ in ranked:
                 if not self.search_identity_candidate(s, rect, identity, wanted):
                     continue
                 x, y, w, h = rect
@@ -313,7 +342,7 @@ class EventFormation:
                 if reasons:
                     failures.append({"character": member.name, "reasons": reasons})
                 else:
-                    self.ui.click(pos)
+                    self.select_card(pos)
                 break
             if not found:
                 failures.append({"character": member.name, "reasons": ["未在搜索结果中确认该版本的角色"]})

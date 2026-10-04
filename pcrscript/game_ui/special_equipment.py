@@ -1,4 +1,4 @@
-"""Read the five EX-equipment panels in a deep-area formation."""
+"""Shared five-member EX-equipment observation and allocation."""
 from __future__ import annotations
 
 import cv2 as cv
@@ -12,10 +12,37 @@ SPECIAL_COLUMNS = (158, 337, 516, 694, 873)
 SPECIAL_ROWS = (218, 291, 365)
 
 
+def loadout_items(image):
+    """Keep item appearance as well as occupancy; two full slots may differ."""
+    return [[cv.resize(cv.GaussianBlur(image[y-22:y+22, x-22:x+22], (5, 5), 0),
+                       (8, 8), interpolation=cv.INTER_AREA).flatten().tolist()
+             for y in SPECIAL_ROWS] for x in SPECIAL_COLUMNS]
+
+
+def same_loadout(before, after):
+    if (before.get('order') != after.get('order') or before.get('slots') != after.get('slots')
+            or before.get('unknown') != 0 or after.get('unknown') != 0):
+        return False
+    a, b = np.asarray(before.get('items', [])), np.asarray(after.get('items', []))
+    return bool(a.shape == b.shape == (5, 3, 192)
+                and np.max(np.mean(np.abs(a.astype(float)-b.astype(float)), axis=2)) <= 5)
+
+
 def formation_entry_visible(screen) -> bool:
     """OCR may split the two vertical words and return them in either order."""
     words = normalized(screen.text((582,416,646,485)))
     return '特别' in words and '装备' in words
+
+
+def cancel_special_equipment(ui: EventUI, screen) -> bool:
+    """Dismiss one identified settings/preview panel without committing gear."""
+    automatic = screen.find('自动特别装备设定', (320, 15, 650, 65), exact=True)
+    if not automatic and not screen.find('特别装备设定', (320, 15, 650, 65), exact=True):
+        return False
+    ui.expect_click('取消', (35, 445, 480 if automatic else 265, 520), exact=True)
+    title = '自动特别装备设定' if automatic else '特别装备设定'
+    ui.wait(lambda s: not s.find(title, (320, 15, 650, 65), exact=True), '取消'+title, timeout=10)
+    return True
 
 
 def occupied_slots(image) -> list[list[bool | None]]:
@@ -82,7 +109,8 @@ def inspect_special_equipment(ui: EventUI, order: list[str]) -> dict:
     ui.expect_click('取消',(35,445,265,520),exact=True)
     ui.wait(lambda s:s.find('队伍编组',(300,0,650,70),exact=True),'特别装备返回编队')
     return dict(order=list(order),slots=slots,empty=sum(v is False for col in slots for v in col),
-                unknown=sum(v is None for col in slots for v in col),evidence=evidence)
+                unknown=sum(v is None for col in slots for v in col),evidence=evidence,
+                items=loadout_items(panel.image))
 
 
 def auto_equip_special(ui: EventUI, order: list[str]) -> dict:
@@ -107,6 +135,8 @@ def auto_equip_special(ui: EventUI, order: list[str]) -> dict:
     selected=preview_slots(panel.image,preview.image,before)
     selected_evidence=str(ui.save('abyss_special_selected_'+tag,preview))
     if any(v is None for col in selected for v in col):
+        cancel_special_equipment(ui, preview)
+        ui.wait(lambda s:s.find('队伍编组',(300,0,650,70),exact=True),'取消未知特别装备预览')
         raise EventUIError('特别装备自动选择后槽位无法识别，未提交')
     changed=equipment_changed(panel.image,preview.image)
     if changed:
@@ -129,4 +159,5 @@ def auto_equip_special(ui: EventUI, order: list[str]) -> dict:
                 unknown=sum(v is None for col in final for v in col),
                 before_power=before_power,after_power=after_power,changed=changed,
                 evidence=evidence,before_evidence=before_evidence,
-                settings_evidence=settings_evidence,selected_evidence=selected_evidence)
+                settings_evidence=settings_evidence,selected_evidence=selected_evidence,
+                items=loadout_items(committed.image))

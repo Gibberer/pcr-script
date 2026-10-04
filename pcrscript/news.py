@@ -161,6 +161,26 @@ def _query_clan_battle(conn: sqlite3.Connection):
     return Event(begin.timestamp(), battle_end.timestamp(), '团队战',
                  {'clan_battle_id': battle_id, 'schedule_end': schedule_end})
 
+def _query_abyss_subjugation(conn: sqlite3.Connection):
+    """Use the event's own CN schedule, including its 05:00 closing boundary."""
+    now = datetime.now(SERVER_TIMEZONE).replace(tzinfo=None).isoformat(' ', 'seconds')
+    try:
+        row = conn.execute(
+            'SELECT abyss_id, boss_ticket_id, talent_id, title, start_time, end_time '
+            'FROM abyss_schedule WHERE ISO(start_time) <= ? AND ISO(end_time) > ? '
+            'ORDER BY ISO(start_time) DESC, abyss_id DESC LIMIT 1', (now, now)).fetchone()
+    except sqlite3.OperationalError as error:
+        if 'no such table' in str(error):
+            return None
+        raise
+    if row is None:
+        return None
+    event_id, ticket_id, talent_id, title, start, end = row
+    return Event(_event_timestamp(start), _event_timestamp(end), '深渊讨伐战',
+                 dict(abyss_id=event_id, boss_ticket_id=ticket_id, talent_id=talent_id,
+                      title=title.replace('\\n', ' ')))
+
+
 def _iso_datetime(date):
     return str(datetime.strptime(date, _time_format))
 
@@ -175,9 +195,10 @@ def _build_event_news(cache_path, db_file):
         drop_hard = _query_drop_hard_event(conn)
         secret_dungeon = _query_secret_dungeon(conn)
         clan_battle = _query_clan_battle(conn)
+        abyss_subjugation = _query_abyss_subjugation(conn)
     return EventNews(freeGacha=free_gacha, hatsune=hatsune, tower=tower, dropItemNormal=drop_normal, 
                          dropItemHard=drop_hard, secretDungeon=secret_dungeon, revival=revival,
-                         clanBattle=clan_battle)
+                         clanBattle=clan_battle, abyssSubjugation=abyss_subjugation)
 
 def fetch_event_news() -> EventNews:
     # 从redive.estertion.win抓国服信息

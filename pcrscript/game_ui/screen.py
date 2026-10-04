@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 import json
 import re
+import subprocess
 from pcrscript.run_session import clock as time
 import unicodedata
 
@@ -222,6 +223,14 @@ class EventUI:
         if result.txts:
             items = [TextBox(t, float(score), (np.asarray(box)/3 + (x1, y1)).tolist())
                      for t, score, box in zip(result.txts, result.scores, result.boxes)]
+        elif y2-y1 <= 40:
+            # A short label can be readable even when its tightly cropped
+            # field has no detected box. Recognition still needs the caller's
+            # exact label and confidence check; do not apply this to paragraphs.
+            result = self._ocr(patch, use_det=False, use_cls=False, use_rec=True)
+            if result.txts and len(result.txts) == 1:
+                items = [TextBox(result.txts[0], float(result.scores[0]),
+                                 [[x1,y1],[x2,y1],[x2,y2],[x1,y2]])]
         return EventScreen(screen.image, items)
 
     def swipe(self, start, end, duration=450):
@@ -230,6 +239,74 @@ class EventUI:
         conv = lambda p: (round(p[0]*self.width/960), round(p[1]*self.height/540))
         self.driver.swipe(conv(start), conv(end), duration)
         time.sleep(.8)
+
+    @staticmethod
+    def scrollbar_bounds(screen, roi):
+        x1, y1, x2, y2 = roi
+        hsv = cv.cvtColor(screen.image[y1:y2, x1:x2], cv.COLOR_BGR2HSV)
+        rows = np.nonzero(((hsv[:, :, 0] > 90) & (hsv[:, :, 0] < 115)
+                           & (hsv[:, :, 1] > 80) & (hsv[:, :, 2] > 140)).any(axis=1))[0]
+        if len(rows) < 15:
+            return None
+        # Touch sparkles can remove a few thumb rows or add isolated blue
+        # pixels elsewhere on the track. Use the main interval, tolerating
+        # short occlusions without treating those stray pixels as the thumb.
+        intervals = np.split(rows, np.nonzero(np.diff(rows) > 5)[0]+1)
+        thumb = max(intervals, key=len)
+        if len(thumb) < 15:
+            return None
+        return int(thumb[0]+y1), int(thumb[-1]+y1)
+
+    def scrollbar(self, screen, roi, direction):
+        """Verify a list drag before using its background input fallback."""
+        bounds = self.scrollbar_bounds(screen, roi)
+        if bounds is None:
+            raise EventUIError('列表滚动条未确认')
+        x1, y1, x2, y2 = roi
+        if direction < 0 and bounds[0] <= y1+2 or direction > 0 and bounds[1] >= y2-2:
+            return False
+        center = sum(bounds)//2
+        body_roi = (max(0,x1-430), y1-15, x1-12, y2+24)
+        before_text = normalized(screen.text(body_roi))
+        start = ((x1+x2)//2, bounds[1]-10)
+        end = (start[0], max(y1, min(y2-1, start[1]+direction*max(120, round((bounds[1]-bounds[0])*.8)))))
+        convert = lambda p: (round(p[0]*self.width/960), round(p[1]*self.height/540))
+        def changed(timeout):
+            until = time.monotonic()+timeout
+            while time.monotonic() < until:
+                after = self.capture()
+                actual = self.scrollbar_bounds(after, roi)
+                if actual is None:
+                    # The game's touch highlight briefly covers the thumb.
+                    # Wait for its colour to settle before reading its position.
+                    time.sleep(.3)
+                    continue
+                same_height = abs((actual[1]-actual[0])-(bounds[1]-bounds[0])) <= max(5,(bounds[1]-bounds[0])*.12)
+                if (same_height and direction*(sum(actual)//2-center) >= 5
+                        and (not before_text or normalized(after.text(body_roi)) != before_text)):
+                    return True
+                time.sleep(.3)
+            return False
+        self.swipe(start, end, duration=500)
+        if changed(3):
+            return True
+        if not getattr(self.driver, 'supports_scrollbar_fallback', False):
+            raise EventUIError('列表后台滑动未生效')
+        try:
+            self.driver.swipe(convert(start), convert(end), 500, fallback=True)
+        except (RuntimeError, OSError, subprocess.SubprocessError) as error:
+            raise EventUIError('列表后台滑动回退失败：'+str(error)) from error
+        if not changed(8):
+            # A newly opened detail can render before its scroll view accepts
+            # input. Retry once only when both position and content stayed put.
+            latest = self.capture()
+            if (self.scrollbar_bounds(latest, roi) == bounds
+                    and normalized(latest.text(body_roi)) == before_text):
+                self.swipe(start, end, duration=500)
+                if changed(3):
+                    return True
+            raise EventUIError('列表后台滑动回退后未确认变化')
+        return True
 
     def wait(self, predicate, description, timeout=None, handle=None):
         from pcrscript.run_session import emit

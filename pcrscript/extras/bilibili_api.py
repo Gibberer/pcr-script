@@ -168,3 +168,15 @@ class BilibiliApi:
         return self._get('https://api.bilibili.com/x/v2/reply',
                          {'type': 1, 'oid': avid, 'sort': 2, 'pn': page, 'ps': 20},
                          sign=False).json()
+
+    def getVideoCommentReplies(self, avid, root, page=1):
+        """Read one public page of replies to a top-level comment."""
+        return self._get('https://api.bilibili.com/x/v2/reply/reply',
+                         {'type': 1, 'oid': avid, 'root': root, 'pn': page, 'ps': 20},
+                         sign=False).json()
+
+    def getVideoCommentReplies(self, avid, root, page=1):
+        """Read one public page of replies to a top-level comment."""
+        return self._get('https://api.bilibili.com/x/v2/reply/reply',
+                         {'type': 1, 'oid': avid, 'root': root, 'pn': page, 'ps': 20},
+                         sign=False).json()

@@ -179,7 +179,8 @@ def labeled_fields(text: str) -> dict:
     text = re.sub(r'\s+', '', text).replace('：', ':').replace('★', '星')
     result = {}
     # A UE2 star level describes the weapon, not the character's rarity.
-    rarity_text = re.sub(r'专武?[2二][:=]?\d+星', '', text)
+    rarity_text = re.sub(r'专(?:用装备|武)?[2二](?:强化)?(?:阶段)?[:=]?\d+星', '', text)
+    stat_text = re.sub(r'专(?:用装备|武)?[12一二](?:强化)?(?:等级|阶段|[Ll][Vv]\.?)?[:=]?\d+(?:星|级)?', '', text)
     patterns = {
         'stars': r'(?<!\d)([1-6])星',
         'level': r'(?<!属性)(?:等级|[Ll][Vv]\.?)[:=]?(\d{1,3})(?!\d)',
@@ -187,18 +188,28 @@ def labeled_fields(text: str) -> dict:
         'skill_level': r'技能(?:等级)?[:=]?(\d{1,3})(?!\d)',
     }
     for key, pattern in patterns.items():
-        values = {int(v) for v in re.findall(pattern, rarity_text if key == 'stars' else text)}
+        values = {int(v) for v in re.findall(pattern, rarity_text if key == 'stars' else stat_text)}
         if len(values) == 1:
             result[key] = values.pop()
     for key, label in (('unique2', r'(?:专武?2|专武?二)'), ('unique', r'(?:专武?1|专武?一)')):
         match = re.search(label+r'(?:[:=](\d+)|(未开启|未装备|未实装|未开放|无|关闭|有|开启|已装备|装备))', text)
         if match:
             value = match[1] or match[2]
-            result[key] = value not in ('未开启', '未装备', '未实装', '未开放', '无', '关闭', '0')
+            if not (key == 'unique2' and value == '0'):
+                result[key] = value not in ('未开启', '未装备', '未实装', '未开放', '无', '关闭', '0')
     # Common guide notation "专310" explicitly proves UE1, says nothing about UE2.
     match = re.search(r'(?<!无)(?:专武[:=]|专[:=]?)(\d{2,3})(?!\d)', text)
     if match:
         result['unique'] = int(match[1]) > 0
+        if int(match[1]) > 0:
+            result['unique_level'] = int(match[1])
+    level = re.search(r'(?:专(?:用装备|武)[1一]|专一|专1(?=[:=]|等级|[Ll][Vv]))(?:强化)?(?:等级|[Ll][Vv]\.?)?[:=]?(\d+)(?!\d)', text)
+    if level and int(level[1]) > 0:
+        result.update(unique=True, unique_level=int(level[1]))
+    # UE2 at stage zero is already installed; it is not an empty slot.
+    stage = re.search(r'专(?:用装备|武)?[2二](?:强化)?(?:阶段)?[:=]?(\d+)星', text)
+    if stage:
+        result.update(unique2=True, unique2_stars=int(stage[1]))
     if re.search(r'(?:无专武|未装备专武)(?:[。;,，；]|$)', text):
         result['unique'] = False
     if re.search(r'(?:SET|立即发动)[:=]?(?:开启|开|ON|O)(?![A-Za-z])', text, re.I):

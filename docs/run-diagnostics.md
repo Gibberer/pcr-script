@@ -33,6 +33,24 @@ Agent 介入流程：先 status → pause 并核实确认 → snapshot → 读�
 
 ## 根据证据定位
 
+### 设备接管与画面读取
+
+Agent 处理设备问题时主动执行以下流程，无需等用户提示截图入口。未启动任务时，`status` 应返回无活跃运行；有活跃任务则仍须先收到 `state=paused` 确认。始终使用同一配置与已有后台驱动，每台设备只允许一个操作进程。
+
+1. 从任务入口确定配置路径，只读取 `Extra` 中的设备字段，不打印账号配置。`dnpath` 非空表示雷电窗口驱动，空值表示 ADB；不得为绕过故障临时清空它或连接其他设备。
+2. 先执行下面的只读截图命令，打开输出的绝对路径图片，确认是当前游戏、实际尺寸与页面；OCR 文本不能代替查看原图。只有取得新图并核对当前页面后，才执行需要的后台输入，每次动作后重新观察回执。
+3. 发现或截图失败时执行 `--diagnose`。它仅查询配置指向的设备，不启动模拟器、不点击、不改变驱动，雷电结果区分 `query_failed`、`not_visible` 与 `visible`，保留实例索引、窗口句柄、启动状态和尺寸，不输出窗口标题。`query_failed` 看异常类型/退出码；无效行不应掩盖后面的有效实例。
+4. `list2` 返回实例但句柄为零，或进程存在却没有可见窗口时，不能直接结论为“模拟器没开”。检查安装目录、Windows 会话及执行隔离。Windows 沙箱可能让雷电查询成功退出但只返回全零句柄：在工具允许的权限升级流程中，以明确的只读用途在正常用户会话重试**同一条截图命令**；不要盲目重启雷电、修改配置或换用前台控制。只有重试成功得到真实图像后，才确认是执行环境可见性问题。
+5. 正常会话仍失败时保留脱敏诊断、命令异常和最后成功截图时间，明确失败发生在设备发现、句柄绑定还是截图阶段。若权限审查拒绝，报告具体拒绝与限制；不能声称游戏离线。已取得图片时直接自行检查，无需让用户再截图。
+
+```powershell
+./.venv/Scripts/python.exe -X utf8 scripts/agent/run_control.py status
+./.venv/Scripts/python.exe -X utf8 scripts/agent/game.py --config daily_config.yml --name device_current
+./.venv/Scripts/python.exe -X utf8 scripts/agent/game.py --config daily_config.yml --diagnose
+```
+
+截图入口不带 `--audit/--click/--swipe/--input` 时只读；`--audit` 会导航，因此不用于首轮连通性检查。尺寸信息取实际截图，识别坐标归一到 960×540；目前只有雷电该尺寸在游戏中验证，其他布局须独立验证。正常驱动内既有的窗口输入失败后 ADB 回退仍保留，不等于 Agent 可以绕过配置换设备。原图保存在忽略的 `cache/agent/`，不得提交。
+
 先看 status 与 incident.details 的异常和 owner_stack，再按 events 的时间向前找 wait/action/match/ocr 和最近 driver.begin/end：begin 后没有 end 通常指向驱动阻塞；连续未匹配同时截图出现不同按钮，提示 UI/模板可能变化；OCR 漏字或置信度低时检查原图和识别框；反复返回同一画面则检查导航条件与当前步骤。以上均是线索，未经截图和代码交叉验证不直接断言原因。
 
 ## 验证边界
