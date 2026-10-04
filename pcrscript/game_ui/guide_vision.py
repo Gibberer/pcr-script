@@ -44,6 +44,14 @@ def battle_rectangles(image, *, relaxed=False) -> list[tuple[int, int, int, int]
     mask = (((hsv[:, :, 0] >= 75) & (hsv[:, :, 0] <= 105)
              & (hsv[:, :, 1] > 100) & (hsv[:, :, 2] > 150))*255).astype(np.uint8)
     mask[:round(height*.65)] = 0
+    border_mask = mask
+    if relaxed:
+        # During a UB, an otherwise identical combat card changes from cyan
+        # to orange. Infer those slots from at least three cyan anchors, then
+        # require their real colored borders and independently match faces.
+        orange = (((hsv[:, :, 0] <= 35) | (hsv[:, :, 0] >= 170))
+                  & (hsv[:, :, 1] > 100) & (hsv[:, :, 2] > 150))
+        border_mask = mask | (orange*255).astype(np.uint8)
     # Codec gaps can open the inner card outline into its SET bubble.
     # Close only contour proposals; all five borders are checked against
     # the original cyan pixels below, never against the repaired mask.
@@ -70,9 +78,12 @@ def battle_rectangles(image, *, relaxed=False) -> list[tuple[int, int, int, int]
     anchors.sort(key=lambda r: r[0])
     centers = np.array([r[0]+r[2]/2 for r in anchors])
     differences = np.diff(centers)
-    step = float(np.min(differences))
-    if not 1.1*size < step < 1.5*size:
+    smallest_gap = float(np.min(differences))
+    steps = [smallest_gap/divisor for divisor in range(1, 5)
+             if 1.1*size < smallest_gap/divisor < 1.5*size]
+    if len(steps) != 1:
         return []
+    step = steps[0]
     positions = np.rint((centers-centers[0])/step).astype(int)
     if len(set(positions)) != len(positions) or positions[-1] > 4:
         return []
@@ -97,8 +108,8 @@ def battle_rectangles(image, *, relaxed=False) -> list[tuple[int, int, int, int]
         for x, y, w, h in result:
             if x < 0 or y < 0 or x+w > width or y+h > height:
                 break
-            border = np.concatenate([mask[y:y+h, x:x+max(2, w//14)].ravel(),
-                                     mask[y+h-max(2, h//14):y+h, x:x+w].ravel()])
+            border = np.concatenate([border_mask[y:y+h, x:x+max(2, w//14)].ravel(),
+                                     border_mask[y+h-max(2, h//14):y+h, x:x+w].ravel()])
             borders.append(float(np.mean(border > 0)))
         if len(borders) == 5 and min(borders) >= .18:
             candidates.append(result)

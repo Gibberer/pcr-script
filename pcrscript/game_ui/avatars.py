@@ -44,6 +44,24 @@ def search_card_rectangles(image, top=177):
     return result
 
 
+def candidate_card_rectangles(image):
+    """Nominate visible formation cards when badges interrupt their outlines.
+
+    Alternate crops are recognition candidates only. Callers must still
+    verify identity and the live card before selecting a character.
+    """
+    result = card_rectangles(image)
+    rows = []
+    for y in sorted({r[1] for r in result}):
+        if not rows or y-rows[-1] > 4:
+            rows.append(y)
+    for y in rows:
+        for rectangle in search_card_rectangles(image, top=y+2):
+            if rectangle not in result:
+                result.append(rectangle)
+    return result
+
+
 def feature(picture):
     result = cv.resize(picture, (24, 24), interpolation=cv.INTER_AREA).astype(np.float32).reshape(-1)-128
     return result/max(np.linalg.norm(result), 1e-6)

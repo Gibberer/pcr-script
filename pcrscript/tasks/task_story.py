@@ -65,7 +65,12 @@ class ClearStory(ImageTask):
             # 排除掉错误的位置
             new_story_list = list(filter(lambda pos:pos[0] < 800, new_story_list))
         if new_story_list:
-            self.robot.driver.click(*new_story_list[0])
+            # The NEW badge sits above the episode's clickable body in the
+            # current chapter list. Clicking the badge can leave the page
+            # unchanged indefinitely; enter the labeled tile below it.
+            x, y = new_story_list[0]
+            self.robot.driver.click(x, min(y+35*self.robot.deviceheight/self.define_height,
+                                          self.robot.deviceheight*.8))
         else:
             screenshot = self.robot.driver.screenshot()
             if self.in_story_read_page(screenshot) or self.have_dialog(screenshot):

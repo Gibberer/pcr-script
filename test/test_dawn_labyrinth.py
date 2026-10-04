@@ -259,7 +259,9 @@ class LabyrinthTaskTests(TestCase):
         self.temp = TemporaryDirectory()
         self.folder = Path(self.temp.name)
         self.robot = Robot(Mock(get_screen_size=Mock(return_value=(960, 540))), show_progress=False)
-        self.robot.configure({'DawnLabyrinth': {'output': str(self.folder)}})
+        self.robot.configure({'DawnLabyrinth': {'output': str(self.folder),
+                                               'state_dir': str(self.folder / 'state'),
+                                               'account_key': 'synthetic-account'}})
         self.task = DawnLabyrinth(self.robot)
         self.task.ui = Mock(output=self.folder, last=None)
         self.task.ui.save.return_value = self.folder / 'synthetic.png'
@@ -282,6 +284,23 @@ class LabyrinthTaskTests(TestCase):
 
     def clicks(self):
         return [getattr(call.args[0], 'text', call.args[0]) for call in self.task.ui.click.call_args_list]
+
+    def test_entry_leaves_known_subjugation_detail_before_opening_maze(self):
+        self.frames([screen(('BOSS详情', 109, 52), ('模拟战', 748, 109), ('实战', 866, 109),
+                            ('取消', 668, 469), ('挑战', 840, 469)),
+                     screen(('深渊讨伐战', 135, 30), ('冒险', 537, 526)),
+                     screen(('冒险', 100, 30), ('黎明界迷宫', 800, 365)), home(0)])
+        report = self.task.run()
+        self.assertEqual(report['status'], 'complete', report)
+        self.assertEqual(self.clicks(), ['取消', '冒险', '黎明界迷宫'])
+        self.assertEqual(report['spent'], 0)
+
+    def test_subjugation_confirmation_overlay_is_preserved(self):
+        self.frames([screen(('BOSS详情', 109, 52), ('模拟战', 748, 109), ('实战', 866, 109),
+                            ('取消', 668, 469), ('挑战', 840, 469),
+                            ('扫荡券确认', 480, 150), ('确认', 588, 373))])
+        self.assertEqual(self.task.run()['status'], 'blocked')
+        self.task.ui.click.assert_not_called()
 
     def test_zero_passes_claims_missions_with_receipt_and_empty_home_badge(self):
         self.frames([mission_home(), missions(), missions(), mission_receipt(),
@@ -350,6 +369,21 @@ class LabyrinthTaskTests(TestCase):
             self.task.run()
         self.assertIn('pending_mission_claim', self.task.report)
         self.assertEqual(self.task.report['status'], 'cancelled')
+
+    def test_mission_receipt_is_persisted_before_closing_and_restart(self):
+        self.frames([mission_home(), missions(), missions(), mission_receipt()])
+        def click(button):
+            if getattr(button, 'text', '') == '关闭':
+                state = json.loads(self.task.state_path.read_text(encoding='utf-8'))
+                self.assertIn('receipt', state['pending_mission_claim'])
+                raise RunCancelled('synthetic receipt close cancellation')
+        self.task.ui.click.side_effect = click
+        with self.assertRaises(RunCancelled):
+            self.task.run()
+        report = self.restart([mission_home(badge=False)])
+        self.assertEqual(report['status'], 'complete', report)
+        self.assertNotIn('pending_mission_claim', report)
+        self.assertNotIn('全部收取', self.clicks())
 
     def test_mission_page_without_claimable_rewards_must_clear_the_home_badge(self):
         self.frames([mission_home(), missions(claim=False), missions(claim=False), mission_home()])
@@ -489,7 +523,10 @@ class LabyrinthTaskTests(TestCase):
     def test_no_receipt_or_wrong_balance_retains_pending_spend(self):
         for after, receipt_seen in [(2, False), (1, True)]:
             with self.subTest(after=after):
-                self.task.ui.click.reset_mock()
+                self.robot.task_config['DawnLabyrinth']['account_key'] = f'synthetic-{after}'
+                self.task = DawnLabyrinth(self.robot)
+                self.task.ui = Mock(output=self.folder, last=None)
+                self.task.ui.save.return_value = self.folder / 'synthetic.png'
                 frames = [home(3), guild(), preview()]
                 if receipt_seen:
                     frames.append(result())
@@ -528,6 +565,132 @@ class LabyrinthTaskTests(TestCase):
         self.assertEqual(saved['pending_spend']['before'], 3)
         self.assertEqual(saved['status'], 'cancelled')
         self.assertEqual(self.clicks().count('跳过'), 2)
+
+    def restart(self, frames):
+        self.task = DawnLabyrinth(self.robot)
+        self.task.ui = Mock(output=self.folder, last=None)
+        self.task.ui.save.return_value = self.folder / 'synthetic.png'
+        self.frames(frames)
+        return self.task.run()
+
+    def test_new_run_keeps_unresolved_consumption_and_never_spends_again(self):
+        self.frames([home(3), guild(), preview(), home(2)])
+        self.assertEqual(self.task.run()['status'], 'partial')
+        report = self.restart([home(2), guild(), preview(2, 0), result(), home(0)])
+        self.assertEqual(report['status'], 'partial', report)
+        self.assertEqual(report['pending_spend']['before'], 3)
+        self.assertNotIn('出发', self.clicks())
+        self.assertNotIn('任务', self.clicks())
+
+    def test_new_run_recovers_receipt_and_balance_without_new_consumption(self):
+        self.frames([home(3), guild(), preview(3, 0), home(0)])
+        self.assertEqual(self.task.run()['status'], 'partial')
+        report = self.restart([result(), home(0)])
+        self.assertEqual(report['status'], 'complete', report)
+        self.assertNotIn('pending_spend', report)
+        self.assertEqual(report['history'][0]['outcome'], 'recovered_sweep')
+        self.assertNotIn('出发', self.clicks())
+
+    def test_new_run_does_not_repeat_an_unconfirmed_mission_claim(self):
+        self.frames([mission_home(), missions(), missions(), missions()])
+        ticks = count(0, 10)
+        with patch('pcrscript.tasks.task_dawn_labyrinth.time.monotonic', side_effect=lambda: next(ticks)):
+            self.assertEqual(self.task.run()['status'], 'partial')
+        report = self.restart([mission_home(), missions(), missions(), mission_receipt(),
+                               missions(claim=False), mission_home(badge=False)])
+        self.assertEqual(report['status'], 'partial', report)
+        self.assertIn('pending_mission_claim', report)
+        self.assertNotIn('全部收取', self.clicks())
+
+    def test_new_run_uses_a_saved_receipt_and_counts_it_against_the_budget(self):
+        self.frames([home(3), guild(), preview(), result(), home(1)])
+        self.assertEqual(self.task.run()['status'], 'partial')
+        self.robot.task_config['DawnLabyrinth']['max_passes'] = 1
+        report = self.restart([home(2)])
+        self.assertEqual((report['status'], report['spent'], report['remaining_passes']), ('partial', 1, 2))
+        self.assertNotIn('pending_spend', report)
+        self.assertNotIn('出发', self.clicks())
+
+    def test_new_run_cancels_a_matching_unsubmitted_confirmation_before_retry(self):
+        self.frames([home(1), guild(), preview(1, 0)])
+        self.task.ui.click.side_effect = lambda button: (
+            (_ for _ in ()).throw(RunCancelled('synthetic stop'))
+            if getattr(button, 'center', (0, 0))[1] == 480 else None)
+        with self.assertRaises(RunCancelled):
+            self.task.run()
+        self.robot.task_config['DawnLabyrinth']['max_passes'] = 1
+        report = self.restart([preview(1, 0), home(1), guild(), preview(1, 0), result(), home(0)])
+        self.assertEqual(report['status'], 'complete', report)
+        self.assertEqual(report['history'][0]['outcome'], 'cancelled_sweep')
+        self.assertEqual(report['spent'], 1)
+        self.assertEqual(self.clicks()[0], '取消')
+
+    def test_new_run_does_not_use_an_unrelated_reward_receipt_as_sweep_proof(self):
+        self.frames([home(1), guild(), preview(1, 0), home(0)])
+        self.assertEqual(self.task.run()['status'], 'partial')
+        report = self.restart([screen(('报酬确认', 480, 42), ('关闭', 480, 480)), home(0)])
+        self.assertEqual(report['status'], 'partial', report)
+        self.assertIn('pending_spend', report)
+        self.assertNotIn('出发', self.clicks())
+
+    def test_new_run_recovers_pending_claim_from_a_receipt(self):
+        self.frames([mission_home(), missions(), missions(), missions()])
+        ticks = count(0, 10)
+        with patch('pcrscript.tasks.task_dawn_labyrinth.time.monotonic', side_effect=lambda: next(ticks)):
+            self.assertEqual(self.task.run()['status'], 'partial')
+        report = self.restart([mission_receipt(), missions(claim=False), mission_home(badge=False)])
+        self.assertEqual(report['status'], 'complete', report)
+        self.assertNotIn('pending_mission_claim', report)
+        self.assertNotIn('全部收取', self.clicks())
+
+    def test_new_run_recovers_an_empty_mission_list_before_spending(self):
+        self.frames([mission_home(), missions(), missions(), missions()])
+        ticks = count(0, 10)
+        with patch('pcrscript.tasks.task_dawn_labyrinth.time.monotonic', side_effect=lambda: next(ticks)):
+            self.assertEqual(self.task.run()['status'], 'partial')
+        report = self.restart([mission_home(badge=False), missions(claim=False), missions(claim=False),
+                               mission_home(badge=False)])
+        self.assertEqual(report['status'], 'complete', report)
+        self.assertEqual(report['history'][0]['outcome'], 'recovered_empty_missions')
+        self.assertNotIn('全部收取', self.clicks())
+
+    def test_pending_records_are_isolated_by_account(self):
+        self.frames([home(1), guild(), preview(1, 0), home(0)])
+        self.assertEqual(self.task.run()['status'], 'partial')
+        original = self.task.state_path
+        self.robot.task_config['DawnLabyrinth']['account_key'] = 'other-synthetic-account'
+        report = self.restart([home(0)])
+        self.assertEqual(report['status'], 'complete')
+        self.assertIn('pending_spend', json.loads(original.read_text(encoding='utf-8')))
+
+    def test_pending_claim_blocks_new_pass_spending_before_claim_recovery(self):
+        self.task.report['pending_mission_claim'] = dict(preview='synthetic.png')
+        self.task.save_report()
+        report = self.restart([mission_home(2), missions(), missions()])
+        self.assertEqual(report['status'], 'partial', report)
+        self.assertNotIn('出发', self.clicks())
+        self.assertNotIn('全部收取', self.clicks())
+
+    def test_claim_recovery_follow_up_receipts_survive_the_final_mission_check(self):
+        self.task.report['pending_mission_claim'] = dict(preview='synthetic.png', receipt='synthetic.png')
+        self.task.save_report()
+        report = self.restart([mission_home(), missions(), missions(), mission_receipt(),
+                               missions(claim=False), mission_home(1, badge=False)])
+        self.assertEqual(report['status'], 'partial', report)
+        self.assertEqual((report['spent'], report['missions']['batches']), (0, 1))
+        self.assertEqual(len(report['missions']['receipts']), 1)
+        self.assertNotIn('出发', self.clicks())
+        self.assertIn('任务奖励增加了通行证', report['pending'][0])
+
+    def test_malformed_state_fails_before_any_new_game_input(self):
+        path = self.task.state_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        for invalid in ([], {'pending_spend': {}}, {'pending_spend': {'before': 3, 'after': 2, 'cost': 2}}):
+            with self.subTest(state=invalid):
+                path.write_text(json.dumps(invalid), encoding='utf-8')
+                with self.assertRaises(ValueError):
+                    DawnLabyrinth(self.robot)
+                self.task.ui.click.assert_not_called()
 
     def test_separate_sweep_selection_uses_only_enabled_sweep_control(self):
         choices = screen(('黎明界迷宫', 130, 30), ('请选择跳过的公会', 480, 88),

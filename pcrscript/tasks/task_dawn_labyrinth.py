@@ -1,9 +1,14 @@
 """Consume existing Dawn Labyrinth passes through unlocked sweeps only."""
 from __future__ import annotations
 
+from hashlib import sha256
+import json
+from pathlib import Path
+
 from .base import BaseTask
 from .registry import register
 from ..game_ui import dawn_labyrinth as maze
+from ..game_ui.abyss_subjugation import navigation_exit as subjugation_navigation_exit
 from ..game_ui.screen import EventUI, EventUIError, normalized
 from ..run_session import RunCancelled, ResumeUnsafe, atomic_json, clock as time, emit
 
@@ -12,6 +17,8 @@ def validate_options(options: dict) -> dict:
     if not isinstance(options, dict):
         raise ValueError('DawnLabyrinth必须是配置对象')
     value = dict(options)
+    if 'account_key' in value and (not isinstance(value['account_key'], str) or not value['account_key'].strip()):
+        raise ValueError('DawnLabyrinth.account_key必须是非空字符串')
     for key, default, upper in (('timeout', 600, 3600), ('max_passes', 99, 99)):
         number = value.setdefault(key, default)
         if type(number) is not int or not 1 <= number <= upper:
@@ -21,6 +28,27 @@ def validate_options(options: dict) -> dict:
 
 class SweepBlocked(EventUIError):
     """A visible prerequisite prevents spending any further passes."""
+
+
+def load_daily_state(driver, options):
+    account = options.get('account_key', getattr(driver, 'device_name', getattr(driver, 'index', 'default')))
+    key = sha256(str(account).encode()).hexdigest()[:24]
+    path = Path(options.get('state_dir', 'cache/daily/dawn_labyrinth_state')) / (key + '.json')
+    state = json.loads(path.read_text(encoding='utf-8')) if path.exists() else {}
+    if not isinstance(state, dict):
+        raise ValueError('迷宫消费状态必须是对象，未开始新消费')
+    pending = {}
+    for name in ('pending_spend', 'pending_mission_claim'):
+        if name in state:
+            if not isinstance(state[name], dict) or not state[name]:
+                raise ValueError('迷宫待核对记录无效，未开始新消费')
+            pending[name] = state[name]
+    spend = pending.get('pending_spend')
+    if spend and (any(type(spend.get(k)) is not int for k in ('before', 'after', 'cost'))
+                  or not 0 <= spend['after'] < spend['before'] <= 99
+                  or spend['cost'] != spend['before'] - spend['after']):
+        raise ValueError('迷宫待核对消费数量无效，未开始新消费')
+    return path, pending
 
 
 @register('dawn_labyrinth', requires_home=False)
@@ -40,8 +68,16 @@ class DawnLabyrinth(BaseTask):
         self.deadline = time.monotonic() + self.options['timeout']
         self.report = dict(status='running', initial_passes=None, remaining_passes=None,
                            spent=0, sweeps=0, pending=[], history=[])
+        self.state_path, state = load_daily_state(self.driver, self.options)
+        self.report.update(state)
 
     def save_report(self):
+        # First-clear exploration has a separate, conservative recovery flow.
+        # Daily sweeps need a device/account record outside per-run evidence.
+        if getattr(self, 'state_path', None) is not None:
+            self.state_path.parent.mkdir(parents=True, exist_ok=True)
+            atomic_json(self.state_path, {name: self.report[name] for name in
+                        ('pending_spend', 'pending_mission_claim') if name in self.report})
         atomic_json(self.ui.output / 'report.json', self.report)
 
     def capture(self):
@@ -64,6 +100,8 @@ class DawnLabyrinth(BaseTask):
             if maze.mission_receipt(screen):
                 path = self.ui.save('missions_resumed_receipt', screen)
                 self.report.setdefault('resumed_mission_receipts', []).append(str(path))
+                if self.report.get('pending_mission_claim'):
+                    self.report['pending_mission_claim']['receipt'] = str(path)
                 self.save_report()
                 close = screen.find('确认|关闭', (320, 430, 650, 520), exact=True)
                 if not close:
@@ -75,6 +113,10 @@ class DawnLabyrinth(BaseTask):
                 self.ui.click(screen.find('取消', (255, 440, 465, 515), exact=True))
                 continue
             if maze.receipt(screen):
+                if (self.report.get('pending_spend')
+                        and screen.find(r'(?:迷宫)?(?:跳过|扫荡)结果', (140, 0, 820, 110), exact=True)):
+                    self.report['pending_spend']['receipt'] = str(self.ui.save('sweep_resumed_receipt', screen))
+                    self.save_report()
                 close = screen.find('确认|关闭', (320, 395, 750, 520), exact=True)
                 if close:
                     self.ui.click(close)
@@ -83,10 +125,21 @@ class DawnLabyrinth(BaseTask):
                 continue
             if maze.home(screen):
                 return screen
-            if maze.bulk_confirmation(screen):
+            if (cancel := subjugation_navigation_exit(screen)) is not None:
+                self.ui.click(cancel)
+                continue
+            if maze.bulk_confirmation(screen) or maze.sweep_confirmation(screen):
                 cancel = screen.find('取消', (255, 440, 465, 520), exact=True)
                 if not cancel:
                     raise SweepBlocked('扫荡确认无法安全关闭')
+                pending = self.report.get('pending_spend')
+                if pending:
+                    preview = (maze.bulk_preview(self.ui, screen) if maze.bulk_confirmation(screen)
+                               else maze.pass_preview(screen))
+                    if (preview == (pending['before'], pending['after'])
+                            and (not pending.get('guild') or maze.sweep_guild_evidence(screen, pending['guild']))):
+                        pending['cancelled_confirmation'] = str(self.ui.save('sweep_resumed_cancel', screen))
+                        self.save_report()
                 self.ui.click(cancel)
                 continue
             if maze.sweep_catalogue(screen):
@@ -113,6 +166,26 @@ class DawnLabyrinth(BaseTask):
                     time.sleep(.5)
         raise EventUIError('黎明界迷宫入口无法确认')
 
+    def reconcile_spend(self, screen):
+        pending = self.report.get('pending_spend')
+        if not pending:
+            return
+        remaining = self.balance(screen)
+        self.report['remaining_passes'] = remaining
+        if (remaining == pending['before'] and not pending.get('receipt')
+                and pending.get('cancelled_confirmation')):
+            outcome = 'cancelled_sweep'
+        elif remaining == pending['after'] and pending.get('receipt'):
+            outcome = 'recovered_sweep'
+            self.report['spent'] += pending['cost']
+            self.report['sweeps'] += 1
+        else:
+            raise SweepBlocked('上次迷宫跳过的回执或通行证余额尚未核对，未重复消费或领取奖励')
+        self.report['history'].append(dict(self.report.pop('pending_spend'), outcome=outcome,
+                                            remaining=remaining,
+                                            balance_evidence=str(self.ui.save('sweep_recovered_balance', screen))))
+        self.save_report()
+
     def balance(self, screen):
         value = maze.read_held_passes(self.ui, screen)
         if value is None:
@@ -127,9 +200,15 @@ class DawnLabyrinth(BaseTask):
                 or self.report.get('pending_battle')):
             raise EventUIError('不在迷宫结算后的首页，未领取任务奖励')
         before = self.balance(screen)
-        missions = self.report['missions'] = dict(status='running', batches=0,
-                                                   receipts=[], passes_before=before)
-        if not maze.mission_reward_hint(screen):
+        pending_claim = self.report.get('pending_mission_claim')
+        if pending_claim and pending_claim.get('receipt'):
+            self.report['history'].append(dict(self.report.pop('pending_mission_claim'),
+                                                outcome='recovered_mission_claim'))
+            self.save_report()
+            pending_claim = None
+        missions = self.report.setdefault('missions', dict(batches=0, receipts=[], passes_before=before))
+        missions.update(status='running')
+        if not maze.mission_reward_hint(screen) and not pending_claim:
             missions.update(status='complete', passes_after=before)
             return screen
         self.report_progress('领取黎明界迷宫任务奖励')
@@ -160,15 +239,23 @@ class DawnLabyrinth(BaseTask):
                     raise EventUIError('领取任务奖励后通行证减少，停止追加操作')
                 if maze.mission_reward_hint(screen):
                     raise EventUIError('迷宫首页仍有可领取任务提示，未确认奖励清空')
+                if self.report.get('pending_mission_claim'):
+                    self.report['history'].append(dict(self.report.pop('pending_mission_claim'),
+                                                        outcome='recovered_empty_missions'))
+                    self.save_report()
                 missions['status'] = 'complete'
                 self.ui.save('missions_home', screen)
                 return screen
+            if self.report.get('pending_mission_claim'):
+                raise EventUIError('上次迷宫任务领奖尚未核对，未重复领取')
             preview = self.ui.save(f"missions_{missions['batches'] + 1:02d}_preview", screen)
             self.report['pending_mission_claim'] = dict(preview=str(preview))
             self.save_report()
             self.ui.click(button)
             receipt = self.wait(maze.mission_receipt, '迷宫任务领取回执')
             proof = self.ui.save(f"missions_{missions['batches'] + 1:02d}_receipt", receipt)
+            self.report['pending_mission_claim']['receipt'] = str(proof)
+            self.save_report()
             close = receipt.find('确认|关闭', (320, 430, 650, 520), exact=True)
             if not close:
                 raise EventUIError('迷宫任务领取回执关闭按钮无法核对')
@@ -396,7 +483,10 @@ class DawnLabyrinth(BaseTask):
                 continue
             if maze.receipt(screen):
                 result_seen = True
-                self.ui.save(f"sweep_{self.report['sweeps'] + 1:03d}_result_{step:02d}", screen)
+                proof = self.ui.save(f"sweep_{self.report['sweeps'] + 1:03d}_result_{step:02d}", screen)
+                if screen.find(r'(?:迷宫)?(?:跳过|扫荡)结果', (140, 0, 820, 110), exact=True):
+                    self.report['pending_spend']['receipt'] = str(proof)
+                    self.save_report()
                 button = screen.find('全部开启|全部打开|开启全部|打开全部|确认|关闭|返回迷宫|返回',
                                      (200, 395, 930, 525), exact=True)
                 if button:
@@ -412,9 +502,13 @@ class DawnLabyrinth(BaseTask):
             if screen is None:
                 self.report.update(status='unavailable', reason='冒险页未找到黎明界迷宫入口')
                 return self.report
+            self.reconcile_spend(screen)
             before = self.balance(screen)
             self.report.update(initial_passes=before, remaining_passes=before)
-            budget = min(before, self.options['max_passes'])
+            budget = min(before + self.report['spent'], self.options['max_passes'])
+            if self.report.get('pending_mission_claim'):
+                screen = self.collect_mission_rewards(screen)
+                before = self.balance(screen)
             while self.report['spent'] < budget:
                 self.report_progress('消耗迷宫通行证', self.report['spent'], budget)
                 preview = self.open_sweep(screen, budget - self.report['spent'])

@@ -57,15 +57,19 @@ Recollection:
   max_sweeps: 9
   areas: [霸瞳皇帝的领域, 泽恩的领域, 米洛克的领域]
 RecollectionFirstClear:
+  mastery_preparation: {}
   timeout: 3600
   battle_timeout: 220
   max_battles: 30
   max_attempts_per_stage: 2
+  max_source_batches: 3
   areas: [记忆领域, 霸瞳皇帝的领域, 泽恩的领域, 米洛克的领域]
   source_urls: []
   discover_sources: true
   allow_local_trials: false
   auto_equip: false
+  auto_equip_priorities: {}
+  retry_failed_parties: false
   sources: {}
 TeamBattle:
   timeout: 3600
@@ -137,6 +141,8 @@ CharacterBond:
   max_pages: 80
   max_story_steps_per_character: 200
   max_gifts_per_character: 2000
+  max_gifts_total: 800000
+  read_stories_only: false
 
 # 按需深域推进；本地试打须明确启用，不自动加入每日。
 Abyss:

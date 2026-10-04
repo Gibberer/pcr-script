@@ -12,6 +12,9 @@ from ..game_ui.avatars import card_rectangles, search_card_rectangles, face_crop
 from ..game_ui.screen import EventUIError, normalized
 
 
+MAX_DEPARTURE_EQUIPMENT_AGE = 1800
+
+
 @dataclass(frozen=True)
 class LabyrinthBossStrategy:
     server: str
@@ -31,11 +34,43 @@ class LabyrinthFormation(EventFormation):
     detail_close_pattern = '确认|关闭'
     formation_title_pattern = '角色选择|队伍编组'
 
+    def inspect(self, *args, **kwargs):
+        actual = super().inspect(*args, **kwargs)
+        self.bind_departure_equipment(actual)
+        return actual
+
+    def bind_departure_equipment(self, actual):
+        proof = getattr(self, 'departure_equipment', {}).get(normalized(actual.name))
+        departure = getattr(self, 'departure_verified_at', None)
+        # NPCs use fixed Lv320 / Rank34. Account equipment cannot be copied
+        # onto them, or onto a partner recruited by an unverified old run.
+        if (not actual.identity_verified or not proof or departure is None
+                or type(actual.level) is not int or actual.level <= 320
+                or type(actual.rank) is not int or actual.rank <= 34
+                or (actual.level, actual.rank) != (proof.get('level'), proof.get('rank'))
+                or not 0 <= departure-proof.get('observed_at', 0) < MAX_DEPARTURE_EQUIPMENT_AGE):
+            return
+        values = proof['values']
+        for key in ('unique', 'unique2'):
+            if getattr(actual, key) is not None and getattr(actual, key) is not values.get(key):
+                raise EventUIError(actual.name+'招募专武标记与出发前检查不符，未继续')
+        for key in ('equipment', 'equipment_available', 'unique', 'unique2', 'unique_level', 'unique2_stars'):
+            if key in values:
+                setattr(actual, key, values[key])
+        actual.ordinary_equipment_evidence = list(proof['ordinary_evidence'])
+        if not actual.equipment_evidence:
+            actual.equipment_evidence = proof['unique_evidence'][0]
+
     @staticmethod
     def require_equipment(status):
-        # Rank does not prove its six ordinary items are equipped. Never turn
+        # Rank does not prove all released ordinary items are equipped. Never turn
         # a missing badge observation or unspecified build into an allowed one.
-        if (type(status.equipment) is not int or status.equipment != 6
+        available = status.equipment_available
+        if available is None:
+            available = 6
+        if (type(available) is not int or not 1 <= available <= 6
+                or type(status.equipment) is not int or status.equipment != available
+                or (available != 6 and not status.ordinary_equipment_evidence)
                 or type(status.unique) is not bool or type(status.unique2) is not bool
                 or not status.equipment_evidence
                 or (status.unique2 and not status.unique)):
@@ -190,7 +225,8 @@ class LabyrinthFormation(EventFormation):
                         or not isinstance(requirement.name, str) or not requirement.name.strip()
                         or any(type(getattr(requirement, key)) is not int or getattr(requirement, key) <= 0
                                for key in ('level', 'rank', 'stars', 'skill_level'))
-                        or requirement.equipment != 6 or type(requirement.unique) is not bool
+                        or type(requirement.equipment) is not int or not 1 <= requirement.equipment <= 6
+                        or type(requirement.unique) is not bool
                         or type(requirement.unique2) is not bool or requirement.instant is not True):
                     raise EventUIError('首领攻略的培养、装备或操作要求尚未明确，未开战')
                 name = normalized(requirement.name)

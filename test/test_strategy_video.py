@@ -14,7 +14,7 @@ from pcrscript.game_ui.avatars import AvatarIndex, face_crop
 from pcrscript.game_ui.avatar_assets import ensure_avatar_index
 from pcrscript.game_ui.guide_vision import GuideText, battle_rectangles, combat_team, formation_team, wide_special_equipment_team, combat_set, combat_auto, labeled_fields, formation_fields
 from pcrscript.tasks.strategy_document import Evidence, empty_member, finalize, to_event_party, abyss_candidate, event_parties, event_trial_parties, dungeon_plan
-from pcrscript.tasks.strategy_video import choose_pages, observed_scope, parse_video_source, acquire_strategies, task_source_options, texts_in_view, sample_seconds, frame_texts, combat_button_texts, combat_hud_visible, combat_caption_signature
+from pcrscript.tasks.strategy_video import choose_pages, observed_scope, parse_video_source, acquire_strategies, task_source_options, texts_in_view, sample_seconds, frame_texts, combat_button_texts, unread_active_set_badge, combat_hud_visible, combat_caption_signature, text_constraints
 from pcrscript.tasks.strategy_party_pool import boss_parties, next_boss_party
 from pcrscript.tasks.strategy_trial import TrialFormation
 from pcrscript.tasks.event_strategy import CharacterStatus, EventParty, MemberRequirement
@@ -36,6 +36,32 @@ def complete_party():
 
 
 class VideoStrategyTests(TestCase):
+    def test_whole_frame_ocr_missing_active_set_requests_local_read_without_inventing_a_switch(self):
+        image = np.zeros((540,960,3),np.uint8)
+        box = (190,392,100,100)
+        image[378:417,267:321] = (255,220,0)
+        self.assertTrue(unread_active_set_badge(image, [box], []))
+        labels = [GuideText('立即',.99,(277,382,27,15)), GuideText('发动',.99,(277,397,27,15))]
+        self.assertFalse(unread_active_set_badge(image, [box], labels))
+        uncertain = [GuideText(t.text,.94,t.rectangle) for t in labels]
+        self.assertTrue(unread_active_set_badge(image, [box], uncertain))
+        self.assertIsNone(combat_set(image, {'rectangle':box}, []))
+        # A grey or occluded badge supplies no on/off evidence and no color fallback.
+        image[378:417,267:321] = (180,180,180)
+        self.assertFalse(unread_active_set_badge(image, [box], []))
+
+    def test_fixed_hud_switch_status_does_not_discard_creator_operations(self):
+        proof = Evidence('https://example.com/synthetic', method='video_ocr')
+        label = '连结爆发立即发动开启'
+        self.assertEqual(text_constraints([GuideText(label, .99, (1080, 70, 180, 20))],
+                         proof, unparsed_settings=True), ([], []))
+        for text, rectangle in ((label, (10, 170, 200, 20)),
+                                ('连结爆发立即发动关闭', (1080, 70, 180, 20)),
+                                ('需手动连结爆发立即发动开启', (1080, 70, 180, 20))):
+            with self.subTest(text=text, rectangle=rectangle):
+                self.assertTrue(text_constraints([GuideText(text, .99, rectangle)],
+                                proof, unparsed_settings=True)[1])
+
     def test_event_starting_mode_caption_can_coexist_with_later_hud_phase(self):
         labels = [GuideText('SP模式1', 1, (10, 180, 150, 25)),
                   GuideText('阶段2', 1, (60, 50, 100, 25))]
@@ -203,6 +229,15 @@ class VideoStrategyTests(TestCase):
             task_source_options('abyss',dict(search_effort='high',
                 sources=dict(max_videos='4')),stage=stage)
 
+    def test_single_domain_collection_keeps_unscoped_overview_for_frame_verification(self):
+        source=dict(title='米洛克1-5层参考作业',pages=[
+            dict(cid=1,part='参考作业'),dict(cid=2,part='米洛克4层通关记录'),
+            dict(cid=3,part='米洛克5层通关记录')])
+        options=dict(task_type='recollection',area='米洛克的领域',stage=1)
+        self.assertEqual([p['cid'] for p in choose_pages(source,options)],[1])
+        self.assertEqual(choose_pages(dict(source,title='米洛克2-5层参考作业'),options),[])
+        self.assertEqual(choose_pages(dict(source,title='米洛克/泽恩1-5层合集'),options),[])
+
     def test_combat_row_verifies_inferred_cards_with_connected_set_bubbles(self):
         image=np.zeros((540,960,3),np.uint8)
         cyan=(255,200,0)
@@ -244,6 +279,15 @@ class VideoStrategyTests(TestCase):
         self.assertTrue(all(abs(x+w/2-(239+120*i))<8 for i,(x,y,w,h) in enumerate(boxes)))
         image[370:495,552:666]=245
         self.assertEqual(battle_rectangles(image),[])
+
+    def test_ub_orange_cards_need_real_borders_between_cyan_anchors(self):
+        image = np.full((540,960,3),245,np.uint8)
+        for i in range(5):
+            color = (255,200,0) if i % 2 == 0 else (0,180,255)
+            cv.rectangle(image,(197+120*i,397),(285+120*i,485),color,4)
+        self.assertEqual(len(battle_rectangles(image,relaxed=True)),5)
+        image[390:495,550:666] = 245
+        self.assertEqual(battle_rectangles(image,relaxed=True),[])
 
     def test_combat_button_regions_use_recognition_without_text_detection(self):
         frame=np.zeros((720,1280,3),np.uint8)
@@ -650,6 +694,24 @@ class VideoStrategyTests(TestCase):
             self.assertEqual(result['skipped_sources'][0]['bvid'],'BVWATER')
             self.assertEqual(parse.call_count,1)
             self.assertEqual(parse.call_args.args[0]['bvid'],'BVFIRE')
+
+    def test_accepted_preferred_source_does_not_depend_on_search_availability(self):
+        with TemporaryDirectory() as folder:
+            api=Mock()
+            api.getVideoInfo.return_value=dict(code=0,data=dict(bvid='BVPREFERRED',
+                title='公主连结 火4-1',pages=[dict(cid=1,part='火4-1')]))
+            index=SimpleNamespace(names=['角色'],matrix=np.ones((1,1728),np.float32))
+            with patch('pcrscript.tasks.strategy_video.preferred_sources',
+                       return_value=([dict(bvid='BVPREFERRED',user_provided=True)],[])), \
+                 patch('pcrscript.tasks.strategy_video.discover_sources',
+                       side_effect=RuntimeError('synthetic search failure')) as search, \
+                 patch('pcrscript.tasks.strategy_video.parse_video_source',
+                       return_value=dict(parties=[complete_party()],errors=[])):
+                result=acquire_strategies(dict(task_type='abyss',stage='4-1',element='fire',
+                    source_urls=['https://example.com/synthetic'],parsed_dir=folder),api=api,index=index,
+                    accept=lambda report:bool(report['parties']))
+            self.assertEqual(result['status'],'complete')
+            search.assert_not_called()
 
     def test_video_to_document_with_synthetic_frames_and_explicit_fields(self):
         with TemporaryDirectory() as folder:

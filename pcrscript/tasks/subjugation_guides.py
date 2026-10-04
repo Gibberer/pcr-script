@@ -27,6 +27,7 @@ def source_options(options, event, *, kind='outpost', difficulty='高难', boss=
     if type(talent) is not int or talent not in range(1, 6):
         raise ValueError('本期加成属性未知，不能取得攻略')
     result = dict(options.get('sources', {}))
+    result.pop('observed_target', None)
     result.update(task_type='subjugation', region='cn', area=event.extras['title'],
                   aliases=['深渊讨伐战', '深域讨伐战'], category_terms=[], stage='',
                   element=ELEMENTS[talent-1], kind=kind, difficulty=difficulty, boss=boss,
@@ -36,8 +37,8 @@ def source_options(options, event, *, kind='outpost', difficulty='高难', boss=
                   source_urls=options.get('source_urls') or result.get('source_urls', []),
                   skip_manual_media=True, skip_long_media=True)
     result.setdefault('max_videos', 4)
-    result.setdefault('max_pages_per_video', 4)
-    result.setdefault('max_frames_per_page', 36)
+    result.setdefault('max_pages_per_video', 12)
+    result.setdefault('max_frames_per_page', 96)
     result.setdefault('max_video_seconds', 600)
     result.setdefault('parse_timeout', 300 if kind == 'boss' else 1800)
     result.setdefault('max_download_seconds', 180)
@@ -332,28 +333,41 @@ def constraint_cids(pages, frames):
     return result
 
 
-def applicable_scope(scope, options, *, allow_higher=False):
-    """Match the current target, or an explicitly allowed highest-tier guide."""
+def applicable_scope(scope, options, *, allow_higher=False, allow_lower=False):
+    """Match a source tier; lower boss tiers can only seed free trials."""
     wanted = target_scope(options)
     if scope == wanted:
         return True
     tiers = ('普通', '困难', '高难', '极难') if wanted['kind'] == 'boss' else ('普通', '困难', '高难')
-    return (allow_higher and wanted['difficulty'] in tiers[:-1]
-            and scope == dict(wanted, difficulty=tiers[-1]))
+    if (allow_higher and wanted['difficulty'] in tiers[:-1]
+            and scope == dict(wanted, difficulty=tiers[-1])):
+        return True
+    return (allow_lower and wanted['kind'] == 'boss'
+            and wanted['difficulty'] in tiers
+            and any(scope == dict(wanted, difficulty=tier)
+                    for tier in tiers[:tiers.index(wanted['difficulty'])]))
 
 
 def parties_for_target(report, options, *, allow_local_trials):
     result = []
     wanted = target_scope(options)
     for raw in report.get('parties', []):
-        higher_trial = raw.get('scope') != wanted and applicable_scope(
-            raw.get('scope'), options, allow_higher=allow_local_trials)
+        difficulty_trial = raw.get('scope') != wanted and applicable_scope(
+            raw.get('scope'), options, allow_higher=allow_local_trials,
+            allow_lower=allow_local_trials)
         members = raw.get('members', [])
         names = [m.get('name') for m in members]
         flags = [raw.get('auto', {})]+[m.get('instant', {}) for m in members]
-        if ((raw.get('scope') != wanted and not higher_trial) or not raw.get('scope_verified')
+        actions = raw.get('manual_actions') or []
+        # A guide's borrowing confirmation is an observation of the source
+        # account, not a requirement to borrow. An owned-character trial must
+        # still inspect all five builds and pass the current free simulation.
+        owned_trial = (allow_local_trials and wanted['kind'] == 'boss' and bool(actions)
+            and all(a.get('text') == '要借用这个角色吗？'
+                    and a.get('evidence', {}).get('method') == 'video_ocr' for a in actions))
+        if ((raw.get('scope') != wanted and not difficulty_trial) or not raw.get('scope_verified')
                 or raw.get('region') != 'cn' or raw.get('target_region') != 'cn'
-                or raw.get('global_requirements') or raw.get('manual_actions')
+                or raw.get('global_requirements') or actions and not owned_trial
                 or len(names) != 5 or any(not isinstance(n, str) or not n or n.startswith('unit:') for n in names)
                 or len(set(map(normalized, names))) != 5
                 or any(type(f.get('value')) is not bool or not f.get('evidence') or f.get('conflicts') for f in flags)
@@ -361,7 +375,10 @@ def parties_for_target(report, options, *, allow_local_trials):
                        for k in ('level', 'rank', 'stars', 'skill_level', 'unique', 'unique2', 'unique_level', 'unique2_stars'))):
             continue
         missing = missing_fields(raw)
-        if not missing and not higher_trial:
+        live_trial = any(e.get('method') == 'combat_matches_live_target' for e in raw.get('scope_evidence', []))
+        if live_trial and not allow_local_trials:
+            continue
+        if not missing and not difficulty_trial and not live_trial and not owned_trial:
             candidate = to_event_party(raw)
         elif allow_local_trials:
             candidate = EventParty(raw['id']+'-trial', raw['source'],
@@ -375,9 +392,16 @@ def parties_for_target(report, options, *, allow_local_trials):
                 assumptions=missing, auto=raw['auto']['value'])
         else:
             continue
-        if higher_trial:
+        if difficulty_trial:
             candidate.assumptions.append('同一目标'+raw['scope']['difficulty']+'来源用于'+wanted['difficulty']+
                 '账号试打，保留来源难度'+('，首领先免费模拟再核验实战' if wanted['kind'] == 'boss' else ''))
-        candidate.damage_reference = dict(raw.get('damage_reference', {}))
+        if live_trial:
+            candidate.assumptions.append('来源战斗与实时目标的首领、等级和生命上限一致；先免费模拟核验')
+        if owned_trial:
+            candidate.assumptions.append('来源画面使用过借角；仅核验账号自有五人，免费模拟通过后才实战')
+        # A different difficulty has different HP and combat conditions. Its
+        # source damage cannot permit spending even when the team is intact.
+        candidate.damage_reference = ({} if difficulty_trial else
+                                      dict(raw.get('damage_reference', {})))
         result.append(candidate)
     return result

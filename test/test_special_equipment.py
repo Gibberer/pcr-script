@@ -5,10 +5,85 @@ import numpy as np
 
 from pcrscript.game_ui.screen import EventScreen, EventUIError, TextBox
 from pcrscript.game_ui.special_equipment import (auto_equip_special, occupied_slots,
-    preview_slots, SPECIAL_COLUMNS, SPECIAL_ROWS)
+    preview_slots, SPECIAL_COLUMNS, SPECIAL_ROWS, PRIORITY_OPTIONS, configure_auto_priorities,
+    selected_priority, validate_auto_priorities, cancel_special_equipment)
 
 
 class SpecialEquipmentTests(TestCase):
+    def test_equipment_navigation_closes_detail_and_swap_without_committing(self):
+        for title,y,button in (('道具详情',40,'关闭'),('特别装备替换确认',90,'关闭'),('选择装备',40,'取消')):
+            with self.subTest(title=title):
+                screen=EventScreen(np.full((540,960,3),240,np.uint8),[
+                    TextBox(title,1,[[400,y-10],[560,y-10],[560,y+10],[400,y+10]])])
+                ui=Mock()
+                self.assertTrue(cancel_special_equipment(ui,screen))
+                self.assertEqual(ui.expect_click.call_args.args[0],button)
+                self.assertEqual(ui.expect_click.call_count,1)
+
+    def test_priorities_reject_unknown_category_stat_and_types(self):
+        for value in (None, [], {'all': 'hp'}, {'armor': []}, {'armor': 'invented'}):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                validate_auto_priorities(value)
+
+    def test_priority_radio_needs_blue_center_not_outline_or_gray(self):
+        image = np.full((540,960,3), 240, np.uint8)
+        screen = EventScreen(image, [])
+        self.assertFalse(selected_priority(screen, (290,195)))
+        image[187:203,282:298]=(230,170,50)
+        self.assertTrue(selected_priority(screen, (290,195)))
+        image[187:203,282:298]=100
+        self.assertFalse(selected_priority(screen, (290,195)))
+
+    def priority_ui(self, *, visible=True, selected=True, readback=True):
+        state=dict(page='settings', value='稀有度', radio=False)
+        def capture():
+            image=np.full((540,960,3),240,np.uint8)
+            if state['page']=='settings':
+                labels=[('自动特别装备设定',480,40),('防具',345,284),(state['value'],580,284)]
+            else:
+                labels=[('优先属性值',480,40)]
+                if visible:
+                    labels.append(('魔法防御力',365,195))
+                if state['radio']:
+                    image[187:203,282:298]=(230,170,50)
+            return EventScreen(image,[TextBox(t,1,[[x-20,y-10],[x+20,y-10],[x+20,y+10],[x-20,y+10]])
+                                      for t,x,y in labels])
+        def wait(predicate, description, **kwargs):
+            s=capture()
+            if not predicate(s):
+                raise EventUIError(description+'超时')
+            return s
+        def click(target):
+            if isinstance(target,TextBox):
+                state['page']='picker'
+            else:
+                state['radio']=selected
+        def confirm(*args, **kwargs):
+            state.update(page='settings', value='魔法防御力' if readback else '稀有度')
+        ui=Mock(capture=capture, wait=wait, click=Mock(side_effect=click),
+                expect_click=Mock(side_effect=confirm))
+        return ui,capture()
+
+    def test_priority_changes_only_requested_field_and_verifies_readback(self):
+        ui,screen=self.priority_ui()
+        result=configure_auto_priorities(ui,screen,{'armor':'magic_defense'})
+        self.assertIsNotNone(result.find('魔法防御力',(480,264,690,304),exact=True))
+        self.assertEqual(ui.click.call_args_list[-1].args,((290,195),))
+        self.assertEqual(ui.expect_click.call_count,1)
+
+    def test_unknown_radio_or_readback_stops_before_settings_confirmation(self):
+        for options, confirmations in ((dict(visible=False),0),(dict(selected=False),0),(dict(readback=False),1)):
+            with self.subTest(options=options):
+                ui,screen=self.priority_ui(**options)
+                with self.assertRaises(EventUIError):
+                    configure_auto_priorities(ui,screen,{'armor':'magic_defense'})
+                self.assertEqual(ui.expect_click.call_count,confirmations)
+
+    def test_empty_priorities_preserve_saved_game_settings(self):
+        ui,screen=self.priority_ui()
+        self.assertIs(configure_auto_priorities(ui,screen,{}),screen)
+        ui.click.assert_not_called()
+
     def test_unrecognized_auto_selection_cancels_preview_before_raising(self):
         state = dict(page='formation')
         titles = dict(formation='队伍编组', panel='特别装备设定',

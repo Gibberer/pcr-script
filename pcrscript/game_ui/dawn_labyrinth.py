@@ -248,7 +248,17 @@ def read_held_passes(ui, screen: EventScreen) -> int | None:
 
 def departure_confirmation(screen: EventScreen) -> bool:
     return bool(screen.find('公会选择确认', (240, 0, 720, 75), exact=True)
-                and screen.find(r'将消耗1张迷宫通行证和.*美食殿堂.*一同出发', (170, 65, 800, 115)))
+                and (screen.find(r'将消耗1张迷宫通行证和.*美食殿堂.*一同出发', (170, 65, 800, 115))
+                     or unrewarded_departure_confirmation(screen)))
+
+
+def unrewarded_departure_confirmation(screen: EventScreen) -> bool:
+    """Identify the observed zero-pass preview without authorizing departure."""
+    header = screen.find('公会选择确认', (240, 0, 720, 75), exact=True)
+    guild = screen.find(r'美食殿堂.*一同出发', (170, 65, 800, 125))
+    warning = screen.find(r'由于未持有迷宫通行证.*无法获得报酬', (170, 360, 800, 450))
+    return bool(header and guild and warning
+                and min(header.score, guild.score, warning.score) >= .95)
 
 
 def invitation_animation(screen: EventScreen) -> bool:
@@ -686,7 +696,8 @@ def enemy_details_match(ui, screen: EventScreen, name, level, current, maximum):
 
 
 def departure_preview(ui, screen: EventScreen) -> tuple[int, int]:
-    if not departure_confirmation(screen) or not screen.find('持有迷宫通行证', (260, 405, 485, 445)):
+    if (not departure_confirmation(screen) or unrewarded_departure_confirmation(screen)
+            or not screen.find('持有迷宫通行证', (260, 405, 485, 445))):
         raise EventUIError('迷宫首通的公会或通行证消费确认无法核对')
     before = ui.number(screen, (530, 400, 586, 449))
     after = ui.number(screen, (659, 400, 723, 449))

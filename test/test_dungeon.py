@@ -289,7 +289,7 @@ class DungeonTests(TestCase):
 
     def test_character_search_input_failure_blocks_equipment_claim(self):
         ui=Mock()
-        ui.capture.return_value=frame(('重置',689,90))
+        ui.capture.return_value=frame(('角色一览',120,30),('重置',689,90))
         ui.driver.input.side_effect=subprocess.CalledProcessError(137,['adb'])
         with self.assertRaisesRegex(EventUIError,'后台角色搜索输入失败'):
             open_character_memory(ui,'测试角色')

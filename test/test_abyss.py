@@ -216,6 +216,26 @@ class AbyssTests(TestCase):
         self.assertEqual(formation.owned_candidates('fire'),['candidate-a','candidate-b'])
         formation.ui.assert_not_called()
 
+    def test_owned_attribute_scan_starts_at_top_and_visits_each_page_once(self):
+        formation=object.__new__(AbyssFormation)
+        position=[2];directions=[]
+        def capture():
+            s=screen(('队伍编组',480,40));s.image[:]=40+position[0]*30
+            return s
+        def scroll(s,roi,direction):
+            directions.append(direction)
+            if position[0] == (0 if direction < 0 else 2):return False
+            position[0]+=direction
+            return True
+        formation.ui=Mock(capture=capture,scrollbar=scroll)
+        formation.avatars=Mock(query=lambda pictures:['合成角色'+str(round((float(p.mean())-40)/30)) for p in pictures])
+        with patch('pcrscript.tasks.strategy_formation.candidate_card_rectangles',return_value=[(60,177,100,99)]):
+            self.assertEqual(formation.owned_candidates('water'),['合成角色0','合成角色1','合成角色2'])
+        self.assertEqual(directions,[-1,-1,-1,1,1,1])
+        formation.ui.swipe.assert_not_called()
+        self.assertEqual(formation.ui.save.call_count,3)
+
+
     def test_alternative_does_not_reaudit_same_unready_incoming_member(self):
         formation=object.__new__(AbyssFormation)
         formation.owned_candidates=lambda element:['替补']
@@ -652,7 +672,7 @@ class AbyssTests(TestCase):
             self.assertEqual(task.report['battles'][0]['formation']['build_basis'],
                              'local_trial_source_roster')
 
-    def test_source_selection_reaudits_replaced_saved_team(self):
+    def test_source_selection_audits_selected_team_without_inspecting_unrelated_saved_team(self):
         stage=AbyssStage('fire',5,4)
         source_names=['碧(工作服)','静流(情人节)','克莉丝提娜','矛依未','纯']
         saved_names=['涅妃=涅菈','凤凰','秋乃&咲恋','艾拉','纯']
@@ -667,17 +687,62 @@ class AbyssTests(TestCase):
         formation.avatars.query.return_value=[None]*5
         formation.occupied_slots=Mock(return_value=list(range(5)))
         formation.select=Mock(return_value=(True,{}))
-        formation.current_trial=Mock(side_effect=[trial(saved_names),trial(source_names)])
+        formation.current_trial=Mock(return_value=trial(source_names))
         source=dict(source='synthetic',names=source_names,instant=[True]*5,required_stars=[None]*5)
         party,audit=formation.source_trial(stage,source)
-        self.assertEqual(formation.current_trial.call_count,2)
+        self.assertEqual(formation.current_trial.call_count,1)
         self.assertEqual(audit['order'],source_names)
         self.assertEqual([m.name for m in party.members],source_names)
 
-        formation.current_trial=Mock(side_effect=[trial(saved_names),trial(saved_names)])
+        formation.current_trial=Mock(return_value=trial(saved_names))
         party,audit=formation.source_trial(stage,source)
         self.assertIsNone(party)
         self.assertIn('选队后的五人身份与来源不一致，未开战',audit['unready'])
+
+    def test_new_substitute_gets_one_equipment_recovery_and_full_reselection(self):
+        stage=AbyssStage('water',5,4)
+        original=['missing','b','c','d','e'];adapted=['replacement','b','c','d','e']
+        role=dict(kind=2,role=2,heal=False,tank=False,damage=3)
+        for recovered in (False,True):
+            with self.subTest(recovered=recovered):
+                formation=object.__new__(AbyssFormation)
+                formation.ui=Mock(capture=Mock(return_value=SimpleNamespace(image=np.zeros((540,960,3),np.uint8))))
+                formation.avatars=Mock(query=Mock(return_value=[None]*5))
+                formation.occupied_slots=Mock(return_value=list(range(5)))
+                formation.owned_candidates=Mock(return_value=['replacement'])
+                formation.recover_equipment=Mock()
+                unknown=dict(unready=[dict(character='replacement',reasons=['专武1开启状态未知'])])
+                formation.select_source_members=Mock(side_effect=[(False,unknown),(recovered,unknown)])
+                party=EventParty('synthetic','local',[MemberRequirement(n,1,1,5,False,False,True,0) for n in adapted])
+                formation.current_trial=Mock(return_value=(party,dict(order=adapted,
+                    observed=[dict(name=n,stars=5) for n in adapted])))
+                source=dict(source='synthetic',names=original.copy(),instant=[False]+[True]*4,required_stars=[None]*5)
+                with patch('pcrscript.tasks.strategy_formation.character_roles',return_value={'missing':role,'replacement':role}):
+                    selected,audit=formation.adapt_source(stage,source,['missing'])
+                formation.recover_equipment.assert_called_once_with(stage,adapted)
+                self.assertEqual(formation.select_source_members.call_count,2)
+                self.assertEqual(selected is not None,recovered)
+                if recovered:self.assertFalse(selected.members[0].instant)
+
+    def test_equipment_recovery_keeps_missing_versions_blocked_without_repeating_search(self):
+        formation=object.__new__(AbyssFormation)
+        formation.allow_substitutions=False
+        formation.ui=Mock(capture=Mock(return_value=SimpleNamespace(image=np.zeros((540,960,3),np.uint8))))
+        formation.avatars=Mock(query=Mock(return_value=[None]*5))
+        formation.occupied_slots=Mock(return_value=list(range(5)))
+        formation.select=Mock(side_effect=[(False,dict(unready=[
+            dict(character='missing',reasons=['未在搜索结果中确认该版本的角色']),
+            dict(character='held',reasons=['专武状态未知'])])),(True,dict(order=['held','c','d','e']))])
+        formation.current_trial=Mock()
+        formation.recover_equipment=Mock()
+        source=dict(source='synthetic',names=['missing','held','c','d','e'],
+                    instant=[True]*5,required_stars=[None]*5)
+        party,_=formation.source_trial(AbyssStage('water',5,4),source)
+        self.assertIsNone(party)
+        self.assertEqual([m.name for m in formation.select.call_args_list[1].args[0].members],
+                         ['held','c','d','e'])
+        formation.current_trial.assert_not_called()
+        formation.recover_equipment.assert_called_once_with(AbyssStage('water',5,4),['held','c','d','e'])
 
     def test_unready_or_disabled_trials_never_start(self):
         for enabled in (True,False):

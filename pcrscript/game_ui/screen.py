@@ -268,7 +268,10 @@ class EventUI:
         center = sum(bounds)//2
         body_roi = (max(0,x1-430), y1-15, x1-12, y2+24)
         before_text = normalized(screen.text(body_roi))
-        start = ((x1+x2)//2, bounds[1]-10)
+        # Near the lower end, dragging from the thumb's bottom leaves too
+        # little travel for Android to recognize a swipe. Its center retains
+        # room to reach the end of the verified track.
+        start = ((x1+x2)//2, center)
         end = (start[0], max(y1, min(y2-1, start[1]+direction*max(120, round((bounds[1]-bounds[0])*.8)))))
         convert = lambda p: (round(p[0]*self.width/960), round(p[1]*self.height/540))
         def changed(timeout):

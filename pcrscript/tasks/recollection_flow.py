@@ -8,6 +8,7 @@ import re
 
 from .base import BaseTask
 from ..game_ui import recollection as field
+from ..game_ui.abyss_subjugation import navigation_exit as subjugation_navigation_exit
 from ..game_ui.screen import EventUI, EventUIError
 from ..run_session import atomic_json, checkpoint, clock as time
 
@@ -24,16 +25,16 @@ def validate_options(options, *, first_clear=False):
     defaults = [('timeout', 3600 if first_clear else 600, 7200)]
     if first_clear:
         defaults += [('battle_timeout', 220, 600), ('max_battles', 30, 100),
-                     ('max_attempts_per_stage', 2, 5)]
+                     ('max_attempts_per_stage', 2, 5), ('max_source_batches', 3, 10)]
     else:
         defaults += [('max_sweeps', 9, 99)]
     for key, default, upper in defaults:
         number = value.setdefault(key, default)
         if type(number) is not int or not 1 <= number <= upper:
             raise ValueError(f'{section}.{key}必须是1到{upper}的整数')
-    flags = ('discover_sources', 'allow_local_trials', 'auto_equip') if first_clear else ('claim_rewards', 'sweep_dominion', 'preview_only')
+    flags = ('discover_sources', 'allow_local_trials', 'auto_equip', 'retry_failed_parties') if first_clear else ('claim_rewards', 'sweep_dominion', 'preview_only')
     for key in flags:
-        flag = value.setdefault(key, key not in ('allow_local_trials', 'auto_equip', 'preview_only'))
+        flag = value.setdefault(key, key not in ('allow_local_trials', 'auto_equip', 'retry_failed_parties', 'preview_only'))
         if type(flag) is not bool:
             raise ValueError(f'{section}.{key}必须为布尔值')
     areas = value.setdefault('areas', list(field.AREAS) if first_clear else ['kaiser', 'zen', 'miroku'])
@@ -47,6 +48,12 @@ def validate_options(options, *, first_clear=False):
     value['areas'] = areas
     if first_clear:
         from .strategy_inputs import validate_urls
+        from ..game_ui.special_equipment import validate_auto_priorities
+        from .role_mastery_preparation import validate_mastery_preparation
+        value['mastery_preparation'] = validate_mastery_preparation(value.setdefault('mastery_preparation', {}))
+        value['auto_equip_priorities'] = validate_auto_priorities(value.setdefault('auto_equip_priorities', {}))
+        if value['auto_equip_priorities'] and not value['auto_equip']:
+            raise ValueError(section+'.auto_equip_priorities需要开启auto_equip')
         validate_urls(value.setdefault('source_urls', []))
         if not isinstance(value.setdefault('sources', {}), dict):
             raise ValueError(section+'.sources必须为配置对象')
@@ -112,6 +119,16 @@ class RecollectionTask(BaseTask):
     def settle_battle_result(self, screen):
         raise RecollectionBlocked('存在未结算首通战斗，请先运行追忆战场首通核对结果')
 
+    def settle_sweep_summary(self, screen):
+        summary = field.sweep_summary(screen)
+        plan = self.state.get('pending_sweep')
+        if (not summary or not plan or summary['quantity'] != plan['quantity']
+                or summary['stages'] != len(plan['targets'])):
+            raise RecollectionBlocked('扫荡汇总与待核对消费不符，未继续结算或再次扫荡')
+        plan['summary_receipt'] = str(self.ui.save('sweep_summary_receipt', screen))
+        self.save()
+        self.click(screen, '确认', (350, 440, 615, 525))
+
     def enter(self):
         for _ in range(30):
             s = self.capture()
@@ -119,11 +136,22 @@ class RecollectionTask(BaseTask):
                 return s
             if field.battle_result_button(s):
                 self.settle_battle_result(s)
+            elif field.sweep_summary(s):
+                self.settle_sweep_summary(s)
             elif field.receipt(s):
                 self.ui.save('resumed_receipt', s)
                 self.click(s, '确认|关闭|确定', (250, 430, 720, 525))
             elif field.bulk_confirmation(s) or field.bulk_catalogue(s) or field.difficulty_selector(s):
                 self.click(s, '取消|关闭', (250, 440, 615, 525))
+            elif (cancel := subjugation_navigation_exit(s)) is not None:
+                self.ui.click(cancel)
+            elif s.find('角色详情', (300, 0, 650, 70), exact=True):
+                self.click(s, '确认', (320, 450, 650, 515))
+            elif (s.find('优先属性值|自动特别装备设定|特别装备设定|选择装备|道具详情', (320, 15, 650, 65), exact=True)
+                  or s.find('特别装备替换确认', (320, 65, 650, 120), exact=True)):
+                from ..game_ui.special_equipment import cancel_special_equipment
+                if not cancel_special_equipment(self.ui, s):
+                    raise RecollectionBlocked('未能取消特别装备弹窗，未开战')
             elif s.find('队伍编组', (250, 0, 710, 80), exact=True):
                 self.click(s, '取消', (630, 410, 780, 500))
             elif field.detail_scope(s) or field.dominion_index(s):

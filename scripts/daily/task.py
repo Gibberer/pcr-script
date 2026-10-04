@@ -28,7 +28,9 @@ def main() -> None:
     if not isinstance(values, list):
         parser.error('--args 必须是 JSON 列表')
     with RunSession(args.task):
-        print_report(run_task_from_config(args.config, args.task, *values))
+        report = run_task_from_config(args.config, args.task, *values)
+    # Business partial/blocked exit codes are not uncaught game-run errors.
+    print_report(report)
 
 
 if __name__ == '__main__':

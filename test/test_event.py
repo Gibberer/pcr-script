@@ -20,7 +20,7 @@ from pcrscript.tasks.event_sweep import HardSweep
 from pcrscript.driver import DNDriver, ADBDriver
 from pcrscript.simulator import DNSimulator
 from pcrscript.tasks import CampaignClean, ClearCampaignFirstTime
-from pcrscript.game_ui.avatars import AvatarIndex, search_card_rectangles, face_crop
+from pcrscript.game_ui.avatars import AvatarIndex, search_card_rectangles, candidate_card_rectangles, face_crop
 from pcrscript.game_ui.equipment import EquipmentBadges
 
 FIXTURES = Path(__file__).parent / "fixtures/story_event"
@@ -418,6 +418,75 @@ class AvatarTests(TestCase):
             self.assertEqual([call.args[2] for call in formation.ui.scrollbar.call_args_list], [-1,1])
             formation.ui.read_region.assert_called_once_with(first,(570,322,785,358),classify=False)
 
+    def test_skill_scroll_near_bottom_has_enough_travel_and_confirms_true_end(self):
+        roi=(903,190,912,424)
+        initial=frame(('角色详情',480,42),('合成技能甲',650,225))
+        after=frame(('角色详情',480,42),('合成技能乙',650,225))
+        colour=cv.cvtColor(np.uint8([[[105,160,240]]]),cv.COLOR_HSV2BGR)[0,0]
+        initial.image[334:408,903:912]=colour
+        after.image[350:424,903:912]=colour
+        driver=Mock(supports_scrollbar_fallback=True)
+        ui=EventUI(driver);ui.width,ui.height=960,540;ui.capture=Mock(return_value=after)
+        with patch('pcrscript.game_ui.screen.time.monotonic',return_value=0), \
+             patch('pcrscript.game_ui.screen.time.sleep'):
+            self.assertTrue(ui.scrollbar(initial,roi,1))
+        start,end,_=driver.swipe.call_args.args
+        self.assertGreater(end[1]-start[1],40)
+        self.assertFalse(ui.scrollbar(after,roi,1))
+        self.assertEqual(driver.swipe.call_count,1)
+
+    def test_recollection_known_avatar_still_requires_a_current_skill_audit(self):
+        from pcrscript.tasks.recollection_strategy import RecollectionFormation
+        detail=frame(('角色详情',480,42),('合成角色',540,80),('355',560,115),('38',790,115),('技能',704,150))
+        skills=frame(('连结爆发',650,180),('合成爆发',650,205),('等级',815,205),('355',870,205),
+                     ('技能',638,265),('合成技能一',650,290),('等级',815,290),('355',870,290),
+                     ('技能',638,350),('合成技能二',650,375),('等级',815,375),('355',870,375))
+        with TemporaryDirectory() as root:
+            formation=RecollectionFormation.__new__(RecollectionFormation)
+            formation.observed={};formation.unreleased={}
+            formation.ui=Mock(output=Path(root),capture=Mock(side_effect=[detail,skills,skills,skills]))
+            formation.ui.save.return_value=Path(root)/'evidence.png'
+            formation.ui.wait.side_effect=lambda predicate,description,**kwargs: detail if description=='角色详情' else skills if description=='角色技能列表' else frame(('队伍编组',480,42))
+            formation.avatars=Mock(query=Mock(return_value=['合成角色']))
+            formation.badges=Mock(observe=Mock(return_value=((True,False),detail)))
+            variant=dict(main_skill_1='合成技能一',main_skill_2='合成技能二')
+            with patch('pcrscript.tasks.event_formation.count_stars',return_value=5), \
+                 patch('pcrscript.tasks.event_formation.skill_names',return_value=variant), \
+                 patch('pcrscript.tasks.event_strategy.costume_skills',return_value={'合成角色':variant}):
+                actual=formation.inspect((96,452),rectangle=(48,405,96,96),expected_name='合成角色',verify_skills=False)
+                self.assertTrue(actual.identity_verified)
+                self.assertEqual(actual.skill_level,355)
+                formation.ui.click.assert_called_once_with(detail.find('技能'))
+                formation.ui.click.reset_mock()
+                formation.ui.capture.side_effect=[detail]
+                again=formation.inspect((96,452),rectangle=(48,405,96,96),expected_name='合成角色',verify_skills=False)
+            self.assertEqual(again.skill_level,355)
+            formation.ui.click.assert_not_called()
+
+    def test_requested_costume_cannot_relabel_another_costumes_verified_skills(self):
+        detail=frame(('角色详情',480,42),('合成角色',540,80),('355',560,115),('38',790,115),('技能',704,150))
+        skills=frame(('连结爆发',650,180),('合成爆发',650,205),('等级',815,205),('355',870,205),
+                     ('技能',638,265),('冬日技能一',650,290),('等级',815,290),('355',870,290),
+                     ('技能',638,350),('冬日技能二',650,375),('等级',815,375),('355',870,375))
+        with TemporaryDirectory() as root:
+            formation=EventFormation.__new__(EventFormation)
+            formation.infer_costume_from_skills=True;formation.observed={}
+            formation.ui=Mock(output=Path(root),capture=Mock(side_effect=[detail,skills,skills,skills]))
+            formation.ui.save.return_value=Path(root)/'evidence.png'
+            formation.ui.wait.side_effect=lambda predicate,description,**kwargs: detail if description=='角色详情' else skills if description=='角色技能列表' else frame(('队伍编组',480,42))
+            formation.avatars=Mock(query=Mock(return_value=['合成角色(冬日)']))
+            formation.badges=Mock(observe=Mock(return_value=((True,False),detail)))
+            variants={'合成角色(冬日)':dict(main_skill_1='冬日技能一',main_skill_2='冬日技能二'),
+                      '合成角色(夏日)':dict(main_skill_1='夏日技能一',main_skill_2='夏日技能二')}
+            with patch('pcrscript.tasks.event_formation.count_stars',return_value=5), \
+                 patch('pcrscript.tasks.event_formation.skill_names',return_value=variants['合成角色(夏日)']), \
+                 patch('pcrscript.tasks.event_strategy.costume_skills',return_value=variants):
+                actual=formation.inspect((96,452),rectangle=(48,405,96,96),expected_name='合成角色(夏日)',verify_skills=False)
+            self.assertEqual(actual.name,'合成角色(冬日)')
+            self.assertTrue(actual.identity_verified)
+            self.assertNotIn('合成角色(夏日)',formation.observed)
+            self.assertTrue(readiness(MemberRequirement('合成角色(夏日)',1,1,1),actual))
+
     def test_selection_waits_for_delayed_search_reset_before_reusing_cards(self):
         formation = EventFormation.__new__(EventFormation)
         formation.ui = Mock()
@@ -546,6 +615,38 @@ class AvatarTests(TestCase):
         self.assertTrue(ready)
         formation.ui.driver.input.assert_called_once_with('纯')
 
+    def test_search_observes_delayed_reset_and_new_focus_before_input(self):
+        from pcrscript.game_ui.character_search import search_character
+        ui=Mock()
+        state=dict(query='旧查询',reset=False,polls=0,focused=False,focus_observed=False)
+        def capture(**kwargs):
+            if state['reset']:
+                state['polls']+=1
+                if state['polls']>=2:
+                    state.update(query='',reset=False)
+            if state['focused']:
+                state['focus_observed']=True
+            return frame(('队伍编组',480,42),('重置',690,135),
+                         (state['query'] or '用角色名搜索',470,135))
+        def click(position,**kwargs):
+            if position==(691,135):state['reset']=True
+            if position==(480,136):state['focused']=True
+        def wait(predicate,*args,**kwargs):
+            for _ in range(3):
+                screen=capture()
+                if predicate(screen):return screen
+            self.fail('reset did not settle')
+        def input_text(value):
+            self.assertFalse(state['reset'])
+            self.assertEqual(state['query'],'')
+            self.assertTrue(state['focus_observed'])
+            state['query']=value
+        ui.capture.side_effect=capture;ui.click.side_effect=click
+        ui.wait.side_effect=wait;ui.driver.input.side_effect=input_text
+        with patch('pcrscript.game_ui.character_search.time.sleep'):
+            search_character(ui,'纯')
+        ui.driver.input.assert_called_once_with('纯')
+
     def test_failed_background_search_resets_field_and_stops_safely(self):
         formation = EventFormation.__new__(EventFormation)
         formation.ui = Mock()
@@ -600,6 +701,8 @@ class AvatarTests(TestCase):
         self.assertEqual(field('干歌').text((300, 110, 640, 165)), '')
         self.assertTrue(search_text_confirmed('千歌', field('干歌')))
         self.assertTrue(search_text_confirmed('千爱瑠', field('干爱瑠')))
+        self.assertTrue(search_text_confirmed('菈比莉斯塔', field('莅比莉斯塔'), exact=True))
+        self.assertFalse(search_text_confirmed('菈比莉斯塔', field('莉比莉斯塔'), exact=True))
         self.assertFalse(search_text_confirmed('千歌', field('干爱瑠')))
         self.assertFalse(search_text_confirmed('怜', field('干歌')))
         self.assertFalse(search_text_confirmed('千歌', field('干歌', score=.7)))
@@ -610,6 +713,18 @@ class AvatarTests(TestCase):
             image = np.zeros((540, 960, 3), np.uint8)
             image[170:285, 40:905] = cv.imread(str(FIXTURES/f"search_{number}_crop.png"))
             self.assertEqual(len(search_card_rectangles(image)), count)
+
+    def test_formation_scan_recovers_occupied_cards_with_broken_outlines(self):
+        image=np.full((540,960,3),230,np.uint8)
+        image[194:263,707:781]=(180,40,80)
+        anchors=[(58,176,103,103),(269,176,103,103),(58,178,98,99)]
+        with patch('pcrscript.game_ui.avatars.card_rectangles',return_value=anchors):
+            result=candidate_card_rectangles(image)
+        self.assertIn((695,178,100,99),result)
+        self.assertTrue(all(r in result for r in anchors))
+        self.assertEqual(sum(r==(695,178,100,99) for r in result),1)
+        with patch('pcrscript.game_ui.avatars.card_rectangles',return_value=[]):
+            self.assertEqual(candidate_card_rectangles(image),[])
 
     def test_incremental_identity_and_unknown_rejection(self):
         rng = np.random.default_rng(3)
@@ -742,6 +857,23 @@ class WorkflowTests(TestCase):
         with patch('pcrscript.tasks.event_battle.time.sleep'):
             self.assertTrue(combat.configure_paused(party, [m.name for m in members]))
         combat.ui.click.assert_called_once_with((480,358))
+
+    def test_initial_menu_observation_is_used_before_another_capture(self):
+        combat = EventCombat.__new__(EventCombat)
+        initial = frame(('菜单',900,25))
+        panel = frame(('进行中战斗',480,45),('主菜单',480,85),('返回',335,438))
+        combat.ui = Mock()
+        combat.ui.capture.return_value = panel
+        combat.ui.wait.return_value = frame(('AUTO开启',480,355))
+        combat.r = SimpleNamespace(check_deadline=Mock(),story_dialog=Mock(return_value=False))
+        combat.match = Mock(return_value=None)
+        def click(button, **kwargs):
+            self.assertEqual(button.text, '菜单')
+            combat.ui.capture.assert_not_called()
+        combat.ui.click.side_effect = click
+        with patch('pcrscript.tasks.event_battle.time.sleep'):
+            self.assertTrue(combat.configure_paused(None,None,screen=initial))
+        combat.ui.click.assert_called_once()
 
     def test_pause_retries_ignored_menu_tap_before_settings(self):
         combat = EventCombat.__new__(EventCombat)

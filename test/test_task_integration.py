@@ -14,6 +14,42 @@ from pcrscript.runtime import run_task_from_config
 
 
 class TaskIntegrationTests(TestCase):
+    def test_single_cli_business_exit_is_outside_run_session(self):
+        from contextlib import redirect_stdout
+        from io import StringIO
+        from scripts.daily import task as task_cli
+        for status in ('partial','blocked','error'):
+            with self.subTest(status=status),TemporaryDirectory() as root:
+                sessions=[]
+                def session(name):
+                    value=RunSession(name,root=root);sessions.append(value);return value
+                with patch.object(task_cli,'RunSession',side_effect=session), \
+                     patch.object(task_cli,'run_task_from_config',return_value=dict(status=status)), \
+                     patch('sys.argv',['task.py','caravan','--config','synthetic.yml']), \
+                     redirect_stdout(StringIO()),self.assertRaises(SystemExit) as exit:
+                    task_cli.main()
+                self.assertEqual(exit.exception.code,2)
+                snapshot=json.loads((sessions[0].path/'status.json').read_text())
+                self.assertEqual((snapshot['state'],snapshot['errors']),('finished',0))
+                self.assertFalse(list(sessions[0].path.glob('incident-*')))
+
+    def test_single_cli_real_error_keeps_run_diagnostics(self):
+        from contextlib import redirect_stdout
+        from io import StringIO
+        from scripts.daily import task as task_cli
+        with TemporaryDirectory() as root:
+            sessions=[]
+            def session(name):
+                value=RunSession(name,root=root);sessions.append(value);return value
+            with patch.object(task_cli,'RunSession',side_effect=session), \
+                 patch.object(task_cli,'run_task_from_config',side_effect=RuntimeError('synthetic failure')), \
+                 patch('sys.argv',['task.py','caravan','--config','synthetic.yml']), \
+                 redirect_stdout(StringIO()),self.assertRaises(RuntimeError):
+                task_cli.main()
+            snapshot=json.loads((sessions[0].path/'status.json').read_text())
+            self.assertEqual((snapshot['state'],snapshot['errors']),('failed',1))
+            self.assertTrue(list(sessions[0].path.glob('incident-*')))
+
     def robot(self):
         return Robot(Mock(get_screen_size=Mock(return_value=(960, 540))), show_progress=False)
 

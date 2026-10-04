@@ -44,6 +44,24 @@ def boss_detail(s):
                 and s.find('实战', (810, 85, 920, 135), exact=True))
 
 
+def detail_cancel(s):
+    """Known navigation-only exit; never act through a confirmation overlay."""
+    if (not (boss_detail(s) or outpost_detail(s))
+            or s.find('确认|关闭|扫荡券确认|队伍编组|主菜单', exact=True)):
+        return None
+    cancel = s.find('取消', (580, 430, 755, 510), exact=True)
+    challenge = s.find('挑战', (765, 430, 925, 510), exact=True)
+    return cancel if cancel and challenge and min(cancel.score, challenge.score) >= .95 else None
+
+
+def navigation_exit(s):
+    """Leave a known selector or unstarted detail before entering another task."""
+    if boss_selector(s):
+        close = s.find('关闭', (365, 450, 600, 510), exact=True)
+        return close if close.score >= .95 else None
+    return detail_cancel(s)
+
+
 def difficulty(s, ui=None):
     roi = (185, 30, 310, 75) if outpost_detail(s) else (150, 30, 285, 75)
     names = DIFFICULTIES if outpost_detail(s) else BOSS_DIFFICULTIES
@@ -195,6 +213,48 @@ def boss_name(s):
     return match[1] if match else None
 
 
+def boss_signature(ui, s):
+    if not boss_detail(s):
+        return None
+    # Multi-part boss names push the separately recognized level beyond the
+    # short-name area. Both labels still belong to the same fixed info row.
+    labels = s.all('.+', (275, 217, 690, 249))
+    def identity(rows):
+        rows = [t for t in rows if normalized(t.text) != '弱点']
+        if not rows or any(t.score < .95 for t in rows):
+            return None
+        text = normalized(''.join(t.text for t in sorted(rows, key=lambda t: t.center[0])))
+        return re.fullmatch(r'(.{2,30}?)(?:等级[.．:：]?|Lv\.?)([1-9]\d*)', text, re.I)
+    match = identity(labels)
+    if match is None:
+        local = ui.read_region(s, (275, 215, 690, 253), classify=False)
+        match = identity(local.all('.+', (275, 217, 690, 249)))
+    resolved = (match[1], int(match[2])) if match else None
+    if resolved is None:
+        rows = [t for t in labels if normalized(t.text) != '弱点']
+        levels = [(t, re.fullmatch(r'(?:等级[.．:：]?|Lv\.?)([1-9]\d*)',
+                                  normalized(t.text), re.I)) for t in rows]
+        levels = [(t, m) for t, m in levels if m]
+        names = [t for t in rows if not any(t is level for level, _ in levels)]
+        if len(names) == len(levels) == 1 and names[0].score >= .95:
+            name, (level, value) = names[0], levels[0]
+            nx = max(p[0] for p in name.box)
+            x1, x2 = min(p[0] for p in level.box), max(p[0] for p in level.box)
+            y1, y2 = min(p[1] for p in level.box), max(p[1] for p in level.box)
+            if abs(name.center[1]-level.center[1]) <= 10 and 0 <= x1-nx <= 40:
+                # A combined label can have an uncertain separator while its
+                # numeric suffix is clear. Independently confirm those digits
+                # at high confidence; agreement with the original is required.
+                roi = (round(x2-(x2-x1)*.4), round(y1+1), round(x2), round(y2-1))
+                number = int(value[1]) if level.score >= .95 else ui.number(s, roi)
+                if number == int(value[1]):
+                    resolved = normalized(name.text), number
+    health = boss_health(ui, s)
+    if not resolved or health is None:
+        return None
+    return dict(boss=resolved[0], level=resolved[1], maximum_hp=health[1])
+
+
 def cleared_boss(ui, s):
     damage = ui.number(s, (815, 319, 923, 347))
     if damage is not None and damage > 0:
@@ -244,7 +304,21 @@ def sweep_cost(ui, s, label):
     if row is None or row.score < .95:
         return None
     y = row.center[1]
-    return ui.number(s, (432, y-15, 484, y+15))
+    value = ui.number(s, (432, y-15, 484, y+15))
+    if value is not None:
+        return value
+    # The dotted row divider lowers recognition confidence for a thin "1".
+    # A tighter crop is safe only when the full field contains one thin glyph;
+    # otherwise cropping could discard a leading digit from a larger cost.
+    patch = cv.cvtColor(s.image[y-15:y+15, 432:484], cv.COLOR_BGR2GRAY)
+    _, _, stats, _ = cv.connectedComponentsWithStats((patch < 140).astype(np.uint8))
+    glyphs = [stat for stat in stats[1:] if stat[4] >= 4]
+    if len(glyphs) != 1 or not (1 <= glyphs[0][2] <= 8 and 8 <= glyphs[0][3] <= 22):
+        return None
+    roi = (452, y-12, 479, y+12)
+    local = ui.read_region(s, roi, classify=False)
+    one = local.find('1', roi, exact=True)
+    return 1 if one is not None and one.score >= .95 else None
 
 
 def limited_shop(s):

@@ -75,7 +75,7 @@ class SubjugationFormation(StrategyFormation):
             self.pin_build = False
             self.strict_source = strict
 
-    def select_source_members(self, party):
+    def _select_source_party(self, party):
         # Source identity selection uses provisional requirements. Executable
         # parties always go through select(), which pins the audited build.
         return super().select(party)

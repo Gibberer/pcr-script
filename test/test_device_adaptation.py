@@ -20,6 +20,38 @@ from pcrscript.simulator import DNSimulator, GeneralSimulator
 
 
 class DeviceAdaptationTests(TestCase):
+    def test_invalid_handle_retry_keeps_the_same_configured_console(self):
+        path='C:/Program Files/synthetic'
+        error=subprocess.CalledProcessError(-1073741816,'list2')
+        with patch('pcrscript.leidian_console.subprocess.check_output',
+                   side_effect=[error,'0,private,101,102,1,7,8,960,540,240\n']) as query:
+            simulator=DNSimulator(path,useADB=False)
+            self.assertEqual(simulator.get_devices(),['0'])
+        self.assertEqual(query.call_count,2)
+        for invocation in query.call_args_list:
+            self.assertEqual(invocation.args[0],[os.path.join(path,'ldconsole.exe'),'list2'])
+            self.assertEqual(invocation.kwargs['stdin'],subprocess.DEVNULL)
+            self.assertEqual(invocation.kwargs['stderr'],subprocess.PIPE)
+
+    def test_permanent_list_error_and_zero_handles_do_not_trigger_retries(self):
+        for result in (subprocess.CalledProcessError(1,'list2'),
+                       subprocess.TimeoutExpired('list2',15),'0,private,0,0,0,-1,-1,960,540,240\n'):
+            with self.subTest(result=type(result).__name__), \
+                 patch('pcrscript.leidian_console.subprocess.check_output') as query:
+                if isinstance(result,Exception):query.side_effect=result
+                else:query.return_value=result
+                simulator=DNSimulator('C:/synthetic',useADB=False)
+                self.assertFalse(simulator.get_devices())
+                query.assert_called_once()
+
+    def test_persistent_invalid_handle_has_a_finite_read_only_budget(self):
+        error=subprocess.CalledProcessError(3221225480,'list2')
+        with patch('pcrscript.leidian_console.subprocess.check_output',side_effect=error) as query:
+            simulator=DNSimulator('C:/synthetic',useADB=False)
+            self.assertIsNone(simulator.get_devices())
+        self.assertEqual(query.call_count,3)
+        self.assertEqual(simulator.last_discovery['exit_code'],'0xC0000008')
+
     def test_zero_window_handles_are_context_evidence_not_a_closed_emulator(self):
         raw = '0,private window title,0,0,0,-1,-1,960,540,240\n'
         with patch('pcrscript.simulator.subprocess.check_output', return_value=raw), \
@@ -201,7 +233,9 @@ class DeviceAdaptationTests(TestCase):
                 driver.input('厄里斯')
             command.assert_called_once_with([str(console), 'action', '--index', '2',
                                              '--key', 'call.input', '--value', '厄里斯'],
-                                            check=True, timeout=15)
+                                            check=True, timeout=15,
+                                            stdin=subprocess.DEVNULL, capture_output=True,
+                                            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
 
     def test_adb_unicode_console_must_exist(self):
         with self.assertRaisesRegex(ValueError,'adb_unicode_console_path'):
