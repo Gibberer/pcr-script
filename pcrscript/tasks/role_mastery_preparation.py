@@ -123,24 +123,10 @@ def prepare_role_mastery(task, options):
                                               recover_unsubmitted=True)
         elif pending['kind']=='mastery_node':
             if screen.find('强化确认',(300,15,660,70),exact=True):
-                # A persisted submission must never be sent twice. Preserve
-                # an uncertain dialog rather than guessing whether it arrived.
-                if pending.get('submitted'):
-                    raise EventUIError('上次精通确认是否提交未知，保留记录，未重复确认')
-                ui.expect_click('取消',(265,440,480,520),exact=True)
-                screen = ui.wait(lambda s:mastery.role_page(s,pending['role']),'取消精通预览')
-                if mastery.node_state(screen,pending['role'],ui=ui) != pending['before']:
-                    raise EventUIError('取消精通预览后节点状态不一致')
-                task.state.pop('pending_mastery')
-                report['history'].append(dict(pending,outcome='cancelled_preview'))
-                task.save()
-            elif (pending.get('submitted') is False
+                mastery.cancel_mastery_confirmation(ui,pending,screen,observed=submitted,settled=settled)
+            elif ((pending.get('submitted') is False or pending.get('cancellation_requested') is True)
                     and mastery.node_state(screen,pending['role'],ui=ui) == pending['before']):
-                # The first journal write can precede opening the preview.
-                # An unchanged selected node with no submission is cancellable.
-                task.state.pop('pending_mastery')
-                report['history'].append(dict(pending,outcome='cancelled_preview'))
-                task.save()
+                mastery.reconcile_cancelled_mastery_node(ui,pending,screen,settled=settled)
             else:
                 mastery.reconcile_mastery_node(ui,pending,settled=settled)
         else:

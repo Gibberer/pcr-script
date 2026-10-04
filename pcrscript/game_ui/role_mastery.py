@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+from hashlib import sha256
 from uuid import uuid4
 
 from .screen import EventUIError, normalized, claimable_task_snapshot
@@ -277,6 +278,69 @@ def node_state(screen, role, *, ui=None):
                 action=normalized(action.text), enabled=screen.blue_button(action))
 
 
+def node_confirmation_snapshot(screen):
+    """Identify the original material preview, including quantities missed by OCR."""
+    if screen.find('正在进行数据连接|连接中|加载中'):
+        return None
+    controls = [screen.find(pattern,roi,exact=True) for pattern,roi in (
+        ('强化确认',(300,15,660,70)),
+        ('要消耗以下道具进行强化吗[?？]',(300,70,680,110)),
+        ('取消',(265,440,480,520)),('确认',(480,440,700,520)))]
+    materials = screen.all('.+',(255,115,705,435))
+    if (any(not item or item.score < .95 for item in controls)
+            or not screen.blue_button(controls[-1]) or not materials
+            or any(item.score < .95 for item in materials)
+            or not any(normalized(item.text) == '消耗道具' for item in materials)
+            or not any(re.fullmatch(r'Lv[1-9]\d*',normalized(item.text)) for item in materials)):
+        return None
+    # Icons and their consumption counts are part of the proof even when OCR
+    # sees only a material's level. Keep their exact pixels in a local digest.
+    digest = sha256(screen.image[115:435,255:705].tobytes()).hexdigest()
+    rows = [[normalized(item.text),*map(int,item.center)] for item in materials]
+    return dict(version=1,materials_digest=digest,rows=sorted(rows,key=lambda row:(row[2],row[1],row[0])))
+
+
+def reconcile_cancelled_mastery_node(ui, record, screen, *, settled):
+    """Observe an unchanged node after an interrupted or delivered cancellation."""
+    if (record.get('submitted') is not False
+            and (record.get('cancellation_requested') is not True
+                 or not isinstance(record.get('confirmation_view'),dict))):
+        raise EventUIError('精通取消恢复缺少原预览与取消记录，保留待核对消费')
+    for check in range(3):
+        if (screen.find('强化确认|正在进行数据连接|连接中|加载中')
+                or node_state(screen,record['role'],ui=ui) != record['before']):
+            raise EventUIError('取消精通预览后节点或材料不一致，保留待核对记录')
+        if check < 2:
+            time.sleep(.5)
+            screen = ui.capture()
+    resolved = dict(record,outcome='cancelled_preview',
+        recovery_evidence=str(ui.save('mastery_node_cancelled_'+uuid4().hex[:8],screen)))
+    settled(resolved)
+    return resolved
+
+
+def cancel_mastery_confirmation(ui, record, screen, *, observed, settled):
+    """Cancel a proven unchanged preview, then prove the node and stock unchanged."""
+    snapshot = node_confirmation_snapshot(screen)
+    saved = record.get('confirmation_view')
+    if snapshot is None or (record.get('submitted') is not False and saved != snapshot):
+        raise EventUIError('上次精通确认缺少原消耗预览或状态未知，保留记录，未重复确认')
+    if saved and saved != snapshot:
+        raise EventUIError('精通确认的消耗预览与原记录不一致，保留记录')
+    for _ in range(2):
+        time.sleep(.5)
+        if node_confirmation_snapshot(ui.capture()) != snapshot:
+            raise EventUIError('精通确认弹窗或消耗预览变化，保留记录，未取消或重放')
+    record = dict(record,confirmation_view=snapshot,cancellation_requested=True)
+    # Cancellation is also an input boundary. A restart after its delivery
+    # must be able to reconcile an unchanged node without waiting for a spend.
+    observed(record)
+    ui.expect_click('取消',(265,440,480,520),exact=True)
+    screen = ui.wait(lambda s:role_page(s,record['role'])
+        and not s.find('强化确认|正在进行数据连接|连接中|加载中'),'取消精通预览')
+    return reconcile_cancelled_mastery_node(ui,record,screen,settled=settled)
+
+
 def reinforce_mastery_node(ui, role, node, *, begin, submitted, settled):
     """Apply one audited node increment, journaling before both input steps."""
     if role not in ROLE_TABS or type(node) is not int or not 0 <= node < 4:
@@ -302,7 +366,12 @@ def reinforce_mastery_node(ui, role, node, *, begin, submitted, settled):
     button = confirmation.find('确认', (480,440,700,520), exact=True)
     if not button or button.score < .95 or not confirmation.blue_button(button):
         raise EventUIError('精通强化确认按钮未知，保留待核对记录')
+    snapshot = node_confirmation_snapshot(confirmation)
+    if snapshot is None:
+        raise EventUIError('精通强化消耗预览不完整，保留待核对记录，未确认')
+    record['confirmation_view'] = snapshot
     record['confirmation_evidence'] = str(ui.save('mastery_node_confirmation_'+tag,confirmation))
+    record['submitted'] = True
     submitted(record)
     ui.click(button)
     return reconcile_mastery_node(ui,record,settled=settled)

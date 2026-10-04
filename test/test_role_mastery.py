@@ -3,7 +3,7 @@ from unittest.mock import Mock, patch
 import numpy as np
 from pcrscript.game_ui.screen import EventScreen, EventUIError, TextBox
 from pcrscript.game_ui.role_mastery import integer_text, ticket_balance, draw_mastery_batch, reconcile_mastery_batch
-from pcrscript.game_ui.role_mastery import node_state, reinforce_mastery_node, ROLE_NODES, NODE_POINTS
+from pcrscript.game_ui.role_mastery import node_state, reinforce_mastery_node, ROLE_NODES, NODE_POINTS, node_confirmation_snapshot
 from pcrscript.game_ui.role_mastery import collect_mastery_rewards,reconcile_mastery_rewards,quest_claim_snapshot
 from pcrscript.tasks.role_mastery_preparation import validate_mastery_preparation, prepare_role_mastery
 
@@ -27,7 +27,8 @@ def node_screen(level=2,value='6%',target='7.5%(+1.5%)',action='升级',cost='20
 
 
 def confirmation():
-    labels=[('强化确认',480,42),('要消耗以下道具进行强化吗?',480,90),('确认',590,480)]
+    labels=[('强化确认',480,42),('要消耗以下道具进行强化吗?',480,90),
+            ('消耗道具',307,137),('Lv2',353,168),('20',370,214),('取消',370,480),('确认',590,480)]
     image=np.full((540,960,3),240,np.uint8);image[462:498,550:630]=(230,170,50)
     return EventScreen(image,[TextBox(t,1,[[x-20,y-10],[x+20,y-10],[x+20,y+10],[x-20,y+10]]) for t,x,y in labels])
 
@@ -36,7 +37,7 @@ class NodeDevice:
     """Synthetic UI boundary: four nodes, real preparation and ledger logic."""
     def __init__(self,task):
         self.task=task;self.levels=[2]*4;self.node=0;self.dialog=False
-        self.payments=[];self.interrupt=False;self.held='170'
+        self.payments=[];self.interrupt=False;self.held='170';self.cancellations=0
     def capture(self):
         if self.dialog:return confirmation()
         level=self.levels[self.node]
@@ -56,6 +57,10 @@ class NodeDevice:
                 raise RuntimeError('interrupted after submission')
         elif point in NODE_POINTS:self.node=NODE_POINTS.index(point)
     def expect_click(self,pattern,*args,**kwargs):
+        if pattern=='取消':
+            assert self.dialog
+            self.dialog=False;self.cancellations+=1
+            return
         assert pattern=='升级' and self.task.state['pending_mastery']
         self.dialog=True
     def read_region(self,screen,*args,**kwargs):return screen
@@ -480,6 +485,120 @@ class RoleMasteryTests(TestCase):
         self.assertIn('pending_mastery',task.state)
         self.assertTrue(task.ui.dialog)
         self.assertEqual(task.ui.payments,[])
+
+    def test_restart_recovers_node_interrupted_after_submission_journal_before_click(self):
+        import json
+        task=self.preparation_task()
+        options=validate_mastery_preparation({'roles':{'buff':3}})
+        persisted=[]
+        def save():
+            pending=task.state.get('pending_mastery',{})
+            if pending.get('submitted'):
+                persisted.append(json.loads(json.dumps(pending)))
+                raise RuntimeError('interrupted before confirmation click')
+        task.save.side_effect=save
+        with self.assertRaisesRegex(RuntimeError,'before confirmation click'):
+            prepare_role_mastery(task,options)
+        self.assertTrue(task.ui.dialog)
+        self.assertEqual(task.ui.payments,[])
+        restarted=self.preparation_task()
+        restarted.state['pending_mastery']=persisted[0]
+        restarted.ui.dialog=True;restarted.ui.node=persisted[0]['node']
+        with patch('pcrscript.game_ui.role_mastery.time.sleep'):
+            report=prepare_role_mastery(restarted,validate_mastery_preparation({}))
+        self.assertNotIn('pending_mastery',restarted.state)
+        self.assertEqual(report['history'][0]['outcome'],'cancelled_preview')
+        self.assertEqual(restarted.ui.cancellations,1)
+        self.assertEqual(restarted.ui.payments,[])
+        prepare_role_mastery(restarted,options)
+        self.assertEqual(restarted.ui.payments,[0,1,2,3])
+
+    def confirmed_node_task(self):
+        task=self.preparation_task()
+        task.state['pending_mastery']=dict(self.pending_node(),
+            confirmation_view=node_confirmation_snapshot(confirmation()))
+        task.ui.dialog=True;task.ui.node=2
+        return task
+
+    def test_changed_or_loading_node_confirmation_preserves_record_without_cancel(self):
+        changed=confirmation();changed.items[4].text='21'
+        icons=confirmation();icons.image[180:220,300:340]=(30,100,200)
+        loading=confirmation();loading.items.append(TextBox('正在进行数据连接',1,
+            [[400,290],[600,290],[600,310],[400,310]]))
+        disabled=confirmation();disabled.image[462:498,550:630]=170
+        for view in (changed,icons,loading,disabled):
+            with self.subTest(view=view.text()):
+                task=self.confirmed_node_task();task.ui.capture=Mock(return_value=view)
+                task.capture=task.ui.capture
+                with self.assertRaises(EventUIError),patch('pcrscript.game_ui.role_mastery.time.sleep'):
+                    prepare_role_mastery(task,validate_mastery_preparation({}))
+                self.assertIn('pending_mastery',task.state)
+                self.assertTrue(task.ui.dialog)
+                self.assertEqual((task.ui.cancellations,task.ui.payments),(0,[]))
+
+    def test_confirmation_must_remain_stable_across_fresh_captures_before_cancel(self):
+        task=self.confirmed_node_task();changed=confirmation();changed.items[4].text='21'
+        task.ui.capture=Mock(side_effect=[confirmation(),confirmation(),changed])
+        task.capture=task.ui.capture
+        with self.assertRaises(EventUIError),patch('pcrscript.game_ui.role_mastery.time.sleep'):
+            prepare_role_mastery(task,validate_mastery_preparation({}))
+        self.assertIn('pending_mastery',task.state)
+        self.assertEqual((task.ui.cancellations,task.ui.payments),(0,[]))
+
+    def test_cancellation_cannot_release_record_when_node_or_stock_has_changed(self):
+        for change in ('node','stock'):
+            with self.subTest(change=change):
+                task=self.confirmed_node_task()
+                if change=='node':task.ui.levels[2]=3
+                else:task.ui.held='169'
+                with self.assertRaises(EventUIError),patch('pcrscript.game_ui.role_mastery.time.sleep'):
+                    prepare_role_mastery(task,validate_mastery_preparation({}))
+                self.assertIn('pending_mastery',task.state)
+                self.assertFalse(task.ui.dialog)
+                self.assertEqual((task.ui.cancellations,task.ui.payments),(1,[]))
+
+    def test_unsubmitted_confirmation_can_cancel_without_saved_preview(self):
+        task=self.preparation_task();task.state['pending_mastery']=self.pending_node(submitted=False)
+        task.ui.dialog=True;task.ui.node=2
+        with patch('pcrscript.game_ui.role_mastery.time.sleep'):
+            report=prepare_role_mastery(task,validate_mastery_preparation({}))
+        self.assertEqual(report['history'][0]['outcome'],'cancelled_preview')
+        self.assertNotIn('pending_mastery',task.state)
+        self.assertEqual((task.ui.cancellations,task.ui.payments),(1,[]))
+
+    def test_incomplete_confirmation_preview_is_not_submitted(self):
+        for index in (2,3,5):
+            view=confirmation();view.items[index].score=.94
+            ui=Mock(capture=Mock(return_value=node_screen()),wait=Mock(return_value=view))
+            submitted=Mock();settled=Mock()
+            with self.assertRaises(EventUIError):
+                reinforce_mastery_node(ui,'buff',0,begin=Mock(),submitted=submitted,settled=settled)
+            submitted.assert_not_called();settled.assert_not_called();ui.click.assert_not_called()
+
+    def test_restart_after_cancellation_delivery_reconciles_without_another_input(self):
+        from copy import deepcopy
+        task=self.confirmed_node_task();cancel=task.ui.expect_click
+        def interrupt(pattern,*args,**kwargs):
+            cancel(pattern,*args,**kwargs)
+            raise RuntimeError('interrupted after cancellation delivery')
+        task.ui.expect_click=interrupt
+        with self.assertRaisesRegex(RuntimeError,'cancellation delivery'),patch('pcrscript.game_ui.role_mastery.time.sleep'):
+            prepare_role_mastery(task,validate_mastery_preparation({}))
+        self.assertTrue(task.state['pending_mastery']['cancellation_requested'])
+        self.assertFalse(task.ui.dialog)
+        restarted=self.restarted_task(deepcopy(task.state['pending_mastery']))
+        with patch('pcrscript.tasks.task_home.ToHomePage.run'),patch('pcrscript.game_ui.role_mastery.time.sleep'):
+            report=prepare_role_mastery(restarted,validate_mastery_preparation({}))
+        self.assertNotIn('pending_mastery',restarted.state)
+        self.assertEqual(report['history'][0]['outcome'],'cancelled_preview')
+        self.assertEqual((restarted.ui.cancellations,restarted.ui.payments),(0,[]))
+
+    def test_cancellation_journal_failure_prevents_cancellation_input(self):
+        task=self.confirmed_node_task();task.save.side_effect=OSError('cannot save cancellation')
+        with self.assertRaises(OSError),patch('pcrscript.game_ui.role_mastery.time.sleep'):
+            prepare_role_mastery(task,validate_mastery_preparation({}))
+        self.assertTrue(task.ui.dialog)
+        self.assertEqual((task.ui.cancellations,task.ui.payments),(0,[]))
 
     def test_production_preparation_trains_four_nodes_then_repeat_spends_nothing(self):
         task=self.preparation_task();options=validate_mastery_preparation({'roles':{'buff':3}})
