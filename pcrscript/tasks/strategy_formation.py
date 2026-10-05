@@ -315,8 +315,6 @@ class StrategyFormation(EventFormation):
                     source['_known_missing'] = sorted(set(known_missing) | set(missing))
                     if self.recover_source_equipment(stage,source,[n for n in source['names'] if n not in missing]):
                         return self.source_trial(stage,source)
-                if self.allow_substitutions and missing and recover and not unresolved:
-                    return self.adapt_source(stage,source,missing)
                 # Equipment recovery is independent of a missing member.
                 if self.allow_substitutions and missing and not unresolved:
                     return self.adapt_source(stage,source,missing)
