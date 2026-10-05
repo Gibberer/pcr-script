@@ -260,8 +260,9 @@ class EventFormation:
         return actual
 
     def inspect_current(self, full: bool = True, expected_names: Sequence[str] = (), *, verify_skills: bool = True) -> list[CharacterStatus]:
+        """Inspect occupied slots; callers still validate the required roster."""
         results = []
-        for pos in self.slots:
+        for pos in self.occupied_slots(self.ui.capture(ocr=False)):
             rect = (pos[0]-48, self.slot_top, 96, 96)
             actual = self.inspect(pos, full=full, rectangle=rect, verify_skills=verify_skills)
             if not actual.identity_verified:

@@ -423,6 +423,7 @@ class AbyssTests(TestCase):
             self.assertTrue(actual.unique)
             # The final selected-slot verification must keep the same rule;
             # the shared base used to re-enable skill inspection here.
+            formation.occupied_slots = Mock(return_value=formation.slots)
             observed=formation.inspect_current(full=False)
             self.assertEqual(len(observed),5)
             self.assertTrue(all(a.identity_verified for a in observed))

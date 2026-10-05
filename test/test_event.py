@@ -600,6 +600,36 @@ class AvatarTests(TestCase):
         self.assertEqual([c.kwargs['expected_name'] for c in formation.inspect.call_args_list], names)
         formation.ui.driver.input.assert_called_once_with('合成角色')
 
+    def test_partial_source_selection_never_opens_empty_member_slots(self):
+        formation = EventFormation.__new__(EventFormation)
+        current = frame(('队伍编组',480,42), ('重置',690,135))
+        formation.ui = Mock(capture=Mock(return_value=current), wait=Mock(return_value=current))
+        formation.requires_declared_build = False
+        formation.search_rectangles = Mock(return_value=[(60,177,100,99)])
+        formation.avatars = Mock(query=Mock(return_value=[None]))
+        selected, inspected = [], []
+        formation.occupied_slots = lambda s: formation.slots[-len(selected):] if selected else []
+        def inspect(pos, **kwargs):
+            if pos in formation.slots:
+                occupied = formation.occupied_slots(current)
+                self.assertIn(pos, occupied, 'empty slots have no character detail')
+                name = selected[occupied.index(pos)]
+                inspected.append(name)
+            else:
+                name = kwargs['expected_name']
+            return SimpleNamespace(name=name, identity_verified=True)
+        formation.inspect = inspect
+        formation.member_readiness = Mock(return_value=[])
+        def search(ui, name, **kwargs):
+            formation.select_card = lambda pos: selected.append(name)
+            return current
+        names = ['合成角色甲', '合成角色乙', '合成角色丙']
+        with patch('pcrscript.tasks.event_formation.search_character', side_effect=search):
+            ready, details = formation.select(SimpleNamespace(members=[SimpleNamespace(name=n) for n in names]))
+        self.assertTrue(ready)
+        self.assertEqual(details['order'], names)
+        self.assertEqual(inspected, names)
+
     def test_search_waits_for_queued_input_before_defocusing(self):
         formation = EventFormation.__new__(EventFormation)
         formation.ui = Mock()
