@@ -797,6 +797,10 @@ class AbyssSubjugation(TimeLimitTask):
 
     def bosses(self):
         for difficulty in field.BOSS_DIFFICULTIES:
+            if difficulty == '极难' and not all(
+                    self.report['bosses'].get(str(i)+':'+d, {}).get('cleared') is True
+                    for i in range(3) for d in field.DIFFICULTIES):
+                raise SubjugationBlocked('普通、困难或高难尚未全部首通；优先补齐，暂不挑战极难')
             for index in range(3):
                 self.report_progress(f'首领{index+1} · {difficulty}首通核对')
                 try:

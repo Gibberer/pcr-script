@@ -673,6 +673,22 @@ class SubjugationTests(TestCase):
                     task.bosses()
                 self.assertEqual(task.clear_boss.call_count, 1)
 
+    def test_uncleared_high_tier_continues_other_high_bosses_but_defers_extreme(self):
+        game = Game()
+        game.outpost_clears = set(field.DIFFICULTIES)
+        game.attempts = dict.fromkeys(field.DIFFICULTIES, 0)
+        game.boss_clears = {(i, d) for i in range(3) for d in ('普通', '困难')} | {(0, '高难')}
+        game.tickets = 10
+        task = self.task(game)
+        task.source_parties = Mock(side_effect=lambda kind, boss='', *args, **kwargs:
+                                   [] if boss == '合成首领1' else [party()])
+        report = task.run(EVENT)
+        self.assertEqual([(h['index'], h['difficulty']) for h in report['history']], [(2, '高难')])
+        self.assertTrue(any('高难尚未全部首通' in reason for reason in report['pending']))
+        self.assertFalse(report['all_bosses_cleared'])
+        self.assertFalse(any(d == '极难' for _, d in game.boss_clears))
+        self.assertEqual(game.tickets, 9)
+
     def test_boss_entry_can_return_the_requested_detail_directly(self):
         game = Game()
         game.difficulty = '困难'

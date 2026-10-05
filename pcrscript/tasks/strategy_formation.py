@@ -285,21 +285,9 @@ class StrategyFormation(EventFormation):
             if len(checked[1].get('order',[]))==5:
                 identities=checked[1]['order']
             else:checked=None
-        if self.allow_substitutions and len(identities)==5 and None not in identities and set(identities)!=set(source['names']):
-            missing=list(set(source['names'])-set(identities))
-            incoming=list(set(identities)-set(source['names']))
-            if len(missing)==len(incoming)==1:
-                roles=character_roles()
-                old,new=roles.get(missing[0]),roles.get(incoming[0])
-                if old and new and all(old[key]==new[key] for key in ('kind','heal','tank')):
-                    if checked is None:checked=self.current_trial(stage)
-                    if set(checked[1].get('order',[]))==set(identities):
-                        index=source['names'].index(missing[0])
-                        source.setdefault('original_names',list(source['names']))
-                        source['names'][index]=incoming[0]
-                        source['required_stars'][index]=None
-                        source.setdefault('adaptations',[]).append(dict(missing=missing[0],replacement=incoming[0],
-                            reason='复用已保存的一名同属性、同攻击类型及生存职能替补，当前账号重新核验'))
+        # Returning from equipment inspection can restore an older saved team.
+        # Select the intended members; only a confirmed missing identity may
+        # trigger adapt_source(), never a mismatch with that saved team.
         candidate=EventParty('用户攻略成员 '+stage.title,source['source'],
                              [MemberRequirement(n,1,1,1,None,None,True,0) for n in source['names']])
         if None in identities or set(identities)!=set(source['names']):

@@ -708,20 +708,27 @@ class AbyssTests(TestCase):
             with self.subTest(recovered=recovered):
                 formation=object.__new__(AbyssFormation)
                 formation.ui=Mock(capture=Mock(return_value=SimpleNamespace(image=np.zeros((540,960,3),np.uint8))))
-                formation.avatars=Mock(query=Mock(return_value=[None]*5))
+                formation.avatars=Mock(query=Mock(side_effect=[[None]*5, ['old','b','c','d','e']]))
                 formation.occupied_slots=Mock(return_value=list(range(5)))
                 formation.owned_candidates=Mock(return_value=['replacement'])
                 formation.recover_equipment=Mock()
                 unknown=dict(unready=[dict(character='replacement',reasons=['专武1开启状态未知'])])
                 formation.select_source_members=Mock(side_effect=[(False,unknown),(recovered,unknown)])
-                party=EventParty('synthetic','local',[MemberRequirement(n,1,1,5,False,False,True,0) for n in adapted])
-                formation.current_trial=Mock(return_value=(party,dict(order=adapted,
-                    observed=[dict(name=n,stars=5) for n in adapted])))
+                def current_trial(stage):
+                    names = adapted if formation.select_source_members.call_count == 2 else ['old','b','c','d','e']
+                    party = EventParty('synthetic','local',[
+                        MemberRequirement(n,1,1,5,False,False,True,0) for n in names])
+                    return party,dict(order=names,observed=[dict(name=n,stars=5) for n in names])
+                formation.current_trial=Mock(side_effect=current_trial)
                 source=dict(source='synthetic',names=original.copy(),instant=[False]+[True]*4,required_stars=[None]*5)
-                with patch('pcrscript.tasks.strategy_formation.character_roles',return_value={'missing':role,'replacement':role}):
+                with patch('pcrscript.tasks.strategy_formation.character_roles',return_value={
+                        'missing':role,'replacement':role,'old':role}):
                     selected,audit=formation.adapt_source(stage,source,['missing'])
                 formation.recover_equipment.assert_called_once_with(stage,adapted)
                 self.assertEqual(formation.select_source_members.call_count,2)
+                self.assertEqual(source['names'],adapted)
+                self.assertEqual([(row['missing'],row['replacement']) for row in source['adaptations']],
+                                 [('missing','replacement')])
                 self.assertEqual(selected is not None,recovered)
                 if recovered:self.assertFalse(selected.members[0].instant)
 
