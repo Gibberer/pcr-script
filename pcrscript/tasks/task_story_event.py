@@ -11,6 +11,8 @@ import re
 from ..run_session import atomic_json, clock as time, failure
 
 from ..game_ui.screen import EventUI, EventUIError, normalized
+from ..game_ui.dawn_labyrinth import navigation_exit as maze_navigation_exit
+from ..game_ui.recollection import navigation_exit as recollection_navigation_exit
 
 
 @register("campaign_clean")
@@ -153,6 +155,9 @@ class CampaignClean(TimeLimitTask):
         for _ in range(90):
             self.check_deadline()
             s = self.ui.capture()
+            if (cancel := maze_navigation_exit(s) or recollection_navigation_exit(s)) is not None:
+                self.ui.click(cancel)
+                continue
             if self.entry_dialog(s):
                 continue
             if s.find("角色详情", (300, 0, 700, 70)):

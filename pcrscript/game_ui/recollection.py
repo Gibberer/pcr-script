@@ -51,6 +51,14 @@ def bulk_confirmation(s: EventScreen) -> bool:
                 and s.find('合计扫荡次数', (700, 335, 925, 400), exact=True))
 
 
+def navigation_exit(screen: EventScreen):
+    """Cancel a sweep selection; never dismiss a result receipt."""
+    if not (bulk_catalogue(screen) or bulk_confirmation(screen)):
+        return None
+    cancel = screen.find('取消', (250, 440, 470, 520), exact=True)
+    return cancel if cancel and cancel.score >= .95 else None
+
+
 def difficulty_selector(s: EventScreen) -> bool:
     ordinary = s.find('难度变更', (250, 0, 720, 80), exact=True)
     dominion = (s.find('取消', (250, 440, 470, 520), exact=True)
@@ -225,14 +233,23 @@ def receipt(s: EventScreen) -> bool:
                 and s.find('确认|关闭|确定', (250, 430, 720, 525), exact=True))
 
 
+def sweep_receipt(screen: EventScreen) -> bool:
+    """Identify the owning task behind a shared sweep-result dialog title."""
+    return bool(screen.find('扫荡结果', (300, 0, 660, 70), exact=True)
+                and screen.find('追忆的战场', (50, 65, 220, 330), exact=True))
+
+
 def sweep_summary(screen: EventScreen):
     title = screen.find('扫荡结果', (300, 0, 660, 70), exact=True)
-    quantity = screen.find(r'扫荡次数\d+次', (300, 65, 660, 115), exact=True)
+    # The count can be a separate OCR box from its label on the same row.
+    quantity = sorted(screen.all('.*', (300, 65, 660, 115)), key=lambda box: box.center[0])
+    quantity_text = ''.join(normalized(box.text) for box in quantity)
     defeats = screen.find(r'\d+只击破[!！]', (300, 95, 660, 165), exact=True)
     button = screen.find('确认', (350, 440, 615, 525), exact=True)
-    if not all(box and box.score >= .95 for box in (title, quantity, defeats, button)):
+    if (not 1 <= len(quantity) <= 2 or not re.fullmatch(r'扫荡次数\d+次', quantity_text)
+            or not all(box and box.score >= .95 for box in (title, *quantity, defeats, button))):
         return None
-    return dict(quantity=int(re.search(r'\d+', normalized(quantity.text))[0]),
+    return dict(quantity=int(re.search(r'\d+', quantity_text)[0]),
                 defeats=int(re.search(r'\d+', normalized(defeats.text))[0]))
 
 

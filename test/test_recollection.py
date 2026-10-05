@@ -436,6 +436,13 @@ class RecollectionTests(TestCase):
     def test_multiple_dominion_summary_settles_aggregate_executions_and_defeats(self):
         with TemporaryDirectory() as root:
             game=Game();game.native_sweep_summary=True
+            capture = game.capture
+            def split_summary(**kwargs):
+                value = capture(**kwargs)
+                if game.page == 'sweep_summary':
+                    value.items[1:2] = screen(('扫荡次数',453,92),('6次',545,93)).items
+                return value
+            game.capture = split_summary
             task=self.make_task(root,game,max_sweeps=6)
             report=task.run()
             self.assertEqual((report['status'],report['spent']),('complete',6),report)
@@ -506,6 +513,55 @@ class RecollectionTests(TestCase):
             self.assertTrue(field.home(task.enter()))
             self.assertEqual([call.args[0].text for call in task.ui.click.call_args_list],
                              ['取消','冒险','追忆的战场'])
+
+    def test_daily_entry_accepts_expedition_menu_but_preserves_battle_timer(self):
+        with TemporaryDirectory() as root:
+            task = self.make_task(root, Game())
+            task.ui = Mock(output=Path(root))
+            expedition = screen(('探险', 90, 30), ('菜单', 852, 53),
+                                ('冒险目的地', 95, 451), ('冒险', 538, 526))
+            ready = screen(('追忆的战场',160,30),('追忆战',210,375),('追忆战·霸',760,375))
+            task.ui.capture.side_effect = [expedition,
+                screen(('冒险',100,30),('追忆的战场',800,365)), ready]
+            self.assertIs(task.enter(), ready)
+            self.assertEqual([call.args[0].text for call in task.ui.click.call_args_list],
+                             ['冒险', '追忆的战场'])
+            for value in (screen(('菜单', 852, 53)),
+                          screen(*[(item.text, *item.center) for item in expedition.items], ('1:20',800,25))):
+                task.ui.click.reset_mock()
+                task.ui.capture.side_effect = [value]
+                with self.assertRaisesRegex(EventUIError, '未结算战斗'):
+                    task.enter()
+                task.ui.click.assert_not_called()
+
+    def test_entry_waits_for_adventure_cards_before_reporting_unavailable(self):
+        with TemporaryDirectory() as root:
+            task = self.make_task(root, Game())
+            task.ui = Mock(output=Path(root))
+            loading = screen(('冒险', 100, 30))
+            ready = screen(('追忆的战场',160,30),('追忆战',210,375),('追忆战·霸',760,375))
+            task.ui.capture.side_effect = [loading, loading,
+                screen(('冒险',100,30),('追忆的战场',800,365)), ready]
+            self.assertIs(task.enter(), ready)
+            task.ui.click.assert_called_once()
+            task.ui.click.reset_mock()
+            task.ui.capture.side_effect = [loading, loading, loading]
+            self.assertIsNone(task.enter())
+            task.ui.click.assert_not_called()
+
+    def test_daily_entry_leaves_maze_catalogue_before_opening_recollection(self):
+        from dawn_labyrinth_fixtures import catalogue, guild, home
+        with TemporaryDirectory() as root:
+            task = self.make_task(root, Game())
+            task.ui = Mock(output=Path(root))
+            maze_home = home()
+            maze_home.items.extend(screen(('冒险', 538, 526)).items)
+            ready = screen(('追忆的战场',160,30),('追忆战',210,375),('追忆战·霸',760,375))
+            task.ui.capture.side_effect = [catalogue(), guild(), maze_home,
+                screen(('冒险',100,30),('追忆的战场',800,365)), ready]
+            self.assertIs(task.enter(), ready)
+            self.assertEqual([getattr(call.args[0], 'text', call.args[0]) for call in task.ui.click.call_args_list],
+                             ['取消', (30, 30), '冒险', '追忆的战场'])
 
     def test_entry_closes_subjugation_selector_before_other_task_navigation(self):
         with TemporaryDirectory() as root:
@@ -1219,6 +1275,11 @@ class RecognitionAndStrategyTests(TestCase):
             uncertain=deepcopy(summary);uncertain.items[index].score=.94
             self.assertIsNone(field.sweep_summary(uncertain))
         self.assertIsNone(field.sweep_summary(screen(('扫荡结果',480,42),('确认',480,480))))
+        summary.items[1:2] = screen(('扫荡次数',453,92),('9次',545,93)).items
+        self.assertEqual(field.sweep_summary(summary),dict(quantity=9,defeats=1))
+        for index in (1,2):
+            uncertain = deepcopy(summary); uncertain.items[index].score = .94
+            self.assertIsNone(field.sweep_summary(uncertain))
 
     def test_sweep_stage_count_recovers_split_number_and_unit(self):
         confirmation=screen(('一键扫荡确认',480,42),

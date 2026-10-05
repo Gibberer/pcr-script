@@ -10,6 +10,7 @@ from .options import validated_options
 from .registry import register
 from ..game_ui import dawn_labyrinth as maze
 from ..game_ui.abyss_subjugation import navigation_exit as subjugation_navigation_exit
+from ..game_ui.recollection import navigation_exit as recollection_navigation_exit, sweep_receipt as recollection_receipt
 from ..game_ui.screen import EventUI, EventUIError, normalized
 from ..run_session import RunCancelled, ResumeUnsafe, atomic_json, clock as time, emit
 
@@ -92,6 +93,8 @@ class DawnLabyrinth(BaseTask):
     def enter(self):
         for _ in range(30):
             screen = self.capture()
+            if recollection_receipt(screen):
+                raise SweepBlocked('存在追忆战扫荡回执，请先运行追忆战核对；未记录为迷宫消费')
             if maze.mission_receipt(screen):
                 path = self.ui.save('missions_resumed_receipt', screen)
                 self.report.setdefault('resumed_mission_receipts', []).append(str(path))
@@ -118,7 +121,7 @@ class DawnLabyrinth(BaseTask):
                 continue
             if maze.home(screen):
                 return screen
-            if (cancel := subjugation_navigation_exit(screen)) is not None:
+            if (cancel := subjugation_navigation_exit(screen) or recollection_navigation_exit(screen)) is not None:
                 self.ui.click(cancel)
                 continue
             if maze.bulk_confirmation(screen) or maze.sweep_confirmation(screen):

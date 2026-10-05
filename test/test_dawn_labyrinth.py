@@ -20,6 +20,18 @@ from pcrscript.tasks import DawnLabyrinth
 
 
 class LabyrinthRecognitionTests(TestCase):
+    def test_navigation_leaves_only_uncovered_selection_pages(self):
+        self.assertEqual(maze.navigation_exit(catalogue()).text, '取消')
+        self.assertEqual(maze.navigation_exit(guild()), (30, 30))
+        covered = catalogue()
+        covered.items.extend(screen(('未知确认', 480, 270), ('确认', 590, 380)).items)
+        departure = guild()
+        departure.items.extend(screen(('取消', 370, 480), ('出发', 590, 480)).items)
+        for value in (covered, departure, bulk(), preview(), result(), home(),
+                      screen(('菜单', 900, 30), ('1:20', 800, 25))):
+            with self.subTest(labels=value.text()):
+                self.assertIsNone(maze.navigation_exit(value))
+
     def test_missions_require_the_maze_popup_tabs_and_footer(self):
         self.assertTrue(maze.missions_page(missions()))
         self.assertFalse(maze.missions_page(home()))
@@ -130,7 +142,8 @@ class LabyrinthRecognitionTests(TestCase):
 
     def test_catalogue_preview_requires_single_guild_cost_and_explicit_zero(self):
         ui = Mock(number=lambda value, roi: value.number(roi))
-        self.assertEqual(maze.catalogue_preview(ui, catalogue(3, 3)), (3, 0))
+        for balance in (1, 3, 99):
+            self.assertEqual(maze.catalogue_preview(ui, catalogue(balance, balance)), (balance, 0))
         self.assertEqual(maze.catalogue_preview(ui, catalogue(3, 1)), (3, 2))
         # Two selected guilds would cost twice the per-guild quantity.
         for value in (catalogue(6, 2, after=2), catalogue(selected=False),
@@ -185,6 +198,28 @@ class LabyrinthTaskTests(TaskReplayMixin, TestCase):
         self.assertEqual(report['status'], 'complete', report)
         self.assertEqual(self.clicks(), ['取消', '冒险', '黎明界迷宫'])
         self.assertEqual(report['spent'], 0)
+
+    def test_entry_leaves_recollection_sweep_preview_without_confirming_it(self):
+        from recollection_fixtures import sweep_selector
+        self.frames([sweep_selector(True), sweep_selector(), screen(('冒险',537,526)),
+                     screen(('冒险',100,30),('黎明界迷宫',800,365)), home(0)])
+        report = self.task.run()
+        self.assertEqual(report['status'], 'complete', report)
+        self.assertEqual(self.clicks(), ['取消', '取消', '冒险', '黎明界迷宫'])
+        self.assertEqual(report['spent'], 0)
+
+    def test_recollection_receipt_cannot_be_saved_as_pending_maze_spend(self):
+        pending = dict(before=1, after=0, cost=1, submitted=False, submission_tracked=True)
+        self.task.report['pending_spend'] = pending.copy()
+        self.task.save_report()
+        for content in (('9只击破！',480,136), ('获得了以下道具。',480,78)):
+            with self.subTest(content=content):
+                receipt = screen(('扫荡结果',480,42),('追忆的战场',115,113),
+                                 content,('确认',480,480))
+                report = self.restart([receipt])
+                self.assertEqual((report['status'],report['spent']),('partial',0),report)
+                self.assertEqual(report['pending_spend'],pending)
+                self.task.ui.click.assert_not_called()
 
     def test_subjugation_confirmation_overlay_is_preserved(self):
         self.frames([screen(('BOSS详情', 109, 52), ('模拟战', 748, 109), ('实战', 866, 109),

@@ -7,7 +7,9 @@ import cv2 as cv
 import numpy as np
 
 from pcrscript.actions import ClickAction, MatchAction
-from pcrscript.tasks.task_home import SkipLoginStamp
+from pcrscript.tasks.task_home import SkipLoginStamp, TaskPageNavigation
+from pcrscript.game_ui.screen import EventScreen, EventUIError
+from ui_fixtures import screen
 from pcrscript.templates import BooleanTemplate
 from pcrscript.runtime import run_script
 from pcrscript.tasks import EventNews, NormalGacha
@@ -53,6 +55,8 @@ class LoginStampTests(TestCase):
             modal_icon = cv.imread(f'images/{start}.png')
             modal[240:240+modal_icon.shape[0], 450:450+modal_icon.shape[1]] = modal_icon
         state = {'page': start, 'seen': [], 'elapsed': 0}
+        from dawn_labyrinth_fixtures import catalogue, guild, home as maze_home
+        recognized = {'maze_catalogue': catalogue(), 'maze_guild': guild(), 'maze_home': maze_home()}
         def monotonic():
             state['elapsed'] += 10 if start in ('loading', 'unknown') else 1
             return state['elapsed']
@@ -63,10 +67,21 @@ class LoginStampTests(TestCase):
                 state['page'] = 'title'
             page = state['page']
             state['seen'].append(page)
-            return home if page == 'home' else modal if page == start else blank
+            return (recognized[page].image if page in recognized else
+                    home if page == 'home' else modal if page == start else blank)
+        def observe(ui, image, **kwargs):
+            ui.height, ui.width = image.shape[:2]
+            ui.last = recognized.get(state['page'], EventScreen(image, []))
+            return ui.last
         def click(x, y):
             # Loading ignores input; the title's bottom-left menu cannot enter.
-            if state['page'] == 'title' and not (x < 200 and y > 460):
+            if state['page'] == 'maze_catalogue' and (x,y) == (584,477):
+                state['page'] = 'maze_guild'
+            elif state['page'] == 'maze_guild' and (x,y) == (30,30):
+                state['page'] = 'maze_home'
+            elif state['page'] == 'maze_home' and (x,y) == (90,500):
+                state['page'] = 'home'
+            elif state['page'] == 'title' and not (x < 200 and y > 460):
                 state['page'] = 'home'
             elif state['page'] == start and modal_icon is not None:
                 if 450 <= x < 450+modal_icon.shape[1] and 240 <= y < 240+modal_icon.shape[0]:
@@ -77,6 +92,7 @@ class LoginStampTests(TestCase):
             self.assertEqual(state['page'], 'home')
             self.assertGreaterEqual(state['seen'].count('home'), 3)
         with patch('pcrscript.runtime.select_driver', return_value=driver), \
+                patch('pcrscript.game_ui.screen.EventUI.observe', observe), \
                 patch('pcrscript.runtime.fetch_event_news', return_value=EventNews()), \
                 patch('pcrscript.run_session.clock.sleep'), \
                 patch('pcrscript.run_session.clock.monotonic', side_effect=monotonic), \
@@ -89,6 +105,28 @@ class LoginStampTests(TestCase):
                 run_script({'Task': {1: [['normal_gacha']]}})
                 consume.assert_called_once_with()
         return state['seen']
+
+    def test_daily_leaves_maze_selectors_before_confirming_home(self):
+        for start in ('maze_catalogue', 'maze_guild'):
+            with self.subTest(start=start):
+                seen = self._run_daily(start)
+                self.assertIn('maze_home', seen)
+                self.assertIn('home', seen)
+
+    def test_known_selector_uses_only_its_exit_and_battle_preserves_the_screen(self):
+        from dawn_labyrinth_fixtures import guild
+        fallback = Mock()
+        action = TaskPageNavigation(fallback)
+        action.ui = Mock(observe=Mock(return_value=guild()))
+        action.do(guild().image, Mock())
+        action.ui.click.assert_called_once_with((30,30))
+        fallback.bindTask.assert_not_called()
+        action.ui.observe.return_value = screen(('菜单',900,30),('1:20',800,25))
+        action.ui.click.reset_mock()
+        with self.assertRaisesRegex(EventUIError, '未结算战斗'):
+            action.do(guild().image, Mock())
+        action.ui.click.assert_not_called()
+        fallback.bindTask.assert_not_called()
 
     def test_daily_enters_from_loading_title_and_home_before_running_task(self):
         for start in ('loading', 'title', 'home'):

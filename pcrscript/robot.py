@@ -135,10 +135,11 @@ class Robot:
             time.sleep(3)
 
     def _first_enter_check(self, timeout=600):
+        from .tasks.task_home import TaskPageNavigation
         # Cold emulator/game startup can take several minutes; finish as soon
         # as home is confirmed instead of imposing a fixed startup sleep.
         pos = random.choice(((199, 300), (400, 300), (590, 300), (790, 300)))
-        action = MatchAction(ImageTemplate('shop', consecutive_hit=3), unmatch_actions=(
+        action = MatchAction(ImageTemplate('shop', consecutive_hit=3), unmatch_actions=[TaskPageNavigation(
             ClickAction(template = ImageTemplate('btn_close') | ImageTemplate('btn_close_2')
                         | ImageTemplate('btn_ok_blue')
                         | ImageTemplate('btn_download') | ImageTemplate('btn_skip')
@@ -152,7 +153,7 @@ class Robot:
                 SleepAction(2),
                 ClickAction(pos=(838, 494))
             ])
-        ), timeout=timeout)
+        )], timeout=timeout)
         self.__action_squential(action, net_error_check=False)
         if action.is_timeout:
             raise RuntimeError('未能在时限内进入游戏首页，任务未开始；请检查当前页面或弹窗')

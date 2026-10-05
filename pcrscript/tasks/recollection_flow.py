@@ -10,6 +10,7 @@ from .base import BaseTask
 from .options import validated_options
 from ..game_ui import recollection as field
 from ..game_ui.abyss_subjugation import navigation_exit as subjugation_navigation_exit
+from ..game_ui.dawn_labyrinth import navigation_exit as maze_navigation_exit
 from ..game_ui.screen import EventUI, EventUIError
 from ..run_session import atomic_json, checkpoint, clock as time
 
@@ -126,8 +127,11 @@ class RecollectionTask(BaseTask):
         self.click(screen, '确认', (350, 440, 615, 525))
 
     def enter(self):
+        missing_entry = 0
         for _ in range(30):
             s = self.capture()
+            if not s.find('冒险', (30, 0, 175, 65), exact=True):
+                missing_entry = 0
             if field.home(s):
                 return s
             if field.battle_result_button(s):
@@ -140,6 +144,8 @@ class RecollectionTask(BaseTask):
             elif field.bulk_confirmation(s) or field.bulk_catalogue(s) or field.difficulty_selector(s):
                 self.click(s, '取消|关闭', (250, 440, 615, 525))
             elif (cancel := subjugation_navigation_exit(s)) is not None:
+                self.ui.click(cancel)
+            elif (cancel := maze_navigation_exit(s)) is not None:
                 self.ui.click(cancel)
             elif s.find('角色详情', (300, 0, 650, 70), exact=True):
                 self.click(s, '确认', (320, 450, 650, 515))
@@ -157,9 +163,13 @@ class RecollectionTask(BaseTask):
             elif s.find('冒险', (30, 0, 175, 65), exact=True):
                 entry = s.find('追忆的战场', (100, 65, 950, 470), exact=True)
                 if not entry:
-                    return None
+                    missing_entry = 0 if s.find('正在进行数据连接|加载') else missing_entry + 1
+                    if missing_entry >= 3:
+                        return None
+                    time.sleep(.5)
+                    continue
                 self.ui.click(entry)
-            elif (s.find('菜单', (840, 0, 960, 60), exact=True)
+            elif ((s.find('菜单', (840, 0, 960, 60), exact=True) and not s.expedition_home)
                   or s.find(r'\d:\d{2}', (750, 0, 850, 55))):
                 raise RecollectionBlocked('存在未结算战斗；保留现场，不开始新挑战')
             elif s.find('日程表', (650, 390, 810, 475), exact=True) or s.find('出发', (500, 260, 690, 330), exact=True):

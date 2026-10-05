@@ -13,6 +13,35 @@ if TYPE_CHECKING:
 from .registry import register
 
 
+class TaskPageNavigation(Action):
+    """Exit known task selectors before applying the legacy home/login actions."""
+
+    def __init__(self, *fallback):
+        super().__init__()
+        self.fallback = fallback
+        self.ui = None
+
+    def do(self, screenshot, robot):
+        from ..game_ui.screen import EventUI, EventUIError
+        from ..game_ui.dawn_labyrinth import navigation_exit as maze_exit
+        from ..game_ui.recollection import navigation_exit as recollection_exit
+        from ..game_ui.abyss_subjugation import navigation_exit as subjugation_exit
+        if self.ui is None:
+            output = getattr(robot, '_task_output', None) or 'cache/daily/navigation'
+            self.ui = EventUI(robot.driver, output)
+        screen = self.ui.observe(screenshot)
+        target = maze_exit(screen) or recollection_exit(screen) or subjugation_exit(screen)
+        if target is not None:
+            self.ui.click(target)
+            return
+        if screen.find(r'\d:\d{2}', (750, 0, 850, 55)) and screen.find('菜单', (840, 0, 960, 65), exact=True):
+            raise EventUIError('存在未结算战斗，不能自动返回首页')
+        for action in self.fallback:
+            action.bindTask(self.task).do(screenshot, robot)
+            if isinstance(action, CanSkipMatchAction) and action.skip:
+                break
+
+
 class SkipLoginStamp(CanSkipMatchAction):
     """Skip the observed daily stamp board before ordinary home navigation."""
 
@@ -45,11 +74,11 @@ class ToHomePage(ImageTask):
     '''
 
     def run(self, click_pos=(90, 500), timeout=60):
-        action = MatchAction(ImageTemplate('shop', consecutive_hit=2), unmatch_actions=(
+        action = MatchAction(ImageTemplate('shop', consecutive_hit=2), unmatch_actions=[TaskPageNavigation(
             SkipLoginStamp(),
             ClickAction(ImageTemplate('btn_close') | ImageTemplate('btn_cancel') | ImageTemplate('btn_close_2')),
             ClickAction(pos=click_pos),
-        ), timeout=timeout)
+        )], timeout=timeout)
         self.action_squential(action, show_progress=False, net_error_check=False)
         if action.is_timeout:
             raise RuntimeError('未能在时限内返回首页，任务未开始；请检查当前页面或弹窗')

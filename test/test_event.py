@@ -134,6 +134,24 @@ class EventRecognitionTests(TestCase):
         ui._ocr = Mock(return_value=SimpleNamespace(txts=["1"], scores=np.array([.99])))
         self.assertEqual(ui.number(frame(), (775, 395, 840, 436)), 1)
 
+    def test_numeric_crop_keeps_upright_six_and_nine(self):
+        ui = EventUI.__new__(EventUI)
+        for value in (6, 9):
+            def recognize(image, *, use_cls, **kwargs):
+                return SimpleNamespace(txts=[str(15-value if use_cls else value)], scores=[.99])
+            ui._ocr = Mock(side_effect=recognize)
+            self.assertEqual(ui.number(frame(), (820, 365, 930, 410)), value)
+            self.assertFalse(ui._ocr.call_args.kwargs['use_cls'])
+
+    def test_low_confidence_digit_detection_retries_recognition_without_lowering_threshold(self):
+        ui = EventUI.__new__(EventUI)
+        for score, expected in ((.99, 1), (.90, None)):
+            ui._ocr = Mock(side_effect=[SimpleNamespace(txts=['1'],scores=[.89]),
+                                       SimpleNamespace(txts=['1'],scores=[score])]*2)
+            self.assertEqual(ui.number(frame(), (443,382,490,427)), expected)
+            self.assertFalse(ui._ocr.call_args.kwargs['use_det'])
+            self.assertFalse(ui._ocr.call_args.kwargs['use_cls'])
+
     def test_crop_does_not_guess_between_two_numeric_results(self):
         ui = EventUI.__new__(EventUI)
         ui._ocr = Mock(return_value=SimpleNamespace(txts=["1", "2"], scores=np.array([.99, .99])))
@@ -740,6 +758,29 @@ class AvatarTests(TestCase):
 
 
 class WorkflowTests(TestCase):
+    def test_entry_cancels_recollection_catalogue_with_its_own_layout(self):
+        from recollection_fixtures import sweep_selector
+        runner = CampaignClean.__new__(CampaignClean)
+        runner.check_deadline = Mock()
+        runner.ui = ReplayUI([sweep_selector(True), sweep_selector(),
+                             frame(('冒险', 538, 526)),
+                             frame(('主线关卡', 610, 200), ('剧情活动', 240, 330)),
+                             frame(('活动关卡·首领', 150, 30))])
+        self.assertTrue(runner.enter())
+        self.assertEqual(runner.ui.clicks, ['取消', '取消', '冒险', '剧情活动'])
+
+    def test_daily_entry_leaves_maze_selection_before_story_navigation(self):
+        from dawn_labyrinth_fixtures import catalogue, guild, home
+        maze_home = home()
+        maze_home.items.extend(frame(('冒险', 538, 526)).items)
+        ready = frame(('活动关卡·首领', 150, 30))
+        runner = CampaignClean.__new__(CampaignClean)
+        runner.check_deadline = Mock()
+        runner.ui = ReplayUI([catalogue(), guild(), maze_home,
+                             frame(('主线关卡', 610, 200), ('剧情活动', 240, 330)), ready])
+        self.assertTrue(runner.enter())
+        self.assertEqual(runner.ui.clicks, ['取消', (30, 30), '冒险', '剧情活动'])
+
     def test_cleared_story_memoir_and_mission_entries_never_open_pages(self):
         r = CampaignClean.__new__(CampaignClean)
         s = fixture("event_home")

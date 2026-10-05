@@ -456,6 +456,26 @@ class SubjugationTests(TestCase):
         task.ui.click.assert_called_once()
         self.assertEqual(task.ui.click.call_args.args[0].text, '取消')
 
+    def test_daily_entry_leaves_expedition_or_maze_before_subjugation(self):
+        from dawn_labyrinth_fixtures import catalogue, guild, home
+        expedition = screen(('探险',90,30),('菜单',852,53),
+                            ('冒险目的地',95,451),('冒险',538,526))
+        maze_home = home()
+        maze_home.items.extend(screen(('冒险',538,526)).items)
+        for pages, expected in (([expedition], ['冒险']),
+                                ([catalogue(),guild(),maze_home], ['取消',(30,30),'冒险'])):
+            with self.subTest(start=pages[0].text()):
+                game = Game()
+                game.page = 'home'
+                ready = game.capture()
+                task = self.task(game)
+                task.ui.capture = Mock(side_effect=[*pages,
+                    screen(('冒险',100,30),('深渊讨伐战',600,300)), ready])
+                task.ui.click = Mock()
+                self.assertIs(task.enter(), ready)
+                self.assertEqual([getattr(c.args[0],'text',c.args[0]) for c in task.ui.click.call_args_list],
+                                 [*expected,'深渊讨伐战'])
+
     def test_blue_challenge_with_negative_preview_collects_existing_stamina_then_finishes(self):
         game = Game()
         game.stamina = 25
