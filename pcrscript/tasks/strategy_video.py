@@ -23,7 +23,7 @@ from .strategy_document import Evidence, Fact, empty_member, finalize, export_do
 from .strategy_sources import BORROW_PART, MANUAL_PART, UNVERIFIED_SETTING, discover_sources, unparsed_switch_requirement
 from .strategy_inputs import declared_region, preferred_sources, source_statements
 
-PARSER_VERSION = 82
+PARSER_VERSION = 83
 FRAME_OCR_VERSION = 1
 COMBAT_AUDIT_SECONDS = 20
 RECOLLECTION_UNSUPPORTED = re.compile(
@@ -805,6 +805,9 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
             manual.append(dict(text=setting_text[:240], evidence=asdict(Evidence(
                 source['url'], int(pages[0]['cid']) if pages else 0,
                 method='source_title' if title_setting else 'source_description', text=setting_text[:240]))))
+    # These metadata constraints apply to every candidate in this source.
+    # Freeze them before page-specific conditions, which may belong to another plan.
+    blocked_source = bool(source_setting or options['task_type'] == 'subjugation' and globals_)
     for page in pages:
         check()
         page_name = page.get('part', page.get('title', ''))
@@ -821,9 +824,11 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
                 pages_report.append(dict(cid=page['cid'], title=page_name,
                                          skipped='标题要求手动操作、借角或未核实TP+2，自动任务不下载此分P'))
                 continue
-        if source_setting and options.get('skip_manual_media'):
+        if blocked_source and options.get('skip_manual_media'):
             pages_report.append(dict(cid=page['cid'], title=page_name,
-                                     skipped='来源声明手动、借角或未核实TP+2/大师点条件，自动任务不下载此分P'))
+                                     skipped=('来源声明手动、借角或未核实TP+2/大师点条件，自动任务不下载此分P'
+                                              if source_setting else
+                                              '来源声明尚未支持的培养或装备条件，自动任务不下载此分P')))
             continue
         page_duration = float(page.get('duration') or 0)
         if (options.get('skip_long_media') and page_duration > 0

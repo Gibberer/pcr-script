@@ -313,20 +313,39 @@ class SubjugationGuideTests(TestCase):
                     else:
                         self.assertEqual(actions, [])
 
-    def test_production_skips_media_for_manual_source_metadata(self):
+    def test_production_skips_media_for_unsupported_source_metadata(self):
         for field in ('title', 'description', 'author_comments'):
-            with self.subTest(field=field), TemporaryDirectory() as folder:
+            for condition in ('需要借角色', 'MP90', '特别装备五星要求'):
+                with self.subTest(field=field, condition=condition), TemporaryDirectory() as folder:
+                    options = source_options({}, EVENT, kind='boss', boss='合成首领', boss_number=2)
+                    options['parsed_dir'] = folder
+                    source = dict(bvid='BVSYNTHETIC', url='https://example.com/synthetic',
+                        title='公主连结 国服 合成深渊', pages=[dict(cid=1, part='Boss2', duration=4)])
+                    source[field] = [dict(text=condition, reply_id=12)] if field == 'author_comments' else condition
+                    index = SimpleNamespace(names=['合成角色'], matrix=np.ones((1,1728),np.float32))
+                    fetch = Mock(side_effect=AssertionError('Unsupported source must not download media'))
+                    report = parse_video_source(source, options, index, api=Mock(), ocr=Mock(), media_fetcher=fetch)
+                    self.assertEqual(report['parties'], [])
+                    self.assertTrue(report['manual_actions'] or report['global_requirements'])
+                    fetch.assert_not_called()
+
+    def test_metadata_prefilter_keeps_other_boss_and_analysis_sources_readable(self):
+        for condition, automatic, blocked in (('Boss1 MP90', True, False),
+                                               ('Boss2 MP90', True, True),
+                                               ('Boss2 MP90', False, False)):
+            with self.subTest(condition=condition, automatic=automatic), TemporaryDirectory() as folder:
                 options = source_options({}, EVENT, kind='boss', boss='合成首领', boss_number=2)
-                options['parsed_dir'] = folder
+                options.update(parsed_dir=folder, skip_manual_media=automatic)
                 source = dict(bvid='BVSYNTHETIC', url='https://example.com/synthetic',
-                    title='公主连结 国服 合成深渊', pages=[dict(cid=1, part='Boss2', duration=4)])
-                source[field] = [dict(text='需要借角色', reply_id=12)] if field == 'author_comments' else '需要借角色'
+                    title='公主连结 国服 合成深渊', author_comments=[dict(text=condition, reply_id=12)],
+                    pages=[dict(cid=1, part='Boss2', duration=4)])
                 index = SimpleNamespace(names=['合成角色'], matrix=np.ones((1,1728),np.float32))
-                fetch = Mock(side_effect=AssertionError('Unsupported source must not download media'))
+                fetch = Mock(side_effect=RuntimeError('synthetic media unavailable'))
                 report = parse_video_source(source, options, index, api=Mock(), ocr=Mock(), media_fetcher=fetch)
-                self.assertEqual(report['parties'], [])
-                self.assertTrue(report['manual_actions'])
-                fetch.assert_not_called()
+                self.assertEqual(fetch.call_count, int(not blocked))
+                self.assertEqual(bool(report['errors']), not blocked)
+                self.assertEqual(any(row['evidence']['method'] == 'source_requirements'
+                                     for row in report['global_requirements']), condition.startswith('Boss2'))
 
     def test_plain_auto_set_labels_do_not_turn_boss_names_into_switch_actions(self):
         for text in ('暗黑合成首领 全AUTO', '光亮合成首领 全SET', 'Boss2 全AUTO 关卡攻略'):
