@@ -36,6 +36,11 @@ class TaskPageNavigation(Action):
             return
         if screen.find(r'\d:\d{2}', (750, 0, 850, 55)) and screen.find('菜单', (840, 0, 960, 65), exact=True):
             raise EventUIError('存在未结算战斗，不能自动返回首页')
+        start = screen.find('点击屏幕开始游戏', (260, 450, 710, 535), exact=True)
+        menu = screen.find('主菜单', (0, 460, 200, 540), exact=True)
+        if start is not None and menu is not None and min(start.score, menu.score) >= .95:
+            self.ui.click(start)
+            return
         for action in self.fallback:
             action.bindTask(self.task).do(screenshot, robot)
             if isinstance(action, CanSkipMatchAction) and action.skip:

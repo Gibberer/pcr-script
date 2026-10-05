@@ -128,6 +128,24 @@ class LoginStampTests(TestCase):
         action.ui.click.assert_not_called()
         fallback.bindTask.assert_not_called()
 
+    def test_title_screen_uses_start_prompt_before_default_bottom_left_home_click(self):
+        for confidence, with_menu in ((.99, True), (.9, True), (.99, False)):
+            with self.subTest(confidence=confidence, with_menu=with_menu):
+                observed = screen(('点击屏幕 开始游戏', 480, 496))
+                observed.items[0].score = confidence
+                if with_menu:
+                    observed.items.extend(screen(('主菜单', 70, 508)).items)
+                fallback = Mock()
+                action = TaskPageNavigation(fallback)
+                action.ui = Mock(observe=Mock(return_value=observed))
+                action.do(observed.image, Mock())
+                if confidence >= .95 and with_menu:
+                    action.ui.click.assert_called_once_with(observed.items[0])
+                    fallback.bindTask.assert_not_called()
+                else:
+                    action.ui.click.assert_not_called()
+                    fallback.bindTask.assert_called_once()
+
     def test_daily_enters_from_loading_title_and_home_before_running_task(self):
         for start in ('loading', 'title', 'home'):
             with self.subTest(start=start):
