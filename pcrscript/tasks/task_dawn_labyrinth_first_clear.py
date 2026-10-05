@@ -204,10 +204,28 @@ class DawnLabyrinthFirstClear(DawnLabyrinth):
                     raise SweepBlocked(name+'未满足当前首通路线的等级365、Rank38要求，未出发')
                 ToHomePage(self.robot).run(timeout=60)
                 unique = inspect_unique_equipment(self.ui, name)
-                if unique is None or any(type(unique['values'].get(key)) is not bool for key in ('unique', 'unique2')):
+                if unique is None or not isinstance(unique.get('values'), dict):
                     raise SweepBlocked(name+'的独立专武状态未核验，未出发')
                 self.report['core_equipment'][name]['unique'] = unique
                 self.save_report()
+                unique_values = unique['values']
+                for slot, key in enumerate(('unique', 'unique2'), 1):
+                    equipped = unique_values.get(key)
+                    available = unique_values.get(key+'_available')
+                    if (type(equipped) is not bool or type(available) is not bool
+                            or equipped and not available):
+                        raise SweepBlocked(name+'的独立专武'+str(slot)+'状态未核验，未出发')
+                    if available and not equipped:
+                        raise SweepBlocked(name+'的专武'+str(slot)+'已实装但未穿戴，未出发')
+                    # An implemented but missing/low-level slot recruits an NPC
+                    # below this route's required build. Reject it before the
+                    # pass is spent; future slots need explicit absence proof.
+                    if key == 'unique' and available:
+                        level = unique_values.get('unique_level')
+                        if type(level) is not int:
+                            raise SweepBlocked(name+'的专武1等级未核验，未出发')
+                        if level < 30:
+                            raise SweepBlocked(name+'的专武1未达到自持伙伴要求的等级30，未出发')
                 formation.departure_equipment[normalized(name)] = dict(
                     level=ordinary['level'], rank=ordinary['rank'], observed_at=ordinary['observed_at'],
                     values=dict(values, **unique['values']), ordinary_evidence=ordinary['evidence'],

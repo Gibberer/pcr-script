@@ -597,6 +597,63 @@ class FirstClearTaskTests(TestCase):
         return dict(level=level, rank=38, observed_at=observed_at,
                     values=dict(equipment=4, equipment_available=4), evidence=['synthetic-slots'])
 
+    def unique_proof(self, **changes):
+        values = dict(unique=True, unique_available=True, unique_level=30,
+                      unique2=False, unique2_available=False)
+        values.update(changes)
+        return dict(values=values, evidence=['synthetic-unique'])
+
+    def test_missing_implemented_core_unique_slots_block_production_entry_without_spending(self):
+        for name in ('佩可莉姆', '可可萝', '凯露'):
+            for key in ('unique', 'unique2'):
+                with self.subTest(name=name, slot=key):
+                    self.task = DawnLabyrinthFirstClear(self.robot)
+                    self.task.ui = Mock(output=self.folder, last=None)
+                    self.task.ui.save.return_value = self.folder/'synthetic.png'
+                    self.task.ui.number.side_effect = lambda s, roi: s.number(roi)
+                    self.frames([home(11), home(11), self.guild(), difficulty(), self.guild(),
+                                 self.locked(), self.guild(), home(11)])
+                    missing = self.unique_proof(**{key: False, key+'_available': True})
+                    def inspect(ui, current):
+                        return missing if current == name else self.unique_proof()
+                    with patch.object(self.task, 'get_formation', return_value=Mock()) as formation, \
+                            patch('pcrscript.tasks.task_home.ToHomePage'), \
+                            patch('pcrscript.game_ui.ordinary_equipment.inspect_ordinary_equipment',
+                                  side_effect=lambda ui, current, **kwargs: self.core_proof()), \
+                            patch('pcrscript.game_ui.character_equipment.inspect_unique_equipment', side_effect=inspect):
+                        report = self.task.run()
+                    self.assertEqual((report['status'], report['entries'], report['spent']), ('blocked', 0, 0), report)
+                    self.assertIn(name+'的专武'+('1' if key == 'unique' else '2')+'已实装但未穿戴', report['pending'][-1])
+                    self.assertEqual(report['core_equipment'][name]['unique'], missing)
+                    self.assertNotIn(name, formation.return_value.departure_equipment)
+                    self.assertNotIn('pending_spend', report)
+                    self.assertEqual(report['remaining_passes'], 11)
+                    self.assertEqual(self.clicks().count('出发'), 1)  # Navigation to guild selection only.
+                    self.assertNotIn('选择', self.clicks())
+                    self.assertNotIn('战斗开始', self.clicks())
+
+    def test_core_unique_availability_and_minimum_level_must_be_known_before_departure(self):
+        cases = [(self.unique_proof(unique=False, unique_available=None), '独立专武1'),
+                 (self.unique_proof(unique2_available=None), '独立专武2'),
+                 (self.unique_proof(unique_available=False), '独立专武1'),
+                 (self.unique_proof(unique_level=None), '等级未核验'),
+                 (self.unique_proof(unique_level=True), '等级未核验'),
+                 (self.unique_proof(unique_level=29), '等级30')]
+        for proof, reason in cases:
+            with self.subTest(values=proof['values']):
+                self.task.ui.click.reset_mock()
+                with patch.object(self.task, 'get_formation', return_value=Mock()), \
+                        patch.object(self.task, 'wait', return_value=home(11)), \
+                        patch('pcrscript.tasks.task_home.ToHomePage'), \
+                        patch('pcrscript.game_ui.ordinary_equipment.inspect_ordinary_equipment',
+                              return_value=self.core_proof()), \
+                        patch('pcrscript.game_ui.character_equipment.inspect_unique_equipment', return_value=proof):
+                    with self.assertRaisesRegex(EventUIError, reason):
+                        DawnLabyrinthFirstClear.prepare_core_equipment(self.task, self.guild(), 11)
+                self.assertNotIn('pending_spend', self.task.report)
+                self.assertEqual((self.task.report['entries'], self.task.report['spent']), (0, 0))
+                self.assertEqual(self.clicks(), [(30, 30)])
+
     def test_core_cultivation_gap_is_reported_before_any_departure_spend(self):
         with patch.object(self.task, 'get_formation', return_value=Mock()), \
                 patch.object(self.task, 'wait', return_value=home(11)), \
@@ -670,7 +727,11 @@ class FirstClearTaskTests(TestCase):
             self.assertEqual(current_page, 'home')
             current_page = 'unique'
             inspected.append(('unique', name))
-            return dict(values=dict(unique=True,unique2=False),evidence=['synthetic-unique'])
+            if name == '佩可莉姆':
+                return self.unique_proof(unique2=True, unique2_available=True, unique2_stars=0)
+            if name == '凯露':
+                return self.unique_proof(unique=False, unique_available=False)
+            return self.unique_proof()
         with patch.object(self.task,'get_formation',return_value=formation), \
                 patch.object(self.task,'wait',side_effect=[home(11),target]), \
                 patch.object(self.task,'enter',return_value=home(11)), \
@@ -687,6 +748,8 @@ class FirstClearTaskTests(TestCase):
         self.assertEqual(inspected, [(kind,name) for name in ('佩可莉姆','可可萝','凯露')
                                      for kind in ('ordinary','unique')])
         self.assertEqual(set(formation.departure_equipment),{'佩可莉姆','可可萝','凯露'})
+        self.assertEqual(formation.departure_equipment['佩可莉姆']['values']['unique2_stars'], 0)
+        self.assertIs(formation.departure_equipment['凯露']['values']['unique_available'], False)
         unlock.assert_called_once_with(target)
         self.assertNotIn('pending_spend',self.task.report)
 
@@ -698,7 +761,7 @@ class FirstClearTaskTests(TestCase):
                 patch('pcrscript.game_ui.ordinary_equipment.inspect_ordinary_equipment',
                       side_effect=lambda ui,name,**kwargs: self.core_proof(observed_at=0)), \
                 patch('pcrscript.game_ui.character_equipment.inspect_unique_equipment',
-                      return_value=dict(values=dict(unique=True,unique2=False),evidence=['synthetic-unique'])), \
+                      return_value=self.unique_proof()), \
                 patch('pcrscript.tasks.task_dawn_labyrinth_first_clear.time.time',return_value=2000):
             with self.assertRaisesRegex(EventUIError,'已过期'):
                 DawnLabyrinthFirstClear.prepare_core_equipment(self.task,self.guild(),11)
