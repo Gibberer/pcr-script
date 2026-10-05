@@ -22,11 +22,16 @@ def _catalogue(path, modified, size):
         profiles = conn.execute('SELECT unit_id,unit_name FROM unit_profile').fetchall()
         tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         skills = {}
+        training_skills = {}
         if {'unit_skill_data', 'skill_data'} <= tables:
             names = dict(conn.execute('SELECT skill_id,name FROM skill_data'))
             for row in conn.execute('SELECT * FROM unit_skill_data'):
                 skills[row['unit_id']] = {k: normalized(names[row[k]]) for k in (
                     'main_skill_1', 'main_skill_evolution_1', 'main_skill_2', 'main_skill_evolution_2')
+                    if k in row.keys() and row[k] and row[k] in names}
+                training_skills[row['unit_id']] = {k: normalized(names[row[k]]) for k in (
+                    'union_burst', 'union_burst_evolution', 'main_skill_1', 'main_skill_evolution_1',
+                    'main_skill_2', 'main_skill_evolution_2', 'ex_skill_1', 'ex_skill_evolution_1')
                     if k in row.keys() and row[k] and row[k] in names}
         equipment = {}
         complete = {'unit_unique_equipment', 'unique_equipment_data', 'unit_skill_data', 'skill_data'} <= tables
@@ -53,6 +58,7 @@ def _catalogue(path, modified, size):
                 result[name] = None  # Ambiguous costumes cannot authorize a shortcut.
                 continue
             result[name] = dict(name=name, unit_id=row['unit_id'], skills=skills.get(row['unit_id'], {}),
+                training_skills=training_skills.get(row['unit_id'], {}),
                 unique_slots=equipment.get(row['unit_id'], {}),
                 equipment_catalogue_complete=complete and all(k in skills.get(row['unit_id'], {})
                     for k in ('main_skill_1', 'main_skill_2')))

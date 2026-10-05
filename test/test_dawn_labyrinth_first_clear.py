@@ -593,9 +593,43 @@ class FirstClearTaskTests(TestCase):
     def clicks(self):
         return [getattr(call.args[0], 'text', call.args[0]) for call in self.task.ui.click.call_args_list]
 
-    def core_proof(self, level=365, observed_at=1000):
-        return dict(level=level, rank=38, observed_at=observed_at,
-                    values=dict(equipment=4, equipment_available=4), evidence=['synthetic-slots'])
+    def core_proof(self, level=365, observed_at=1000, **changes):
+        return dict(dict(level=level, rank=38, stars=6, skill_level=365,
+                         training_evidence=['synthetic-stars', 'synthetic-skills'], observed_at=observed_at,
+                         values=dict(equipment=4, equipment_available=4), evidence=['synthetic-slots']), **changes)
+
+    def test_core_star_or_skill_gaps_block_production_entry_before_pass_spend(self):
+        for name in ('佩可莉姆', '可可萝', '凯露'):
+            for gap, reason in (({'stars': 5}, '六星'), ({'stars': None}, '六星'),
+                                ({'stars': True}, '六星'), ({'skill_level': 364}, '技能至少等级365'),
+                                ({'skill_level': None}, '技能至少等级365'),
+                                ({'skill_level': True}, '技能至少等级365'),
+                                ({'training_evidence': []}, '星级与技能证据缺失')):
+                with self.subTest(name=name, gap=gap):
+                    self.task = DawnLabyrinthFirstClear(self.robot)
+                    self.task.ui = Mock(output=self.folder, last=None)
+                    self.task.ui.save.return_value = self.folder/'synthetic.png'
+                    self.task.ui.number.side_effect = lambda s, roi: s.number(roi)
+                    self.frames([home(11), home(11), self.guild(), difficulty(), self.guild(),
+                                 self.locked(), self.guild(), home(11)])
+                    def inspect(ui, current, **kwargs):
+                        self.assertIs(kwargs['inspect_training'], True)
+                        return self.core_proof(**gap) if current == name else self.core_proof()
+                    with patch.object(self.task, 'get_formation', return_value=Mock()), \
+                            patch('pcrscript.tasks.task_home.ToHomePage'), \
+                            patch('pcrscript.game_ui.ordinary_equipment.inspect_ordinary_equipment',
+                                  side_effect=inspect), \
+                            patch('pcrscript.game_ui.character_equipment.inspect_unique_equipment',
+                                  return_value=self.unique_proof()):
+                        report = self.task.run()
+                    self.assertEqual((report['status'], report['entries'], report['spent']), ('blocked', 0, 0), report)
+                    self.assertIn(name, report['pending'][-1])
+                    self.assertIn(reason, report['pending'][-1])
+                    self.assertNotIn('pending_spend', report)
+                    self.assertEqual(report['remaining_passes'], 11)
+                    self.assertEqual(self.clicks().count('出发'), 1)
+                    self.assertNotIn('选择', self.clicks())
+                    self.assertNotIn('战斗开始', self.clicks())
 
     def unique_proof(self, **changes):
         values = dict(unique=True, unique_available=True, unique_level=30,
@@ -719,6 +753,7 @@ class FirstClearTaskTests(TestCase):
         def ordinary(ui, name, **kwargs):
             nonlocal current_page
             self.assertEqual(current_page, 'home')
+            self.assertIs(kwargs['inspect_training'], True)
             current_page = 'ordinary'
             inspected.append(('ordinary', name))
             return self.core_proof()

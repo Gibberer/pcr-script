@@ -96,10 +96,12 @@ def read_slot_fields(ui, screen, index):
     return slot_fields(EventScreen(screen.image, kept+local.items), index)
 
 
-def inspect_ordinary_equipment(ui, name, *, check=lambda: None):
+def inspect_ordinary_equipment(ui, name, *, check=lambda: None, inspect_training=False):
     check()
-    if open_character_memory(ui, name) is None:
+    memory = open_character_memory(ui, name)
+    if memory is None:
         return None
+    observed_at = time.time()
     ui.expect_click('装备', (465, 55, 545, 95), exact=True)
     screen = ui.wait(ordinary_page, '普通装备页')
     rank = ui.number(screen, (400, 380, 442, 414))
@@ -119,5 +121,9 @@ def inspect_ordinary_equipment(ui, name, *, check=lambda: None):
             raise EventUIError('普通装备槽'+str(index+1)+'的说明或穿戴状态未明确')
         row['evidence'] = str(ui.save('ordinary_slot_'+normalized(name)+'_'+str(index), screen))
         rows.append(row)
-    return dict(name=normalized(name), observed_at=time.time(), level=level, rank=rank,
-                values=summarize_slots(rows), slots=rows, evidence=[row['evidence'] for row in rows])
+    result = dict(name=normalized(name), observed_at=observed_at, level=level, rank=rank,
+                  values=summarize_slots(rows), slots=rows, evidence=[row['evidence'] for row in rows])
+    if inspect_training:
+        from .character_training import inspect_owned_training
+        result.update(inspect_owned_training(ui, name, memory, check=check))
+    return result

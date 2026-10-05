@@ -62,6 +62,27 @@ class CharacterDataTests(TestCase):
             with patch('pcrscript.tasks.party_preparation.time.time', return_value=100000):
                 self.assertEqual(catalogue_issues(formation,[member]),[])
 
+    def test_training_catalogue_includes_ub_and_ex_without_changing_identity_skills(self):
+        with TemporaryDirectory() as root:
+            path = self.database(root)
+            before = skill_names('合成角色(夏日)',path)
+            with closing(sqlite3.connect(path)) as conn:
+                conn.executescript('''
+                    ALTER TABLE unit_skill_data ADD COLUMN union_burst INTEGER;
+                    ALTER TABLE unit_skill_data ADD COLUMN union_burst_evolution INTEGER;
+                    ALTER TABLE unit_skill_data ADD COLUMN ex_skill_1 INTEGER;
+                    ALTER TABLE unit_skill_data ADD COLUMN ex_skill_evolution_1 INTEGER;
+                    INSERT INTO skill_data VALUES (6,'合成爆发'),(7,'合成爆发+'),
+                        (8,'合成EX'),(9,'合成EX+');
+                    UPDATE unit_skill_data SET union_burst=6,union_burst_evolution=7,
+                        ex_skill_1=8,ex_skill_evolution_1=9 WHERE unit_id=1;
+                ''')
+            info = character('合成角色(夏日)',path)
+            self.assertEqual(info['skills'],before)
+            self.assertEqual(info['training_skills'],dict(before,union_burst='合成爆发',
+                             union_burst_evolution='合成爆发+',ex_skill_1='合成EX',ex_skill_evolution_1='合成EX+'))
+            self.assertNotIn('union_burst', character('合成角色(冬日)',path)['training_skills'])
+
     def test_updated_database_invalidates_cache_and_missing_tables_remain_unknown(self):
         with TemporaryDirectory() as root:
             path = self.database(root)

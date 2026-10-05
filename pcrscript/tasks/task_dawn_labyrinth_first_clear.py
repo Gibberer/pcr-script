@@ -179,7 +179,7 @@ class DawnLabyrinthFirstClear(DawnLabyrinth):
         return self.capture()
 
     def prepare_core_equipment(self, screen, before):
-        """Read owned core equipment before spending, then recheck the entry."""
+        """Audit owned core training and equipment before spending."""
         from ..game_ui.ordinary_equipment import inspect_ordinary_equipment
         from ..game_ui.character_equipment import inspect_unique_equipment
         from .task_home import ToHomePage
@@ -192,7 +192,8 @@ class DawnLabyrinthFirstClear(DawnLabyrinth):
         try:
             for name in ('佩可莉姆', '可可萝', '凯露'):
                 self.check_deadline()
-                ordinary = inspect_ordinary_equipment(self.ui, name, check=self.check_deadline)
+                ordinary = inspect_ordinary_equipment(self.ui, name, check=self.check_deadline,
+                                                       inspect_training=True)
                 if ordinary is None:
                     raise SweepBlocked(name+'的自持衣装与普通装备未核验，未出发')
                 self.report.setdefault('core_equipment', {})[name] = ordinary
@@ -202,6 +203,12 @@ class DawnLabyrinthFirstClear(DawnLabyrinth):
                     raise SweepBlocked(name+'仍有已开放的普通装备槽未穿戴，未出发')
                 if ordinary['level'] < 365 or ordinary['rank'] < 38:
                     raise SweepBlocked(name+'未满足当前首通路线的等级365、Rank38要求，未出发')
+                if type(ordinary.get('stars')) is not int or ordinary['stars'] != 6:
+                    raise SweepBlocked(name+'的当前六星未核验，未出发')
+                if type(ordinary.get('skill_level')) is not int or ordinary['skill_level'] < 365:
+                    raise SweepBlocked(name+'未核验全部技能至少等级365，未出发')
+                if not ordinary.get('training_evidence'):
+                    raise SweepBlocked(name+'的星级与技能证据缺失，未出发')
                 ToHomePage(self.robot).run(timeout=60)
                 unique = inspect_unique_equipment(self.ui, name)
                 if unique is None or not isinstance(unique.get('values'), dict):
