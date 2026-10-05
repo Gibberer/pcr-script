@@ -717,10 +717,14 @@ class SubjugationGuideTests(TestCase):
                 reference = damage_reference(dict(cid=1, part=title), scope, 1000000000,
                                              'https://example.com/synthetic')
                 self.assertEqual(reference, {})
-                runner = SimpleNamespace(last_result=dict(win=False, damage=100000000,
-                    retry=dict(action='continue'), samples=[dict(seconds=s, dark_portraits=0) for s in (7,4,1)]))
+                runner = object.__new__(AbyssSubjugation)
+                runner.options = {'boss_max_attacks': {'极难': 6}}
+                runner.state = {}
+                runner.last_result = dict(win=False, damage=100000000,
+                    retry=dict(action='continue'), samples=[dict(seconds=s, living_portraits=5) for s in (7,4,1)])
                 readiness = AbyssSubjugation.boss_trial_readiness(runner,
-                    SimpleNamespace(damage_reference=reference), dict(boss='合成首领', health=(1000000000,1000000000)),
+                    SimpleNamespace(damage_reference=reference), dict(index=0, difficulty='极难',
+                        boss='合成首领', health=(1000000000,1000000000)),
                     SimpleNamespace(outcome='settled', reason=''))
                 self.assertFalse(readiness['accepted'])
         for title in ('Boss2 伤害：3.7亿', 'Boss2 3.7亿伤害', 'Boss2 输出3.7亿'):

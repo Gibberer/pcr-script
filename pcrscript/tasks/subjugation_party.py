@@ -169,6 +169,6 @@ def guide_party(runner, seed, reopen, *, allow_substitutions=True):
     party.assumptions = list(seed.assumptions)+['按共享编队流程核验当前账号，来源缺失字段仍保留为未知']
     party.assumptions.extend('共享编队缺员替补：'+a['missing']+' → '+a['replacement'] for a in adaptations)
     if adaptations:
-        party.assumptions.append('替补队伍不继承原攻略伤害；首领须免费模拟击杀后才可实战')
+        party.assumptions.append('替补队伍不继承原攻略伤害；首领须免费模拟击杀，或存活至时限且符合首通刀数预算')
     require_event_talent(runner, party)
     return party, order

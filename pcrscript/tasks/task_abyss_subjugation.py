@@ -58,6 +58,11 @@ def validate_options(options):
         raise ValueError('AbyssSubjugation.avatars必须是配置对象')
     if 'sources' in value and not isinstance(value['sources'], dict):
         raise ValueError('AbyssSubjugation.sources必须是配置对象')
+    attacks = validated_options(value.get('boss_max_attacks', {}), 'AbyssSubjugation.boss_max_attacks',
+        integers=(('普通', 1, 99), ('困难', 1, 99), ('高难', 2, 99), ('极难', 6, 99)))
+    if set(attacks) != set(field.BOSS_DIFFICULTIES):
+        raise ValueError('AbyssSubjugation.boss_max_attacks只接受普通、困难、高难、极难')
+    value['boss_max_attacks'] = attacks
     from .strategy_inputs import validate_urls
     value['source_urls'] = validate_urls(value.get('source_urls', []))
     return value
@@ -341,6 +346,8 @@ class AbyssSubjugation(TimeLimitTask):
                 return
             if tickets != plan['tickets_before']-plan['quantity'] or health is None:
                 raise SubjugationBlocked('讨伐委托证未按预览扣除；未重复提交')
+            if health[1] != plan['health'][1]:
+                raise SubjugationBlocked('待核对消费的首领生命上限变化；未追加消费')
             if plan['kind'] == 'boss_battle' and not (cleared is True or health[0] < plan['health'][0] or plan.get('result', {}).get('win')):
                 raise SubjugationBlocked('实战消费后未确认首领进度；停止追加挑战')
             if plan['kind'] == 'boss_sweep' and cleared is not True:
@@ -350,6 +357,16 @@ class AbyssSubjugation(TimeLimitTask):
                 cleared = True
             self.report['tickets_spent'] += plan['quantity']
             self.report['bosses'][str(plan['index'])+':'+plan['difficulty']] = dict(name=plan['boss'], cleared=cleared, health=health)
+            if plan['kind'] == 'boss_battle':
+                budget = self.boss_attack_budget(plan)
+                # Keep the pre-spend count in the same pending record. A
+                # receipt/save failure can persist both the updated counter
+                # and pending action; recovery must not count that cut twice.
+                before = plan.setdefault('attack_budget', budget).get('spent')
+                if type(before) is not int or before < 0 or budget['spent'] not in (before, before+plan['quantity']):
+                    raise SubjugationBlocked('待核对首领刀数与消费记录不一致；未追加消费')
+                self.state.setdefault('boss_attacks', {})[str(plan['index'])+':'+plan['difficulty']] = dict(
+                    boss=plan['boss'], maximum_hp=health[1], spent=before+plan['quantity'])
         self.report['history'].append(dict(plan, tickets_after=tickets, attempts_after=counts,
                                           after_evidence=str(self.ui.save('after_'+str(len(self.report['history']))))))
         self.state.pop('pending')
@@ -656,28 +673,47 @@ class AbyssSubjugation(TimeLimitTask):
             if quantity != counts[difficulty]:
                 raise SubjugationBlocked('前哨仍有次数，现有体力或本次上限不足')
 
+    def boss_attack_budget(self, reference):
+        limit = self.options['boss_max_attacks'][reference['difficulty']]
+        previous = self.state.get('boss_attacks', {}).get(str(reference['index'])+':'+reference['difficulty'], {})
+        spent = (previous.get('spent', 0) if previous.get('boss') == reference['boss']
+                 and previous.get('maximum_hp') == reference['health'][1] else 0)
+        if type(spent) is not int or spent < 0:
+            raise SubjugationBlocked('首领已消费刀数未知；保留进度，未追加消费')
+        return dict(limit=limit, spent=spent, remaining=max(0, limit-spent))
+
     def boss_trial_readiness(self, party, reference, result):
+        budget = self.boss_attack_budget(reference)
+        verdict = dict(accepted=False, attack_budget=budget)
+        if not budget['remaining']:
+            return dict(verdict, reason='该首领首通刀数上限已用完')
         retry = self.last_result['retry']
         if result.outcome != 'settled':
-            return dict(accepted=False, reason=result.reason or '模拟战未正常结算')
+            return dict(verdict, reason=result.reason or '模拟战未正常结算')
         if retry['action'] in ('change_survival', 'retry_once'):
-            return dict(accepted=False, reason='模拟战出现持续减员，需按深域判断重试或换队')
+            return dict(verdict, reason='模拟战出现持续减员，需重试或换队')
         if self.last_result.get('win'):
-            return dict(accepted=True, reason='免费模拟已击杀')
-        source = party.damage_reference
-        expected = source.get('damage')
-        if (type(expected) is not int or expected <= 0 or not source.get('evidence')
-                or source.get('scope', {}).get('boss') != reference['boss']):
-            return dict(accepted=False, reason='非击杀模拟缺少本首领攻略的参考伤害或刀数，未仅凭正数伤害实战')
-        expected = min(expected, reference['health'][1])
+            return dict(verdict, accepted=True, estimated_attacks=1, reason='免费模拟已击杀')
         samples = self.last_result['samples']
         timed_alive = (len(samples) >= 3 and min(s['seconds'] for s in samples) <= 8
                        and all(s.get('living_portraits') == 5 for s in samples[-3:]))
-        met = meets_reference(self.last_result.get('damage'), expected, reference['health'][1], False)
-        return dict(accepted=timed_alive and met, expected_damage=expected,
-                    source_reference=source,
-                    reason=('存活至时限并达到攻略参考伤害' if timed_alive and met else
-                            '模拟伤害未达到攻略参考值' if not met else '未确认队伍存活至时限'))
+        remaining, maximum = reference['health']
+        expected = (remaining+budget['remaining']-1)//budget['remaining']
+        damage = self.last_result.get('damage')
+        valid_damage = type(damage) is int and 0 < damage <= maximum
+        estimated = (remaining+damage-1)//damage if valid_damage else None
+        # A source establishes the strategy, not this account's damage. Even
+        # adapted teams may finish in several paid attacks after a full,
+        # surviving free trial. One attack against full HP needs an actual
+        # win; a partial boss can be finished with proven nonlethal damage.
+        met = valid_damage and meets_reference(damage, expected, maximum, False)
+        return dict(verdict, accepted=timed_alive and met, expected_damage=expected,
+                    simulated_damage=damage, estimated_attacks=estimated,
+                    source_reference=party.damage_reference,
+                    reason=('存活至时限，预计'+str(estimated)+'刀完成，符合剩余刀数预算' if timed_alive and met else
+                            '未确认队伍存活至时限' if not timed_alive else
+                            '模拟伤害未知或超出首领生命上限' if not valid_damage else
+                            '模拟伤害不足以在剩余刀数内首通'))
 
     def observe_boss_target(self, index, difficulty, detail, reference):
         target = field.boss_signature(self.ui, detail)
@@ -697,6 +733,7 @@ class AbyssSubjugation(TimeLimitTask):
     def simulate_boss(self, index, difficulty, reference):
         if not self.options['first_clear']:
             raise SubjugationBlocked('首领尚未通关，已关闭首次通关')
+        reference = dict(reference, index=index, difficulty=difficulty)
         if self.options['allow_local_trials']:
             self.observe_boss_target(index, difficulty,
                 self.boss_detail(index, difficulty, simulation=True), reference)
@@ -847,10 +884,13 @@ class AbyssSubjugation(TimeLimitTask):
                 raise SubjugationBlocked('首领消费达到本次上限')
             plan = dict(kind='boss_battle', index=index, difficulty=difficulty, quantity=1,
                         tickets_before=tickets, boss=field.boss_name(detail), health=field.boss_health(self.ui, detail))
+            budget = self.boss_attack_budget(plan)
+            if not budget['remaining']:
+                raise BossPartyUnavailable(f'{difficulty}首通已用{budget["spent"]}刀，达到{budget["limit"]}刀上限；保留剩余生命进度')
+            plan['attack_budget'] = budget
             if party is None:
                 party, _ = self.simulate_boss(index, difficulty, plan)
                 reference = (plan['boss'], plan['health'][1])
-                simulated_damage = self.last_result.get('damage') or plan['health'][0]
             elif reference != (plan['boss'], plan['health'][1]):
                 raise SubjugationBlocked('接续首领的身份或最大生命值变化')
             detail = self.boss_detail(index, difficulty)
@@ -860,12 +900,12 @@ class AbyssSubjugation(TimeLimitTask):
             party, order = self.select_verified_party(party,
                 lambda: self.open_formation(self.boss_detail(index, difficulty)))
             prior = len(self.report['history'])
-            self.report_progress(f'首领{index+1} · {difficulty}实战')
+            self.report_progress(f'首领{index+1} · {difficulty}首通第{budget["spent"]+1}/{budget["limit"]}刀')
             result = self.battle(party, order, plan)
             if len(self.report['history']) == prior:
                 raise SubjugationBlocked('实战未产生已核对进度；不重复使用同一队伍消费')
             defeated = self.report['bosses'][key]['cleared'] is True
-            expected = min(party.damage_reference.get('damage') or simulated_damage, plan['health'][0])
+            expected = (plan['health'][0]+budget['remaining']-1)//budget['remaining']
             # Like dungeon attempts, use reconciled before/after HP for real
             # damage; a result OCR miss must not discard verified progress.
             actual_damage = plan['health'][0]-self.report['bosses'][key]['health'][0] if not defeated else plan['health'][0]
@@ -873,7 +913,8 @@ class AbyssSubjugation(TimeLimitTask):
                     or not meets_reference(actual_damage, expected, plan['health'][0], False))):
                 self.failed_boss_teams.setdefault((index, difficulty), set()).add(party_fingerprint(party))
                 self.report.setdefault('real_rejections', []).append(dict(index=index, difficulty=difficulty,
-                    expected_damage=expected, actual_damage=actual_damage, result=dict(self.last_result), reason='实战减员或伤害低于模拟/攻略，先换队重新模拟'))
+                    expected_damage=expected, actual_damage=actual_damage, attack_budget=budget,
+                    result=dict(self.last_result), reason='实战减员或伤害不足以在剩余刀数内首通，先换队重新模拟'))
                 self.save()
                 party = None
 

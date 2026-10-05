@@ -371,6 +371,7 @@ class SubjugationTests(TestCase):
         return task
 
     def referenced_task(self, game, damage=40000000, **options):
+        options.setdefault('boss_max_attacks', dict.fromkeys(field.BOSS_DIFFICULTIES, 2))
         task = self.task(game, **options)
         def sources(kind, boss='', boss_number=None, **kwargs):
             if kind != 'boss':
@@ -394,6 +395,8 @@ class SubjugationTests(TestCase):
         self.assertEqual(game.attempts, dict.fromkeys(field.DIFFICULTIES, 0))
         self.assertEqual(report['stamina_spent'], 300)
         self.assertEqual(game.real_battles, 12)
+        self.assertEqual([(h['difficulty'], h['index']) for h in report['history'] if h['kind'] == 'boss_battle'],
+                         [(d, i) for d in field.BOSS_DIFFICULTIES for i in range(3)])
         self.assertEqual(game.tickets, 0)
         self.assertEqual(game.sweeps[-1], ('boss', 0, '极难', 3))
         self.assertEqual(set(report['outpost_parties']), set(field.DIFFICULTIES))
@@ -804,6 +807,103 @@ class SubjugationTests(TestCase):
         self.assertFalse(report['simulations'][0]['readiness']['accepted'])
         self.assertTrue(all(d == 0 for d in game.allowed_deaths))
 
+    def test_surviving_trial_uses_tier_budget_without_inventing_source_damage(self):
+        for difficulty, damage, cuts in (('普通', 70000000, 0), ('困难', 70000000, 0),
+                                         ('高难', 40000000, 2), ('极难', 14000000, 6),
+                                         ('极难', 12000000, 0)):
+            with self.subTest(difficulty=difficulty, damage=damage):
+                game = Game()
+                game.attempts = dict.fromkeys(field.DIFFICULTIES, 0)
+                game.outpost_clears = set(field.DIFFICULTIES)
+                game.boss_clears = {(i, d) for i in (1, 2) for d in field.BOSS_DIFFICULTIES}
+                game.boss_clears.update((0, d) for d in field.BOSS_DIFFICULTIES[:field.BOSS_DIFFICULTIES.index(difficulty)])
+                game.tickets = max(cuts, 1)
+                game.simulation_wins = False
+                game.simulation_damage = game.real_damage = damage
+                task = self.task(game)
+                task.options['state_dir'] = str(self.root/f'{difficulty}-{damage}')
+                report = task.run(EVENT)
+                self.assertEqual(game.real_battles, cuts, report['pending'])
+                self.assertEqual(game.tickets, 0 if cuts else 1)
+                trial = report['simulations'][0]['readiness']
+                self.assertEqual(trial['accepted'], bool(cuts))
+                self.assertEqual(trial['source_reference'], {})
+                if cuts:
+                    self.assertEqual(trial['estimated_attacks'], cuts)
+                    self.assertIn((0, difficulty), game.boss_clears)
+                    self.assertEqual(task.state['boss_attacks']['0:'+difficulty]['spent'], cuts)
+
+    def test_last_remaining_attack_uses_partial_hp_after_restart(self):
+        game = Game()
+        game.attempts = dict.fromkeys(field.DIFFICULTIES, 0)
+        game.outpost_clears = set(field.DIFFICULTIES)
+        game.boss_clears = {(i, d) for i in (1, 2) for d in field.BOSS_DIFFICULTIES}
+        game.boss_clears.update({(0, '普通'), (0, '困难')})
+        game.simulation_wins = False
+        game.simulation_damage = game.real_damage = 40000000
+        estimates = []
+        for _ in range(2):
+            game.tickets = 1
+            task = self.task(game)
+            report = task.run(EVENT)
+            self.assertEqual(game.tickets, 0, report['pending'])
+            estimates.append(report['simulations'][0]['readiness']['estimated_attacks'])
+        self.assertEqual(estimates, [2, 1])
+        self.assertEqual(game.real_battles, 2)
+        self.assertIn((0, '高难'), game.boss_clears)
+        self.assertEqual(task.state['boss_attacks']['0:高难']['spent'], 2)
+
+    def test_attack_cap_is_not_reset_by_restarting_or_changing_candidates(self):
+        game = Game()
+        game.attempts = dict.fromkeys(field.DIFFICULTIES, 0)
+        game.outpost_clears = set(field.DIFFICULTIES)
+        game.boss_clears = {(i, d) for i in (1, 2) for d in field.BOSS_DIFFICULTIES}
+        game.boss_clears.update({(0, '普通'), (0, '困难')})
+        game.tickets, game.real_damage = 3, 40000000
+        for _ in range(2):
+            task = self.task(game, boss_max_attacks={'高难': 1})
+            report = task.run(EVENT)
+            self.assertEqual(game.real_battles, 1)
+            self.assertEqual(game.tickets, 2)
+            self.assertIn('达到1刀上限', str(report['pending']))
+        self.assertEqual(task.simulation_count, 0)
+        self.assertEqual(game.health[(0, '高难')], 40000000)
+
+    def test_pending_boss_attack_is_counted_once_before_new_budget_checks(self):
+        for receipt_failure in (False, True):
+            with self.subTest(receipt_failure=receipt_failure):
+                game = Game()
+                game.attempts = dict.fromkeys(field.DIFFICULTIES, 0)
+                game.boss_clears = {(0, '普通'), (0, '困难')}
+                game.health[(0, '高难')] = 40000000
+                game.tickets = 2
+                task = self.task(game, preview_only=True)
+                folder = self.root/str(receipt_failure)
+                task.options['state_dir'] = str(folder)
+                task.state['pending'] = dict(kind='boss_battle', index=0, difficulty='高难', quantity=1,
+                    tickets_before=3, boss='合成首领0', health=[80000000, 80000000], day=task.day())
+                task.state_path = folder/(sha256(b'synthetic|1').hexdigest()[:24]+'.json')
+                task.save()
+                if receipt_failure:
+                    save = task.ui.save
+                    def fail_receipt(name, s=None):
+                        if name.startswith('after_'):
+                            raise OSError('synthetic receipt failure')
+                        return save(name, s)
+                    task.ui.save = fail_receipt
+                    with self.assertRaisesRegex(OSError, 'synthetic receipt failure'):
+                        task.run(EVENT)
+                    self.assertEqual(task.state['boss_attacks']['0:高难']['spent'], 1)
+                    self.assertEqual(task.state['pending']['attack_budget']['spent'], 0)
+                else:
+                    self.assertEqual(task.run(EVENT)['tickets_spent'], 1)
+                next_task = self.task(game, preview_only=True)
+                next_task.options['state_dir'] = str(folder)
+                self.assertEqual(next_task.run(EVENT)['tickets_spent'], int(receipt_failure))
+                self.assertEqual(next_task.state['boss_attacks']['0:高难']['spent'], 1)
+                self.assertNotIn('pending', next_task.state)
+                self.assertEqual(game.real_battles, 0)
+
     def test_changed_special_equipment_after_simulation_blocks_real_ticket(self):
         from pcrscript.game_ui.special_equipment import loadout_items
         game = Game()
@@ -883,7 +983,7 @@ class SubjugationTests(TestCase):
         game.tickets = 1
         game.simulation_wins = False
         game.simulation_damage = 70000000
-        report = self.referenced_task(game, damage=370000000).run(EVENT)
+        report = self.referenced_task(game, damage=370000000, boss_max_attacks={'普通': 1}).run(EVENT)
         self.assertEqual(report['status'], 'blocked')
         self.assertEqual(report['simulations'][0]['readiness']['expected_damage'], 80000000)
         self.assertEqual(game.tickets, 1)

@@ -23,6 +23,18 @@ CASES = (
 
 
 class TaskOptionsTests(TestCase):
+    def test_subjugation_tier_budgets_validate_before_device_work(self):
+        defaults = {'普通': 1, '困难': 1, '高难': 2, '极难': 6}
+        self.assertEqual(task_abyss_subjugation.validate_options({})['boss_max_attacks'], defaults)
+        raw = {'boss_max_attacks': {'极难': 5}}
+        self.assertEqual(task_abyss_subjugation.validate_options(raw)['boss_max_attacks'], dict(defaults, 极难=5))
+        self.assertEqual(raw, {'boss_max_attacks': {'极难': 5}})
+        for invalid in (None, [], {'未知': 2}, {'极难': True}, {'高难': 0}, {'普通': 100}):
+            with self.subTest(invalid=invalid), patch('pcrscript.news.fetch_event_news') as fetch:
+                with self.assertRaisesRegex(ValueError, 'boss_max_attacks'):
+                    AbyssSubjugation.prepare({'AbyssSubjugation': {'boss_max_attacks': invalid}})
+                fetch.assert_not_called()
+
     def test_invalid_config_fails_in_prepare_before_external_work(self):
         with patch('pcrscript.news.fetch_event_news') as fetch:
             for task, _, budget, upper, flag in CASES:
