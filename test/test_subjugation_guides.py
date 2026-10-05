@@ -76,6 +76,9 @@ class SubjugationGuideTests(TestCase):
         runner = SimpleNamespace(options=dict(discover_sources=True, source_urls=[], allow_local_trials=True),
             source_pools={}, inspected_sources={}, event=EVENT, report={}, formation=Mock(),
             report_progress=Mock(), check_deadline=Mock(), save=Mock())
+        runner.source_targets = {(kind, tier, boss): dict(boss=boss, difficulty=tier)
+            for kind, tier, boss in (('boss', '普通', '合成首领甲'), ('boss', '困难', '合成首领甲'),
+                                     ('boss', '普通', '合成首领乙'), ('outpost', '高难', '合成首领甲'))}
         def acquire(options, **kwargs):
             report = trial_report()
             report['parties'][0]['scope'] = dict(kind='boss', boss=options['boss'], difficulty=options['difficulty'])
@@ -89,6 +92,10 @@ class SubjugationGuideTests(TestCase):
         self.assertEqual(fetch.call_count, 3)
         self.assertEqual([(c.args[0]['boss'], c.args[0]['difficulty']) for c in fetch.call_args_list],
                          [('合成首领甲', '普通'), ('合成首领甲', '困难'), ('合成首领乙', '普通')])
+        self.assertEqual(fetch.call_args_list[1].args[0]['observed_target'], [
+            runner.source_targets[('boss', tier, '合成首领甲')] for tier in ('普通', '困难')])
+        self.assertEqual(fetch.call_args_list[2].args[0]['observed_target'], [
+            runner.source_targets[('boss', '普通', '合成首领乙')]])
 
     def test_higher_outpost_guide_requires_account_trial_permission(self):
         report = trial_report()

@@ -23,7 +23,7 @@ from .strategy_document import Evidence, Fact, empty_member, finalize, export_do
 from .strategy_sources import BORROW_PART, MANUAL_PART, UNVERIFIED_SETTING, discover_sources, unparsed_switch_requirement
 from .strategy_inputs import declared_region, preferred_sources, source_statements
 
-PARSER_VERSION = 81
+PARSER_VERSION = 82
 FRAME_OCR_VERSION = 1
 COMBAT_AUDIT_SECONDS = 20
 RECOLLECTION_UNSUPPORTED = re.compile(
@@ -56,6 +56,10 @@ def recollection_client_region(texts):
 
 def live_target_scope(texts, target, proof):
     """Match a combat HUD to a fresh account-trial target, with both proofs."""
+    if isinstance(target, list):
+        matches = [live_target_scope(texts, row, proof) for row in target if isinstance(row, dict)]
+        matches = [match for match in matches if match[1]]
+        return matches[0] if len(matches) == 1 else ({}, False, None)
     if not isinstance(target, dict) or not target.get('image'):
         return {}, False, None
     scope = target.get('scope', {})
@@ -85,6 +89,15 @@ def live_target_scope(texts, target, proof):
         return {}, False, None
     return dict(scope), True, dict(proof, method='combat_matches_live_target',
         target=dict(target), text=f"{names[0]}; maximum HP {target['maximum_hp']}")
+
+
+def live_target_key(target):
+    """A fresh evidence path does not change the identity; missing proof does."""
+    if isinstance(target, list):
+        return [live_target_key(row) for row in target]
+    if isinstance(target, dict):
+        return dict(target, image=isinstance(target.get('image'), str) and bool(target['image']))
+    return target
 
 
 class RecollectionScopeContext:
@@ -726,12 +739,7 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
     root.mkdir(parents=True, exist_ok=True)
     pages = choose_pages(source, options)
     target = options.get('observed_target')
-    target_key = dict(target) if isinstance(target, dict) else target
-    if isinstance(target_key, dict):
-        # A new run's filename is fresh evidence, not a different boss.
-        # Keep proof presence in the key: missing evidence must not hit a
-        # cache which was bound to a verified live target.
-        target_key['image'] = isinstance(target.get('image'), str) and bool(target['image'])
+    target_key = live_target_key(target)
     fingerprint = sha256(json.dumps(dict(version=PARSER_VERSION, source=source, pages=pages,
                          scope={k: options.get(k) for k in ('task_type', 'stage', 'element', 'area', 'difficulty', 'mode', 'region', 'max_frames_per_page', 'max_video_seconds', 'skip_manual_media', 'skip_long_media')},
                          observed_target=target_key,
@@ -747,11 +755,14 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
                  for key in ('stars', 'unique', 'unique2', 'instant') for e in m[key].get('evidence', []) if e.get('image')]
         if all(Path(p).is_file() for p in paths):
             cached = deepcopy(saved)
-            if isinstance(target, dict) and target_key['image']:
-                for party in cached.get('parties', []):
-                    for proof in party.get('scope_evidence', []):
-                        if proof.get('method') == 'combat_matches_live_target':
-                            proof['target'] = dict(target)
+            targets = target if isinstance(target, list) else [target]
+            for party in cached.get('parties', []):
+                for proof in party.get('scope_evidence', []):
+                    if proof.get('method') == 'combat_matches_live_target':
+                        current = next((row for row in targets if isinstance(row, dict)
+                            and row.get('image') and live_target_key(row) == live_target_key(proof.get('target'))), None)
+                        if current is not None:
+                            proof['target'] = dict(current)
             return dict(cached, cache_hit=True)
     # Match the game's OCR worker limits. Default ONNX sessions can otherwise
     # spin a full thread pool for each engine throughout multi-page parsing.

@@ -133,6 +133,11 @@ class LiveTargetTests(TestCase):
         self.assertFalse(live_target_scope(labels[:-1],target,proof)[1])
         self.assertFalse(live_target_scope(labels,dict(target,image=''),proof)[1])
         self.assertFalse(live_target_scope([GuideText(t.text,.94,t.rectangle) for t in labels],target,proof)[1])
+        other = dict(target, scope=dict(target['scope'], floor=2), level=200, maximum_hp=150000000)
+        self.assertEqual(live_target_scope(labels, [other, target], proof), (scope, verified, evidence))
+        self.assertFalse(live_target_scope(labels, [other, dict(target, image='')], proof)[1])
+        ambiguous = dict(target, scope=other['scope'])
+        self.assertFalse(live_target_scope(labels, [ambiguous, target], proof)[1])
 
     def test_ordinary_signature_reads_long_boss_name_and_level_without_weakness(self):
         s=detail(field.AREAS['memory'],9)
@@ -220,6 +225,12 @@ class LiveTargetTests(TestCase):
                     api=Mock(),ocr=Mock(),media_fetcher=lambda *a,**k:(path,dict(duration=20)))
                 changed=parse_video_source(source,dict(options,observed_target=dict(target,level=101)),index,
                     api=Mock(),ocr=Mock(),media_fetcher=lambda *a,**k:(path,dict(duration=20)))
+                other=dict(target, scope=dict(target['scope'],floor=2),level=200,maximum_hp=150000000)
+                multiple=parse_video_source(source,dict(options,observed_target=[other,target]),index,
+                    api=Mock(),ocr=Mock(),media_fetcher=lambda *a,**k:(path,dict(duration=20)))
+                fresh_multiple=parse_video_source(source,dict(options,observed_target=[
+                    dict(other,image='fresh_other.png'),dict(target,image='fresh_matching.png')]),index,
+                    api=Mock(),ocr=Mock(),media_fetcher=Mock(side_effect=AssertionError('same targets should reuse media')))
             self.assertEqual(len(parties_for_floor(report,field.AREAS['miroku'],1,allow_local_trials=True)),1)
             self.assertEqual([f['seconds'] for f in report['parties'][0]['frames']],[4,4.25,4.5])
             self.assertEqual(report['pages'][0]['frames'],5)
@@ -228,6 +239,9 @@ class LiveTargetTests(TestCase):
             self.assertEqual(report['parties'][0]['scope_evidence'][0]['target']['image'],'live.png')
             self.assertEqual(parties_for_floor(no_proof,field.AREAS['miroku'],1,allow_local_trials=True),[])
             self.assertEqual(parties_for_floor(changed,field.AREAS['miroku'],1,allow_local_trials=True),[])
+            self.assertTrue(fresh_multiple['cache_hit'])
+            self.assertEqual(multiple['parties'][0]['scope'], target['scope'])
+            self.assertEqual(fresh_multiple['parties'][0]['scope_evidence'][0]['target']['image'], 'fresh_matching.png')
 
 
 

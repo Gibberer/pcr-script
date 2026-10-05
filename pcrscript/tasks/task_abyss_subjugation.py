@@ -100,6 +100,7 @@ class AbyssSubjugation(TimeLimitTask):
         self.house_checked = False
         self.simulation_count = 0
         self.source_pools = {}
+        self.source_targets = {}
         self.guide_streams = {}
         self.inspected_sources = {}
         self.boss_unlocks = {}
@@ -523,9 +524,11 @@ class AbyssSubjugation(TimeLimitTask):
             options = source_options(self.options, self.event, kind=kind, boss=boss, boss_number=boss_number,
                                      difficulty=difficulty)
             if self.options['allow_local_trials'] and kind == 'boss':
-                target = getattr(self, 'source_targets', {}).get(key)
-                if target:
-                    options['observed_target'] = target
+                targets = [target for (target_kind, _, target_boss), target
+                           in getattr(self, 'source_targets', {}).items()
+                           if target_kind == kind and target_boss == boss]
+                if targets:
+                    options['observed_target'] = targets
             self.report_progress('检索并解析本期攻略 · '+difficulty+('前哨' if kind == 'outpost' else boss))
             report = acquire_strategies(options, index=self.formation.avatars, check=self.check_deadline,
                 exclude_sources=self.inspected_sources.get(key, set()),
@@ -669,28 +672,27 @@ class AbyssSubjugation(TimeLimitTask):
                     reason=('存活至时限并达到攻略参考伤害' if timed_alive and met else
                             '模拟伤害未达到攻略参考值' if not met else '未确认队伍存活至时限'))
 
+    def observe_boss_target(self, index, difficulty, detail, reference):
+        target = field.boss_signature(self.ui, detail)
+        for _ in range(6):
+            if target:
+                break
+            time.sleep(.3)
+            detail = self.capture()
+            target = field.boss_signature(self.ui, detail)
+        evidence = str(self.ui.save(f'source_target_{index}_{difficulty}', detail))
+        if (target and target['boss'] == reference['boss']
+                and target['maximum_hp'] == reference['health'][1]):
+            target.update(scope=dict(kind='boss', difficulty=difficulty, boss=target['boss']),
+                          image=evidence)
+            self.source_targets[('boss', difficulty, reference['boss'])] = target
+
     def simulate_boss(self, index, difficulty, reference):
         if not self.options['first_clear']:
             raise SubjugationBlocked('首领尚未通关，已关闭首次通关')
         if self.options['allow_local_trials']:
-            detail = self.boss_detail(index, difficulty, simulation=True)
-            target = field.boss_signature(self.ui, detail)
-            for _ in range(6):
-                if target:
-                    break
-                time.sleep(.3)
-                detail = self.capture()
-                target = field.boss_signature(self.ui, detail)
-            # Keep an unsuccessful observation for diagnosis as well; absence
-            # of this proof must never become permission to guess a target.
-            evidence = str(self.ui.save(f'source_target_{index}_{difficulty}', detail))
-            if (target and target['boss'] == reference['boss']
-                    and target['maximum_hp'] == reference['health'][1]):
-                target.update(scope=dict(kind='boss', difficulty=difficulty, boss=target['boss']),
-                              image=evidence)
-                if not hasattr(self, 'source_targets'):
-                    self.source_targets = {}
-                self.source_targets[('boss', difficulty, reference['boss'])] = target
+            self.observe_boss_target(index, difficulty,
+                self.boss_detail(index, difficulty, simulation=True), reference)
         def reopen():
             return self.open_formation(self.boss_detail(index, difficulty, simulation=True))
         candidates = self.guide_candidates('boss', difficulty, reopen, reference['boss'], index+1)
@@ -825,6 +827,9 @@ class AbyssSubjugation(TimeLimitTask):
             self.report['bosses'][key] = dict(name=field.boss_name(detail), cleared=cleared,
                                             health=field.boss_health(self.ui, detail))
             if cleared:
+                if self.options['first_clear'] and self.options['allow_local_trials']:
+                    self.observe_boss_target(index, difficulty, detail,
+                        dict(boss=field.boss_name(detail), health=field.boss_health(self.ui, detail)))
                 return
             tickets = field.tickets(self.ui, detail)
             if tickets is None:

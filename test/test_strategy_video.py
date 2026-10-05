@@ -760,7 +760,7 @@ class VideoStrategyTests(TestCase):
             self.assertEqual(buttons.call_count,page['frames']-2)
 
     def parse_targeted_auto_source(self, folder, kind, wide, *, auto_on=True,
-                                   existing='missing', local_label='AUTO'):
+                                   existing='missing', local_label='AUTO', target_difficulty='普通'):
         boxes = [(190+i*120, 390, 100, 100) for i in range(5)]
         members = [dict(name=f'合成角色{i}', rectangle=list(box), score=.99)
                    for i, box in enumerate(boxes)]
@@ -792,7 +792,10 @@ class VideoStrategyTests(TestCase):
                              else '公主连结 国服 深渊讨伐战 合成合集'),
                       pages=[dict(cid=1, part='合成合集', duration=1)])
         options = dict(task_type=kind, area='米洛克的领域', stage='1', parsed_dir=folder,
-                       kind='boss', difficulty='普通', boss='合成首领', observed_target=target)
+                       kind='boss', difficulty=target_difficulty, boss='合成首领', observed_target=target)
+        if target_difficulty != '普通':
+            options['observed_target'] = [dict(target, scope=dict(scope, difficulty=target_difficulty),
+                level=200, maximum_hp=150000000, image='synthetic_current_target.png'), target]
         capture = Mock()
         raw = cv.resize(frame, (raw_width, raw_height))
         capture.read.side_effect = [(True, raw), (True, raw.copy())]
@@ -817,6 +820,16 @@ class VideoStrategyTests(TestCase):
         candidates = (parties_for_floor(report, '米洛克的领域', 1, allow_local_trials=True)
                       if kind == 'recollection' else parties_for_target(report, options, allow_local_trials=True))
         return report['parties'][0], candidates
+
+    def test_higher_boss_target_can_parse_a_freshly_verified_lower_tier_trial(self):
+        with TemporaryDirectory() as folder:
+            raw, candidates = self.parse_targeted_auto_source(folder, 'subjugation', True,
+                                                              target_difficulty='困难')
+        self.assertEqual(raw['scope']['difficulty'], '普通')
+        self.assertEqual(raw['scope_evidence'][0]['target']['maximum_hp'], 80000000)
+        self.assertEqual(len(candidates), 1)
+        self.assertEqual(candidates[0].damage_reference, {})
+        self.assertTrue(any('普通' in note and '困难' in note for note in candidates[0].assumptions))
 
     def test_full_ocr_local_trials_retain_targeted_auto(self):
         for kind in ('recollection', 'subjugation'):

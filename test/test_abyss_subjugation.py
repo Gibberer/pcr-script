@@ -423,6 +423,11 @@ class SubjugationTests(TestCase):
         self.assertEqual(game.real_battles, 4)
         self.assertTrue(all(h['index'] == 2 for h in report['history'] if h['kind'] == 'boss_battle'))
         self.assertEqual(game.sweeps[-1], ('boss', 0, '极难', 8))
+        for index in range(3):
+            observed = task.source_targets[('boss', '普通', '合成首领'+str(index))]
+            self.assertEqual(observed['scope']['difficulty'], '普通')
+            self.assertEqual(observed['maximum_hp'], 80000000)
+            self.assertTrue(observed['image'])
 
     def test_adventure_header_before_activity_entry_does_not_imply_unavailable(self):
         game = Game()
