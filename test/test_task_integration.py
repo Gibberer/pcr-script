@@ -33,6 +33,33 @@ class TaskIntegrationTests(TestCase):
                 self.assertEqual((snapshot['state'],snapshot['errors']),('finished',0))
                 self.assertFalse(list(sessions[0].path.glob('incident-*')))
 
+    def test_single_cli_cooperative_stop_does_not_print_an_unproduced_report(self):
+        from contextlib import redirect_stdout
+        from io import StringIO
+        from scripts.daily import task as task_cli
+        with TemporaryDirectory() as root:
+            sessions = []
+            def session(name):
+                value = RunSession(name, root=root)
+                sessions.append(value)
+                return value
+            def stop_run(*args):
+                value = sessions[0]
+                (value.path/'control.json').write_text(json.dumps(dict(action='stop', id='synthetic-stop')))
+                value.checkpoint()
+                self.fail('stop checkpoint must cancel the run')
+            with patch.object(task_cli, 'RunSession', side_effect=session), \
+                 patch.object(task_cli, 'run_task_from_config', side_effect=stop_run), \
+                 patch.object(task_cli, 'print_report') as print_report, \
+                 patch('sys.argv', ['task.py', 'caravan', '--config', 'synthetic.yml']), \
+                 redirect_stdout(StringIO()):
+                task_cli.main()
+            print_report.assert_not_called()
+            snapshot = json.loads((sessions[0].path/'status.json').read_text())
+            self.assertEqual((snapshot['state'], snapshot['errors'], snapshot['command_id']),
+                             ('cancelled', 0, 'synthetic-stop'))
+            self.assertFalse(list(sessions[0].path.glob('incident-*')))
+
     def test_single_cli_real_error_keeps_run_diagnostics(self):
         from contextlib import redirect_stdout
         from io import StringIO

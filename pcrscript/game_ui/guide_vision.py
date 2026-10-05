@@ -311,11 +311,17 @@ def formation_fields(image, texts, index, badges) -> list[dict]:
     return result
 
 
+def combat_auto_labels(image, texts: list[GuideText]) -> list[GuideText]:
+    """Locate reliable AUTO labels in the combat button region."""
+    height, width = image.shape[:2]
+    return [t for t in texts if t.score >= .95 and t.text.upper() in ('自动', 'AUTO')
+            and t.center[0] > width*.86 and height*.70 < t.center[1] < height*.85]
+
+
 def combat_auto(image, texts: list[GuideText]) -> bool | None:
     """Read the labeled combat AUTO button, independently from member SET."""
     height, width = image.shape[:2]
-    labels = [t for t in texts if t.score >= .95 and t.text.upper() in ('自动', 'AUTO')
-              and t.center[0] > width*.86 and height*.70 < t.center[1] < height*.85]
+    labels = combat_auto_labels(image, texts)
     if len(labels) != 1:
         return None
     x, y, w, h = labels[0].rectangle

@@ -759,6 +759,96 @@ class VideoStrategyTests(TestCase):
             self.assertEqual(full.call_count,2)
             self.assertEqual(buttons.call_count,page['frames']-2)
 
+    def parse_targeted_auto_source(self, folder, kind, wide, *, auto_on=True,
+                                   existing='missing', local_label='AUTO'):
+        boxes = [(190+i*120, 390, 100, 100) for i in range(5)]
+        members = [dict(name=f'合成角色{i}', rectangle=list(box), score=.99)
+                   for i, box in enumerate(boxes)]
+        raw_width, raw_height = (1280, 590) if wide else (960, 540)
+        crop_width = round(raw_height*16/9) if wide else raw_width
+        crop_left = (raw_width-crop_width)//2 if wide else 0
+        frame = np.full((720, 1280, 3), 35, np.uint8)
+        for x, y, w, h in boxes:
+            left = round((crop_left+(x+.76*w)*crop_width/960)*1280/raw_width)
+            right = round((crop_left+(x+1.32*w)*crop_width/960)*1280/raw_width)
+            frame[round((y-.16*h)*4/3):round((y+.24*h)*4/3), left:right] = (255, 220, 0)
+        auto_rect = (1110, 505, 65, 45)
+        color = (255, 220, 0) if auto_on is True else (230, 230, 230) if auto_on is False else (120, 120, 120)
+        frame[501:554, 1106:1179] = color
+        labels = [GuideText(text, .99, (100, 10, 250, 20))
+                  for text in ('合成首领等级.100', '79000000/80000000', '1:25')]
+        if existing in ('known', 'ambiguous', 'low_confidence'):
+            labels.append(GuideText('AUTO', .94 if existing == 'low_confidence' else .99, auto_rect))
+        if existing == 'ambiguous':
+            labels.append(GuideText('自动', .99, (1200, 530, 65, 45)))
+        if existing == 'off_button':
+            labels.append(GuideText('AUTO', .99, (20, 150, 65, 45)))
+        scope = (dict(area='米洛克的领域', floor=1) if kind == 'recollection'
+                 else dict(kind='boss', difficulty='普通', boss='合成首领'))
+        target = dict(scope=scope, boss='合成首领', level=100,
+                      maximum_hp=80000000, image='synthetic_live_target.png')
+        source = dict(bvid='BVSYNTHETIC', url='https://example.com/synthetic',
+                      title=('公主连结 国服 米洛克1～3层自动参考' if kind == 'recollection'
+                             else '公主连结 国服 深渊讨伐战 合成合集'),
+                      pages=[dict(cid=1, part='合成合集', duration=1)])
+        options = dict(task_type=kind, area='米洛克的领域', stage='1', parsed_dir=folder,
+                       kind='boss', difficulty='普通', boss='合成首领', observed_target=target)
+        capture = Mock()
+        raw = cv.resize(frame, (raw_width, raw_height))
+        capture.read.side_effect = [(True, raw), (True, raw.copy())]
+        recognized = (['立即', '发动']*5 + ([local_label] if local_label else ['未知']*4))*2
+        ocr = Mock(side_effect=[SimpleNamespace(txts=(text,), scores=(.99,)) for text in recognized])
+        def full_texts(image, image_path, *args):
+            cv.imwrite(str(image_path), image)
+            return list(labels)
+        index = SimpleNamespace(names=[m['name'] for m in members], matrix=np.ones((5,1728),np.float32))
+        with patch('pcrscript.tasks.strategy_video.cv.VideoCapture', return_value=capture), \
+             patch('pcrscript.tasks.strategy_video.sample_seconds', return_value=[0, .5]), \
+             patch('pcrscript.tasks.strategy_video.frame_texts', side_effect=full_texts), \
+             patch('pcrscript.tasks.strategy_video.battle_rectangles', return_value=boxes), \
+             patch('pcrscript.tasks.strategy_video.combat_team', return_value=members):
+            report = parse_video_source(source, options, index, api=Mock(), ocr=ocr,
+                media_fetcher=lambda *a, **k: (Path(folder)/'synthetic.avi', dict(duration=1)))
+        self.assertEqual(report['pages'][0]['full_ocr_frames'], 2)
+        self.assertEqual(report['pages'][0]['button_ocr_frames'], 2)
+        self.assertTrue(all(m['instant']['value'] is True for m in report['parties'][0]['members']))
+        from pcrscript.tasks.recollection_strategy import parties_for_floor
+        from pcrscript.tasks.subjugation_guides import parties_for_target
+        candidates = (parties_for_floor(report, '米洛克的领域', 1, allow_local_trials=True)
+                      if kind == 'recollection' else parties_for_target(report, options, allow_local_trials=True))
+        return report['parties'][0], candidates
+
+    def test_full_ocr_local_trials_retain_targeted_auto(self):
+        for kind in ('recollection', 'subjugation'):
+            for wide in (False, True):
+                for existing in ('missing', 'low_confidence', 'off_button'):
+                    for auto_on in (False, True):
+                        with self.subTest(kind=kind, wide=wide, existing=existing, auto_on=auto_on), TemporaryDirectory() as folder:
+                            party, candidates = self.parse_targeted_auto_source(
+                                folder, kind, wide, existing=existing, auto_on=auto_on)
+                            self.assertIs(party['auto']['value'], auto_on)
+                            self.assertEqual(len(party['auto']['evidence']), 2)
+                            self.assertTrue(all(e['method'] == 'combat_auto_button' for e in party['auto']['evidence']))
+                            self.assertEqual(len(candidates), 1)
+                            self.assertEqual(candidates[0].build_basis, 'local_trial')
+                            self.assertIs(candidates[0].auto, auto_on)
+
+    def test_full_ocr_keeps_existing_and_ambiguous_auto_labels(self):
+        for wide in (False, True):
+            for existing in ('known', 'ambiguous'):
+                with self.subTest(wide=wide, existing=existing), TemporaryDirectory() as folder:
+                    party, candidates = self.parse_targeted_auto_source(folder, 'recollection', wide, existing=existing)
+                    self.assertIs(party['auto']['value'], True if existing == 'known' else None)
+                    self.assertEqual(len(candidates), 1 if existing == 'known' else 0)
+
+    def test_targeted_auto_needs_both_label_and_known_button_state(self):
+        for wide in (False, True):
+            for options in (dict(local_label=None), dict(auto_on=None)):
+                with self.subTest(wide=wide, options=options), TemporaryDirectory() as folder:
+                    party, candidates = self.parse_targeted_auto_source(folder, 'recollection', wide, **options)
+                    self.assertIsNone(party['auto']['value'])
+                    self.assertEqual(candidates, [])
+
     def test_compilation_table_retains_members_without_claiming_stage(self):
         with TemporaryDirectory() as folder:
             path=Path(folder)/'table.avi'

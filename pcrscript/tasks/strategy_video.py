@@ -17,12 +17,12 @@ import requests
 from ..extras.bilibili_api import BilibiliApi
 from ..extras.guide_media import fetch_video
 from ..game_ui.avatar_assets import ensure_avatar_index, atomic_json, read_json
-from ..game_ui.guide_vision import GuideText, combat_team, formation_team, wide_special_equipment_team, combat_set, combat_auto, battle_rectangles, match_portrait, read_text, requirement_cells, labeled_fields, formation_fields
+from ..game_ui.guide_vision import GuideText, combat_team, formation_team, wide_special_equipment_team, combat_set, combat_auto, combat_auto_labels, battle_rectangles, match_portrait, read_text, requirement_cells, labeled_fields, formation_fields
 from .strategy_document import Evidence, Fact, empty_member, finalize, export_document
 from .strategy_sources import BORROW_PART, MANUAL_PART, UNVERIFIED_SETTING, discover_sources, unparsed_switch_requirement
 from .strategy_inputs import declared_region, preferred_sources, source_statements
 
-PARSER_VERSION = 80
+PARSER_VERSION = 81
 FRAME_OCR_VERSION = 1
 COMBAT_AUDIT_SECONDS = 20
 RECOLLECTION_UNSUPPORTED = re.compile(
@@ -1085,9 +1085,11 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
                         crop_width if wide_crop else raw.shape[1])
                     page_record['button_ocr_frames'] = page_record.get('button_ocr_frames', 0)+1
                     scaled_texts += set_labels
-                    if not full_ocr:
-                        button_auto_texts = auto_labels
-                    if not wide_crop and not full_ocr:
+                    # Recover missing labels without duplicating existing ones
+                    # or replacing ambiguous full-frame evidence.
+                    if not combat_auto_labels(frame, button_auto_texts):
+                        button_auto_texts = texts + auto_labels
+                    if not wide_crop and not combat_auto_labels(small, scaled_texts):
                         scaled_texts += texts_in_view(auto_labels, raw.shape[1], 0, raw.shape[1])
                 if not row:
                     # The wide video's combat cards need a central 16:9 crop,
