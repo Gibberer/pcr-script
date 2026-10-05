@@ -337,6 +337,19 @@ def result_button(s):
     return None
 
 
+def result_win(ui, s):
+    if not result_button(s) or sweep_receipt(s):
+        return False
+    roi = (275, 70, 685, 250)
+    pattern = r'WIN[!！]?|战斗胜利|胜利'
+    won = s.find(pattern, roi, exact=True)
+    if won is None or won.score < .95:
+        # Orientation classification can rotate the stylized WIN into NIM.
+        # Re-read the upright banner; never treat that misread as victory.
+        won = ui.read_region(s, roi, classify=False).find(pattern, roi, exact=True)
+    return won is not None and won.score >= .95
+
+
 def result_damage(ui, s):
     # Shared battle-result layout; a score/bonus is never a damage observation.
     from .team_battle import result_damage as read_damage

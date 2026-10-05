@@ -720,6 +720,45 @@ class SubjugationTests(TestCase):
         self.assertEqual(game.tickets, 12)
         self.assertEqual(game.real_battles, 0)
 
+    def test_rotated_win_banner_is_rechecked_before_real_first_clear(self):
+        game = Game()
+        game.outpost_clears = set(field.DIFFICULTIES)
+        game.attempts = dict.fromkeys(field.DIFFICULTIES, 0)
+        game.tickets = 1
+        task = self.task(game)
+        read_result = task.combat_result_button
+        def misread(screen):
+            for item in screen.items:
+                if item.text == 'WIN':
+                    item.text = 'NIM'
+            screen.items.extend(synthetic_screen(('伤害报告', 870, 35)).items)
+            return read_result(screen)
+        task.combat_result_button = misread
+        task.ui.read_region = lambda s, roi, **kw: (
+            screen(('WIN!', 480, 150)) if roi == (275, 70, 685, 250) else s)
+        report = task.run(EVENT)
+        self.assertEqual(report['status'], 'complete', report['pending'])
+        self.assertEqual(game.real_battles, 1)
+        self.assertEqual(game.tickets, 0)
+        self.assertIn((0, '普通'), game.boss_clears)
+        self.assertTrue(report['simulations'][0]['readiness']['accepted'])
+
+    def test_win_requires_confident_banner_on_a_battle_result(self):
+        for label, confidence, x, expected in (
+                ('WIN!', .99, 480, True), ('WIN!', .94, 480, False),
+                ('TIMEUP', .99, 480, False), ('NIM', .99, 480, False),
+                ('WIN!', .99, 800, False)):
+            with self.subTest(label=label, confidence=confidence, x=x):
+                local = screen((label, x, 150))
+                local.items[0].score = confidence
+                ui = Mock(read_region=Mock(return_value=local))
+                result = screen(('伤害报告', 870, 35), ('下一步', 840, 470))
+                self.assertEqual(field.result_win(ui, result), expected)
+                ui.read_region.assert_called_once_with(result, (275, 70, 685, 250), classify=False)
+                for other in (screen(('WIN!', 480, 150)),
+                              screen(('扫荡结果', 480, 50), ('WIN!', 480, 150), ('关闭', 840, 470))):
+                    self.assertFalse(field.result_win(ui, other))
+
     def test_positive_damage_without_a_source_reference_preserves_the_ticket(self):
         game = Game()
         game.outpost_clears = set(field.DIFFICULTIES)

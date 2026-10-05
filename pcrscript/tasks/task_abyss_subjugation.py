@@ -363,7 +363,7 @@ class AbyssSubjugation(TimeLimitTask):
             return s.find('取消', (500, 430, 690, 520), exact=True)
         button = field.result_button(s)
         if button:
-            self.last_result = dict(self.last_result, win=bool(self.last_result.get('win') or s.find('WIN|战斗胜利|胜利')), text=s.text(),
+            self.last_result = dict(self.last_result, win=bool(self.last_result.get('win') or field.result_win(self.ui, s)), text=s.text(),
                                     evidence=str(self.ui.save('battle_result_'+str(len(self.report['history'])))))
             damage = field.result_damage(self.ui, s)
             if damage is not None:
