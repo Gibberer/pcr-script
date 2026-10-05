@@ -24,7 +24,7 @@ GUI 的“每日日常”会按顺序执行预设列表；配置好 Python 依�
 | 首页任务领奖 | `get_quest_reward` | 依次检查每日、普通、称号三个标签，领取已完成任务奖励，可能包含体力 |
 | 礼物箱 | `get_gift` | 可选择暂不领取体力；满仓处理见 [礼物说明](../game-knowledge/gifts.md) |
 | 剧情活动日常 | `campaign_clean` | 困难扫荡、普通扫荡开关；剧情、领奖、兑换放在日常选项；[详细说明](story-event.md) |
-| 深渊讨伐战 | `abyss_subjugation` | 开放期内优先完成前哨与首领日常，再执行清体力的快捷扫荡；关闭 `first_clear` 时只扫荡已满足条件的关卡，全部首领各难度首通后扫荡极难。[详细说明](abyss-subjugation.md) |
+| 深渊讨伐战 | `abyss_subjugation` | 开放期内完成前哨，并默认补齐三个首领各难度首通奖励；全部首通后扫荡极难，再执行清体力的快捷扫荡。明确只需扫荡时可关闭 `first_clear`。[详细说明](abyss-subjugation.md) |
 | 活动首通 | `clear_campaign_first_time` | 显式启用本次首通，复用剧情活动流程；需允许当前队伍试打，遵守首通体力上限 |
 | 复刻活动 | `revival_event_once` | 活动情报筛选、完成回执跳过；[详细说明](../game-knowledge/revival-events.md) |
 | 快捷扫荡 | `quick_clean` | 游戏中预设 1～7；仅困难掉落活动时可能切预设 3，先核对游戏内预设。关卡剩余挑战次数不足时不购买回复；预设次数超出剩余次数时不自动调整。 |
