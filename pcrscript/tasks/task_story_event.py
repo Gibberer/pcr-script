@@ -8,7 +8,7 @@ from ..game_ui.screen import EventScreen
 if TYPE_CHECKING:
     from pcrscript import Robot
 import re
-from ..run_session import atomic_json, clock as time
+from ..run_session import atomic_json, clock as time, failure
 
 from ..game_ui.screen import EventUI, EventUIError, normalized
 
@@ -730,7 +730,6 @@ class CampaignClean(TimeLimitTask):
             self.report["status"] = "complete" if not self.report["pending"] else "partial"
             return self.report
         except Exception as error:
-            from ..run_session import atomic_json, failure
             failure(error)
             self.report["status"] = "error"
             self.report["pending"].append(str(error))

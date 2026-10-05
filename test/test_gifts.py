@@ -1,4 +1,5 @@
 """Offline boundaries for inventory destruction, gift recovery and scaling."""
+import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
@@ -69,6 +70,7 @@ class GiftTests(TestCase):
             g.ui.click = Mock()
             g.ui.save = Mock()
             self.assertEqual(g.run()["status"], "partial")
+            self.assertEqual(json.loads((Path(folder)/'report.json').read_text(encoding='utf-8')), g.report)
             g.free_space.assert_called_once()
 
     def test_enough_space_does_not_auto_select_or_dismantle(self):

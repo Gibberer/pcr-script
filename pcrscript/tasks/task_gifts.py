@@ -6,7 +6,7 @@ from .base import BaseTask, TaskOptions, TaskReport
 from ..game_ui.screen import EventScreen
 if TYPE_CHECKING:
     from pcrscript import Robot
-from ..run_session import atomic_json, clock as time
+from ..run_session import atomic_json, clock as time, failure
 
 import cv2 as cv
 import numpy as np
@@ -199,7 +199,6 @@ class GetGift(BaseTask):
             self.report["status"] = "partial"
             return self.report
         except Exception as error:
-            from ..run_session import atomic_json, failure
             failure(error)
             self.report["status"] = "error"
             self.report["pending"].append(str(error))

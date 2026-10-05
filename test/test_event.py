@@ -935,6 +935,7 @@ class WorkflowTests(TestCase):
             battles.return_value.bosses.side_effect = lambda: sequence.append("bosses")
             r.ui = SimpleNamespace(output=Path(folder), save=Mock())
             self.assertEqual(r.run()["status"], "complete")
+            self.assertEqual(json.loads((Path(folder)/'report.json').read_text(encoding='utf-8')), r.report)
             battles.assert_not_called()
         self.assertEqual(sequence, ["sweep", "stories", "memoirs", "missions", "exchange"])
 
