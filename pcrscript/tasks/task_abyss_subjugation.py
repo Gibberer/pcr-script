@@ -7,6 +7,7 @@ from pathlib import Path
 import re
 
 from .base import Event, EventNews, TimeLimitTask
+from .options import validated_options
 from .event_battle import EventCombat
 from .abyss_retry import combat_sample, retry_decision
 from .registry import register
@@ -16,10 +17,10 @@ from .party_preparation import source_candidates, prepare_special, party_fingerp
 from ..constants import SERVER_TIMEZONE
 from ..game_ui import abyss_subjugation as field
 from ..game_ui.special_equipment import cancel_special_equipment
-from ..game_ui.avatar_assets import atomic_json, read_json
+from ..game_ui.avatar_assets import read_json
 from ..game_ui.screen import EventUI, EventUIError, normalized
 from ..game_ui.team_battle import meets_reference
-from ..run_session import checkpoint, clock as time, RunCancelled, ResumeUnsafe
+from ..run_session import atomic_json, checkpoint, clock as time, RunCancelled, ResumeUnsafe
 
 
 class SubjugationBlocked(EventUIError):
@@ -42,20 +43,15 @@ def migrate_options(options):
 def validate_options(options):
     if not isinstance(options, dict):
         raise ValueError('AbyssSubjugation必须是配置对象')
-    value = migrate_options(options)
-    for key, default, upper in (('timeout', 7200, 21600), ('battle_timeout', 240, 600),
-                                ('max_stamina', 400, 2000), ('max_boss_tickets', 99, 999),
-                                ('max_simulations', 30, 100), ('max_normal_trials', 6, 12),
-                                ('max_source_batches', 3, 10)):
-        number = value.setdefault(key, default)
-        if type(number) is not int or not 1 <= number <= upper:
-            raise ValueError(f'AbyssSubjugation.{key}必须是1到{upper}的整数')
-    for key, default in (('preview_only', False), ('first_clear', True), ('allow_local_trials', True),
-                         ('auto_collect_house_stamina', True), ('discover_sources', True),
-                         ('auto_equip_special', True), ('allow_five_star_upgrade', False),
-                         ('allow_divine_amulets', False)):
-        if type(value.setdefault(key, default)) is not bool:
-            raise ValueError('AbyssSubjugation.'+key+'必须是布尔值')
+    value = validated_options(migrate_options(options), 'AbyssSubjugation',
+        integers=(('timeout', 7200, 21600), ('battle_timeout', 240, 600),
+                  ('max_stamina', 400, 2000), ('max_boss_tickets', 99, 999),
+                  ('max_simulations', 30, 100), ('max_normal_trials', 6, 12),
+                  ('max_source_batches', 3, 10)),
+        flags=(('preview_only', False), ('first_clear', True), ('allow_local_trials', True),
+               ('auto_collect_house_stamina', True), ('discover_sources', True),
+               ('auto_equip_special', True), ('allow_five_star_upgrade', False),
+               ('allow_divine_amulets', False)))
     if 'avatars' in value and not isinstance(value['avatars'], dict):
         raise ValueError('AbyssSubjugation.avatars必须是配置对象')
     if 'sources' in value and not isinstance(value['sources'], dict):

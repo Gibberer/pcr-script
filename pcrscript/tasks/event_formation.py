@@ -5,10 +5,9 @@ from .base import Screenshot, Point, Region, TaskReport
 from .event_strategy import EventParty
 from ..game_ui.screen import EventUI, EventScreen
 from dataclasses import asdict
-import json
 import re
 from uuid import uuid4
-from pcrscript.run_session import clock as time
+from ..run_session import atomic_json, clock as time
 
 import cv2 as cv
 import numpy as np
@@ -245,8 +244,7 @@ class EventFormation:
             actual.skill_level = prior.skill_level
         if full:
             self.observed[normalized(name)] = actual
-            (self.ui.output / "roster.json").write_text(json.dumps(
-                {k: asdict(v) for k, v in self.observed.items()}, ensure_ascii=False, indent=2), encoding="utf-8")
+            atomic_json(self.ui.output / "roster.json", {k: asdict(v) for k, v in self.observed.items()})
         self.ui.expect_click(self.detail_close_pattern, (320, 450, 650, 515), exact=True)
         close_attempts = 0
         def close_remaining_dialog(screen):

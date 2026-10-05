@@ -15,7 +15,7 @@ import numpy as np
 
 from pcrscript import Robot
 from pcrscript.game_ui import recollection as field
-from pcrscript.game_ui.screen import EventScreen, EventUIError, TextBox
+from pcrscript.game_ui.screen import EventUIError, TextBox
 from pcrscript.tasks import Recollection, RecollectionFirstClear
 from pcrscript.tasks.event_strategy import CharacterStatus
 from pcrscript.tasks.event_battle import BattleResult, EventCombat
@@ -26,16 +26,11 @@ from pcrscript.tasks.strategy_video import (choose_pages, observed_scope, task_s
     parse_video_source, RecollectionScopeContext, recollection_client_region, live_target_scope)
 from pcrscript.run_session import RunCancelled, ResumeUnsafe
 from pcrscript.game_ui.guide_vision import GuideText
+from functools import partial
+from ui_fixtures import screen as synthetic_screen
 
 
-def screen(*labels, blue=()):
-    img = np.full((540, 960, 3), 245, np.uint8)
-    items = []
-    for text, x, y in labels:
-        items.append(TextBox(text, .999, [[x-25,y-9],[x+25,y-9],[x+25,y+9],[x-25,y+9]]))
-        if text in blue:
-            cv.rectangle(img, (x-50,y-24), (x+50,y+24), (230,155,25), -1)
-    return EventScreen(img, items)
+screen = partial(synthetic_screen, box_half_size=(25, 9))
 
 
 def detail(area, floor, cleared=False, remaining=3, tickets=100, claim=False):

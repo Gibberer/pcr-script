@@ -8,7 +8,7 @@ import requests
 from pathlib import Path
 from typing import Any
 from ..extras.bilibili_api import BilibiliApi
-from ..run_session import clock as time
+from ..run_session import atomic_json, clock as time
 from .strategy_inputs import preferred_sources,validate_urls
 
 PARSER_VERSION = 25
@@ -354,10 +354,9 @@ def discover_sources(options: dict, *, api=None, check=lambda: None, exclude_sou
                   excluded=excluded,errors=errors,pending=[])
     if not candidates: report['pending'].append('没有获得经视频详情核验的目标攻略来源；未生成战斗队伍')
     if errors: report['pending'].append('部分来源请求或详情核验失败，见errors；未把失败当作没有攻略')
-    path.parent.mkdir(parents=True,exist_ok=True)
     if isinstance(cached,dict) and cached.get('status') == 'complete' and report['status'] != 'complete':
         backup=path.with_suffix('.last-good.json')
-        backup.write_text(json.dumps(cached,ensure_ascii=False,indent=2),encoding='utf-8')
+        atomic_json(backup, cached)
         report['previous_catalog']=str(backup)
-    temp=path.with_suffix('.tmp');temp.write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf-8');temp.replace(path)
+    atomic_json(path, report)
     return report

@@ -1,7 +1,6 @@
 """List-layout story-event workflow, reusable for new and revival editions."""
 from __future__ import annotations
 from .registry import register
-import json
 from difflib import SequenceMatcher
 from typing import TYPE_CHECKING, Any
 from .base import BaseTask, TimeLimitTask, EventNews, TaskOptions, TaskReport
@@ -9,7 +8,7 @@ from ..game_ui.screen import EventScreen
 if TYPE_CHECKING:
     from pcrscript import Robot
 import re
-from pcrscript.run_session import clock as time
+from ..run_session import atomic_json, clock as time
 
 from ..game_ui.screen import EventUI, EventUIError, normalized
 
@@ -693,7 +692,7 @@ class CampaignClean(TimeLimitTask):
             self.ui.save('error')
             raise
         finally:
-            (self.ui.output / 'report.json').write_text(json.dumps(self.report, ensure_ascii=False, indent=2), encoding='utf-8')
+            atomic_json(self.ui.output / 'report.json', self.report)
 
     def run(self, hard_chapter: bool = True, exhaust_power: bool = False, *, only: str = 'all') -> TaskReport:
         if only != 'all':
@@ -731,14 +730,14 @@ class CampaignClean(TimeLimitTask):
             self.report["status"] = "complete" if not self.report["pending"] else "partial"
             return self.report
         except Exception as error:
-            from pcrscript.run_session import failure
+            from ..run_session import atomic_json, failure
             failure(error)
             self.report["status"] = "error"
             self.report["pending"].append(str(error))
             self.ui.save("error")
             raise
         finally:
-            (self.ui.output / "report.json").write_text(json.dumps(self.report, ensure_ascii=False, indent=2), encoding="utf-8")
+            atomic_json(self.ui.output / "report.json", self.report)
 
 @register("clear_campaign_first_time")
 class ClearCampaignFirstTime(TimeLimitTask):

@@ -13,7 +13,9 @@ GUI、每日命令和单项命令共用 `pcrscript/tasks/` 中的 Task 注册表
 
 ## 配置与调用
 
-完整日常从 YAML 的 `Task` 列表依次调用 `Robot.work()`；GUI 批量运行先将启用项写入同一列表。单项入口调用 `Robot.run_task(name, *args, **kwargs)`，使用选定配置段但不修改每日列表。
+完整日常从 YAML 的 `Task` 列表依次调用 `Robot.work()`；GUI 批量运行先将启用项写入同一列表。单项入口调用 `Robot.run_task(name, *args, **kwargs)`，使用选定配置段但不修改每日列表。默认配置集中在根目录 `runtime_defaults.yml`。
+
+`tasks/options.py` 共用正整数预算和布尔开关的默认值填充、类型与范围校验，返回新字典，不改写传入配置；布尔值不能作为整数预算。各任务声明自己的字段与上限，并负责领域、来源、装备等关联约束和旧配置迁移。接入该能力的任务在 `prepare()` 与构造时使用同一校验函数，非法配置在设备连接前报错。
 
 ```powershell
 ./.venv/Scripts/python.exe -X utf8 daily_task.py --config daily_config.yml
@@ -28,13 +30,17 @@ GUI、每日命令和单项命令共用 `pcrscript/tasks/` 中的 Task 注册表
 
 每次调度将执行记录写入 `cache/daily/runs/<run>/tasks/<序号>-<任务名>/result.json`，任务报告与必要截图在同一目录；重复运行同名任务不会覆盖本轮其他任务。`events.jsonl` 记录 `task.result`，运行控制和异常证据见[运行诊断](run-diagnostics.md)。没有业务后置核验的旧任务只标记 `finished`，不能当作资源已确认的 `complete`。
 
+任务报告、消费状态和攻略缓存统一用 `run_session.atomic_json()` 写入：创建父目录，写入同目录唯一临时文件后原子替换，Windows 短暂占用时有界重试，失败时保留旧文件并清理临时文件。写入失败须向调用方传播；缓存可重建，待核对消费不能按缓存缺失处理。各玩法仍自行定义状态内容和解除条件。
+
 单项任务在运行记录中显示 0/1 到 1/1 的任务级进度；日常列表沿用逐项计数。任务内部的 OCR 业务阶段和旧图片动作共用第二行进度，每次任务结束都会清除该行，避免下一项显示上项的进度。进度仅表示执行位置；最终业务状态仍以任务报告为准。
 
 单项异常向调用方抛出；每日列表记录错误并继续后续项。消费后不递归重放整任务；恢复必须先核对实际结果。旧任务中尚未有界的等待和缺少业务结果核验的场景见[待验证清单](pending-validation.md)。
 
 ## 回归测试
 
-按功能定位 `test/test_<功能>.py`；跨入口调度见 `test_task_integration.py`，登录见 `test_home_login.py`，设备与启动见 `test_device_adaptation.py`，状态控制见 `test_run_session.py`，GUI 配置协议见 `test_desktop.py`。
+按功能定位 `test/test_<功能>.py`；跨入口调度见 `test_task_integration.py`，配置边界见 `test_task_options.py`，原子写入见 `test_persistence.py`。登录、设备启动、运行控制和 GUI 配置协议分别见 `test_home_login.py`、`test_device_adaptation.py`、`test_run_session.py`、`test_desktop.py`。
+
+共用合成画面和输入回放放在 `test/ui_fixtures.py`，玩法页面放在对应的 `*_fixtures.py`。测试从夹具模块导入辅助函数，避免为复用页面而导入另一套测试；场景差异通过参数和 `subTest` 表达。回放只替换截图、输入和证据保存，任务的预算、状态迁移与消费核验仍执行生产逻辑。
 
 先运行受影响测试；共享入口或测试组织变更再运行完整离线集：
 

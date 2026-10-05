@@ -1,5 +1,6 @@
 """Per-account, per-occurrence completion receipts; partial runs remain resumable."""
 from .base import Event, TaskReport
+from ..run_session import atomic_json
 import hashlib
 import json
 from pathlib import Path
@@ -17,8 +18,5 @@ class RevivalState:
         return self.data.get('status') == 'complete'
 
     def save(self, report: TaskReport) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        temp = self.path.with_suffix('.tmp')
-        temp.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
-        temp.replace(self.path)
+        atomic_json(self.path, report)
         self.data = report

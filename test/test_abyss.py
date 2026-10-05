@@ -7,7 +7,7 @@ from unittest.mock import Mock, patch
 import numpy as np
 import cv2 as cv
 
-from pcrscript.game_ui.screen import EventScreen, TextBox, EventUIError
+from pcrscript.game_ui.screen import EventScreen, EventUIError
 from pcrscript.game_ui.abyss import AbyssStage, next_stage, detail_stage, remaining, advanced
 from pcrscript.game_ui.guild_house import collect_produced_stamina, visible_stamina
 from pcrscript.tasks.task_abyss import AbyssPush, validate_options, equipment_retrial, source_for_stage, recent_unreleased, recent_previous_win
@@ -18,11 +18,11 @@ from pcrscript.tasks.abyss_party import AbyssFormation, archive_observations
 from pcrscript.tasks.abyss_history import AbyssHistory
 from pcrscript.run_session import RunCancelled
 from test_strategy_sources import fake_api
+from functools import partial
+from ui_fixtures import screen as synthetic_screen
 
 
-def screen(*labels):
-    return EventScreen(np.zeros((540, 960, 3), np.uint8), [
-        TextBox(text, 1, [[x-10,y-7],[x+10,y-7],[x+10,y+7],[x-10,y+7]]) for text,x,y in labels])
+screen = partial(synthetic_screen, background=0, score=1, box_half_size=(10, 7))
 
 
 def map_screen(number=1):

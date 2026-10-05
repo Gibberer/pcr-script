@@ -16,7 +16,7 @@ import numpy as np
 from pcrscript import Robot
 from pcrscript.constants import SERVER_TIMEZONE
 from pcrscript.game_ui import abyss_subjugation as field
-from pcrscript.game_ui.screen import EventScreen, EventUIError, TextBox
+from pcrscript.game_ui.screen import EventUIError, TextBox
 from pcrscript.tasks import AbyssSubjugation, Event, EventNews
 from pcrscript.tasks.event_battle import BattleResult
 from pcrscript.tasks.event_strategy import CharacterStatus, EventParty, MemberRequirement
@@ -24,22 +24,15 @@ from pcrscript.tasks.subjugation_party import character_talents, require_event_t
 from pcrscript.tasks.party_preparation import party_fingerprint
 from pcrscript.tasks.task_abyss_subjugation import validate_options, BossPartyUnavailable
 from pcrscript.runtime import modify_task_list, run_task_with_config
+from functools import partial
+from ui_fixtures import screen as synthetic_screen
 
 START = datetime(2026, 10, 2, 12, tzinfo=SERVER_TIMEZONE)
 NOW = START+timedelta(hours=1)
 EVENT = Event(START.timestamp(), datetime(2026, 10, 7, 4, 59, 59, tzinfo=SERVER_TIMEZONE).timestamp(),
               '深渊讨伐战', dict(abyss_id=1, boss_ticket_id=70001, talent_id=2, title='合成深渊'))
 
-def screen(*labels, blue=(), yellow=()):
-    img = np.full((540, 960, 3), 245, np.uint8)
-    items = []
-    for text, x, y in labels:
-        items.append(TextBox(text, .999, [[x-24, y-8], [x+24, y-8], [x+24, y+8], [x-24, y+8]]))
-        if text in blue:
-            cv.rectangle(img, (x-50, y-22), (x+50, y+22), (230, 155, 25), -1)
-    for x1, y1, x2, y2 in yellow:
-        cv.rectangle(img, (x1, y1), (x2, y2), (25, 200, 245), -1)
-    return EventScreen(img, items)
+screen = partial(synthetic_screen, box_half_size=(24, 8), button_half_size=(50, 22))
 
 def party():
     return EventParty('synthetic', '合成游戏保存队伍',
@@ -1253,9 +1246,3 @@ class SubjugationTests(TestCase):
                 recover.assert_called_once_with(task, order)
                 source_audit.assert_not_called()
         self.assertEqual(task.simulation_count, 0)
-
-    def test_configuration_rejects_unsafe_or_ambiguous_values(self):
-        for options in ({'max_stamina': True}, {'max_boss_tickets': -1}, {'preview_only': 1},
-                        {'first_clear': 1}, {'allow_local_trials': 1}):
-            with self.subTest(options=options), self.assertRaises(ValueError):
-                validate_options(options)

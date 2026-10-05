@@ -2,31 +2,26 @@
 from __future__ import annotations
 
 from hashlib import sha256
-import json
 
 import cv2 as cv
 import numpy as np
 
-from .base import BaseTask, Event, EventNews, TimeLimitTask
+from .base import Event, EventNews, TimeLimitTask
+from .options import validated_options
 from .event_formation import EventFormation
 from .registry import register
 from ..game_ui.avatars import feature
 from ..game_ui.screen import EventUI, EventUIError, normalized
 from ..game_ui.special_equipment import auto_equip_special
 from ..game_ui.team_battle import Boss, boss_detail, can_repeat, map_bosses, map_ready, meets_reference, parse_remaining_time, priority, recommendation_damage, recommendation_time, result_damage
-from ..run_session import clock as time
+from ..run_session import clock as time, atomic_json
 
 
 def validate_options(options: dict) -> dict:
-    value = dict(options)
-    for key, default, upper in (('timeout', 3600, 7200), ('battle_timeout', 220, 600),
-                                ('max_real_attacks', 3, 3), ('max_simulations', 12, 40)):
-        number = value.setdefault(key, default)
-        if type(number) is not int or not 1 <= number <= upper:
-            raise ValueError(f'TeamBattle.{key}必须是1到{upper}的整数')
-    if type(value.setdefault('simulation_only', False)) is not bool:
-        raise ValueError('TeamBattle.simulation_only必须是布尔值')
-    return value
+    return validated_options(options, 'TeamBattle',
+        integers=(('timeout', 3600, 7200), ('battle_timeout', 220, 600),
+                  ('max_real_attacks', 3, 3), ('max_simulations', 12, 40)),
+        flags=(('simulation_only', False),))
 
 
 class BossChanged(EventUIError):
@@ -80,7 +75,7 @@ class TeamBattle(TimeLimitTask):
         self.carry = None
 
     def save_report(self):
-        (self.ui.output/'report.json').write_text(json.dumps(self.report, ensure_ascii=False, indent=2), encoding='utf-8')
+        atomic_json(self.ui.output/'report.json', self.report)
 
     def log(self, message: str) -> None:
         print('[团队战] '+message, flush=True)

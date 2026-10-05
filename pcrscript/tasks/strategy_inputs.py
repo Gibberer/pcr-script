@@ -7,6 +7,7 @@ import re
 import time
 from urllib.parse import urlsplit,urljoin
 import requests
+from ..run_session import atomic_json
 
 SOURCE_CACHE_VERSION = 5
 
@@ -237,7 +238,7 @@ def preferred_sources(urls,api,*,directory='cache/game/strategies/user_sources',
                            resolved_url=response.url)
             entry.update(version=SOURCE_CACHE_VERSION,url=url,fetched_at=time.time(),priority=priority,user_provided=True,
                          readiness='source_only',pending=['仍需核验任务范围和解析角色/培养要求'])
-            path.write_text(json.dumps(entry,ensure_ascii=False,indent=2),encoding='utf-8')
+            atomic_json(path, entry)
             result.append(entry)
         except (requests.RequestException,ValueError,KeyError,TypeError,OSError) as error:
             errors.append(dict(url=url,error=type(error).__name__+': '+str(error)[:180]))

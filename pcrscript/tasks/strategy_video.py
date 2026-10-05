@@ -1,7 +1,7 @@
 """Formal video-to-strategy acquisition. No Agent files, prompts or labels required."""
 from __future__ import annotations
 
-from collections import Counter, defaultdict
+from collections import defaultdict
 from copy import deepcopy
 from dataclasses import asdict
 from hashlib import sha256
@@ -16,7 +16,8 @@ import requests
 
 from ..extras.bilibili_api import BilibiliApi
 from ..extras.guide_media import fetch_video
-from ..game_ui.avatar_assets import ensure_avatar_index, atomic_json, read_json
+from ..game_ui.avatar_assets import ensure_avatar_index, read_json
+from ..run_session import atomic_json
 from ..game_ui.guide_vision import GuideText, combat_team, formation_team, wide_special_equipment_team, combat_set, combat_auto, combat_auto_labels, battle_rectangles, match_portrait, read_text, requirement_cells, labeled_fields, formation_fields
 from .strategy_document import Evidence, Fact, empty_member, finalize, export_document
 from .strategy_sources import BORROW_PART, MANUAL_PART, UNVERIFIED_SETTING, discover_sources, unparsed_switch_requirement

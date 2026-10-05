@@ -1,7 +1,6 @@
 """One completion per revival occurrence, selected by news and live UI layout."""
 from __future__ import annotations
 from .registry import register
-import json
 from typing import TYPE_CHECKING, Any
 from .base import BaseTask, Event, EventNews, TaskOptions, TaskReport, TaskConfig, PreparedTask
 if TYPE_CHECKING:
@@ -12,6 +11,7 @@ from .task_story_event import CampaignClean
 from .revival_state import RevivalState
 from ..game_ui.event_layout import event_layout, map_dialogue
 from ..game_ui.screen import EventUIError
+from ..run_session import atomic_json
 
 
 @register("revival_event_once")
@@ -123,7 +123,7 @@ class RevivalEventOnce(CampaignClean):
             raise
         finally:
             self.state.save(self.report)
-            (self.ui.output / 'report.json').write_text(json.dumps(self.report, ensure_ascii=False, indent=2), encoding='utf-8')
+            atomic_json(self.ui.output / 'report.json', self.report)
 
     @classmethod
     def prepare(cls, config: TaskConfig, event: Event | None = None) -> PreparedTask:

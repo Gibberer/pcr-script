@@ -1,14 +1,13 @@
 """Standalone caravan dice spending; no purchases or daily-list changes."""
 from __future__ import annotations
 from .registry import register
-import json
 from typing import TYPE_CHECKING
 from .base import BaseTask, TaskOptions, TaskReport, Region
 from ..game_ui.screen import EventScreen
 if TYPE_CHECKING:
     from pcrscript import Robot
 import re
-from pcrscript.run_session import clock as time, emit
+from ..run_session import atomic_json, clock as time, emit
 from ..game_ui.screen import EventUI, EventUIError
 from ..game_ui.caravan import board, triple_mode, disabled_roll, progress, fastest_turn, helpful_food, surplus_food
 
@@ -42,8 +41,7 @@ class Caravan(BaseTask):
         self.empty_confirmed = False
 
     def save_report(self) -> None:
-        (self.ui.output / 'report.json').write_text(
-            json.dumps(self.report, ensure_ascii=False, indent=2), encoding='utf-8')
+        atomic_json(self.ui.output / 'report.json', self.report)
 
     def click_text(self, s: EventScreen, pattern: str, roi: Region=(200, 350, 760, 515)) -> bool:
         button = s.find(pattern, roi, exact=True)

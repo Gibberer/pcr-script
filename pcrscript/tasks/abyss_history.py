@@ -89,5 +89,4 @@ class AbyssHistory:
         self.save()
 
     def save(self):
-        self.path.parent.mkdir(parents=True, exist_ok=True)
         atomic_json(self.path, self.data)

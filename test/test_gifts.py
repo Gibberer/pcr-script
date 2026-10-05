@@ -9,13 +9,12 @@ import numpy as np
 import cv2 as cv
 
 from pcrscript.tasks.task_gifts import GetGift, inventory, stamina_excluded
-from pcrscript.game_ui.screen import EventUI, EventUIError, EventScreen, TextBox
+from pcrscript.game_ui.screen import EventUI, EventUIError
+from functools import partial
+from ui_fixtures import screen as synthetic_screen
 
 
-def screen(*items):
-    return EventScreen(np.zeros((540, 960, 3), np.uint8), [
-        TextBox(text, 1, [[x-15, y-8], [x+15, y-8], [x+15, y+8], [x-15, y+8]])
-        for text, x, y in items])
+screen = partial(synthetic_screen, background=0, score=1, box_half_size=(15, 8))
 
 
 class GiftTests(TestCase):

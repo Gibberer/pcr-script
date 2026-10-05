@@ -1,13 +1,12 @@
 """Gift collection with bounded EX inventory recovery using saved game settings."""
 from __future__ import annotations
 from .registry import register
-import json
 from typing import TYPE_CHECKING
 from .base import BaseTask, TaskOptions, TaskReport
 from ..game_ui.screen import EventScreen
 if TYPE_CHECKING:
     from pcrscript import Robot
-from pcrscript.run_session import clock as time
+from ..run_session import atomic_json, clock as time
 
 import cv2 as cv
 import numpy as np
@@ -200,12 +199,12 @@ class GetGift(BaseTask):
             self.report["status"] = "partial"
             return self.report
         except Exception as error:
-            from pcrscript.run_session import failure
+            from ..run_session import atomic_json, failure
             failure(error)
             self.report["status"] = "error"
             self.report["pending"].append(str(error))
             self.ui.save("error")
             raise
         finally:
-            (self.ui.output / "report.json").write_text(json.dumps(self.report, ensure_ascii=False, indent=2), encoding="utf-8")
+            atomic_json(self.ui.output / "report.json", self.report)
             print(f"[礼物] {self.report['status']}；" + "；".join(self.report["pending"]), flush=True)

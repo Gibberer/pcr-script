@@ -7,6 +7,7 @@ from pathlib import Path
 import re
 
 from .base import BaseTask
+from .options import validated_options
 from ..game_ui import recollection as field
 from ..game_ui.abyss_subjugation import navigation_exit as subjugation_navigation_exit
 from ..game_ui.screen import EventUI, EventUIError
@@ -19,24 +20,16 @@ class RecollectionBlocked(EventUIError):
 
 def validate_options(options, *, first_clear=False):
     section = 'RecollectionFirstClear' if first_clear else 'Recollection'
-    if not isinstance(options, dict):
-        raise ValueError(section+'必须是配置对象')
-    value = dict(options)
     defaults = [('timeout', 3600 if first_clear else 600, 7200)]
     if first_clear:
         defaults += [('battle_timeout', 220, 600), ('max_battles', 30, 100),
                      ('max_attempts_per_stage', 2, 5), ('max_source_batches', 3, 10)]
     else:
         defaults += [('max_sweeps', 9, 99)]
-    for key, default, upper in defaults:
-        number = value.setdefault(key, default)
-        if type(number) is not int or not 1 <= number <= upper:
-            raise ValueError(f'{section}.{key}必须是1到{upper}的整数')
-    flags = ('discover_sources', 'allow_local_trials', 'auto_equip', 'retry_failed_parties') if first_clear else ('claim_rewards', 'sweep_dominion', 'preview_only')
-    for key in flags:
-        flag = value.setdefault(key, key not in ('allow_local_trials', 'auto_equip', 'retry_failed_parties', 'preview_only'))
-        if type(flag) is not bool:
-            raise ValueError(f'{section}.{key}必须为布尔值')
+    flags = ((('discover_sources', True), ('allow_local_trials', False),
+              ('auto_equip', False), ('retry_failed_parties', False)) if first_clear else
+             (('claim_rewards', True), ('sweep_dominion', True), ('preview_only', False)))
+    value = validated_options(options, section, integers=defaults, flags=flags)
     areas = value.setdefault('areas', list(field.AREAS) if first_clear else ['kaiser', 'zen', 'miroku'])
     reverse = {name: key for key, name in field.AREAS.items()}
     if not isinstance(areas, list) or not areas or any(not isinstance(a, str) for a in areas):
@@ -83,7 +76,6 @@ class RecollectionTask(BaseTask):
         self.state = json.loads(self.state_path.read_text(encoding='utf-8')) if self.state_path.exists() else {}
 
     def save(self):
-        self.state_path.parent.mkdir(parents=True, exist_ok=True)
         atomic_json(self.report_path, self.report)
         atomic_json(self.state_path, self.state)
 
