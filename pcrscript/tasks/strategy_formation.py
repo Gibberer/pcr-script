@@ -309,6 +309,8 @@ class StrategyFormation(EventFormation):
             if not ready:
                 unresolved=[f['character'] for f in details.get('unready',[]) if any('专武' in r for r in f.get('reasons',[]))]
                 missing=[f['character'] for f in details.get('unready',[]) if any('未在搜索结果' in r for r in f.get('reasons',[]))]
+                if missing and not self.allow_substitutions:
+                    return None,dict(source=source,selection=details,unready=['来源阵容缺员，继续其他原阵容候选'])
                 if unresolved and recover and hasattr(self,'recover_equipment'):
                     source['_known_missing'] = sorted(set(known_missing) | set(missing))
                     if self.recover_source_equipment(stage,source,[n for n in source['names'] if n not in missing]):

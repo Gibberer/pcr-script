@@ -751,7 +751,7 @@ class AbyssTests(TestCase):
                 self.assertEqual(formation.current_trial.call_count, 3)
                 self.assertEqual([call.args[1] for call in formation.recover_equipment.call_args_list], [['a'], ['b']])
 
-    def test_equipment_recovery_keeps_missing_versions_blocked_without_repeating_search(self):
+    def test_missing_source_member_skips_equipment_recovery_when_substitutions_are_disabled(self):
         formation=object.__new__(AbyssFormation)
         formation.allow_substitutions=False
         formation.ui=Mock(capture=Mock(return_value=SimpleNamespace(image=np.zeros((540,960,3),np.uint8))))
@@ -766,10 +766,9 @@ class AbyssTests(TestCase):
                     instant=[True]*5,required_stars=[None]*5)
         party,_=formation.source_trial(AbyssStage('water',5,4),source)
         self.assertIsNone(party)
-        self.assertEqual([m.name for m in formation.select.call_args_list[1].args[0].members],
-                         ['held','c','d','e'])
+        formation.select.assert_called_once()
         formation.current_trial.assert_not_called()
-        formation.recover_equipment.assert_called_once_with(AbyssStage('water',5,4),['held','c','d','e'])
+        formation.recover_equipment.assert_not_called()
 
     def test_unready_or_disabled_trials_never_start(self):
         for enabled in (True,False):
