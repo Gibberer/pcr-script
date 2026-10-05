@@ -690,6 +690,21 @@ class SubjugationTests(TestCase):
         self.assertEqual(game.sweeps[-1], ('boss', 0, '极难', 12))
         task.source_parties.assert_not_called()
         task.formation.select.assert_not_called()
+        self.assertEqual([text for page,text,*_ in game.clicks if page == 'home' and text in field.DIFFICULTIES],
+                         list(field.DIFFICULTIES))
+        self.assertEqual([text for page,text,*_ in game.clicks if page == 'normal'], ['使用4张']*3)
+
+    def test_cleared_outpost_sweep_still_obeys_stamina_and_budget_caps(self):
+        for stamina, budget in ((1000,50),(60,400)):
+            with self.subTest(stamina=stamina,budget=budget):
+                game = Game()
+                game.stamina = stamina
+                game.outpost_clears = set(field.DIFFICULTIES)
+                report = self.task(game,first_clear=False,max_stamina=budget).run(EVENT)
+                self.assertEqual((report['stamina_spent'],game.stamina,game.tickets),(50,stamina-50,2))
+                self.assertEqual(game.attempts['普通'],2)
+                self.assertEqual(game.sweeps,[('outpost',0,'普通',2)])
+                self.assertEqual(game.real_battles,0)
 
     def test_failed_simulation_does_not_spend_boss_tickets(self):
         game = Game()

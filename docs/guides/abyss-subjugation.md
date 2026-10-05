@@ -6,7 +6,7 @@
 
 ## 运行与配置
 
-新工程的默认日常包含本任务。已有配置可在 GUI 添加“深渊讨伐战”，或在 `Task` 中加入 `[abyss_subjugation]`。单独执行：
+新工程的默认日常包含本任务，并放在第一次快捷扫荡之前。已有配置可在 GUI 添加“深渊讨伐战”，或在 `Task` 中第一次 `[quick_clean, ...]` 之前加入 `[abyss_subjugation]`；活动前哨优先使用体力，快捷扫荡负责清理剩余体力。单独执行或补跑未完成部分：
 
 ```powershell
 ./.venv/Scripts/python.exe -X utf8 scripts/daily/task.py abyss_subjugation --config daily_config.yml

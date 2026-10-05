@@ -234,8 +234,8 @@ class AbyssSubjugation(TimeLimitTask):
         self.report.update(remaining_attempts=counts, remaining_tickets=tickets)
         return s
 
-    def normal_detail(self, difficulty):
-        s = self.enter()
+    def normal_detail(self, difficulty, *, home=None):
+        s = home if home is not None else self.enter()
         if s is None:
             raise SubjugationBlocked('活动入口不可用')
         index = field.DIFFICULTIES.index(difficulty)
@@ -437,7 +437,16 @@ class AbyssSubjugation(TimeLimitTask):
         return self.guide_streams[key]
 
     def ensure_stamina(self, difficulty, detail):
-        # Once cleared, the game initially selects all remaining attempts.
+        # Cleared stages already select their remaining attempts. Derive the
+        # unit cost from that preview instead of reducing and restoring it.
+        quantity = field.quantity(detail)
+        preview = field.stamina_preview(self.ui, detail)
+        if (quantity is not None and 1 <= quantity <= 99 and preview is not None
+                and preview[0] > preview[1] >= 0
+                and (preview[0]-preview[1]) % quantity == 0
+                and detail.blue_button(detail.find('挑战', (755, 428, 925, 508), exact=True))):
+            return detail, (preview[0]-preview[1])//quantity
+        # An unaffordable bulk preview may still permit one attempt.
         detail = self.adjust_quantity(detail, 1)
         preview = field.stamina_preview(self.ui, detail)
         if preview is not None and preview[1] >= 0 and detail.blue_button(detail.find('挑战', (755, 428, 925, 508), exact=True)):
@@ -607,19 +616,22 @@ class AbyssSubjugation(TimeLimitTask):
     def outposts(self):
         for difficulty in field.DIFFICULTIES:
             self.report_progress('前哨'+difficulty+' · 首通后消耗剩余次数')
-            s = self.enter()
-            if field.attempts(s)[difficulty] == 0:
-                continue
-            detail = self.normal_detail(difficulty)
-            detail, unit_cost = self.ensure_stamina(difficulty, detail)
-            if field.sweep_enabled(detail) is False:
-                detail = self.normal_first_clear(difficulty, detail, unit_cost)
-            if field.sweep_enabled(detail) is not True:
-                raise SubjugationBlocked('前哨通关/扫荡状态未知')
             before = self.enter()
             counts, tickets = field.attempts(before), field.tickets(self.ui, before)
-            detail = self.normal_detail(difficulty)
+            if counts[difficulty] == 0:
+                continue
+            detail = self.normal_detail(difficulty, home=before)
             detail, unit_cost = self.ensure_stamina(difficulty, detail)
+            if field.sweep_enabled(detail) is False:
+                self.normal_first_clear(difficulty, detail, unit_cost)
+                before = self.enter()
+                counts, tickets = field.attempts(before), field.tickets(self.ui, before)
+                detail = self.normal_detail(difficulty, home=before)
+                detail, unit_cost = self.ensure_stamina(difficulty, detail)
+            if field.sweep_enabled(detail) is not True:
+                raise SubjugationBlocked('前哨通关/扫荡状态未知')
+            if field.detail_attempts(detail) != counts[difficulty]:
+                raise SubjugationBlocked('前哨详情与首页剩余次数不符；未提交扫荡')
             preview = field.stamina_preview(self.ui, detail)
             quantity = min(counts[difficulty], (self.options['max_stamina']-self.report['stamina_spent'])//unit_cost,
                            preview[0]//unit_cost)
