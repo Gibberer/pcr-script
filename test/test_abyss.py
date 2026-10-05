@@ -724,6 +724,33 @@ class AbyssTests(TestCase):
                 self.assertEqual(selected is not None,recovered)
                 if recovered:self.assertFalse(selected.members[0].instant)
 
+    def test_new_unknown_after_reselection_has_its_own_bounded_equipment_recovery(self):
+        stage = AbyssStage('water', 5, 4)
+        names = ['a', 'b', 'c', 'd', 'e']
+        for resolved in (False, True):
+            with self.subTest(resolved=resolved):
+                formation = object.__new__(AbyssFormation)
+                formation.allow_substitutions = False
+                formation.ui = Mock(capture=Mock(return_value=SimpleNamespace(image=np.zeros((540,960,3),np.uint8))))
+                formation.avatars = Mock(query=Mock(return_value=names))
+                formation.observed = {name: SimpleNamespace(unique=False, unique2=False) for name in names}
+                formation.recover_equipment = Mock()
+                party = EventParty('synthetic', 'local', [MemberRequirement(n,1,1,5,False,False,True,0) for n in names])
+                def audit(stage):
+                    attempt = formation.current_trial.call_count
+                    unknown = 'a' if attempt == 1 else 'b' if attempt == 2 or not resolved else None
+                    for name, status in formation.observed.items():
+                        status.unique = status.unique2 = None if name == unknown else False
+                    return (None if unknown else party, dict(order=names,
+                        observed=[dict(name=n,stars=5) for n in names],
+                        unready=[dict(character=unknown,reasons=['专武状态未知'])] if unknown else []))
+                formation.current_trial = Mock(side_effect=audit)
+                source = dict(source='synthetic',names=names,instant=[True]*5,required_stars=[None]*5)
+                selected, _ = formation.source_trial(stage, source)
+                self.assertEqual(selected is not None, resolved)
+                self.assertEqual(formation.current_trial.call_count, 3)
+                self.assertEqual([call.args[1] for call in formation.recover_equipment.call_args_list], [['a'], ['b']])
+
     def test_equipment_recovery_keeps_missing_versions_blocked_without_repeating_search(self):
         formation=object.__new__(AbyssFormation)
         formation.allow_substitutions=False

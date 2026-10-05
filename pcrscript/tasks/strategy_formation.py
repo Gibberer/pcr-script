@@ -207,6 +207,21 @@ class StrategyFormation(EventFormation):
     def _select_source_party(self, party):
         return self.select(party)
 
+    def recover_source_equipment(self, stage, source, names):
+        recovered = set(source.get('_equipment_recovered', ()))
+        observed = getattr(self, 'observed', {})
+        pending = [name for name in names if name not in recovered and (
+            observed.get(normalized(name)) is None
+            or observed[normalized(name)].unique is None
+            or observed[normalized(name)].unique2 is None)]
+        if not pending:
+            return False
+        # A later selection may reveal another unknown. Bound recovery per
+        # character instead of exhausting the whole team's chance at once.
+        source['_equipment_recovered'] = sorted(recovered | set(pending))
+        self.recover_equipment(stage, pending)
+        return True
+
     def source_trial(self,stage,source,*,recover=True):
         if source.get('document'):
             from .party_preparation import audit_declared_build, numeric_equipment_unknown, catalogue_issues
@@ -295,12 +310,9 @@ class StrategyFormation(EventFormation):
                 unresolved=[f['character'] for f in details.get('unready',[]) if any('专武' in r for r in f.get('reasons',[]))]
                 missing=[f['character'] for f in details.get('unready',[]) if any('未在搜索结果' in r for r in f.get('reasons',[]))]
                 if unresolved and recover and hasattr(self,'recover_equipment'):
-                    # One character-page visit can establish every unreleased
-                    # weapon in this team. Auditing only the first unknown here
-                    # can repeatedly rebuild and inspect the same five cards.
                     source['_known_missing'] = sorted(set(known_missing) | set(missing))
-                    self.recover_equipment(stage,[n for n in source['names'] if n not in missing])
-                    return self.source_trial(stage,source,recover=False)
+                    if self.recover_source_equipment(stage,source,[n for n in source['names'] if n not in missing]):
+                        return self.source_trial(stage,source)
                 if self.allow_substitutions and missing and recover and not unresolved:
                     return self.adapt_source(stage,source,missing)
                 # Equipment recovery is independent of a missing member.
@@ -315,9 +327,8 @@ class StrategyFormation(EventFormation):
         if party is None and recover and hasattr(self,'recover_equipment'):
             unresolved=[f['character'] for f in audit.get('unready',[]) if f.get('character')
                         and any('专武' in r for r in f.get('reasons',[]))]
-            if unresolved:
-                self.recover_equipment(stage,source['names'])
-                return self.source_trial(stage,source,recover=False)
+            if unresolved and self.recover_source_equipment(stage,source,source['names']):
+                return self.source_trial(stage,source)
         if party:
             settings=dict(zip((normalized(name) for name in source['names']),source['instant']))
             if {normalized(member.name) for member in party.members} != set(settings):
@@ -353,9 +364,7 @@ class StrategyFormation(EventFormation):
             replacement=max(options)[1];i=adapted['names'].index(name);adapted['names'][i]=replacement;adapted['required_stars'][i]=None
             adapted['adaptations'].append(dict(missing=name,replacement=replacement,reason='同属性同攻击类型，按职能/治疗/坦克/输出技能相似度选本地替补'))
         source.update(adapted)
-        # New members need their own equipment proof. The source_trial
-        # recovery path is bounded to one character-page visit before a full
-        # reselection; disabling it here strands valid unreleased weapons.
+        # New members receive their own bounded equipment recovery.
         return self.source_trial(stage,source)
 
     def current_trial(self, stage):
