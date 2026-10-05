@@ -111,10 +111,15 @@ def yellow(s, roi):
                          & (hsv[:, :, 1] > 100) & (hsv[:, :, 2] > 170))) > .2
 
 
-def selector_locked(s, item):
+def selector_cleared(s, item):
     y = item.center[1]
-    if s.find('通关', (260, y-50, 340, y-5), exact=True):
+    return bool(s.find('通关', (260, y-50, 340, y-5), exact=True))
+
+
+def selector_locked(s, item):
+    if selector_cleared(s, item):
         return False
+    y = item.center[1]
     return yellow(s, (260, y-38, 300, y+5))
 
 

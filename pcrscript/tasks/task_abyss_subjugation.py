@@ -256,6 +256,14 @@ class AbyssSubjugation(TimeLimitTask):
                       and field.difficulty(frame, self.ui) == difficulty), '首领入口')
         if field.boss_selector(s):
             item = field.selector_difficulty(s, difficulty)
+            if (item is None and difficulty == '极难'
+                    and str(index)+':高难' not in self.state.get('boss_clears', {})
+                    and all(field.selector_difficulty(s, name) for name in field.DIFFICULTIES)
+                    and not field.selector_cleared(s, field.selector_difficulty(s, '高难'))
+                    and self.ui.scrollbar_bounds(s, (696, 75, 708, 402)) is None):
+                # The complete three-tier list has no scrollbar until High
+                # is cleared. An incomplete or conflicting list stays unknown.
+                return None
             # Clearing High adds Extreme above the three existing rows.
             # Locate the observed label, using the shared verified scrollbar.
             for direction in (-1, 1):
@@ -267,8 +275,6 @@ class AbyssSubjugation(TimeLimitTask):
                         raise SubjugationBlocked('首领难度列表滚动后页面未知')
                     item = field.selector_difficulty(s, difficulty)
             if item is None:
-                if difficulty == '极难' and str(index)+':高难' not in self.state.get('boss_clears', {}):
-                    return None
                 raise SubjugationBlocked('目标首领难度未完整显示')
             number = field.BOSS_DIFFICULTIES.index(difficulty)
             if number < len(field.BOSS_DIFFICULTIES)-1:
@@ -405,6 +411,7 @@ class AbyssSubjugation(TimeLimitTask):
             health = plan.get('health')
             self._expected_battle_hp = health[1] if health else None
             self.commit(plan)
+        self.report_progress('深渊讨伐战 · '+('实战' if plan is not None else '免费模拟')+'与结算')
         result = self.combat.run(party, order)
         self.last_result.update(samples=list(self._battle_samples),
                                 retry=retry_decision(self._battle_samples, result.reason, 1))

@@ -603,6 +603,34 @@ class SubjugationTests(TestCase):
         extreme = task.boss_detail(0, '极难')
         self.assertEqual(field.difficulty(extreme), '极难')
         self.assertEqual(game.selector_scroll, 0)
+
+    def test_unreleased_extreme_needs_a_complete_unscrolled_three_tier_list(self):
+        for condition in ('locked', 'missing_row', 'live_clear', 'saved_clear', 'scrollbar'):
+            with self.subTest(condition=condition):
+                game = Game()
+                task = self.task(game)
+                capture = game.capture
+                def observed(**kwargs):
+                    s = capture(**kwargs)
+                    if game.page == 'selector':
+                        if condition == 'missing_row':
+                            s.items = [item for item in s.items if item.text != '普通']
+                        if condition == 'live_clear':
+                            s.items.extend(screen(('通关', 306, 277)).items)
+                    return s
+                task.ui.capture = observed
+                task.ui.scrollbar = Mock(return_value=False)
+                if condition == 'saved_clear':
+                    task.state['boss_clears'] = {'0:高难': dict(name='合成首领0',maximum=80000000)}
+                if condition == 'scrollbar':
+                    task.ui.scrollbar_bounds = Mock(return_value=(100, 200))
+                if condition == 'locked':
+                    self.assertIsNone(task.boss_detail(0, '极难'))
+                    task.ui.scrollbar.assert_not_called()
+                else:
+                    with self.assertRaisesRegex(EventUIError, '目标首领难度未完整显示'):
+                        task.boss_detail(0, '极难')
+                self.assertEqual(game.real_battles, 0)
         self.assertEqual(game.real_battles, 0)
 
     def test_scarce_tickets_finish_other_normal_bosses_before_newly_unlocked_extreme(self):
