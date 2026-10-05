@@ -74,7 +74,7 @@ class Recollection(RecollectionTask):
         self.click(s, '一?键扫荡', (700, 400, 945, 470))
         s = self.wait(lambda s: field.bulk_catalogue(s) or s.find('没有可.*扫荡|无可.*扫荡'), '追忆战扫荡列表')
         if not field.bulk_catalogue(s):
-            self.report['unsweepable'] = list(wanted)
+            self.report['unsweepable'] = [area for area in wanted if counts.get(area, 0) > 0]
             return None
         rows = field.sweep_rows(s)
         if rows is None:
@@ -138,9 +138,9 @@ class Recollection(RecollectionTask):
             if self.ui.number(s, (820, y+5, 925, y+43)) != plan['quantity']:
                 raise RecollectionBlocked('最终确认的各领域扫荡次数不符')
         if (self.ui.number(s, (820, 365, 930, 410)) != plan['cost']
-                or self.ui.number(s, (195, 370, 265, 415)) != plan['cost']
+                or self.ui.number(s, (230, 372, 265, 396)) != plan['cost']
                 or self.ui.number(s, (400, 370, 510, 415)) != plan['tickets_before']
-                or not s.find(str(len(rows))+'处', (650, 350, 790, 410), exact=True)):
+                or field.sweep_stage_count(self.ui, s) != len(rows)):
             raise RecollectionBlocked('最终确认的总次数或消耗券数不符')
         button = s.find('挑战', (480, 440, 710, 520), exact=True)
         if not s.blue_button(button):
@@ -196,10 +196,13 @@ class Recollection(RecollectionTask):
             self.state['pending_sweep'] = plan
             self.save()
             self.click(screen, '挑战', (480, 440, 710, 520))
-            screen = self.wait(field.receipt, '追忆战扫荡结果')
-            plan['receipt'] = str(self.ui.save('sweep_receipt_'+tag, screen))
-            self.save()
-            self.click(screen, '确认|关闭|确定', (250, 430, 720, 525))
+            screen = self.wait(lambda s: field.receipt(s) or field.sweep_summary(s), '追忆战扫荡结果')
+            if field.sweep_summary(screen):
+                self.settle_sweep_summary(screen)
+            else:
+                plan['receipt'] = str(self.ui.save('sweep_receipt_'+tag, screen))
+                self.save()
+                self.click(screen, '确认|关闭|确定', (250, 430, 720, 525))
             self.reconcile_sweep()
         self.report['budget_reached'] = True
 
@@ -207,6 +210,8 @@ class Recollection(RecollectionTask):
         try:
             if self.state.get('pending_battle'):
                 raise RecollectionBlocked('首通战斗尚未核对，请先运行追忆战场首通复核进度')
+            if self.state.get('pending_mastery'):
+                raise RecollectionBlocked('首通精通准备尚未核对，请先运行追忆战场首通复核消费')
             if self.enter() is None:
                 self.report['status'] = 'unavailable'
                 return self.finish()

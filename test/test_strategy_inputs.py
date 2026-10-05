@@ -14,6 +14,62 @@ def page(number,total,rows,*,size=1,**data):
 
 
 class CommentSourcesTests(TestCase):
+    def test_empty_cursor_requires_independent_zero_count_and_request_budget(self):
+        for total, budget, accepted in ((0, 2, True), (1, 2, False), (0, 1, False)):
+            with self.subTest(total=total, budget=budget):
+                class CursorAPI:
+                    getVideoCommentsCursor = Mock()
+                    getVideoComments = Mock()
+                api = CursorAPI()
+                api.getVideoCommentsCursor.return_value = dict(code=0, data=dict(
+                    cursor=dict(mode=2, is_end=True), replies=[]))
+                api.getVideoComments.return_value = page(1, total,
+                    [] if total == 0 else [reply(1, 9, 'viewer')])
+                if accepted:
+                    clues, scan = complete_author_comments(api, 1, 7, 'https://example.com/video', max_pages=budget)
+                    self.assertEqual(clues, [])
+                    self.assertEqual(scan, dict(complete=True, pages=2, root_count=0, reply_count=0))
+                else:
+                    with self.assertRaises(ValueError):
+                        complete_author_comments(api, 1, 7, 'https://example.com/video', max_pages=budget)
+
+    def test_cursor_scan_counts_children_and_deduplicates_pinned_roots(self):
+        class CursorAPI:
+            getVideoCommentsCursor = Mock()
+            getVideoCommentReplies = Mock()
+        api = CursorAPI()
+        author = reply(2, 7, 'Boss2需要借角色')
+        root = dict(reply(1, 9, 'viewer'), rcount=1, replies=[])
+        def cursor(next_value, end, rows, **extras):
+            return dict(code=0, data=dict(cursor=dict(mode=2, all_count=3,
+                next=next_value, is_end=end), replies=rows, **extras))
+        api.getVideoCommentsCursor.side_effect = [cursor(12, False, [root], top_replies=[author]),
+                                                  cursor(0, True, [author])]
+        api.getVideoCommentReplies.return_value = page(1, 1, [reply(11, 7, '补充条件')])
+        clues, scan = complete_author_comments(api, 1, 7, 'https://example.com/video', max_pages=3)
+        self.assertEqual({c['reply_id'] for c in clues}, {2, 11})
+        self.assertEqual(scan, dict(complete=True, pages=3, root_count=2, reply_count=1))
+        self.assertEqual([c.kwargs['next_cursor'] for c in api.getVideoCommentsCursor.call_args_list], [0, 12])
+
+    def test_cursor_scan_rejects_missing_comments_changing_totals_and_loops(self):
+        for case in ('missing', 'changed', 'loop', 'unknown_end', 'budget'):
+            with self.subTest(case=case):
+                class CursorAPI:
+                    getVideoCommentsCursor = Mock()
+                api = CursorAPI()
+                first = dict(code=0, data=dict(cursor=dict(mode=2, all_count=2, next=12,
+                    is_end=False), replies=[reply(1, 9, 'viewer')]))
+                last = dict(code=0, data=dict(cursor=dict(mode=2, all_count=2, next=0,
+                    is_end=True), replies=[reply(2, 9, 'viewer')]))
+                if case == 'missing': last['data']['replies'] = []
+                if case == 'changed': last['data']['cursor']['all_count'] = 3
+                if case == 'loop': last['data']['cursor'].update(next=12, is_end=False)
+                if case == 'unknown_end': last['data']['cursor'].pop('is_end')
+                api.getVideoCommentsCursor.side_effect = [first, last]
+                with self.assertRaises(ValueError):
+                    complete_author_comments(api, 1, 7, 'https://example.com/video',
+                                             max_pages=1 if case == 'budget' else 3)
+
     def test_complete_scan_reads_later_author_corrections_and_nested_replies(self):
         api=Mock()
         root=reply(1,9,'viewer');root.update(rcount=2,replies=[reply(11,9,'inline viewer')])

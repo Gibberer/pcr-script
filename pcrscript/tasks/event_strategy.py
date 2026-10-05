@@ -45,6 +45,8 @@ class CharacterStatus:
     observed_at: float | None = None
     unique_level: int | None = None
     unique2_stars: int | None = None
+    equipment_available: int | None = None
+    ordinary_equipment_evidence: list[str] = field(default_factory=list)
 
 
 def readiness(requirement: MemberRequirement, actual: CharacterStatus) -> list[str]:

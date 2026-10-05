@@ -26,9 +26,56 @@ class NativeInputTests(TestCase):
         driver = self.driver()
         current = np.full((540, 960, 3), 120, dtype=np.uint8)
         driver._scroll_fallback_driver = Mock()
+        driver._capture_consistency_checked = True
         with patch.object(Win32Driver, 'screenshot', return_value=current):
             self.assertIs(driver.screenshot(), current)
         driver._scroll_fallback_driver.assert_not_called()
+
+    def test_full_old_native_page_switches_to_verified_current_capture(self):
+        driver = self.driver()
+        old = np.full((540,960,3), 40, dtype=np.uint8)
+        current = np.full_like(old, 180)
+        peer = Mock(screenshot=Mock(return_value=current))
+        driver._scroll_fallback_driver = Mock(return_value=peer)
+        with patch.object(Win32Driver, 'screenshot', return_value=old) as native:
+            self.assertIs(driver.screenshot(), current)
+            self.assertIs(driver.screenshot(), current)
+        self.assertEqual(native.call_count, 1)
+        self.assertEqual(peer.screenshot.call_count, 2)
+
+    def test_stale_balance_on_otherwise_same_page_uses_current_background(self):
+        driver=self.driver()
+        old=np.full((540,960,3),120,dtype=np.uint8);current=old.copy()
+        current[420:440,740:760]=200
+        peer=Mock(screenshot=Mock(return_value=current))
+        driver._scroll_fallback_driver=Mock(return_value=peer)
+        with patch.object(Win32Driver,'screenshot',return_value=old):
+            self.assertIs(driver.screenshot(),current)
+            self.assertIs(driver.screenshot(),current)
+        self.assertTrue(driver._use_background_capture)
+
+    def test_unchanged_native_input_receipt_is_checked_without_replaying_input(self):
+        driver = self.driver()
+        native = np.full((540,960,3), 40, dtype=np.uint8)
+        current = np.full_like(native, 180)
+        peer = Mock(screenshot=Mock(side_effect=[native, current]))
+        driver._scroll_fallback_driver = Mock(return_value=peer)
+        with patch.object(Win32Driver, 'screenshot', return_value=native), \
+                patch.object(Win32Driver, 'click') as click:
+            self.assertIs(driver.screenshot(), native)
+            driver.click(123,456)
+            self.assertIs(driver.screenshot(), current)
+        click.assert_called_once_with(123,456)
+        self.assertEqual(peer.screenshot.call_count, 2)
+
+    def test_capture_comparison_rejects_different_device_dimensions(self):
+        driver = self.driver()
+        native = np.full((540,960,3), 40, dtype=np.uint8)
+        peer = Mock(screenshot=Mock(return_value=np.full((720,1280,3), 180, dtype=np.uint8)))
+        driver._scroll_fallback_driver = Mock(return_value=peer)
+        with patch.object(Win32Driver, 'screenshot', return_value=native):
+            self.assertIs(driver.screenshot(), native)
+        self.assertFalse(getattr(driver,'_use_background_capture',False))
 
     def test_loading_frame_is_retained_when_background_connection_is_unverified(self):
         driver = self.driver()
@@ -60,6 +107,18 @@ class NativeInputTests(TestCase):
                 with self.assertRaises(RuntimeError):
                     driver.swipe((907,237), (907,310), 300, fallback=True)
                 peer.swipe.assert_not_called()
+
+    def test_empty_serial_uses_only_the_exact_leidian_instance_query(self):
+        driver = self.driver()
+        driver.adb_path, driver.dnpath, driver.index = 'adb.exe', 'synthetic', 2
+        peer = Mock(get_screen_size=Mock(return_value=(960,540)))
+        with patch('pcrscript.driver.subprocess.check_output',return_value='emulator-5558\r\n') as query, \
+             patch('pcrscript.simulator.GeneralSimulator.get_devices',return_value=['phone','emulator-5558']), \
+             patch('pcrscript.driver.ADBDriver',return_value=peer) as adb:
+            self.assertIs(driver._scroll_fallback_driver(),peer)
+        self.assertEqual(query.call_args.args[0][1:],
+                         ['adb','--index','2','--command','get-serialno'])
+        adb.assert_called_once_with('emulator-5558','adb.exe')
 
     def test_single_same_sized_phone_is_not_a_verified_leidian_connection(self):
         for name in ('0', 'phone'):
@@ -131,6 +190,33 @@ class NativeInputTests(TestCase):
         self.assertFalse(state['aware'])
         adb_click.assert_not_called()
         adb_swipe.assert_not_called()
+
+    def test_native_capture_uses_physical_pixels_and_restores_context(self):
+        state, setter = self.context()
+        driver = self.driver()
+        source, memory, bitmap = Mock(), Mock(), Mock()
+        source.CreateCompatibleDC.return_value = memory
+        pixels = np.full((540, 960, 4), 120, dtype=np.uint8)
+        bitmap.GetBitmapBits.return_value = pixels.tobytes()
+        observed = []
+        def observe(*args, **kwargs):
+            observed.append(state['aware'])
+        memory.BitBlt.side_effect = observe
+        bitmap.CreateCompatibleBitmap.side_effect = observe
+        with patch.object(ctypes.windll.user32, 'SetThreadDpiAwarenessContext', setter), \
+                patch('pcrscript.driver.win32gui.GetWindowDC', return_value=201), \
+                patch('pcrscript.driver.win32ui.CreateDCFromHandle', return_value=source), \
+                patch('pcrscript.driver.win32ui.CreateBitmap', return_value=bitmap), \
+                patch('pcrscript.driver.win32gui.ReleaseDC'), \
+                patch('pcrscript.driver.win32gui.DeleteObject'), \
+                patch.object(ADBDriver, 'screenshot') as fallback:
+            image = Win32Driver.screenshot(driver)
+        self.assertEqual(image.shape, (540, 960, 3))
+        self.assertTrue((image == 120).all())
+        self.assertEqual(observed, [True, True])
+        self.assertFalse(state['aware'])
+        self.assertEqual(setter.call_count, 2)
+        fallback.assert_not_called()
 
     def test_exception_restores_the_callers_dpi_context(self):
         state, setter = self.context()

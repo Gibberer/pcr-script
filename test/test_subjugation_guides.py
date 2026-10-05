@@ -99,6 +99,40 @@ class SubjugationGuideTests(TestCase):
         report['parties'][0]['scope'] = dict(kind='boss', difficulty='极难', boss='合成首领')
         self.assertEqual(parties_for_target(report, options, allow_local_trials=True), [])
 
+    def test_lower_boss_guide_is_only_a_trial_seed_without_source_damage(self):
+        report = trial_report()
+        raw = report['parties'][0]
+        raw['scope'] = dict(kind='boss', difficulty='普通', boss='合成首领')
+        raw['damage_reference'] = dict(damage=90000000, evidence=['synthetic'])
+        raw['members'][0]['rank'] = dict(value=38,evidence=[dict(method='synthetic')],conflicts=[])
+        for difficulty in ('困难','高难','极难'):
+            options = source_options({},EVENT,kind='boss',boss='合成首领',difficulty=difficulty)
+            with self.subTest(difficulty=difficulty):
+                self.assertEqual(parties_for_target(report,options,allow_local_trials=False),[])
+                party = parties_for_target(report,options,allow_local_trials=True)[0]
+                self.assertEqual(party.build_basis,'local_trial')
+                self.assertEqual(party.damage_reference,{})
+                self.assertEqual(party.members[0].rank,38)
+                self.assertIs(party.members[0].instant,False)
+                self.assertIs(party.auto,False)
+                self.assertTrue(any('普通' in n and difficulty in n for n in party.assumptions))
+        self.assertEqual(raw['scope']['difficulty'],'普通')
+        self.assertEqual(raw['damage_reference']['damage'],90000000)
+
+    def test_lower_tier_trial_cannot_cross_boss_identity_or_outpost(self):
+        report = trial_report()
+        raw=report['parties'][0]
+        options=source_options({},EVENT,kind='boss',boss='合成首领',difficulty='高难')
+        for scope in (dict(kind='boss',difficulty='普通',boss='另一首领'),
+                      dict(kind='boss',difficulty='未知',boss='合成首领'),
+                      dict(kind='outpost',difficulty='普通')):
+            raw['scope']=scope
+            with self.subTest(scope=scope):
+                self.assertEqual(parties_for_target(report,options,allow_local_trials=True),[])
+        options=source_options({},EVENT,difficulty='高难')
+        raw['scope']=dict(kind='outpost',difficulty='普通')
+        self.assertEqual(parties_for_target(report,options,allow_local_trials=True),[])
+
     def test_complete_current_difficulty_guide_needs_no_account_trial_permission(self):
         report = trial_report()
         raw = report['parties'][0]
@@ -578,7 +612,8 @@ class SubjugationGuideTests(TestCase):
         pages = [dict(cid=i, part='通用说明'+str(i), duration=2) for i in range(1, 5)]
         pages.append(dict(cid=5, part='Boss1打法1', duration=4))
         source = dict(pages=pages)
-        options = source_options({}, EVENT, kind='boss', boss='合成首领', boss_number=1)
+        options = source_options({'sources': {'max_pages_per_video': 4}}, EVENT,
+                                 kind='boss', boss='合成首领', boss_number=1)
         with self.assertRaisesRegex(ValueError, 'max_pages_per_video=4'):
             choose_pages(source, options)
         self.assertEqual([p['cid'] for p in choose_pages(source, dict(options, max_pages_per_video=5))],
@@ -723,6 +758,19 @@ class SubjugationGuideTests(TestCase):
                                            allow_local_trials=True), [])
         raw['global_requirements'] = [dict(text='合成未知装备要求')]
         self.assertEqual(parties_for_target(report, options, allow_local_trials=True), [])
+
+    def test_observed_borrow_dialog_allows_only_owned_boss_account_trials(self):
+        report = trial_report(); raw = report['parties'][0]
+        raw['scope'] = dict(kind='boss',difficulty='普通',boss='合成首领')
+        raw['region'] = raw['target_region'] = 'cn'
+        raw['manual_actions'] = [dict(text='要借用这个角色吗？',evidence=dict(method='video_ocr'))]
+        options = source_options({},EVENT,kind='boss',boss='合成首领',difficulty='普通')
+        self.assertEqual(parties_for_target(report,options,allow_local_trials=False),[])
+        party = parties_for_target(report,options,allow_local_trials=True)[0]
+        self.assertEqual(party.build_basis,'local_trial')
+        self.assertIn('账号自有五人',party.assumptions[-1])
+        raw['manual_actions'].append(dict(text='必须借角色',evidence=dict(method='video_ocr')))
+        self.assertEqual(parties_for_target(report,options,allow_local_trials=True),[])
 
     def test_scope_clears_on_result_unknown_transition_or_boss_hp_change(self):
         for transition in (texts('WIN!'), texts('别的页面')):

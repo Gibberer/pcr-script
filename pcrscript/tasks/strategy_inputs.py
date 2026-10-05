@@ -8,7 +8,7 @@ import time
 from urllib.parse import urlsplit,urljoin
 import requests
 
-SOURCE_CACHE_VERSION = 4
+SOURCE_CACHE_VERSION = 5
 
 
 def source_statements(source):
@@ -105,7 +105,51 @@ def complete_author_comments(api, avid, owner_id, video_url, *, max_pages=10, ch
         if len(rows) != total:
             raise ValueError('作者评论数量与分页总量不符，未确认完整读取')
         return rows
-    roots=read_pages(lambda page: api.getVideoComments(avid,page=page))
+    cursor_reader = getattr(type(api), 'getVideoCommentsCursor', None)
+    if callable(cursor_reader):
+        roots = {}; cursor = 0; cursors = set(); total = None
+        while True:
+            check()
+            if requests_used >= max_pages:
+                raise ValueError(f'作者评论未读完：达到 max_comment_pages={max_pages}')
+            if cursor in cursors:
+                raise ValueError('作者评论游标重复，未确认完整读取')
+            cursors.add(cursor); requests_used += 1
+            response = api.getVideoCommentsCursor(avid, next_cursor=cursor)
+            for clue in author_comment_clues(response, owner_id, video_url):
+                clues[(clue['reply_id'], clue['text'])] = clue
+            data = response['data']; pagination = data.get('cursor') or {}
+            count = pagination.get('all_count')
+            # An empty cursor omits all_count. Confirm zero through the
+            # independent numbered endpoint instead of assuming absence.
+            if (count is None and cursor == 0 and pagination.get('is_end') is True
+                    and not comment_roots(data)):
+                legacy = read_pages(lambda page: api.getVideoComments(avid, page=page))
+                if legacy:
+                    raise ValueError('作者评论空游标与分页结果不一致')
+                count = 0
+            if (type(count) is not int or count < 0 or pagination.get('mode') != 2
+                    or type(pagination.get('is_end')) is not bool
+                    or total is not None and count != total):
+                raise ValueError('作者评论游标总量未知或读取期间变化')
+            total = count
+            for row in comment_roots(data):
+                if (not isinstance(row, dict) or type(row.get('rpid')) not in (int, str)
+                        or not str(row['rpid']).isdigit()
+                        or type(row.get('rcount')) is not int or row['rcount'] < 0):
+                    raise ValueError('作者评论身份或楼中楼数量未知')
+                roots[str(row['rpid'])] = row
+            if pagination['is_end']:
+                break
+            cursor = pagination.get('next')
+            if type(cursor) is not int or cursor <= 0:
+                raise ValueError('作者评论下一页游标未知')
+        # all_count includes root comments and their children, unlike the
+        # legacy synthetic page contract. Pinned roots are deduplicated.
+        if len(roots)+sum(row['rcount'] for row in roots.values()) != total:
+            raise ValueError('作者评论数量与游标总量不符，未确认完整读取')
+    else:
+        roots=read_pages(lambda page: api.getVideoComments(avid,page=page))
     child_count=0
     for root in roots.values():
         count=root.get('rcount');inline=root.get('replies') or []

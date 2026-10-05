@@ -26,6 +26,10 @@ class SubjugationBlocked(EventUIError):
     pass
 
 
+class BossPartyUnavailable(SubjugationBlocked):
+    """No usable guide/trial remains; the last live boss state is reconciled."""
+
+
 def migrate_options(options):
     """Remove retired saved-team settings without expanding old sweep-only runs."""
     value = dict(options)
@@ -171,8 +175,8 @@ class AbyssSubjugation(TimeLimitTask):
                 self.click(s, '取消', (635, 415, 785, 500))
                 self.wait(lambda frame: not frame.find('队伍编组', (300, 15, 650, 70), exact=True),
                           '取消编队', timeout=10)
-            elif field.boss_detail(s) or field.outpost_detail(s):
-                self.click(s, '取消', (580, 430, 755, 510))
+            elif (cancel := field.detail_cancel(s)) is not None:
+                self.ui.click(cancel)
                 self.wait(lambda frame: not frame.find('BOSS详情|前哨关卡', (45, 25, 195, 85), exact=True),
                           '关闭关卡详情', timeout=10)
             elif field.sweep_receipt(s) or field.result_button(s):
@@ -184,6 +188,8 @@ class AbyssSubjugation(TimeLimitTask):
                     self.save()
                 self.ui.save('resumed_receipt', s)
                 self.ui.click(button)
+            elif s.find('角色详情', (300, 0, 650, 70), exact=True):
+                self.click(s, '确认', (320, 450, 650, 515))
             elif field.home(s):
                 return self.verify_home(s)
             elif s.find('进行中战斗') and s.find('主菜单', (300, 30, 660, 150), exact=True):
@@ -368,7 +374,8 @@ class AbyssSubjugation(TimeLimitTask):
     def observe_battle(self, screen):
         if time.monotonic() < self._next_sample:
             return
-        sample = combat_sample(screen, self.combat.portraits)
+        sample = combat_sample(screen, self.combat.portraits,
+                               maximum_hp=getattr(self, '_expected_battle_hp', None))
         if sample is None:
             return
         self._next_sample = time.monotonic()+2
@@ -393,6 +400,8 @@ class AbyssSubjugation(TimeLimitTask):
         self._battle_samples = []
         self._next_sample = 0
         if plan is not None:
+            health = plan.get('health')
+            self._expected_battle_hp = health[1] if health else None
             self.commit(plan)
         result = self.combat.run(party, order)
         self.last_result.update(samples=list(self._battle_samples),
@@ -503,9 +512,15 @@ class AbyssSubjugation(TimeLimitTask):
             prepare_avatars(self)
             options = source_options(self.options, self.event, kind=kind, boss=boss, boss_number=boss_number,
                                      difficulty=difficulty)
+            if self.options['allow_local_trials'] and kind == 'boss':
+                target = getattr(self, 'source_targets', {}).get(key)
+                if target:
+                    options['observed_target'] = target
             self.report_progress('检索并解析本期攻略 · '+difficulty+('前哨' if kind == 'outpost' else boss))
             report = acquire_strategies(options, index=self.formation.avatars, check=self.check_deadline,
-                exclude_sources=self.inspected_sources.get(key, set()))
+                exclude_sources=self.inspected_sources.get(key, set()),
+                accept=lambda report: bool(parties_for_target(report, options,
+                    allow_local_trials=self.options['allow_local_trials'])))
             self.inspected_sources.setdefault(key, set()).update(report.get('inspected_sources', []))
             self.report.setdefault('sources', []).append(dict(kind=kind, difficulty=difficulty, boss=boss, report=report))
             self.source_pools[key] = parties_for_target(report, options,
@@ -569,6 +584,7 @@ class AbyssSubjugation(TimeLimitTask):
         preview_evidence = str(self.ui.save('sweep_detail_'+str(len(self.report['history'])), detail))
         self.ui.click(field.sweep_button(detail))
         confirmation = self.wait(field.sweep_confirmation, '扫荡确认')
+        confirmation_evidence = str(self.ui.save('sweep_confirmation_'+str(len(self.report['history'])), confirmation))
         if field.sweep_cost(self.ui, confirmation, '消耗券') != plan['quantity']:
             raise SubjugationBlocked('扫荡最终确认次数不符；未确认消费')
         if plan['kind'] == 'outpost_sweep' and field.sweep_cost(self.ui, confirmation, '消耗体力') != plan['stamina_cost']:
@@ -579,7 +595,7 @@ class AbyssSubjugation(TimeLimitTask):
         if not confirmation.blue_button(button):
             raise SubjugationBlocked('扫荡最终确认按钮未知或不可用')
         self.commit(dict(plan, detail_evidence=preview_evidence,
-            confirmation=str(self.ui.save('sweep_confirmation_'+str(len(self.report['history'])), confirmation))))
+            confirmation=confirmation_evidence))
         self.check_deadline()
         self.ui.click(button)
         receipt = self.wait(field.sweep_receipt, '扫荡结果')
@@ -633,7 +649,7 @@ class AbyssSubjugation(TimeLimitTask):
         expected = min(expected, reference['health'][1])
         samples = self.last_result['samples']
         timed_alive = (len(samples) >= 3 and min(s['seconds'] for s in samples) <= 8
-                       and all(s.get('dark_portraits') == 0 for s in samples[-3:]))
+                       and all(s.get('living_portraits') == 5 for s in samples[-3:]))
         met = meets_reference(self.last_result.get('damage'), expected, reference['health'][1], False)
         return dict(accepted=timed_alive and met, expected_damage=expected,
                     source_reference=source,
@@ -643,6 +659,25 @@ class AbyssSubjugation(TimeLimitTask):
     def simulate_boss(self, index, difficulty, reference):
         if not self.options['first_clear']:
             raise SubjugationBlocked('首领尚未通关，已关闭首次通关')
+        if self.options['allow_local_trials']:
+            detail = self.boss_detail(index, difficulty, simulation=True)
+            target = field.boss_signature(self.ui, detail)
+            for _ in range(6):
+                if target:
+                    break
+                time.sleep(.3)
+                detail = self.capture()
+                target = field.boss_signature(self.ui, detail)
+            # Keep an unsuccessful observation for diagnosis as well; absence
+            # of this proof must never become permission to guess a target.
+            evidence = str(self.ui.save(f'source_target_{index}_{difficulty}', detail))
+            if (target and target['boss'] == reference['boss']
+                    and target['maximum_hp'] == reference['health'][1]):
+                target.update(scope=dict(kind='boss', difficulty=difficulty, boss=target['boss']),
+                              image=evidence)
+                if not hasattr(self, 'source_targets'):
+                    self.source_targets = {}
+                self.source_targets[('boss', difficulty, reference['boss'])] = target
         def reopen():
             return self.open_formation(self.boss_detail(index, difficulty, simulation=True))
         candidates = self.guide_candidates('boss', difficulty, reopen, reference['boss'], index+1)
@@ -679,6 +714,7 @@ class AbyssSubjugation(TimeLimitTask):
             self.simulation_count += 1
             attempts[signature] = attempts.get(signature, 0)+1
             self.report_progress('首领'+difficulty+' · 模拟战')
+            self._expected_battle_hp = reference['health'][1]
             result = self.battle(party, order)
             self.last_result['retry'] = retry_decision(self._battle_samples, result.reason, attempts[signature])
             actual = self.boss_detail(index, difficulty)
@@ -698,13 +734,22 @@ class AbyssSubjugation(TimeLimitTask):
             retry = self.last_result['retry']
             if retry['action'] == 'retry_once' and attempts[signature] < 2:
                 retry_party = party
-        raise SubjugationBlocked('没有通过本期首领攻略核验及模拟的队伍；未追加实战消费')
+        raise BossPartyUnavailable('没有通过本期首领攻略核验及模拟的队伍；未追加实战消费')
 
     def bosses(self):
         for difficulty in field.BOSS_DIFFICULTIES:
             for index in range(3):
                 self.report_progress(f'首领{index+1} · {difficulty}首通核对')
-                self.clear_boss(index, difficulty)
+                try:
+                    self.clear_boss(index, difficulty)
+                except BossPartyUnavailable as error:
+                    # Independent bosses can still progress when this guide
+                    # pool is exhausted. Never continue uncertain consumption
+                    # or navigation/combat failures through this path.
+                    if self.state.get('pending'):
+                        raise
+                    self.report['pending'].append(f'首领{index+1} {difficulty}：{error}')
+                    self.save()
                 s = self.enter()
                 if field.tickets(self.ui, s) == 0:
                     self.report['all_bosses_cleared'] = all(self.report['bosses'].get(str(i)+':'+d, {}).get('cleared') is True

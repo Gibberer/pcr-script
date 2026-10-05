@@ -12,7 +12,7 @@
 | `.github/workflows/desktop.yml` | Windows GUI 构建、离线测试与产物上传；已合并版本标签创建 Release |
 | `.github/workflows/python.yml` | 普通 Python 代码、依赖与默认配置变更的离线回归 |
 | `pcrscript/tasks/` | 统一任务实现、基类、注册表及任务辅助逻辑 |
-| `pcrscript/game_ui/` | 可共享的观察、识别与操作能力；`dungeon.py` 读取进度，`character_equipment.py` 只读核验专武开放与已支持的强化数值 |
+| `pcrscript/game_ui/` | 可共享的观察、识别与操作能力；`dungeon.py` 读取进度，`character_equipment.py` 只读核验专武开放与已支持的强化数值，`ordinary_equipment.py` 读取普通装备槽的开放及穿戴状态 |
 | `scripts/daily/` | 正式自动化命令入口，可供定时任务调用 |
 | `scripts/legacy/multi_account.py` | 旧版多账号入口，从根目录运行；不属于 GUI 核心下载 |
 | `docs/guides/examples/daily.example.yml` | 可复制到根目录的日常示例配置 |
@@ -69,7 +69,7 @@ GUI 的 `PortableTools.cs` 管理固定版本工具的下载、SHA-256 校验与
 
 新增具体任务使用 `task_<功能>.py`，需要独立调度时使用 `@register(...)` 并在 `__init__.py` 导入，同时更新本表。对外优先从 `pcrscript.tasks` 导入任务类；文件改名不改变类名、注册名和脚本命令。
 
-追忆战场的共享页面识别在 `game_ui/recollection.py`，导航、限额及待核对记录在 `tasks/recollection_flow.py`，精确层数来源适配及编队审计在 `tasks/recollection_strategy.py`。首通调用共享视频解析、`EventFormation` 和 `EventCombat`；日常使用游戏一键扫荡预览与消费核对，均经现有通用命令运行。见[追忆战场指南](guides/recollection.md)。
+追忆战场的共享页面识别在 `game_ui/recollection.py`，导航、限额及待核对记录在 `tasks/recollection_flow.py`，精确层数来源适配及编队审计在 `tasks/recollection_strategy.py`。首通调用共享视频解析、`EventFormation` 和 `EventCombat`；可选职能精通准备位于 `tasks/role_mastery_preparation.py`，复用 `game_ui/role_mastery.py` 并在同一任务内完成。日常使用游戏一键扫荡预览与消费核对，均经现有通用命令运行。见[追忆战场指南](guides/recollection.md)。
 
 深渊讨伐战在 `game_ui/abyss_subjugation.py` 维护页面与消费字段识别，`tasks/subjugation_guides.py` 为共享检索、视频解析和候选转换提供统一的本期目标／难度判断，`tasks/subjugation_party.py` 负责攻略成员的账号适配、活动属性及模拟后培养要求固定。所有新战斗均从适用攻略产生候选，当前／保存编组及旧运行队伍不作为兜底。选人、账号培养核验与缺员替补复用 `StrategyFormation.source_trial()` 和 `EventFormation`；有界候选遍历、培养差距、五星培养和特别装备准备位于 `tasks/party_preparation.py`。任务按目标持有候选迭代器，失败后接续而不重新打开搜索预算，见[公共准备流程](party-preparation.md)。战斗及体力领取复用 `EventCombat` 和公会之家模块。活动情报来自 `news.py` 的 `abyss_schedule`；GUI/CLI 共用注册任务及 `AbyssSubjugation` 配置。见[使用指南](guides/abyss-subjugation.md)。
 

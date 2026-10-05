@@ -11,10 +11,20 @@ def search_text_confirmed(base, screen, *, exact=False, area=(300, 110, 640, 165
     x1, y1, x2, y2 = area
     entered = normalized(' '.join(item.text for item in screen.items if item.score >= .75
         and x1 <= item.center[0] <= x2 and y1 <= item.center[1] <= y2))
-    for expected, mistaken in (('千爱瑠', '干爱瑠'), ('千歌', '干歌')):
+    for expected, mistaken in (('千爱瑠', '干爱瑠'), ('千歌', '干歌'),
+                              ('菈比莉斯塔', '莅比莉斯塔')):
         if base == expected:
             entered = entered.replace(mistaken, expected)
     return entered == base if exact else base in entered
+
+
+def search_reset_confirmed(screen, *, page, page_area, field_area):
+    if not screen.find(page, page_area):
+        return False
+    x1, y1, x2, y2 = field_area
+    labels = [normalized(item.text) for item in screen.items if item.score >= .75
+              and x1 <= item.center[0] <= x2 and y1 <= item.center[1] <= y2]
+    return not labels or all(text in ('用角色名搜索', '请输入角色名') for text in labels)
 
 
 def search_input_confirmation(base, screen, *, page='队伍编组', page_area=(300, 0, 650, 70)):
@@ -43,7 +53,17 @@ def search_character(ui, name, *, page='队伍编组', page_area=(300, 0, 650, 7
             if search_text_confirmed(base, screen, exact=True, area=field_area):
                 return screen
         ui.click(reset)
+        # Reset and Android focus can finish after the click is acknowledged.
+        # Wait for the old query to disappear before requesting a new editor.
+        ui.wait(lambda s: search_reset_confirmed(s, page=page, page_area=page_area,
+                    field_area=field_area), '角色搜索重置', timeout=5)
         ui.click(field, delay=1)
+        # Observe the newly opened editor before delivering Unicode. Sending
+        # while the preceding reset is closing it can silently discard text.
+        focused = ui.capture()
+        if not focused.find(page, page_area):
+            raise EventUIError('搜索聚焦后未处于'+page+'页面')
+        time.sleep(.3)
         try:
             ui.driver.input(base)
         except (subprocess.SubprocessError, OSError):

@@ -1,10 +1,10 @@
 """Conservative retry decisions from observed combat evidence."""
 import re
-import cv2 as cv
 from ..game_ui.screen import normalized
+from ..game_ui.battle_status import portrait_states
 
 
-def combat_sample(screen, portraits):
+def combat_sample(screen, portraits, *, maximum_hp=None):
     timer=screen.find(r'\d:\d{2}',(750,0,850,55),exact=True)
     if not timer:return None
     minutes,seconds=map(int,normalized(timer.text).split(':'))
@@ -12,12 +12,12 @@ def combat_sample(screen, portraits):
     remaining=total=None
     if hp:
         remaining,total=map(int,normalized(hp.text).replace(',','').split('/'))
-        if not 0<=remaining<=total or total<=0:remaining=total=None
-    dark=sum(cv.cvtColor(screen.image[y1:y2,x1:x2],cv.COLOR_BGR2GRAY).mean()<80
-             and cv.cvtColor(screen.image[y1:y2,x1:x2],cv.COLOR_BGR2HSV)[:,:,1].mean()<40
-             for x1,y1,x2,y2 in portraits)
-    # Bright portraits are only a proxy; require repeated samples for a claim.
-    return dict(seconds=minutes*60+seconds,hp=remaining,max_hp=total,dark_portraits=int(dark))
+        if (not 0<=remaining<=total or total<=0
+                or maximum_hp is not None and total!=maximum_hp):remaining=total=None
+    state=portrait_states(screen.image,portraits)
+    return dict(seconds=minutes*60+seconds,hp=remaining,max_hp=total,
+                dark_portraits=len(state['fallen']),fallen_positions=state['fallen'],
+                living_portraits=len(state['living']))
 
 
 def retry_decision(samples, reason, same_team_attempts):
@@ -26,7 +26,7 @@ def retry_decision(samples, reason, same_team_attempts):
     shortfall=(min(s['hp']/s['max_hp'] for s in tail) if tail else None)
     elapsed=min((s['seconds'] for s in samples),default=90)
     deaths=('减员' in reason or sum(s.get('dark_portraits',0)>0 for s in samples[-4:])>=3)
-    alive=(len(samples)>=3 and all(s.get('dark_portraits')==0 for s in samples[-3:]))
+    alive=(len(samples)>=3 and all(s.get('living_portraits')==5 for s in samples[-3:]))
     if elapsed<=8 and alive and shortfall is not None and shortfall>.25:
         return dict(action='change_damage',reason='临近超时且连续无减员迹象，首领剩余生命超过25%；同队重试价值低',remaining_ratio=shortfall)
     if deaths and shortfall is not None and shortfall<=.25 and same_team_attempts<2:

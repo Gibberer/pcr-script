@@ -15,6 +15,7 @@ import cv2 as cv
 import numpy as np
 
 from ..game_ui.screen import EventUIError, normalized
+from ..game_ui.battle_status import portrait_states
 from .strategy_trial import TrialFormation
 from .strategy_party_pool import boss_parties, next_boss_party
 from ..templates import ImageTemplate
@@ -115,7 +116,7 @@ class EventCombat:
                         (bar[:, :, 1] > bar[:, :, 0]+30))
         return bool(green < .08 and cv.cvtColor(face, cv.COLOR_BGR2HSV)[:, :, 2].mean() < 145)
 
-    def configure_paused(self, party: EventParty, order: Sequence[str]) -> bool:
+    def configure_paused(self, party: EventParty, order: Sequence[str], *, screen=None) -> bool:
         """Pause during setup so animations and stage stories cannot race SET."""
         pause_deadline = time.monotonic()+120
         stable = 0
@@ -123,7 +124,10 @@ class EventCombat:
         last_menu_request = 0.0
         while time.monotonic() < pause_deadline:
             self.r.check_deadline()
-            s = self.ui.capture()
+            # The caller has just observed the menu. Act on that observation
+            # before another OCR/capture consumes the opening at 4x speed.
+            s = screen if screen is not None else self.ui.capture()
+            screen = None
             if s.find('进行中战斗') and s.find('主菜单'):
                 # The menu is readable while still scaling/fading in. Its
                 # portrait coordinates are valid only at the final position.
@@ -179,7 +183,10 @@ class EventCombat:
         if s.find(opposite_auto, (400, 330, 550, 385)):
             self.ui.click((480, 358))
         s = self.ui.wait(lambda frame: frame.find(expected_auto, (400, 330, 550, 385)), expected_auto, timeout=5)
-        self.ui.save('battle_after_settings'+suffix, s)
+        evidence = self.ui.save('battle_after_settings'+suffix, s)
+        confirm = getattr(self.r, 'combat_settings_confirmed', None)
+        if callable(confirm):
+            confirm(str(evidence))
         self.ui.expect_click('返回', (260, 405, 410, 465), exact=True)
         # The return animation can leave the old panel in the next capture.
         # Observe its closure before the main loop can request a menu again.
@@ -193,6 +200,9 @@ class EventCombat:
             start = formation.find("战斗开始", (740, 390, 950, 510), exact=True)
             if not formation.blue_button(start):
                 return BattleResult("blocked", "战斗开始按钮不可用，未消耗挑战次数")
+            starting = getattr(self.r, 'combat_starting', None)
+            if callable(starting):
+                starting(formation)
             self.ui.click(start)
         deadline = time.monotonic()+self.r.options.get("battle_timeout", 220)
         started = None
@@ -215,7 +225,7 @@ class EventCombat:
             if s.find('进行中战斗') and s.find('主菜单'):
                 started = started or time.monotonic()
                 try:
-                    configured = self.configure_paused(party, order)
+                    configured = self.configure_paused(party, order, screen=s)
                 except EarlyCasualty as error:
                     return self.retreat(str(error))
                 except EventUIError as error:
@@ -226,20 +236,16 @@ class EventCombat:
                 started = started or time.monotonic()
                 if not configured:
                     try:
-                        configured = self.configure_paused(party, order)
+                        configured = self.configure_paused(party, order, screen=s)
                     except EarlyCasualty as error:
                         return self.retreat(str(error))
                     except EventUIError as error:
                         return self.retreat('SET核验中断：'+str(error))
                     continue
-                # Require multiple stable frames; UB flashes alone must not
-                # count as a KO. This uses the existing script's portrait cue.
+                # Require repeated dark faces with empty, visible HP bars;
+                # colored KO portraits and UB flashes need separate cues.
                 if time.monotonic()-started > 8:
-                    dark = 0
-                    for x1, y1, x2, y2 in self.portraits:
-                        portrait = s.image[y1:y2, x1:x2]
-                        dark += (cv.cvtColor(portrait, cv.COLOR_BGR2GRAY).mean() < 80
-                                 and cv.cvtColor(portrait, cv.COLOR_BGR2HSV)[:, :, 1].mean() < 40)
+                    dark = len(portrait_states(s.image, self.portraits)['fallen'])
                     dead_frames = dead_frames+1 if (party.allow_deaths if party else 0) < dark < 5 else 0
                     if dead_frames >= 3:
                         return self.retreat("减员超出队伍容许值，尝试下一队")

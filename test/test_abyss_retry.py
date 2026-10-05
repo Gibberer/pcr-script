@@ -22,7 +22,7 @@ class RetryTests(TestCase):
         self.assertIsNone(source_set_alternative(dict(names=list('abcde'),notes='猜一下怎么设置'),[]))
 
     def test_large_damage_gap_with_alive_team_never_plain_retries(self):
-        samples=[dict(seconds=s,hp=700,max_hp=1000,dark_portraits=0) for s in [7,5,2]]
+        samples=[dict(seconds=s,hp=700,max_hp=1000,dark_portraits=0,living_portraits=5) for s in [7,5,2]]
         self.assertEqual(retry_decision(samples,'战斗失败',1)['action'],'change_damage')
 
     def test_close_death_only_allows_one_same_team_retry(self):

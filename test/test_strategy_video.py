@@ -14,7 +14,7 @@ from pcrscript.game_ui.avatars import AvatarIndex, face_crop
 from pcrscript.game_ui.avatar_assets import ensure_avatar_index
 from pcrscript.game_ui.guide_vision import GuideText, battle_rectangles, combat_team, formation_team, wide_special_equipment_team, combat_set, combat_auto, labeled_fields, formation_fields
 from pcrscript.tasks.strategy_document import Evidence, empty_member, finalize, to_event_party, abyss_candidate, event_parties, event_trial_parties, dungeon_plan
-from pcrscript.tasks.strategy_video import choose_pages, observed_scope, parse_video_source, acquire_strategies, task_source_options, texts_in_view, sample_seconds, frame_texts, combat_button_texts, combat_hud_visible, combat_caption_signature
+from pcrscript.tasks.strategy_video import choose_pages, observed_scope, parse_video_source, acquire_strategies, task_source_options, texts_in_view, sample_seconds, frame_texts, combat_button_texts, unread_active_set_badge, combat_hud_visible, combat_caption_signature, text_constraints
 from pcrscript.tasks.strategy_party_pool import boss_parties, next_boss_party
 from pcrscript.tasks.strategy_trial import TrialFormation
 from pcrscript.tasks.event_strategy import CharacterStatus, EventParty, MemberRequirement
@@ -36,6 +36,32 @@ def complete_party():
 
 
 class VideoStrategyTests(TestCase):
+    def test_whole_frame_ocr_missing_active_set_requests_local_read_without_inventing_a_switch(self):
+        image = np.zeros((540,960,3),np.uint8)
+        box = (190,392,100,100)
+        image[378:417,267:321] = (255,220,0)
+        self.assertTrue(unread_active_set_badge(image, [box], []))
+        labels = [GuideText('立即',.99,(277,382,27,15)), GuideText('发动',.99,(277,397,27,15))]
+        self.assertFalse(unread_active_set_badge(image, [box], labels))
+        uncertain = [GuideText(t.text,.94,t.rectangle) for t in labels]
+        self.assertTrue(unread_active_set_badge(image, [box], uncertain))
+        self.assertIsNone(combat_set(image, {'rectangle':box}, []))
+        # A grey or occluded badge supplies no on/off evidence and no color fallback.
+        image[378:417,267:321] = (180,180,180)
+        self.assertFalse(unread_active_set_badge(image, [box], []))
+
+    def test_fixed_hud_switch_status_does_not_discard_creator_operations(self):
+        proof = Evidence('https://example.com/synthetic', method='video_ocr')
+        label = '连结爆发立即发动开启'
+        self.assertEqual(text_constraints([GuideText(label, .99, (1080, 70, 180, 20))],
+                         proof, unparsed_settings=True), ([], []))
+        for text, rectangle in ((label, (10, 170, 200, 20)),
+                                ('连结爆发立即发动关闭', (1080, 70, 180, 20)),
+                                ('需手动连结爆发立即发动开启', (1080, 70, 180, 20))):
+            with self.subTest(text=text, rectangle=rectangle):
+                self.assertTrue(text_constraints([GuideText(text, .99, rectangle)],
+                                proof, unparsed_settings=True)[1])
+
     def test_event_starting_mode_caption_can_coexist_with_later_hud_phase(self):
         labels = [GuideText('SP模式1', 1, (10, 180, 150, 25)),
                   GuideText('阶段2', 1, (60, 50, 100, 25))]
@@ -203,6 +229,15 @@ class VideoStrategyTests(TestCase):
             task_source_options('abyss',dict(search_effort='high',
                 sources=dict(max_videos='4')),stage=stage)
 
+    def test_single_domain_collection_keeps_unscoped_overview_for_frame_verification(self):
+        source=dict(title='米洛克1-5层参考作业',pages=[
+            dict(cid=1,part='参考作业'),dict(cid=2,part='米洛克4层通关记录'),
+            dict(cid=3,part='米洛克5层通关记录')])
+        options=dict(task_type='recollection',area='米洛克的领域',stage=1)
+        self.assertEqual([p['cid'] for p in choose_pages(source,options)],[1])
+        self.assertEqual(choose_pages(dict(source,title='米洛克2-5层参考作业'),options),[])
+        self.assertEqual(choose_pages(dict(source,title='米洛克/泽恩1-5层合集'),options),[])
+
     def test_combat_row_verifies_inferred_cards_with_connected_set_bubbles(self):
         image=np.zeros((540,960,3),np.uint8)
         cyan=(255,200,0)
@@ -244,6 +279,15 @@ class VideoStrategyTests(TestCase):
         self.assertTrue(all(abs(x+w/2-(239+120*i))<8 for i,(x,y,w,h) in enumerate(boxes)))
         image[370:495,552:666]=245
         self.assertEqual(battle_rectangles(image),[])
+
+    def test_ub_orange_cards_need_real_borders_between_cyan_anchors(self):
+        image = np.full((540,960,3),245,np.uint8)
+        for i in range(5):
+            color = (255,200,0) if i % 2 == 0 else (0,180,255)
+            cv.rectangle(image,(197+120*i,397),(285+120*i,485),color,4)
+        self.assertEqual(len(battle_rectangles(image,relaxed=True)),5)
+        image[390:495,550:666] = 245
+        self.assertEqual(battle_rectangles(image,relaxed=True),[])
 
     def test_combat_button_regions_use_recognition_without_text_detection(self):
         frame=np.zeros((720,1280,3),np.uint8)
@@ -651,6 +695,24 @@ class VideoStrategyTests(TestCase):
             self.assertEqual(parse.call_count,1)
             self.assertEqual(parse.call_args.args[0]['bvid'],'BVFIRE')
 
+    def test_accepted_preferred_source_does_not_depend_on_search_availability(self):
+        with TemporaryDirectory() as folder:
+            api=Mock()
+            api.getVideoInfo.return_value=dict(code=0,data=dict(bvid='BVPREFERRED',
+                title='公主连结 火4-1',pages=[dict(cid=1,part='火4-1')]))
+            index=SimpleNamespace(names=['角色'],matrix=np.ones((1,1728),np.float32))
+            with patch('pcrscript.tasks.strategy_video.preferred_sources',
+                       return_value=([dict(bvid='BVPREFERRED',user_provided=True)],[])), \
+                 patch('pcrscript.tasks.strategy_video.discover_sources',
+                       side_effect=RuntimeError('synthetic search failure')) as search, \
+                 patch('pcrscript.tasks.strategy_video.parse_video_source',
+                       return_value=dict(parties=[complete_party()],errors=[])):
+                result=acquire_strategies(dict(task_type='abyss',stage='4-1',element='fire',
+                    source_urls=['https://example.com/synthetic'],parsed_dir=folder),api=api,index=index,
+                    accept=lambda report:bool(report['parties']))
+            self.assertEqual(result['status'],'complete')
+            search.assert_not_called()
+
     def test_video_to_document_with_synthetic_frames_and_explicit_fields(self):
         with TemporaryDirectory() as folder:
             path=Path(folder)/'sample.avi'
@@ -696,6 +758,96 @@ class VideoStrategyTests(TestCase):
             self.assertEqual(page['button_ocr_frames'],page['frames']-2)
             self.assertEqual(full.call_count,2)
             self.assertEqual(buttons.call_count,page['frames']-2)
+
+    def parse_targeted_auto_source(self, folder, kind, wide, *, auto_on=True,
+                                   existing='missing', local_label='AUTO'):
+        boxes = [(190+i*120, 390, 100, 100) for i in range(5)]
+        members = [dict(name=f'合成角色{i}', rectangle=list(box), score=.99)
+                   for i, box in enumerate(boxes)]
+        raw_width, raw_height = (1280, 590) if wide else (960, 540)
+        crop_width = round(raw_height*16/9) if wide else raw_width
+        crop_left = (raw_width-crop_width)//2 if wide else 0
+        frame = np.full((720, 1280, 3), 35, np.uint8)
+        for x, y, w, h in boxes:
+            left = round((crop_left+(x+.76*w)*crop_width/960)*1280/raw_width)
+            right = round((crop_left+(x+1.32*w)*crop_width/960)*1280/raw_width)
+            frame[round((y-.16*h)*4/3):round((y+.24*h)*4/3), left:right] = (255, 220, 0)
+        auto_rect = (1110, 505, 65, 45)
+        color = (255, 220, 0) if auto_on is True else (230, 230, 230) if auto_on is False else (120, 120, 120)
+        frame[501:554, 1106:1179] = color
+        labels = [GuideText(text, .99, (100, 10, 250, 20))
+                  for text in ('合成首领等级.100', '79000000/80000000', '1:25')]
+        if existing in ('known', 'ambiguous', 'low_confidence'):
+            labels.append(GuideText('AUTO', .94 if existing == 'low_confidence' else .99, auto_rect))
+        if existing == 'ambiguous':
+            labels.append(GuideText('自动', .99, (1200, 530, 65, 45)))
+        if existing == 'off_button':
+            labels.append(GuideText('AUTO', .99, (20, 150, 65, 45)))
+        scope = (dict(area='米洛克的领域', floor=1) if kind == 'recollection'
+                 else dict(kind='boss', difficulty='普通', boss='合成首领'))
+        target = dict(scope=scope, boss='合成首领', level=100,
+                      maximum_hp=80000000, image='synthetic_live_target.png')
+        source = dict(bvid='BVSYNTHETIC', url='https://example.com/synthetic',
+                      title=('公主连结 国服 米洛克1～3层自动参考' if kind == 'recollection'
+                             else '公主连结 国服 深渊讨伐战 合成合集'),
+                      pages=[dict(cid=1, part='合成合集', duration=1)])
+        options = dict(task_type=kind, area='米洛克的领域', stage='1', parsed_dir=folder,
+                       kind='boss', difficulty='普通', boss='合成首领', observed_target=target)
+        capture = Mock()
+        raw = cv.resize(frame, (raw_width, raw_height))
+        capture.read.side_effect = [(True, raw), (True, raw.copy())]
+        recognized = (['立即', '发动']*5 + ([local_label] if local_label else ['未知']*4))*2
+        ocr = Mock(side_effect=[SimpleNamespace(txts=(text,), scores=(.99,)) for text in recognized])
+        def full_texts(image, image_path, *args):
+            cv.imwrite(str(image_path), image)
+            return list(labels)
+        index = SimpleNamespace(names=[m['name'] for m in members], matrix=np.ones((5,1728),np.float32))
+        with patch('pcrscript.tasks.strategy_video.cv.VideoCapture', return_value=capture), \
+             patch('pcrscript.tasks.strategy_video.sample_seconds', return_value=[0, .5]), \
+             patch('pcrscript.tasks.strategy_video.frame_texts', side_effect=full_texts), \
+             patch('pcrscript.tasks.strategy_video.battle_rectangles', return_value=boxes), \
+             patch('pcrscript.tasks.strategy_video.combat_team', return_value=members):
+            report = parse_video_source(source, options, index, api=Mock(), ocr=ocr,
+                media_fetcher=lambda *a, **k: (Path(folder)/'synthetic.avi', dict(duration=1)))
+        self.assertEqual(report['pages'][0]['full_ocr_frames'], 2)
+        self.assertEqual(report['pages'][0]['button_ocr_frames'], 2)
+        self.assertTrue(all(m['instant']['value'] is True for m in report['parties'][0]['members']))
+        from pcrscript.tasks.recollection_strategy import parties_for_floor
+        from pcrscript.tasks.subjugation_guides import parties_for_target
+        candidates = (parties_for_floor(report, '米洛克的领域', 1, allow_local_trials=True)
+                      if kind == 'recollection' else parties_for_target(report, options, allow_local_trials=True))
+        return report['parties'][0], candidates
+
+    def test_full_ocr_local_trials_retain_targeted_auto(self):
+        for kind in ('recollection', 'subjugation'):
+            for wide in (False, True):
+                for existing in ('missing', 'low_confidence', 'off_button'):
+                    for auto_on in (False, True):
+                        with self.subTest(kind=kind, wide=wide, existing=existing, auto_on=auto_on), TemporaryDirectory() as folder:
+                            party, candidates = self.parse_targeted_auto_source(
+                                folder, kind, wide, existing=existing, auto_on=auto_on)
+                            self.assertIs(party['auto']['value'], auto_on)
+                            self.assertEqual(len(party['auto']['evidence']), 2)
+                            self.assertTrue(all(e['method'] == 'combat_auto_button' for e in party['auto']['evidence']))
+                            self.assertEqual(len(candidates), 1)
+                            self.assertEqual(candidates[0].build_basis, 'local_trial')
+                            self.assertIs(candidates[0].auto, auto_on)
+
+    def test_full_ocr_keeps_existing_and_ambiguous_auto_labels(self):
+        for wide in (False, True):
+            for existing in ('known', 'ambiguous'):
+                with self.subTest(wide=wide, existing=existing), TemporaryDirectory() as folder:
+                    party, candidates = self.parse_targeted_auto_source(folder, 'recollection', wide, existing=existing)
+                    self.assertIs(party['auto']['value'], True if existing == 'known' else None)
+                    self.assertEqual(len(candidates), 1 if existing == 'known' else 0)
+
+    def test_targeted_auto_needs_both_label_and_known_button_state(self):
+        for wide in (False, True):
+            for options in (dict(local_label=None), dict(auto_on=None)):
+                with self.subTest(wide=wide, options=options), TemporaryDirectory() as folder:
+                    party, candidates = self.parse_targeted_auto_source(folder, 'recollection', wide, **options)
+                    self.assertIsNone(party['auto']['value'])
+                    self.assertEqual(candidates, [])
 
     def test_compilation_table_retains_members_without_claiming_stage(self):
         with TemporaryDirectory() as folder:

@@ -11,6 +11,64 @@ from .screen import EventUI, EventUIError, normalized
 SPECIAL_COLUMNS = (158, 337, 516, 694, 873)
 SPECIAL_ROWS = (218, 291, 365)
 
+# Observed CN 960x540 automatic settings and priority picker.
+PRIORITY_FIELDS = dict(weapon=('武器', 239), armor=('防具', 284), accessory=('饰品', 327))
+PRIORITY_OPTIONS = {
+    'rarity': ('稀有度', (70, 139)), 'skill': ('有技能', (290, 139)),
+    'physical_attack': ('物理攻击力', (510, 139)), 'magic_attack': ('魔法攻击力', (730, 139)),
+    'physical_defense': ('物理防御力', (70, 195)), 'magic_defense': ('魔法防御力', (290, 195)),
+    'hp': ('生命值', (510, 195)), 'physical_critical': ('物理暴击', (730, 195)),
+    'magic_critical': ('魔法暴击', (70, 252)),
+    'physical_penetration': ('物理防御贯穿', (290, 252)),
+    'magic_penetration': ('魔法防御贯穿', (510, 252)),
+}
+
+
+def validate_auto_priorities(value):
+    if (not isinstance(value, dict) or any(key not in PRIORITY_FIELDS for key in value)
+            or any(not isinstance(stat, str) or stat not in PRIORITY_OPTIONS for stat in value.values())):
+        raise ValueError('auto_equip_priorities必须为武器、防具或饰品的已知属性配置')
+    return dict(value)
+
+
+def priority_picker(screen):
+    title = screen.find('优先属性值', (320, 15, 650, 65), exact=True)
+    return bool(title and title.score >= .95)
+
+
+def selected_priority(screen, position):
+    x, y = position
+    hsv = cv.cvtColor(screen.image[y-8:y+8, x-8:x+8], cv.COLOR_BGR2HSV)
+    return float(np.mean((hsv[:, :, 0] > 85) & (hsv[:, :, 0] < 120)
+                         & (hsv[:, :, 1] > 90) & (hsv[:, :, 2] > 180))) > .65
+
+
+def configure_auto_priorities(ui, settings, priorities):
+    """Set explicit options only, verifying each radio and the returned selector."""
+    for category, stat in validate_auto_priorities(priorities).items():
+        category_label, y = PRIORITY_FIELDS[category]
+        label, position = PRIORITY_OPTIONS[stat]
+        category_item = settings.find(category_label, (265, y-20, 465, y+20), exact=True)
+        options = settings.all('|'.join(row[0] for row in PRIORITY_OPTIONS.values()), (480, y-20, 690, y+20))
+        if not category_item or category_item.score < .95 or len(options) != 1 or options[0].score < .95:
+            raise EventUIError('自动特别装备类别或当前优先属性无法核对：'+category)
+        ui.click(options[0])
+        picker = ui.wait(priority_picker, '特别装备优先属性值')
+        x, option_y = position
+        item = picker.find(label, (x+20, option_y-22, min(x+215, 940), option_y+22), exact=True)
+        if not item or item.score < .95:
+            raise EventUIError('特别装备优先属性选项未知：'+stat)
+        if not selected_priority(picker, position):
+            ui.click(position)
+        ui.wait(lambda s: priority_picker(s) and selected_priority(s, position), '特别装备优先属性选中')
+        ui.expect_click('确认', (480, 447, 705, 515), exact=True)
+        settings = ui.wait(lambda s: not priority_picker(s)
+                           and s.find('自动特别装备设定', (320, 15, 650, 65), exact=True), '优先属性返回自动设定')
+        chosen = settings.find(label, (480, y-20, 690, y+20), exact=True)
+        if not chosen or chosen.score < .95:
+            raise EventUIError('特别装备优先属性回显不一致：'+stat)
+    return settings
+
 
 def loadout_items(image):
     """Keep item appearance as well as occupancy; two full slots may differ."""
@@ -36,6 +94,24 @@ def formation_entry_visible(screen) -> bool:
 
 def cancel_special_equipment(ui: EventUI, screen) -> bool:
     """Dismiss one identified settings/preview panel without committing gear."""
+    if screen.find('道具详情', (320, 15, 650, 65), exact=True):
+        ui.expect_click('关闭', (320, 445, 650, 515), exact=True)
+        ui.wait(lambda s: s.find('选择装备', (320, 15, 650, 65), exact=True), '关闭特别装备道具详情')
+        return True
+    if screen.find('特别装备替换确认', (320, 65, 650, 120), exact=True):
+        ui.expect_click('关闭', (265, 405, 480, 465), exact=True)
+        ui.wait(lambda s: not s.find('特别装备替换确认', (320, 65, 650, 120), exact=True)
+                and s.find('选择装备', (320, 15, 650, 65), exact=True), '取消特别装备替换确认')
+        return True
+    if screen.find('选择装备', (320, 15, 650, 65), exact=True):
+        ui.expect_click('取消', (470, 445, 615, 520), exact=True)
+        ui.wait(lambda s: s.find('特别装备设定', (320, 15, 650, 65), exact=True), '取消特别装备单人选择')
+        return True
+    if priority_picker(screen):
+        ui.expect_click('取消', (265, 445, 480, 520), exact=True)
+        ui.wait(lambda s: not priority_picker(s)
+                and s.find('自动特别装备设定', (320, 15, 650, 65), exact=True), '取消优先属性选择')
+        return True
     automatic = screen.find('自动特别装备设定', (320, 15, 650, 65), exact=True)
     if not automatic and not screen.find('特别装备设定', (320, 15, 650, 65), exact=True):
         return False
@@ -113,8 +189,9 @@ def inspect_special_equipment(ui: EventUI, order: list[str]) -> dict:
                 items=loadout_items(panel.image))
 
 
-def auto_equip_special(ui: EventUI, order: list[str]) -> dict:
+def auto_equip_special(ui: EventUI, order: list[str], *, priorities=None) -> dict:
     """Use the game's automatic EX loadout and verify the committed slots."""
+    priorities = validate_auto_priorities({} if priorities is None else priorities)
     screen=ui.capture()
     tag=uuid4().hex[:8]
     if not screen.find('队伍编组',(300,0,650,70),exact=True):
@@ -128,6 +205,14 @@ def auto_equip_special(ui: EventUI, order: list[str]) -> dict:
     before_evidence=str(ui.save('abyss_special_before_'+tag,panel))
     ui.expect_click('自动装备',(485,447,705,515),exact=True)
     settings=ui.wait(lambda s:s.find('自动特别装备设定',(320,15,650,65),exact=True),'自动特别装备设定')
+    try:
+        settings=configure_auto_priorities(ui, settings, priorities)
+    except EventUIError:
+        # An unverified selector never reaches the gear commit button.
+        for _ in range(3):
+            if not cancel_special_equipment(ui, ui.capture()):
+                break
+        raise
     settings_evidence=str(ui.save('abyss_special_auto_settings_'+tag,settings))
     ui.expect_click('确认',(480,447,705,515),exact=True)
     preview=ui.wait(lambda s:s.find('特别装备设定',(320,15,650,65),exact=True)
@@ -160,4 +245,5 @@ def auto_equip_special(ui: EventUI, order: list[str]) -> dict:
                 before_power=before_power,after_power=after_power,changed=changed,
                 evidence=evidence,before_evidence=before_evidence,
                 settings_evidence=settings_evidence,selected_evidence=selected_evidence,
+                priorities=priorities,
                 items=loadout_items(committed.image))

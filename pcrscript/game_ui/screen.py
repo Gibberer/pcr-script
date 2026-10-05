@@ -34,6 +34,23 @@ class TextBox:
         return tuple(points.mean(axis=0).astype(int))
 
 
+def claimable_task_snapshot(screen, roi):
+    """Keep confident task content and enabled row controls for claim recovery."""
+    if screen.find('正在进行数据连接|连接中|加载中'):
+        return None
+    items = [item for item in screen.items
+             if roi[0] <= item.center[0] <= roi[2] and roi[1] <= item.center[1] <= roi[3]]
+    if (not items or any(item.score < .95 for item in items)
+            or not any(normalized(item.text) == '收取' and screen.blue_button(item) for item in items)
+            or not any(len(normalized(item.text)) > 4 and re.search(r'[\u4e00-\u9fff]',item.text)
+                       for item in items)):
+        return None
+    rows = [[normalized(item.text), *map(int,item.center),
+             screen.blue_button(item) if normalized(item.text) == '收取' else None]
+            for item in items]
+    return dict(version=1, rows=sorted(rows,key=lambda row:(row[2],row[1],row[0])))
+
+
 class EventScreen:
     def __init__(self, image, items):
         self.image = image
@@ -268,7 +285,10 @@ class EventUI:
         center = sum(bounds)//2
         body_roi = (max(0,x1-430), y1-15, x1-12, y2+24)
         before_text = normalized(screen.text(body_roi))
-        start = ((x1+x2)//2, bounds[1]-10)
+        # Near the lower end, dragging from the thumb's bottom leaves too
+        # little travel for Android to recognize a swipe. Its center retains
+        # room to reach the end of the verified track.
+        start = ((x1+x2)//2, center)
         end = (start[0], max(y1, min(y2-1, start[1]+direction*max(120, round((bounds[1]-bounds[0])*.8)))))
         convert = lambda p: (round(p[0]*self.width/960), round(p[1]*self.height/540))
         def changed(timeout):

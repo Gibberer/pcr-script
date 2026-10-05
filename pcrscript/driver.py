@@ -70,7 +70,9 @@ class ADBDriver(Driver):
         if self.unicode_console_path and not text.isascii():
             subprocess.run([self.unicode_console_path, "action", "--index",
                             str(self.unicode_console_index), "--key", "call.input",
-                            "--value", text], check=True, timeout=15)
+                            "--value", text], check=True, timeout=15,
+                           stdin=subprocess.DEVNULL, capture_output=True,
+                           creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
             return
         self._run("shell", "input", "text", text)
 
@@ -121,7 +123,7 @@ class ADBDriver(Driver):
 
 @contextmanager
 def _physical_input_context():
-    """Keep native geometry and messages in pixels for DPI-unaware CLIs."""
+    """Keep native capture, geometry and messages in physical pixels."""
     set_context = getattr(ctypes.windll.user32, 'SetThreadDpiAwarenessContext', None)
     previous = None
     if set_context is not None:
@@ -198,6 +200,7 @@ class Win32Driver(ADBDriver):
             print(f"fallback adb swipe:{e}")
             super().swipe(start,end, duration)
     
+    @_physical_input_context()
     def screenshot(self, output="screen_shot.png"):
         try:
             hwin = self.get_hwnd(type=WHType.Image)
@@ -245,12 +248,30 @@ class DNDriver(Win32Driver):
     supports_scrollbar_fallback = True
 
     def screenshot(self, output="screen_shot.png"):
+        if getattr(self, '_use_background_capture', False):
+            return self._scroll_fallback_driver().screenshot(output=output)
         frame = super().screenshot(output=output)
-        # GDI can retain the near-black loading surface while Android has
-        # already rendered the next screen. Verify the same device via ADB.
-        if float(np.mean(frame)) < 5:
+        after_input = getattr(self, '_native_input_pending', False)
+        check = (not getattr(self, '_capture_consistency_checked', False)
+                 or after_input or float(np.mean(frame)) < 5)
+        self._capture_consistency_checked = True
+        self._native_input_pending = False
+        # GDI can retain a complete old page as well as a black loading frame.
+        # Compare the first capture and input receipts with Android
+        # on this exact instance. Once stale, never return to its old surface
+        # during this driver session; input remains on the configured driver.
+        if check:
             try:
-                return self._scroll_fallback_driver().screenshot(output=output)
+                current = self._scroll_fallback_driver().screenshot(output=output)
+                if isinstance(current, np.ndarray) and current.shape == frame.shape:
+                    difference = np.abs(frame.astype(np.int16)-current.astype(np.int16))
+                    # Cached pages can differ only in a balance or button cost.
+                    # Prefer the verified current surface even for a small
+                    # changed field; inputs are never replayed by this check.
+                    stale = np.count_nonzero(difference.max(axis=2) > 16) > 50
+                    if float(np.mean(frame)) < 5 or stale:
+                        self._use_background_capture = True
+                        return current
             except (RuntimeError, OSError, subprocess.SubprocessError):
                 # A legitimate loading screen must still work without ADB.
                 # Keep it and wait; never guess an ambiguous connection.
@@ -285,9 +306,8 @@ class DNDriver(Win32Driver):
 
     def _init_window_info(self):
         if os.path.exists(f'{self.dnpath}/ldconsole.exe'):
-            output = subprocess.check_output(
-                [os.path.join(self.dnpath, 'ldconsole.exe'), 'list2'],
-                encoding='mbcs', errors='replace', timeout=15)
+            from .leidian_console import query_list2
+            output = query_list2(self.dnpath)
             if output:
                 infos = list(map(lambda x : x.split(','), output.split('\n')))
                 info = next((row for row in infos if len(row) >= 9 and row[0] == str(self.index)), None)
@@ -312,6 +332,7 @@ class DNDriver(Win32Driver):
         return super().get_screen_size()
 
     def swipe(self, start, end=None, duration=500, *, fallback=False):
+        self._native_input_pending = True
         if fallback:
             self._scroll_fallback_driver().swipe(start, end, duration)
             return
@@ -326,7 +347,17 @@ class DNDriver(Win32Driver):
             return self._scroll_adb
         serial = getattr(self, 'adb_fallback_serial', '')
         if not serial:
-            raise RuntimeError('后台 ADB 回退未明确关联雷电实例；请指定 Extra.adb_serial')
+            try:
+                console = os.path.join(self.dnpath, 'ldconsole.exe')
+                value = subprocess.check_output([console, 'adb', '--index', str(self.index),
+                    '--command', 'get-serialno'], encoding='utf-8', errors='replace', timeout=15).strip()
+                # A console query binds the serial to this exact instance.
+                # Never infer it from a single phone or matching resolution.
+                if not re.fullmatch(r'emulator-\d+|127\.0\.0\.1:\d+', value):
+                    raise ValueError('instance serial unknown')
+                serial = value
+            except (AttributeError, ValueError, OSError, subprocess.SubprocessError) as error:
+                raise RuntimeError('后台 ADB 回退未明确关联雷电实例；请指定 Extra.adb_serial') from error
         from .simulator import GeneralSimulator
         devices = GeneralSimulator(self.adb_path).get_devices()
         if serial not in devices:
@@ -338,6 +369,7 @@ class DNDriver(Win32Driver):
         return driver
     
     def click(self, x, y):
+        self._native_input_pending = True
         if self.click_by_mouse:
             super().click(x, y)
         else:
@@ -347,10 +379,13 @@ class DNDriver(Win32Driver):
         '''
         adb 不支持中文使用dnconsole接口
         '''
+        self._native_input_pending = True
         if self.click_by_mouse:
             subprocess.run([os.path.join(self.dnpath, 'ldconsole.exe'), 'action',
                             '--index', str(self.index), '--key', 'call.input', '--value', text],
-                           check=True, timeout=15)
+                           check=True, timeout=15, stdin=subprocess.DEVNULL,
+                           capture_output=True,
+                           creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
         else:
             contain_hanzi = False
             for char in text:

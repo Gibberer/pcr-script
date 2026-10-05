@@ -7,6 +7,7 @@ import win32api
 import win32gui
 import win32con
 from .driver import ADBDriver, Driver, DNDriver, MuMuDriver
+from .leidian_console import query_list2
 
 
 class GeneralSimulator():
@@ -108,9 +109,7 @@ class DNSimulator(GeneralSimulator):
 
     def online(self)->bool:
         if self.path:
-            command_result = subprocess.check_output(
-                [os.path.join(self.path, 'ldconsole.exe'), 'list2'],
-                encoding='mbcs', errors='replace', timeout=15)
+            command_result = query_list2(self.path)
             if command_result:
                 infos = list(map(lambda x: x.split(","), command_result.split("\n")))
                 if infos and int(infos[0][2]) > 0 and int(infos[0][4]) == 1:
@@ -131,8 +130,7 @@ class DNSimulator(GeneralSimulator):
         report = dict(driver='leidian', console=os.path.join(self.path, 'ldconsole.exe'),
                       status='not_visible', devices=[], malformed_rows=0)
         try:
-            output = subprocess.check_output([report['console'], 'list2'],
-                encoding='mbcs', errors='replace', timeout=15)
+            output = query_list2(self.path)
         except (OSError, subprocess.SubprocessError) as error:
             report.update(status='query_failed', error=type(error).__name__)
             if isinstance(error, subprocess.CalledProcessError):

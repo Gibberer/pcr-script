@@ -165,7 +165,8 @@ class EventFormation:
                     setattr(actual, stat, values.get(stat))
         actual.evidence = str(self.ui.save("character_"+normalized(name)+evidence_suffix, s))
         if full and (verify_skills or not actual.identity_verified
-                     or (not reusable_skill and not self.infer_costume_from_skills)):
+                     or (not reusable_skill and (not self.infer_costume_from_skills
+                         or getattr(self, 'require_current_skills', False)))):
             self.ui.click(s.find("技能", (620, 132, 770, 170), exact=True))
             self.ui.wait(lambda frame: frame.find("连结爆发|技能|EX技能", (485, 175, 900, 438), exact=True),
                          "角色技能列表", timeout=15)
@@ -179,9 +180,9 @@ class EventFormation:
                 if text == previous:
                     break
                 previous = text
-                self.ui.scrollbar(top, (903, 190, 912, 414), -1)
+                self.ui.scrollbar(top, (903, 190, 912, 424), -1)
             candidates = None
-            if self.infer_costume_from_skills and expected_name is None:
+            if self.infer_costume_from_skills:
                 from .event_strategy import costume_skills
                 candidates = costume_skills(displayed, getattr(self, 'database', 'cache/redive_cn.db'))
             wanted = skill_names(name, getattr(self, 'database', 'cache/redive_cn.db'))
@@ -220,7 +221,7 @@ class EventFormation:
                 if text == previous:
                     break
                 previous = text
-                if not self.ui.scrollbar(s, (903, 190, 912, 414), 1):
+                if not self.ui.scrollbar(s, (903, 190, 912, 424), 1):
                     break
             actual.skill_level = min(levels.values()) if len(levels) >= 3 else None
             # The UI omits costume suffixes. The two ordinary skill names

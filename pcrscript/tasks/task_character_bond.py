@@ -42,10 +42,16 @@ def verified_gift_counts(ui: EventUI, screen) -> list[int]:
         if not occupied:
             continue
         items = screen.all(r'[×xX]\d+', (x-9, 360, x+42, 395))
-        if not items:
-            items = ui.read_region(screen, (x-1, 362, x+41, 388)).items
         parsed = [int(match[1]) for item in items if item.score >= .80
-                  if (match := re.search(r'[×xX](\d+)', normalized(item.text)))]
+                  if (match := re.fullmatch(r'[×xX](\d+)', normalized(item.text)))]
+        if len(parsed) != 1:
+            for roi in ((x-1, 362, x+41, 388), (x-8, 365, x+40, 387),
+                        (x+2, 368, x+31, 385)):
+                items = ui.read_region(screen, roi).items
+                parsed = [int(match[1]) for item in items if item.score >= .80
+                          if (match := re.fullmatch(r'[×xX](\d+)', normalized(item.text)))]
+                if len(parsed) == 1:
+                    break
         if len(parsed) != 1:
             return []
         counts.append(parsed[0])
@@ -56,6 +62,24 @@ def card_present(screen, x: int, y: int) -> bool:
     patch = screen.image[y-36:y+36, x-60:x+60]
     hsv = cv.cvtColor(patch, cv.COLOR_BGR2HSV)
     return float(np.mean(hsv[:, :, 1] > 45)) > .17
+
+
+def locked_story(screen):
+    """Require a gold lock and the disabled card, not gold avatar decorations."""
+    for episode in screen.all(r'第\d+话', (385, 115, 560, 430)):
+        y = episode.center[1]
+        patch = screen.image[max(115,y-25):min(435,y+28), 253:308]
+        hsv = cv.cvtColor(patch, cv.COLOR_BGR2HSV)
+        gold = (hsv[:,:,0] >= 12) & (hsv[:,:,0] <= 38) & (hsv[:,:,1] > 80) & (hsv[:,:,2] > 140)
+        body = screen.image[max(115,y+15):min(435,y+45), 555:605]
+        if not body.size:
+            continue
+        body_hsv = cv.cvtColor(body, cv.COLOR_BGR2HSV)
+        disabled = ((body_hsv[:,:,1] < 40) & (body_hsv[:,:,2] >= 105)
+                    & (body_hsv[:,:,2] <= 210))
+        if float(np.mean(gold)) > .2 and float(np.mean(disabled)) > .6:
+            return episode
+    return None
 
 
 @register('max_character_bonds', requires_home=True)
@@ -71,6 +95,43 @@ class MaxCharacterBonds(BaseTask):
         self.report: TaskReport = dict(status='running', characters=[], pending=[], gifts_spent=[], stories_read=[])
         self.deadline = time.monotonic() + self.options.get('timeout', 21600)
         self.attempted: set[str] = set()
+        self.focus_character: str | None = None
+
+    def gift_characters(self, focused) -> list[str] | None:
+        values=self.options.get('gift_characters')
+        if values is None:
+            return None
+        if (not isinstance(values,list)
+                or any(not isinstance(name,str) or not normalized(name) for name in values)):
+            raise EventUIError('赠礼范围必须为完整衣装名列表')
+        names=list(map(normalized,values))
+        if len(set(names))!=len(names) or not set(names)<=set(focused):
+            raise EventUIError('赠礼范围必须是本次指定角色范围的无重复子集')
+        return names
+
+    def focused_characters(self) -> list[str]:
+        single=self.options.get('focus_character')
+        multiple=self.options.get('focus_characters')
+        if single and multiple is not None:
+            raise EventUIError('不能同时设置单角色与多角色好感度范围')
+        values=[single] if single else multiple
+        if values is None:
+            return []
+        if (not isinstance(values,list) or not values
+                or any(not isinstance(name,str) or not normalized(name) for name in values)):
+            raise EventUIError('好感度角色范围必须为非空完整衣装名列表')
+        names=list(map(normalized,values))
+        if len(set(names))!=len(names):
+            raise EventUIError('好感度角色范围存在重复衣装')
+        if len(names)>self.options.get('max_characters',400):
+            raise EventUIError('指定好感度角色数量超过本次上限')
+        return names
+
+    def require_gift_budget(self, counts) -> None:
+        spent=sum(sum(row['counts']) for row in self.report['gifts_spent'])
+        limit=self.options.get('max_gifts_total',800000)
+        if type(limit) is not int or limit<0 or spent+sum(counts)>limit:
+            raise EventUIError('本次好感度礼物总用量超过上限，未赠送')
 
     def check(self) -> None:
         if time.monotonic() >= self.deadline:
@@ -122,7 +183,8 @@ class MaxCharacterBonds(BaseTask):
         name = normalized(s.text((260, 90, 450, 120)))
         if not name:
             raise EventUIError('赠礼角色身份未读出')
-        if self.options.get('focus_character') and name != normalized(self.options['focus_character']):
+        focus=self.focus_character or self.options.get('focus_character')
+        if focus and name != normalized(focus):
             raise EventUIError('赠礼衣装与指定角色不一致，未送出礼物')
         record['name'] = name
         if name in self.attempted:
@@ -152,6 +214,7 @@ class MaxCharacterBonds(BaseTask):
             return
         spend = dict(name=name, before=levels[0], target=levels[1], counts=counts,
                      status='pending', evidence=record['preview'])
+        self.require_gift_budget(counts)
         self.report['gifts_spent'].append(spend)
         self.save()
         self.ui.click(button)
@@ -174,6 +237,7 @@ class MaxCharacterBonds(BaseTask):
         unknown_frames = 0
         scan_direction = 'to_top'
         previous = None
+        prerequisites = {}
         for step in range(max_steps):
             self.check()
             s = self.ui.capture()
@@ -197,6 +261,7 @@ class MaxCharacterBonds(BaseTask):
             elif s.find('菜单', (855, 0, 950, 90), exact=True):
                 self.ui.click((917, 42), delay=.2)
             elif s.find('角色剧情', (320, 15, 620, 70), exact=True):
+                self.ui.save('story_scan_'+name, s)
                 new = s.find('新内容', (245, 110, 715, 435))
                 if new:
                     record['stories_opened'] = record.get('stories_opened', 0)+1
@@ -205,14 +270,40 @@ class MaxCharacterBonds(BaseTask):
                     empty_pages = 0
                     scan_direction = 'to_top'
                     previous = None
+                    prerequisites.clear()
+                    record.pop('story_requirements', None)
                 else:
+                    locked = locked_story(s)
+                    if locked and normalized(locked.text) not in prerequisites:
+                        self.ui.click((480, min(locked.center[1]+35, 415)))
+                        requirement = self.ui.wait(lambda f: f.find('解锁条件', (330,110,630,180),exact=True),
+                                                   '角色剧情解锁条件',timeout=5)
+                        reason = requirement.text((250,190,710,325))
+                        episode = normalized(locked.text)
+                        prerequisites[episode] = dict(episode=episode,requirement=reason,
+                            evidence=str(self.ui.save('story_requirement_'+name+'_'+episode,requirement)))
+                        record['story_requirements'] = list(prerequisites.values())
+                        self.save()
+                        self.ui.expect_click('关闭',(370,330,590,410),exact=True)
+                        self.ui.wait(lambda f:f.find('角色剧情',(320,15,620,70),exact=True),
+                                     '关闭解锁条件返回角色剧情')
+                        continue
                     crop = cv.resize(s.image[125:430, 300:680], (38, 31), interpolation=cv.INTER_AREA)
                     if previous is not None and float(np.mean(np.abs(crop.astype(int)-previous.astype(int)))) < 1.5:
                         if scan_direction == 'to_top':
                             scan_direction = 'to_bottom'
                             previous = None
                             continue
-                        record['stories'] = 'checked_to_end'
+                        if prerequisites:
+                            requirements = list(prerequisites.values())
+                            record['stories'] = 'blocked_by_prerequisite'
+                            record['story_requirements'] = requirements
+                            record['story_requirement'] = requirements[0]['requirement']
+                            record['story_requirement_evidence'] = requirements[0]['evidence']
+                            reasons = list(dict.fromkeys(row['requirement'] for row in requirements))
+                            self.report['pending'].append(name+'：剧情前置条件未满足：'+'；'.join(reasons))
+                        else:
+                            record['stories'] = 'checked_to_end'
                         return
                     previous = crop
                     empty_pages += 1
@@ -249,7 +340,15 @@ class MaxCharacterBonds(BaseTask):
         record = dict(status='checking')
         self.report['characters'].append(record)
         self.save()
-        self.give_gifts(record)
+        gift_names=self.options.get('gift_characters')
+        if (self.options.get('read_stories_only',False)
+                or gift_names is not None and self.focus_character not in list(map(normalized,gift_names))):
+            if not self.focus_character:
+                raise EventUIError('仅阅读剧情须指定完整衣装范围')
+            record.update(name=self.focus_character,bond='unchanged')
+            self.attempted.add(self.focus_character)
+        else:
+            self.give_gifts(record)
         self.read_stories(record)
         if record.get('status') != 'already_checked_this_run':
             record['status'] = 'complete' if record.get('stories') == 'checked_to_end' and record.get('bond') != 'insufficient_gifts' else 'partial'
@@ -263,16 +362,24 @@ class MaxCharacterBonds(BaseTask):
 
     def run(self) -> TaskReport:
         try:
+            focused=self.focused_characters()
+            self.gift_characters(focused)
             self.report_progress('进入角色列表')
             self.enter()
-            if focus := self.options.get('focus_character'):
+            if focused:
                 from ..game_ui.character_equipment import open_character_memory
-                if open_character_memory(self.ui, focus) is None:
-                    raise EventUIError('指定角色的完整衣装身份未能确认')
-                self.report_progress(f'核对角色 · {focus}')
-                self.process_detail()
-                self.report['status'] = 'complete' if self.report['characters'][-1].get('status') == 'complete' else 'partial'
+                for focus in focused:
+                    self.check()
+                    self.focus_character=focus
+                    if open_character_memory(self.ui, focus) is None:
+                        raise EventUIError('指定角色的完整衣装身份未能确认：'+focus)
+                    self.report_progress(f'核对角色 · {focus}')
+                    self.process_detail()
+                self.report['status'] = 'complete' if all(
+                    row.get('status')=='complete' for row in self.report['characters']) else 'partial'
                 return self.report
+            if self.options.get('read_stories_only',False):
+                raise EventUIError('仅阅读剧情须指定完整衣装范围')
             slots = [(x, y) for y in (149, 294, 420) for x in (165, 472, 770)]
             max_characters = self.options.get('max_characters', 400)
             max_pages = self.options.get('max_pages', 80)

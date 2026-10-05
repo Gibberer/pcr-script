@@ -22,7 +22,7 @@ from pcrscript.tasks.event_battle import BattleResult
 from pcrscript.tasks.event_strategy import CharacterStatus, EventParty, MemberRequirement
 from pcrscript.tasks.subjugation_party import character_talents, require_event_talent
 from pcrscript.tasks.party_preparation import party_fingerprint
-from pcrscript.tasks.task_abyss_subjugation import validate_options
+from pcrscript.tasks.task_abyss_subjugation import validate_options, BossPartyUnavailable
 from pcrscript.runtime import modify_task_list, run_task_with_config
 
 START = datetime(2026, 10, 2, 12, tzinfo=SERVER_TIMEZONE)
@@ -45,6 +45,32 @@ def party():
     return EventParty('synthetic', '合成游戏保存队伍',
         [MemberRequirement('合成角色'+str(i), 100, 10, 5, True, False, True, 100) for i in range(5)],
         build_basis='local_trial', allow_deaths=5)
+
+
+class BossSignatureTests(TestCase):
+    def test_long_boss_name_keeps_adjacent_level_in_the_info_row(self):
+        s=screen(('合成首领(多部位)',440,233),('等级.100',560,233),('弱点',630,233))
+        ui=Mock()
+        ui.read_region.return_value=screen()
+        with patch.object(field,'boss_detail',return_value=True), \
+             patch.object(field,'boss_health',return_value=(43747169,80000000)):
+            self.assertEqual(field.boss_signature(ui,s),dict(
+                boss='合成首领(多部位)',level=100,maximum_hp=80000000))
+            s.items[1].score=.94
+            self.assertIsNone(field.boss_signature(ui,s))
+            ui.read_region.return_value=screen(('合成首领(多部位)等级.100',440,233))
+            self.assertEqual(field.boss_signature(ui,s)['boss'],'合成首领(多部位)')
+
+    def test_uncertain_level_label_needs_independent_matching_numeric_read(self):
+        s=screen(('合成首领',440,233),('等级.100',495,233),('弱点',590,233))
+        s.items[1].score=.92
+        ui=Mock(number=Mock(return_value=100),read_region=Mock(return_value=screen()))
+        with patch.object(field,'boss_detail',return_value=True), \
+             patch.object(field,'boss_health',return_value=(43747169,80000000)):
+            self.assertEqual(field.boss_signature(ui,s)['level'],100)
+            for wrong in (None,90):
+                ui.number.return_value=wrong
+                self.assertIsNone(field.boss_signature(ui,s))
 
 class Game:
     def __init__(self):
@@ -233,7 +259,8 @@ class Game:
             won = self.simulation_wins
             self.task._battle_samples = [dict(seconds=self.simulation_end+i,
                 hp=80000000-self.simulation_damage, max_hp=80000000,
-                dark_portraits=self.simulation_deaths) for i in (4, 2, 0)]
+                dark_portraits=self.simulation_deaths,
+                living_portraits=5-self.simulation_deaths) for i in (4, 2, 0)]
         else:
             self.real_battles += 1
             self.tickets -= 1
@@ -269,6 +296,52 @@ class Game:
             raise AssertionError('wrong synthetic party')
 
 class SubjugationTests(TestCase):
+    def test_single_sweep_cost_recovers_only_one_high_confidence_glyph(self):
+        for extra_glyph, confidence, expected in ((False, .99, 1), (False, .90, None), (True, .99, None)):
+            with self.subTest(extra_glyph=extra_glyph, confidence=confidence):
+                observed = screen(('消耗券', 300, 307))
+                cv.rectangle(observed.image, (470, 302), (473, 312), (60, 60, 60), -1)
+                if extra_glyph:
+                    cv.rectangle(observed.image, (452, 302), (456, 312), (60, 60, 60), -1)
+                local = screen(('1', 471, 307))
+                local.items[0].score = confidence
+                ui = Mock(number=Mock(return_value=None), read_region=Mock(return_value=local))
+                self.assertEqual(field.sweep_cost(ui, observed, '消耗券'), expected)
+                if extra_glyph:
+                    ui.read_region.assert_not_called()
+
+    def test_one_remaining_outpost_sweeps_after_thin_digit_recovery(self):
+        game = Game()
+        game.attempts = dict(普通=1, 困难=0, 高难=0)
+        game.outpost_clears.update(field.DIFFICULTIES)
+        original = game.capture
+        def capture(**kwargs):
+            observed = original(**kwargs)
+            if game.page == 'confirmation':
+                observed.items = [t for t in observed.items if tuple(t.center) != (470, 307)]
+                cv.rectangle(observed.image, (470, 302), (473, 312), (60, 60, 60), -1)
+            return observed
+        game.capture = capture
+        task = self.task(game, first_clear=False)
+        task.ui.read_region = Mock(side_effect=lambda s, roi, **kwargs:
+            screen(('1', 471, 307)) if roi == (452, 295, 479, 319) else s)
+        report = task.run(EVENT)
+        self.assertEqual(report['stamina_spent'], 25, report)
+        self.assertEqual(game.attempts['普通'], 0)
+        self.assertEqual(game.tickets, 1)
+        self.assertEqual(len(report['history']), 1)
+        self.assertIn((452, 295, 479, 319), [call.args[1] for call in task.ui.read_region.call_args_list])
+
+    def test_navigation_cancel_requires_detail_controls_without_overlay(self):
+        game = Game()
+        for page in ('normal', 'boss'):
+            with self.subTest(page=page):
+                game.page = page
+                observed = game.capture()
+                self.assertEqual(field.detail_cancel(observed).text, '取消')
+                observed.items.extend(screen(('确认', 588, 373)).items)
+                self.assertIsNone(field.detail_cancel(observed))
+
     def setUp(self):
         self.temp = TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
@@ -526,6 +599,31 @@ class SubjugationTests(TestCase):
         self.assertEqual([(h['index'], h['difficulty']) for h in report['history']], [(1, '普通'), (2, '普通')])
         self.assertNotIn((0, '极难'), game.boss_clears)
 
+    def test_exhausted_guide_for_one_boss_does_not_skip_other_uncleared_bosses(self):
+        game = Game()
+        game.outpost_clears = set(field.DIFFICULTIES)
+        game.attempts = dict.fromkeys(field.DIFFICULTIES, 0)
+        game.tickets = 2
+        task = self.task(game)
+        task.source_parties = Mock(side_effect=lambda kind, boss='', *args, **kwargs:
+                                   [] if boss == '合成首领0' else [party()])
+        report = task.run(EVENT)
+        self.assertEqual([(h['index'], h['difficulty']) for h in report['history']], [(1, '普通'), (2, '普通')])
+        self.assertTrue(any('首领1 普通' in reason for reason in report['pending']))
+        self.assertFalse(report['all_bosses_cleared'])
+        self.assertEqual(game.tickets, 0)
+
+    def test_independent_boss_progress_never_continues_uncertain_consumption_or_ui(self):
+        for error, pending in ((BossPartyUnavailable('合成无队伍'), True), (EventUIError('合成未知页面'), False)):
+            with self.subTest(error=type(error).__name__):
+                task = self.task(Game())
+                if pending:
+                    task.state['pending'] = dict(kind='boss_battle')
+                task.clear_boss = Mock(side_effect=error)
+                with self.assertRaises(EventUIError):
+                    task.bosses()
+                self.assertEqual(task.clear_boss.call_count, 1)
+
     def test_boss_entry_can_return_the_requested_detail_directly(self):
         game = Game()
         game.difficulty = '困难'
@@ -594,6 +692,7 @@ class SubjugationTests(TestCase):
         game.outpost_clears = set(field.DIFFICULTIES)
         game.attempts = dict.fromkeys(field.DIFFICULTIES, 0)
         game.tickets = 1
+        game.boss_clears = {(i, d) for i in (1, 2) for d in field.BOSS_DIFFICULTIES}
         game.simulation_wins = False
         game.simulation_damage = 40000000
         task = self.task(game)
@@ -650,6 +749,7 @@ class SubjugationTests(TestCase):
         game.outpost_clears = set(field.DIFFICULTIES)
         game.attempts = dict.fromkeys(field.DIFFICULTIES, 0)
         game.tickets = 1
+        game.boss_clears = {(i, d) for i in (1, 2) for d in field.BOSS_DIFFICULTIES}
         game.simulation_wins = False
         game.simulation_damage = 70000000
         game.simulation_deaths = 5
@@ -693,6 +793,7 @@ class SubjugationTests(TestCase):
         game.outpost_clears = set(field.DIFFICULTIES)
         game.attempts = dict.fromkeys(field.DIFFICULTIES, 0)
         game.tickets = 3
+        game.boss_clears = {(i, d) for i in (1, 2) for d in field.BOSS_DIFFICULTIES}
         game.simulation_wins = False
         game.simulation_damage = 40000000
         game.real_damage = 10000000
@@ -981,6 +1082,21 @@ class SubjugationTests(TestCase):
             character_talents(missing)
         self.assertFalse(missing.exists())
 
+    def test_source_recovery_skips_missing_members_without_pinning_partial_build(self):
+        from pcrscript.tasks.subjugation_party import SubjugationFormation
+        formation = SubjugationFormation(Mock())
+        selected = party()
+        missing = selected.members[0].name
+        def inspect(partial):
+            self.assertFalse(formation.pin_build)
+            self.assertEqual(len(partial.members), 4)
+            self.assertNotIn(missing, [m.name for m in partial.members])
+            return True, dict(order=[m.name for m in partial.members])
+        with patch('pcrscript.tasks.event_formation.EventFormation.select', side_effect=inspect):
+            ready, details = formation.select_source_members(selected, known_missing=[missing])
+        self.assertFalse(ready)
+        self.assertEqual(details['unready'][0]['character'], missing)
+
     def test_recent_audit_requires_same_equipment_before_reuse(self):
         game = Game()
         game.page = 'formation'
@@ -1026,7 +1142,7 @@ class SubjugationTests(TestCase):
         self.assertNotIn('boss_teams', task.options)
         task.formation.select.assert_not_called()
         task.formation.owned_candidates.assert_not_called()
-        self.assertTrue(all('攻略' in reason for reason in report['pending']))
+        self.assertEqual(sum('首领' in reason and '攻略' in reason for reason in report['pending']), 3)
 
     def test_complete_guides_can_clear_without_allowing_account_trial_adaptations(self):
         game = Game()

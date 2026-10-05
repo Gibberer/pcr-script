@@ -15,7 +15,7 @@ from pcrscript.game_ui import dawn_labyrinth as maze
 from pcrscript.game_ui.screen import EventUIError
 from pcrscript.run_session import RunCancelled
 from pcrscript.runtime import run_task_with_config
-from pcrscript.tasks import DawnLabyrinthFirstClear
+from pcrscript.tasks import DawnLabyrinth, DawnLabyrinthFirstClear
 from pcrscript.tasks.dawn_labyrinth_party import LabyrinthFormation, LabyrinthBossStrategy
 from pcrscript.tasks.event_strategy import CharacterStatus, EventParty, MemberRequirement
 from pcrscript.tasks.party_variants import character_roles
@@ -34,6 +34,13 @@ def departure(before=11, after=10):
     return screen(('公会选择确认', 480, 42),
                   ('将消耗1张迷宫通行证和【美食殿堂】一同出发。确定吗？', 480, 85),
                   ('持有迷宫通行证', 350, 427), (str(before), 565, 427), (str(after), 692, 427),
+                  ('取消', 255, 475), ('出发', 705, 475), blue=('出发',))
+
+
+def zero_departure(guild_name='美食殿堂'):
+    return screen(('公会选择确认', 480, 42),
+                  (f'【{guild_name}】一同出发。', 480, 85),
+                  ('由于未持有迷宫通行证，无法获得报酬。', 480, 415),
                   ('取消', 255, 475), ('出发', 705, 475), blue=('出发',))
 
 
@@ -132,6 +139,21 @@ def synthetic_boss_strategy(groups=None):
 
 
 class FirstClearRecognitionTests(TestCase):
+    def test_zero_pass_preview_is_recognized_but_cannot_authorize_paid_departure(self):
+        value = zero_departure()
+        self.assertTrue(maze.unrewarded_departure_confirmation(value))
+        self.assertTrue(maze.departure_confirmation(value))
+        # Even stray balance text cannot turn the no-reward preview into paid evidence.
+        value.items.extend(departure().items[2:5])
+        ui = Mock(number=Mock(side_effect=lambda s, roi: s.number(roi)))
+        with self.assertRaises(EventUIError):
+            maze.departure_preview(ui, value)
+        ui.number.assert_not_called()
+        self.assertFalse(maze.departure_confirmation(zero_departure('合成公会')))
+        low = zero_departure()
+        low.items[2].score = .94
+        self.assertFalse(maze.departure_confirmation(low))
+
     def test_clear_guild_evidence_covers_each_sweep_layout(self):
         for value in (catalogue(selected=False), cleared_preview(),
                       sweep_guild_choice(), bulk()):
@@ -407,6 +429,16 @@ class FirstClearRecognitionTests(TestCase):
             for unique, unique2 in ((False, False), (True, False), (True, True)):
                 check(ready_character('合成伙伴', unique=unique, unique2=unique2))
 
+    def test_all_released_slots_can_be_four_without_inventing_future_equipment(self):
+        for check in (LabyrinthFormation.require_build, LabyrinthFormation.require_boss_build):
+            value = ready_character('合成伙伴', equipment=4, equipment_available=4,
+                                    ordinary_equipment_evidence=['synthetic-six-slot-audit'])
+            check(value)
+            for change in ({'equipment': 3}, {'equipment_available': 6},
+                           {'equipment_available': True}, {'ordinary_equipment_evidence': []}):
+                with self.subTest(change=change), self.assertRaisesRegex(EventUIError, '装备'):
+                    check(replace(value, **change))
+
     def test_boss_planner_rechecks_equipment_of_non_core_members(self):
         names = ('佩可莉姆', '可可萝', '凯露')+tuple(f'合成伙伴{i}' for i in range(7))
         ready = {name: ready_character(name, stars=6 if name in names[:3] else 5) for name in names}
@@ -420,6 +452,40 @@ class FirstClearRecognitionTests(TestCase):
 
 
 class LabyrinthFormationTests(TestCase):
+    def test_only_same_owned_build_recruited_this_run_uses_predeparture_equipment(self):
+        formation = object.__new__(LabyrinthFormation)
+        formation.departure_verified_at = 2000
+        formation.departure_equipment = {'合成伙伴': dict(level=365, rank=38, observed_at=1900,
+            values=dict(equipment=4, equipment_available=4, unique=True, unique2=False),
+            ordinary_evidence=['synthetic-slots'], unique_evidence=['synthetic-unique'])}
+        value = ready_character('合成伙伴', equipment=None)
+        formation.bind_departure_equipment(value)
+        self.assertEqual((value.equipment, value.equipment_available), (4, 4))
+        self.assertEqual(value.ordinary_equipment_evidence, ['synthetic-slots'])
+        for change in ({'level': 320, 'rank': 34}, {'level': 364}, {'rank': 37}, {'identity_verified': False}):
+            value = ready_character('合成伙伴', equipment=None, **change)
+            formation.bind_departure_equipment(value)
+            self.assertIsNone(value.equipment)
+        formation.departure_verified_at = None
+        value = ready_character('合成伙伴', equipment=None)
+        formation.bind_departure_equipment(value)
+        self.assertIsNone(value.equipment)
+
+    def test_expired_future_or_conflicting_predeparture_equipment_cannot_be_bound(self):
+        formation = object.__new__(LabyrinthFormation)
+        formation.departure_verified_at = 2000
+        proof = dict(level=365, rank=38, observed_at=100,
+            values=dict(equipment=4, equipment_available=4, unique=True, unique2=False),
+            ordinary_evidence=['synthetic-slots'], unique_evidence=['synthetic-unique'])
+        formation.departure_equipment = {'合成伙伴': proof}
+        for observed in (100, 2001):
+            proof['observed_at'] = observed
+            value = ready_character('合成伙伴', equipment=None)
+            formation.bind_departure_equipment(value)
+            self.assertIsNone(value.equipment)
+        proof['observed_at'] = 1900
+        with self.assertRaisesRegex(EventUIError, '不符'):
+            formation.bind_departure_equipment(ready_character('合成伙伴', equipment=None, unique=False))
     def test_neighboring_rows_recover_a_card_with_an_interrupted_border(self):
         value = screen(('队伍编组', 480, 42))
         cv.rectangle(value.image, (178, 281), (254, 348), (230, 155, 25), -1)
@@ -498,11 +564,17 @@ class FirstClearTaskTests(TestCase):
         self.temp = TemporaryDirectory()
         self.folder = Path(self.temp.name)
         self.robot = Robot(Mock(get_screen_size=Mock(return_value=(960, 540))), show_progress=False)
-        self.robot.configure({'DawnLabyrinthFirstClear': {'output': str(self.folder)}})
+        self.robot.configure({'DawnLabyrinthFirstClear': {'output': str(self.folder)},
+                              'DawnLabyrinth': {'output': str(self.folder/'daily'),
+                                               'state_dir': str(self.folder/'state'),
+                                               'account_key': 'synthetic-account'}})
         self.task = DawnLabyrinthFirstClear(self.robot)
         self.task.ui = Mock(output=self.folder, last=None)
         self.task.ui.save.return_value = self.folder/'synthetic.png'
         self.task.ui.number.side_effect = lambda s, roi: s.number(roi)
+        self.core_preparation = patch.object(self.task, 'prepare_core_equipment', side_effect=lambda s, before: s)
+        self.core_preparation.start()
+        self.addCleanup(self.core_preparation.stop)
         self.sleep = patch('pcrscript.tasks.task_dawn_labyrinth_first_clear.time.sleep')
         self.sleep.start()
 
@@ -520,6 +592,232 @@ class FirstClearTaskTests(TestCase):
 
     def clicks(self):
         return [getattr(call.args[0], 'text', call.args[0]) for call in self.task.ui.click.call_args_list]
+
+    def core_proof(self, level=365, observed_at=1000, **changes):
+        return dict(dict(level=level, rank=38, stars=6, skill_level=365,
+                         training_evidence=['synthetic-stars', 'synthetic-skills'], observed_at=observed_at,
+                         values=dict(equipment=4, equipment_available=4), evidence=['synthetic-slots']), **changes)
+
+    def test_core_star_or_skill_gaps_block_production_entry_before_pass_spend(self):
+        for name in ('佩可莉姆', '可可萝', '凯露'):
+            for gap, reason in (({'stars': 5}, '六星'), ({'stars': None}, '六星'),
+                                ({'stars': True}, '六星'), ({'skill_level': 364}, '技能至少等级365'),
+                                ({'skill_level': None}, '技能至少等级365'),
+                                ({'skill_level': True}, '技能至少等级365'),
+                                ({'training_evidence': []}, '星级与技能证据缺失')):
+                with self.subTest(name=name, gap=gap):
+                    self.task = DawnLabyrinthFirstClear(self.robot)
+                    self.task.ui = Mock(output=self.folder, last=None)
+                    self.task.ui.save.return_value = self.folder/'synthetic.png'
+                    self.task.ui.number.side_effect = lambda s, roi: s.number(roi)
+                    self.frames([home(11), home(11), self.guild(), difficulty(), self.guild(),
+                                 self.locked(), self.guild(), home(11)])
+                    def inspect(ui, current, **kwargs):
+                        self.assertIs(kwargs['inspect_training'], True)
+                        return self.core_proof(**gap) if current == name else self.core_proof()
+                    with patch.object(self.task, 'get_formation', return_value=Mock()), \
+                            patch('pcrscript.tasks.task_home.ToHomePage'), \
+                            patch('pcrscript.game_ui.ordinary_equipment.inspect_ordinary_equipment',
+                                  side_effect=inspect), \
+                            patch('pcrscript.game_ui.character_equipment.inspect_unique_equipment',
+                                  return_value=self.unique_proof()):
+                        report = self.task.run()
+                    self.assertEqual((report['status'], report['entries'], report['spent']), ('blocked', 0, 0), report)
+                    self.assertIn(name, report['pending'][-1])
+                    self.assertIn(reason, report['pending'][-1])
+                    self.assertNotIn('pending_spend', report)
+                    self.assertEqual(report['remaining_passes'], 11)
+                    self.assertEqual(self.clicks().count('出发'), 1)
+                    self.assertNotIn('选择', self.clicks())
+                    self.assertNotIn('战斗开始', self.clicks())
+
+    def unique_proof(self, **changes):
+        values = dict(unique=True, unique_available=True, unique_level=30,
+                      unique2=False, unique2_available=False)
+        values.update(changes)
+        return dict(values=values, evidence=['synthetic-unique'])
+
+    def test_missing_implemented_core_unique_slots_block_production_entry_without_spending(self):
+        for name in ('佩可莉姆', '可可萝', '凯露'):
+            for key in ('unique', 'unique2'):
+                with self.subTest(name=name, slot=key):
+                    self.task = DawnLabyrinthFirstClear(self.robot)
+                    self.task.ui = Mock(output=self.folder, last=None)
+                    self.task.ui.save.return_value = self.folder/'synthetic.png'
+                    self.task.ui.number.side_effect = lambda s, roi: s.number(roi)
+                    self.frames([home(11), home(11), self.guild(), difficulty(), self.guild(),
+                                 self.locked(), self.guild(), home(11)])
+                    missing = self.unique_proof(**{key: False, key+'_available': True})
+                    def inspect(ui, current):
+                        return missing if current == name else self.unique_proof()
+                    with patch.object(self.task, 'get_formation', return_value=Mock()) as formation, \
+                            patch('pcrscript.tasks.task_home.ToHomePage'), \
+                            patch('pcrscript.game_ui.ordinary_equipment.inspect_ordinary_equipment',
+                                  side_effect=lambda ui, current, **kwargs: self.core_proof()), \
+                            patch('pcrscript.game_ui.character_equipment.inspect_unique_equipment', side_effect=inspect):
+                        report = self.task.run()
+                    self.assertEqual((report['status'], report['entries'], report['spent']), ('blocked', 0, 0), report)
+                    self.assertIn(name+'的专武'+('1' if key == 'unique' else '2')+'已实装但未穿戴', report['pending'][-1])
+                    self.assertEqual(report['core_equipment'][name]['unique'], missing)
+                    self.assertNotIn(name, formation.return_value.departure_equipment)
+                    self.assertNotIn('pending_spend', report)
+                    self.assertEqual(report['remaining_passes'], 11)
+                    self.assertEqual(self.clicks().count('出发'), 1)  # Navigation to guild selection only.
+                    self.assertNotIn('选择', self.clicks())
+                    self.assertNotIn('战斗开始', self.clicks())
+
+    def test_core_unique_availability_and_minimum_level_must_be_known_before_departure(self):
+        cases = [(self.unique_proof(unique=False, unique_available=None), '独立专武1'),
+                 (self.unique_proof(unique2_available=None), '独立专武2'),
+                 (self.unique_proof(unique_available=False), '独立专武1'),
+                 (self.unique_proof(unique_level=None), '等级未核验'),
+                 (self.unique_proof(unique_level=True), '等级未核验'),
+                 (self.unique_proof(unique_level=29), '等级30')]
+        for proof, reason in cases:
+            with self.subTest(values=proof['values']):
+                self.task.ui.click.reset_mock()
+                with patch.object(self.task, 'get_formation', return_value=Mock()), \
+                        patch.object(self.task, 'wait', return_value=home(11)), \
+                        patch('pcrscript.tasks.task_home.ToHomePage'), \
+                        patch('pcrscript.game_ui.ordinary_equipment.inspect_ordinary_equipment',
+                              return_value=self.core_proof()), \
+                        patch('pcrscript.game_ui.character_equipment.inspect_unique_equipment', return_value=proof):
+                    with self.assertRaisesRegex(EventUIError, reason):
+                        DawnLabyrinthFirstClear.prepare_core_equipment(self.task, self.guild(), 11)
+                self.assertNotIn('pending_spend', self.task.report)
+                self.assertEqual((self.task.report['entries'], self.task.report['spent']), (0, 0))
+                self.assertEqual(self.clicks(), [(30, 30)])
+
+    def test_core_cultivation_gap_is_reported_before_any_departure_spend(self):
+        with patch.object(self.task, 'get_formation', return_value=Mock()), \
+                patch.object(self.task, 'wait', return_value=home(11)), \
+                patch('pcrscript.tasks.task_home.ToHomePage') as to_home, \
+                patch('pcrscript.game_ui.ordinary_equipment.inspect_ordinary_equipment',
+                      return_value=self.core_proof(level=355)), \
+                patch('pcrscript.game_ui.character_equipment.inspect_unique_equipment') as unique:
+            with self.assertRaisesRegex(EventUIError,'等级365'):
+                DawnLabyrinthFirstClear.prepare_core_equipment(self.task, self.guild(), 11)
+        unique.assert_not_called()
+        self.assertEqual(to_home.return_value.run.call_count,2)
+        self.assertEqual(self.task.report['core_equipment']['佩可莉姆']['level'],355)
+        self.assertEqual((self.task.report['entries'],self.task.report['spent']), (0,0))
+        self.assertNotIn('pending_spend',self.task.report)
+        self.assertEqual(self.clicks(),[(30,30)])
+
+    def test_unknown_independent_unique_slot_blocks_before_departure(self):
+        with patch.object(self.task, 'get_formation', return_value=Mock()), \
+                patch.object(self.task, 'wait', return_value=home(11)), \
+                patch('pcrscript.tasks.task_home.ToHomePage'), \
+                patch('pcrscript.game_ui.ordinary_equipment.inspect_ordinary_equipment',
+                      return_value=self.core_proof()), \
+                patch('pcrscript.game_ui.character_equipment.inspect_unique_equipment',
+                      return_value=dict(values=dict(unique=True,unique2=None))):
+            with self.assertRaisesRegex(EventUIError,'独立专武'):
+                DawnLabyrinthFirstClear.prepare_core_equipment(self.task,self.guild(),11)
+        self.assertNotIn('pending_spend',self.task.report)
+        self.assertEqual(self.clicks(),[(30,30)])
+
+    def test_core_check_cancellation_does_not_issue_cleanup_navigation(self):
+        with patch.object(self.task, 'get_formation', return_value=Mock()), \
+                patch.object(self.task, 'wait', return_value=home(11)), \
+                patch('pcrscript.tasks.task_home.ToHomePage') as to_home, \
+                patch('pcrscript.game_ui.ordinary_equipment.inspect_ordinary_equipment',side_effect=RunCancelled):
+            with self.assertRaises(RunCancelled):
+                DawnLabyrinthFirstClear.prepare_core_equipment(self.task,self.guild(),11)
+        self.assertEqual(to_home.return_value.run.call_count,1)
+        self.assertEqual(self.clicks(),[(30,30)])
+
+    def test_navigation_cancelled_between_equipment_audits_preserves_no_spend(self):
+        with patch.object(self.task, 'get_formation', return_value=Mock()), \
+                patch.object(self.task, 'wait', return_value=home(11)), \
+                patch('pcrscript.tasks.task_home.ToHomePage') as to_home, \
+                patch('pcrscript.game_ui.ordinary_equipment.inspect_ordinary_equipment',
+                      return_value=self.core_proof()), \
+                patch('pcrscript.game_ui.character_equipment.inspect_unique_equipment') as unique:
+            to_home.return_value.run.side_effect = [None, RunCancelled('synthetic navigation cancellation')]
+            with self.assertRaises(RunCancelled):
+                DawnLabyrinthFirstClear.prepare_core_equipment(self.task, self.guild(), 11)
+        unique.assert_not_called()
+        self.assertEqual(to_home.return_value.run.call_count, 2)
+        self.assertNotIn('pending_spend', self.task.report)
+        self.assertEqual((self.task.report['entries'], self.task.report['spent']), (0, 0))
+
+    def test_all_core_checks_recheck_balance_and_unlock_before_authorizing_entry(self):
+        formation = Mock()
+        target = self.guild()
+        current_page = 'maze'
+        inspected = []
+        def return_home(**kwargs):
+            nonlocal current_page
+            current_page = 'home'
+        def ordinary(ui, name, **kwargs):
+            nonlocal current_page
+            self.assertEqual(current_page, 'home')
+            self.assertIs(kwargs['inspect_training'], True)
+            current_page = 'ordinary'
+            inspected.append(('ordinary', name))
+            return self.core_proof()
+        def unique(ui, name):
+            nonlocal current_page
+            self.assertEqual(current_page, 'home')
+            current_page = 'unique'
+            inspected.append(('unique', name))
+            if name == '佩可莉姆':
+                return self.unique_proof(unique2=True, unique2_available=True, unique2_stars=0)
+            if name == '凯露':
+                return self.unique_proof(unique=False, unique_available=False)
+            return self.unique_proof()
+        with patch.object(self.task,'get_formation',return_value=formation), \
+                patch.object(self.task,'wait',side_effect=[home(11),target]), \
+                patch.object(self.task,'enter',return_value=home(11)), \
+                patch.object(self.task,'difficulty_one',return_value=target), \
+                patch.object(self.task,'check_unlock',return_value=target) as unlock, \
+                patch('pcrscript.tasks.task_home.ToHomePage') as to_home, \
+                patch('pcrscript.game_ui.ordinary_equipment.inspect_ordinary_equipment',
+                      side_effect=ordinary), \
+                patch('pcrscript.game_ui.character_equipment.inspect_unique_equipment',
+                      side_effect=unique), \
+                patch('pcrscript.tasks.task_dawn_labyrinth_first_clear.time.time',return_value=1001):
+            to_home.return_value.run.side_effect = return_home
+            self.assertIs(DawnLabyrinthFirstClear.prepare_core_equipment(self.task,target,11),target)
+        self.assertEqual(inspected, [(kind,name) for name in ('佩可莉姆','可可萝','凯露')
+                                     for kind in ('ordinary','unique')])
+        self.assertEqual(set(formation.departure_equipment),{'佩可莉姆','可可萝','凯露'})
+        self.assertEqual(formation.departure_equipment['佩可莉姆']['values']['unique2_stars'], 0)
+        self.assertIs(formation.departure_equipment['凯露']['values']['unique_available'], False)
+        unlock.assert_called_once_with(target)
+        self.assertNotIn('pending_spend',self.task.report)
+
+    def test_expired_core_equipment_stops_before_reopening_entry(self):
+        with patch.object(self.task,'get_formation',return_value=Mock()), \
+                patch.object(self.task,'wait',return_value=home(11)), \
+                patch.object(self.task,'enter') as enter, \
+                patch('pcrscript.tasks.task_home.ToHomePage'), \
+                patch('pcrscript.game_ui.ordinary_equipment.inspect_ordinary_equipment',
+                      side_effect=lambda ui,name,**kwargs: self.core_proof(observed_at=0)), \
+                patch('pcrscript.game_ui.character_equipment.inspect_unique_equipment',
+                      return_value=self.unique_proof()), \
+                patch('pcrscript.tasks.task_dawn_labyrinth_first_clear.time.time',return_value=2000):
+            with self.assertRaisesRegex(EventUIError,'已过期'):
+                DawnLabyrinthFirstClear.prepare_core_equipment(self.task,self.guild(),11)
+        enter.assert_not_called()
+        self.assertNotIn('pending_spend',self.task.report)
+
+    def test_daily_pending_blocks_first_clear_without_altering_daily_state(self):
+        for pending in ({'pending_spend': dict(before=1, after=0, cost=1)},
+                        {'pending_mission_claim': dict(preview='synthetic.png')}):
+            with self.subTest(pending=pending):
+                daily = DawnLabyrinth(self.robot)
+                daily.report.update(pending)
+                daily.save_report()
+                self.task = DawnLabyrinthFirstClear(self.robot)
+                self.task.ui = Mock(output=self.folder, last=None)
+                report = self.task.run()
+                self.assertEqual(report['status'], 'blocked', report)
+                self.task.ui.capture.assert_not_called()
+                self.task.ui.click.assert_not_called()
+                self.assertEqual(json.loads(daily.state_path.read_text(encoding='utf-8')), pending)
+                daily.state_path.unlink()
 
     def test_unknown_normal_enemy_mechanics_stop_before_challenge_or_formation(self):
         stage = screen(('战斗格子（普通）', 138, 56), ('挑战', 817, 457))
@@ -724,6 +1022,14 @@ class FirstClearTaskTests(TestCase):
         self.frames([home(0), home(0), self.guild(), difficulty(), self.guild(), self.locked(), self.guild()])
         self.assertEqual(self.task.run()['status'], 'blocked')
         self.assertNotIn('选择', self.clicks())
+        self.assertEqual(self.task.report['entries'], 0)
+        self.assertNotIn('pending_spend', self.task.report)
+
+    def test_zero_pass_departure_preview_is_cancelled_before_returning_home(self):
+        expected = home(0)
+        self.frames([zero_departure(), self.guild(), expected])
+        self.assertIs(self.task.enter(), expected)
+        self.assertEqual(self.clicks(), ['取消', (30, 30)])
         self.assertEqual(self.task.report['entries'], 0)
         self.assertNotIn('pending_spend', self.task.report)
 

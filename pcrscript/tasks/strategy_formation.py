@@ -6,7 +6,7 @@ from uuid import uuid4
 from .event_formation import EventFormation
 from .event_strategy import EventParty, MemberRequirement, readiness, team_key
 from ..game_ui.screen import normalized
-from ..game_ui.avatars import card_rectangles, face_crop
+from ..game_ui.avatars import candidate_card_rectangles, face_crop
 from ..game_ui.screen import EventUIError
 from .party_variants import character_roles, alternatives
 from ..run_session import clock as time
@@ -115,9 +115,15 @@ class StrategyFormation(EventFormation):
             return list(cache[element])
         label={'fire':'火','water':'水','wind':'风','light':'光','dark':'暗'}[element]
         self.ui.expect_click(label,(110,65,480,110),exact=True)
-        # The middle of a card can treat a long drag as a card action and open
-        # the EX-equipment panel. Scroll beside the cards instead.
-        for _ in range(3): self.ui.swipe((914,200),(914,340))
+        # Drag the verified thumb toward the start, then toward the end.
+        # Content swipe directions are reversed when applied to a scrollbar.
+        scrollbar = (912, 124, 923, 361)
+        for _ in range(6):
+            s = self.ui.capture()
+            if not s.find('队伍编组',(300,0,650,70),exact=True):
+                raise EventUIError('候选扫描不在编队，未滑动未知页面')
+            if not self.ui.scrollbar(s, scrollbar, -1):
+                break
         found=set(); previous=None
         import cv2 as cv
         recovered_panel=False
@@ -132,10 +138,11 @@ class StrategyFormation(EventFormation):
             signature=cv.resize(s.image[115:372,40:905],(48,24)).tobytes()
             if signature==previous:break
             previous=signature
-            rects=card_rectangles(s.image)
+            rects=candidate_card_rectangles(s.image)
             found.update(n for n in self.avatars.query([face_crop(s.image,r) for r in rects]) if n)
             self.ui.save(f'candidate_{element}_{page}',s)
-            self.ui.swipe((914,340),(914,200))
+            if not self.ui.scrollbar(s, scrollbar, 1):
+                break
         cache[element]=sorted(found)
         self._owned_candidates=cache
         return list(cache[element])
@@ -182,8 +189,22 @@ class StrategyFormation(EventFormation):
         return None,dict(unready=['没有可确认且未试过的同属性替代阵容'],
                          available=available,rejected=rejected,proposals=choices)
 
-    def select_source_members(self, party):
+    def select_source_members(self, party, *, known_missing=()):
         """Select source identities before their separately declared build is audited."""
+        missing = set(map(normalized, known_missing)) & {normalized(m.name) for m in party.members}
+        if not missing:
+            return self._select_source_party(party)
+        # A read-only equipment visit cannot acquire the already missing
+        # versions. Refresh the held members without repeating those searches;
+        # this partial selection can never authorize combat.
+        _, details = self._select_source_party(replace(party, members=[m for m in party.members
+                                     if normalized(m.name) not in missing]))
+        details['unready'] = list(details.get('unready', [])) + [
+            dict(character=m.name, reasons=['未在搜索结果中确认该版本的角色'])
+            for m in party.members if normalized(m.name) in missing]
+        return False, details
+
+    def _select_source_party(self, party):
         return self.select(party)
 
     def source_trial(self,stage,source,*,recover=True):
@@ -239,7 +260,12 @@ class StrategyFormation(EventFormation):
         current=self.ui.capture(ocr=False)
         identities=self.avatars.query([face_crop(current.image,(x-48,self.slot_top,96,96)) for x,_ in self.slots])
         checked=None
-        if None in identities and len(self.occupied_slots(current))==5:
+        known = {n for n in identities if n is not None}
+        if (None in identities and len(self.occupied_slots(current))==5
+                and len(known)==4 and known <= set(source['names'])):
+            # Only a four-member source match can justify inspecting the
+            # ambiguous fifth saved card. An unrelated saved team will be
+            # replaced and must not consume a full five-character audit.
             checked=self.current_trial(stage)
             if len(checked[1].get('order',[]))==5:
                 identities=checked[1]['order']
@@ -262,7 +288,9 @@ class StrategyFormation(EventFormation):
         candidate=EventParty('用户攻略成员 '+stage.title,source['source'],
                              [MemberRequirement(n,1,1,1,None,None,True,0) for n in source['names']])
         if None in identities or set(identities)!=set(source['names']):
-            ready,details=self.select_source_members(candidate)
+            known_missing = source.get('_known_missing', ())
+            ready,details=(self.select_source_members(candidate, known_missing=known_missing)
+                           if known_missing else self.select_source_members(candidate))
             if not ready:
                 unresolved=[f['character'] for f in details.get('unready',[]) if any('专武' in r for r in f.get('reasons',[]))]
                 missing=[f['character'] for f in details.get('unready',[]) if any('未在搜索结果' in r for r in f.get('reasons',[]))]
@@ -270,6 +298,7 @@ class StrategyFormation(EventFormation):
                     # One character-page visit can establish every unreleased
                     # weapon in this team. Auditing only the first unknown here
                     # can repeatedly rebuild and inspect the same five cards.
+                    source['_known_missing'] = sorted(set(known_missing) | set(missing))
                     self.recover_equipment(stage,[n for n in source['names'] if n not in missing])
                     return self.source_trial(stage,source,recover=False)
                 if self.allow_substitutions and missing and recover and not unresolved:
@@ -324,7 +353,10 @@ class StrategyFormation(EventFormation):
             replacement=max(options)[1];i=adapted['names'].index(name);adapted['names'][i]=replacement;adapted['required_stars'][i]=None
             adapted['adaptations'].append(dict(missing=name,replacement=replacement,reason='同属性同攻击类型，按职能/治疗/坦克/输出技能相似度选本地替补'))
         source.update(adapted)
-        return self.source_trial(stage,source,recover=False)
+        # New members need their own equipment proof. The source_trial
+        # recovery path is bounded to one character-page visit before a full
+        # reselection; disabling it here strands valid unreleased weapons.
+        return self.source_trial(stage,source)
 
     def current_trial(self, stage):
         screen = self.ui.capture()

@@ -3,8 +3,9 @@ from __future__ import annotations
 
 from .base import BaseTask
 from .registry import register
-from .task_dawn_labyrinth import DawnLabyrinth, SweepBlocked
-from .dawn_labyrinth_party import LabyrinthFormation
+from .task_dawn_labyrinth import (DawnLabyrinth, SweepBlocked, load_daily_state,
+                                  validate_options as validate_daily_options)
+from .dawn_labyrinth_party import LabyrinthFormation, MAX_DEPARTURE_EQUIPMENT_AGE
 from .event_battle import EventCombat
 from ..game_ui import dawn_labyrinth as maze
 from ..game_ui.screen import EventUI, EventUIError, normalized
@@ -150,6 +151,9 @@ class DawnLabyrinthFirstClear(DawnLabyrinth):
             return None
         if before < 1:
             raise SweepBlocked('未持有迷宫通行证，无法完成有报酬的首通')
+        screen = self.prepare_core_equipment(screen, before)
+        if screen is None:
+            return None
         guild = screen.find('美食殿堂', (50, 320, 250, 390), exact=True)
         choose = screen.find('选择', (70, 380, 215, 465), exact=True)
         if not guild or not choose or not screen.blue_button(choose):
@@ -169,8 +173,89 @@ class DawnLabyrinthFirstClear(DawnLabyrinth):
         self.save_report()
         self.ui.click(button)
         self.exploration_verified = True
+        if self.formation is not None:
+            self.formation.departure_verified_at = time.time()
         time.sleep(2)
         return self.capture()
+
+    def prepare_core_equipment(self, screen, before):
+        """Audit owned core training and equipment before spending."""
+        from ..game_ui.ordinary_equipment import inspect_ordinary_equipment
+        from ..game_ui.character_equipment import inspect_unique_equipment
+        from .task_home import ToHomePage
+        formation = self.get_formation()
+        formation.departure_equipment = {}
+        self.ui.click((30, 30))
+        self.wait(maze.home, '战前装备检查前返回迷宫首页')
+        ToHomePage(self.robot).run(timeout=60)
+        restore = True
+        try:
+            for name in ('佩可莉姆', '可可萝', '凯露'):
+                self.check_deadline()
+                ordinary = inspect_ordinary_equipment(self.ui, name, check=self.check_deadline,
+                                                       inspect_training=True)
+                if ordinary is None:
+                    raise SweepBlocked(name+'的自持衣装与普通装备未核验，未出发')
+                self.report.setdefault('core_equipment', {})[name] = ordinary
+                self.save_report()
+                values = ordinary['values']
+                if values['equipment'] != values['equipment_available']:
+                    raise SweepBlocked(name+'仍有已开放的普通装备槽未穿戴，未出发')
+                if ordinary['level'] < 365 or ordinary['rank'] < 38:
+                    raise SweepBlocked(name+'未满足当前首通路线的等级365、Rank38要求，未出发')
+                if type(ordinary.get('stars')) is not int or ordinary['stars'] != 6:
+                    raise SweepBlocked(name+'的当前六星未核验，未出发')
+                if type(ordinary.get('skill_level')) is not int or ordinary['skill_level'] < 365:
+                    raise SweepBlocked(name+'未核验全部技能至少等级365，未出发')
+                if not ordinary.get('training_evidence'):
+                    raise SweepBlocked(name+'的星级与技能证据缺失，未出发')
+                ToHomePage(self.robot).run(timeout=60)
+                unique = inspect_unique_equipment(self.ui, name)
+                if unique is None or not isinstance(unique.get('values'), dict):
+                    raise SweepBlocked(name+'的独立专武状态未核验，未出发')
+                self.report['core_equipment'][name]['unique'] = unique
+                self.save_report()
+                unique_values = unique['values']
+                for slot, key in enumerate(('unique', 'unique2'), 1):
+                    equipped = unique_values.get(key)
+                    available = unique_values.get(key+'_available')
+                    if (type(equipped) is not bool or type(available) is not bool
+                            or equipped and not available):
+                        raise SweepBlocked(name+'的独立专武'+str(slot)+'状态未核验，未出发')
+                    if available and not equipped:
+                        raise SweepBlocked(name+'的专武'+str(slot)+'已实装但未穿戴，未出发')
+                    # An implemented but missing/low-level slot recruits an NPC
+                    # below this route's required build. Reject it before the
+                    # pass is spent; future slots need explicit absence proof.
+                    if key == 'unique' and available:
+                        level = unique_values.get('unique_level')
+                        if type(level) is not int:
+                            raise SweepBlocked(name+'的专武1等级未核验，未出发')
+                        if level < 30:
+                            raise SweepBlocked(name+'的专武1未达到自持伙伴要求的等级30，未出发')
+                formation.departure_equipment[normalized(name)] = dict(
+                    level=ordinary['level'], rank=ordinary['rank'], observed_at=ordinary['observed_at'],
+                    values=dict(values, **unique['values']), ordinary_evidence=ordinary['evidence'],
+                    unique_evidence=unique['evidence'])
+                ToHomePage(self.robot).run(timeout=60)
+        except (RunCancelled, ResumeUnsafe):
+            restore = False
+            raise
+        finally:
+            if restore:
+                ToHomePage(self.robot).run(timeout=60)
+        # All three audits must be fresh at departure. Do not extend their
+        # validity after a slow source download or a changed account state.
+        if any(not 0 <= time.time()-proof['observed_at'] < MAX_DEPARTURE_EQUIPMENT_AGE
+               for proof in formation.departure_equipment.values()):
+            raise SweepBlocked('出发前装备证据已过期，未消耗通行证')
+        screen = self.enter()
+        if not maze.home(screen) or self.balance(screen) != before:
+            raise SweepBlocked('装备检查后的探索状态或通行证余额发生变化，未出发')
+        self.ui.click(screen.find('出发', (480, 250, 695, 330), exact=True))
+        screen = self.wait(maze.guild_selection, '装备检查后重新选择公会')
+        screen = self.difficulty_one(screen)
+        return self.check_unlock(screen)
 
     def check_unlock(self, screen):
         skip = screen.find(maze.SWEEP, (870, 0, 955, 100), exact=True)
@@ -562,6 +647,10 @@ class DawnLabyrinthFirstClear(DawnLabyrinth):
 
     def run(self):
         try:
+            daily_options = validate_daily_options(self.robot.task_config.get('DawnLabyrinth', {}))
+            _, pending = load_daily_state(self.driver, daily_options)
+            if pending:
+                raise SweepBlocked('迷宫日常跳过或领奖尚未核对，请先运行 dawn_labyrinth 恢复；未开始首通或领取奖励')
             self.report_progress('准备黎明界迷宫难度1首通')
             screen = self.enter()
             if screen is None:

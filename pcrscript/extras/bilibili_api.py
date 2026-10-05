@@ -175,8 +175,8 @@ class BilibiliApi:
                          {'type': 1, 'oid': avid, 'root': root, 'pn': page, 'ps': 20},
                          sign=False).json()
 
-    def getVideoCommentReplies(self, avid, root, page=1):
-        """Read one public page of replies to a top-level comment."""
-        return self._get('https://api.bilibili.com/x/v2/reply/reply',
-                         {'type': 1, 'oid': avid, 'root': root, 'pn': page, 'ps': 20},
-                         sign=False).json()
+    def getVideoCommentsCursor(self, avid, next_cursor=0):
+        """Read chronological public roots; the old endpoint returns only highlights."""
+        return self._get('https://api.bilibili.com/x/v2/reply/wbi/main',
+                         {'type': 1, 'oid': avid, 'mode': 2, 'next': next_cursor, 'ps': 20},
+                         sign=True).json()
