@@ -307,7 +307,7 @@ class EventFormation:
             raise EventUIError("当前队伍未能清空")
         failures = []
         for member in party.members:
-            print(f"[剧情活动] 搜索并核对 {member.name}", flush=True)
+            print(f"[编队] 搜索并核对 {member.name}", flush=True)
             s = search_character(self.ui, member.name, defocus=self.defocus)
             self.ui.save("search_"+normalized(member.name), s)
             if not s.find("队伍编组", (300, 0, 650, 70)):
