@@ -165,6 +165,17 @@ class AbyssSubjugation(TimeLimitTask):
                     plan['cancelled_preview'] = str(self.ui.save('cancelled_sweep_preview', s))
                     self.save()
                 self.click(s, '取消', (290, 340, 445, 405))
+            elif field.outpost_batch_confirmation(s):
+                plan = self.state.get('pending')
+                if plan and plan['kind'] == 'outpost_batch_sweep':
+                    preview = field.outpost_batch_preview(self.ui, s)
+                    if not preview or any(preview[k] != plan[k] for k in
+                                          ('attempts', 'quantities', 'quantity', 'stamina_cost')):
+                        raise SubjugationBlocked('待核对前哨批量确认与记录不符')
+                    plan['cancelled_preview'] = str(self.ui.save('cancelled_outpost_batch_preview', s))
+                    self.save()
+                self.click(s, '取消', (290, 450, 445, 515))
+                self.wait(lambda frame: not field.outpost_batch_confirmation(frame), '关闭前哨批量确认', timeout=10)
             elif field.limited_shop(s):
                 self.click(s, '取消', (500, 430, 690, 520))
             elif cancel_special_equipment(self.ui, s):
@@ -327,14 +338,23 @@ class AbyssSubjugation(TimeLimitTask):
             if plan['day'] != self.day():
                 raise SubjugationBlocked('未核对的前哨消费已跨05:00刷新；保留记录，未重放')
             expected = dict(plan['attempts'])
-            expected[plan['difficulty']] -= plan['quantity']
+            amounts = plan.get('quantities', {plan.get('difficulty'): plan['quantity']})
+            for difficulty, amount in amounts.items():
+                if difficulty not in expected or type(amount) is not int or not 0 <= amount <= expected[difficulty]:
+                    raise SubjugationBlocked('待核对前哨消费次数记录无效；未重放')
+                expected[difficulty] -= amount
             if can_cancel and counts == plan['attempts'] and tickets == plan['tickets_before']:
                 self.clear_unspent(plan)
                 return
             if counts != expected or tickets is None or tickets <= plan['tickets_before']:
                 raise SubjugationBlocked('前哨次数扣除或讨伐委托证增加未确认；未重复提交')
+            if plan['kind'] == 'outpost_batch_sweep' and tickets-plan['tickets_before'] != sum(amounts.values()):
+                raise SubjugationBlocked('前哨批量扫荡委托证增加与次数不符；未重复提交')
             self.report['stamina_spent'] += plan['stamina_cost']
-            self.report['outposts'][plan['difficulty']] = dict(cleared=True, gained_tickets=tickets-plan['tickets_before'])
+            for difficulty, amount in amounts.items():
+                if amount:
+                    self.report['outposts'][difficulty] = dict(cleared=True,
+                        gained_tickets=amount if plan['kind'] == 'outpost_batch_sweep' else tickets-plan['tickets_before'])
         else:
             detail = self.boss_detail(plan['index'], plan['difficulty'])
             if detail is None or field.boss_name(detail) != plan['boss']:
@@ -619,12 +639,23 @@ class AbyssSubjugation(TimeLimitTask):
 
     def submit_sweep(self, detail, plan):
         preview_evidence = str(self.ui.save('sweep_detail_'+str(len(self.report['history'])), detail))
-        self.ui.click(field.sweep_button(detail))
+        batch = plan['kind'] == 'outpost_batch_sweep'
+        if batch:
+            preview = field.outpost_batch_preview(self.ui, detail)
+            if not preview or any(preview[k] != plan[k] for k in
+                                  ('attempts', 'quantities', 'quantity', 'stamina_cost')):
+                raise SubjugationBlocked('前哨批量预览与计划不符；未确认消费')
+            button = detail.find('挑战', (520, 450, 665, 515), exact=True)
+            if not detail.blue_button(button):
+                raise SubjugationBlocked('前哨批量预览按钮未知或不可用')
+            self.ui.click(button)
+        else:
+            self.ui.click(field.sweep_button(detail))
         confirmation = self.wait(field.sweep_confirmation, '扫荡确认')
         confirmation_evidence = str(self.ui.save('sweep_confirmation_'+str(len(self.report['history'])), confirmation))
         if field.sweep_cost(self.ui, confirmation, '消耗券') != plan['quantity']:
             raise SubjugationBlocked('扫荡最终确认次数不符；未确认消费')
-        if plan['kind'] == 'outpost_sweep' and field.sweep_cost(self.ui, confirmation, '消耗体力') != plan['stamina_cost']:
+        if plan['kind'].startswith('outpost') and field.sweep_cost(self.ui, confirmation, '消耗体力') != plan['stamina_cost']:
             raise SubjugationBlocked('扫荡最终体力消费不符；未确认消费')
         if plan['kind'] == 'boss_sweep' and field.sweep_cost(self.ui, confirmation, '消耗讨伐委托证') != plan['quantity']:
             raise SubjugationBlocked('扫荡最终讨伐委托证消费不符；未确认消费')
@@ -641,6 +672,26 @@ class AbyssSubjugation(TimeLimitTask):
         self.reconcile()
 
     def outposts(self):
+        before = self.enter()
+        counts = field.attempts(before)
+        entry = field.outpost_batch_entry(before)
+        if any(counts.values()) and entry is not None:
+            self.ui.click(entry)
+            confirmation = self.wait(field.outpost_batch_confirmation, '前哨一键扫荡确认')
+            preview = field.outpost_batch_preview(self.ui, confirmation)
+            if preview is None:
+                raise SubjugationBlocked('前哨批量次数或消费未知；未确认消费')
+            budget = self.options['max_stamina']-self.report['stamina_spent']
+            if (preview['attempts'] == counts and preview['quantities'] == counts
+                    and preview['stamina_cost'] == preview['quantity']*25
+                    and preview['stamina_cost'] <= min(budget, preview['stamina_owned'])):
+                self.report_progress('前哨 · 一键扫荡全部剩余次数')
+                self.submit_sweep(confirmation, dict(preview, kind='outpost_batch_sweep',
+                    tickets_before=field.tickets(self.ui, before)))
+                return
+            # A partial selection or insufficient budget retains the existing
+            # per-tier first-clear and quantity-adjustment path.
+            self.enter()
         for difficulty in field.DIFFICULTIES:
             self.report_progress('前哨'+difficulty+' · 首通后消耗剩余次数')
             before = self.enter()

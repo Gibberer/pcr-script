@@ -64,6 +64,8 @@ def detail_cancel(s):
 
 def navigation_exit(s):
     """Leave a known selector or unstarted detail before entering another task."""
+    if outpost_batch_confirmation(s):
+        return s.find('取消', (290, 450, 445, 515), exact=True)
     if boss_selector(s):
         close = s.find('关闭', (365, 450, 600, 510), exact=True)
         return close if close.score >= .95 else None
@@ -103,6 +105,67 @@ def detail_attempts(s):
 def stamina(s):
     item = s.find(r'\d+/\d+', (705, 0, 785, 45), exact=True)
     return int(normalized(item.text).split('/')[0]) if item and item.score >= .95 else None
+
+
+def outpost_batch_entry(s):
+    if not home(s):
+        return None
+    button = s.find(r'一?键扫荡', (60, 415, 245, 465), exact=True)
+    if button is None or button.score < .95:
+        return None
+    # This entry has a white fill and blue icon, unlike the blue sweep buttons.
+    hsv = cv.cvtColor(s.image[426:449, 96:230], cv.COLOR_BGR2HSV)
+    enabled = np.mean((hsv[:, :, 1] < 80) & (hsv[:, :, 2] > 200)) > .5
+    return button if enabled else None
+
+
+def outpost_batch_confirmation(s):
+    if s.find('扫荡券确认', (300, 115, 650, 185), exact=True):
+        return False
+    return all((item := s.find(label, roi, exact=True)) and item.score >= .95
+               for label, roi in ((r'一?键扫荡确认', (300, 15, 665, 75)),
+                                  ('取消', (290, 450, 445, 515)),
+                                  ('挑战', (520, 450, 665, 515))))
+
+
+def outpost_batch_preview(ui, s):
+    if not outpost_batch_confirmation(s):
+        return None
+    labels = s.all(r'^(?:普通|困难|高难)$', (175, 100, 285, 335))
+    if not 1 <= len(labels) <= 3 or len({normalized(t.text) for t in labels}) != len(labels):
+        return None
+    counts = dict.fromkeys(DIFFICULTIES, 0)
+    amounts = dict(counts)
+    for item in labels:
+        name, y = normalized(item.text), int(item.center[1])
+        for text, roi in (('深渊讨伐战', (55, y-16, 172, y+16)),
+                          ('前哨关卡', (45, y-45, 170, y-14))):
+            label = s.find(text, roi, exact=True)
+            if label is None or label.score < .95:
+                return None
+        remaining = fraction(s, (435, y-17, 490, y+17))
+        amount = ui.number(s, (850, y-17, 900, y+17))
+        if (item.score < .95 or remaining is None or remaining[1] != 4
+                or amount is None or not 1 <= amount <= remaining[0]):
+            return None
+        counts[name], amounts[name] = remaining[0], amount
+    stamina_cost = ui.number(s, (215, 343, 262, 376))
+    stamina_owned = ui.number(s, (420, 343, 480, 376))
+    ticket_cost = ui.number(s, (215, 374, 262, 405))
+    total = ui.number(s, (840, 365, 905, 405))
+    stages = s.find(r'[1-3]处', (670, 365, 785, 405), exact=True)
+    if (None in (stamina_cost, stamina_owned, ticket_cost, total) or stages is None
+            or stages.score < .95 or int(normalized(stages.text)[0]) != len(labels)
+            or ticket_cost != total or total != sum(amounts.values())):
+        return None
+    for label, roi in (('消耗体力', (45, 340, 160, 376)),
+                       (r'消耗(?:扫荡)?券', (45, 374, 160, 410)),
+                       ('合计扫荡次数', (770, 335, 920, 365))):
+        item = s.find(label, roi, exact=True)
+        if item is None or item.score < .95:
+            return None
+    return dict(attempts=counts, quantities=amounts, quantity=total,
+                stamina_cost=stamina_cost, stamina_owned=stamina_owned)
 
 
 def dates(s):
@@ -313,25 +376,36 @@ def sweep_confirmation(s):
 
 
 def sweep_cost(ui, s, label):
-    row = s.find(label, (240, 245, 410, 340), exact=True)
+    pattern = r'消耗(?:扫荡)?券' if label == '消耗券' else re.escape(label)
+    row = s.find(pattern, (240, 230, 410, 340), exact=True)
     if row is None or row.score < .95:
         return None
     y = row.center[1]
     value = ui.number(s, (432, y-15, 484, y+15))
     if value is not None:
         return value
-    # The dotted row divider lowers recognition confidence for a thin "1".
-    # A tighter crop is safe only when the full field contains one thin glyph;
-    # otherwise cropping could discard a leading digit from a larger cost.
+    # Dotted dividers can hide a small digit. Crop the complete single glyph,
+    # never a fixed right-hand sliver that could discard a leading digit.
     patch = cv.cvtColor(s.image[y-15:y+15, 432:484], cv.COLOR_BGR2GRAY)
     _, _, stats, _ = cv.connectedComponentsWithStats((patch < 140).astype(np.uint8))
     glyphs = [stat for stat in stats[1:] if stat[4] >= 4]
-    if len(glyphs) != 1 or not (1 <= glyphs[0][2] <= 8 and 8 <= glyphs[0][3] <= 22):
+    if not glyphs:
         return None
-    roi = (452, y-12, 479, y+12)
+    # Anti-aliased strokes can split one digit into overlapping fragments.
+    # Separate horizontal columns still indicate multiple digits or noise.
+    if max(stat[0] for stat in glyphs) >= min(stat[0]+stat[2] for stat in glyphs):
+        return None
+    x = int(min(stat[0] for stat in glyphs))
+    top = int(min(stat[1] for stat in glyphs))
+    width = int(max(stat[0]+stat[2] for stat in glyphs))-x
+    height = int(max(stat[1]+stat[3] for stat in glyphs))-top
+    if not (1 <= width <= 16 and 8 <= height <= 22):
+        return None
+    roi = (max(432, 432+x-2), max(y-15, y-15+top-2),
+           min(484, 432+x+width+2), min(y+15, y-15+top+height+2))
     local = ui.read_region(s, roi, classify=False)
-    one = local.find('1', roi, exact=True)
-    return 1 if one is not None and one.score >= .95 else None
+    digit = local.find(r'\d', roi, exact=True)
+    return int(digit.text) if digit is not None and digit.score >= .95 else None
 
 
 def limited_shop(s):
@@ -341,7 +415,13 @@ def limited_shop(s):
 
 def sweep_receipt(s):
     return bool(s.find('扫荡结果|扫荡完成|扫荡结束', (230, 0, 740, 110))
-                or s.find('获得道具', (260, 0, 730, 100), exact=True))
+                or s.find('获得道具', (260, 0, 730, 100), exact=True)
+                or all((item := s.find(label, roi, exact=True)) and item.score >= .95
+                       for label, roi in (
+                           ('首领结算', (350, 15, 615, 75)),
+                           ('跳过次数', (255, 70, 405, 110)),
+                           ('击破次数', (480, 70, 630, 110)),
+                           ('关闭', (365, 450, 600, 510)))))
 
 
 def result_button(s):

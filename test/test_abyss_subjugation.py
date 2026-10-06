@@ -90,8 +90,13 @@ class Game:
         self.damage_records = {}
         self.outpost_wins = True
         self.lose_receipt = False
+        self.boss_settlement = False
         self.corrupt_counter = False
         self.confirmation_cost_delta = 0
+        self.batch_outposts = False
+        self.batch_quantities = {}
+        self.batch_ticket_delta = 0
+        self.batch_confirmation_delta = 0
         self.entry_loading_frames = 0
         self.selector_scroll = 0
         self.task = None
@@ -113,7 +118,24 @@ class Game:
                 ('体力', 680, 24), (str(self.stamina)+'/413', 742, 24),
                 *[(d, 154, y) for d, y in zip(field.DIFFICULTIES, field.OUTPOST_Y)],
                 *[(str(self.attempts[d])+'/4', 222, y+26) for d, y in zip(field.DIFFICULTIES, field.OUTPOST_Y)],
+                *((('一键扫荡', 164, 437),) if self.batch_outposts else ()),
                 *[('首领', x, 340) for x in (440, 627, 803)])
+        if self.page == 'outpost_batch':
+            amounts = {d: n for d, n in self.batch_quantities.items() if n}
+            rows = []
+            for i, (difficulty, amount) in enumerate(reversed(list(amounts.items()))):
+                y = 146+64*i
+                rows.extend([('前哨关卡', 93, y-28), ('深渊讨伐战', 116, y),
+                    (difficulty, 224, y), ('跳过次数', 832, y-27),
+                    (str(self.attempts[difficulty])+'/4', 470, y), (str(amount), 878, y)])
+            total = sum(amounts.values())
+            return screen(('一键扫荡确认', 480, 42), *rows,
+                ('消耗体力', 80, 361), (str(total*25+self.confirmation_cost_delta), 240, 360),
+                ('体力', 280, 361), (str(self.stamina), 456, 360),
+                ('消耗券', 84, 390), (str(total), 247, 390),
+                ('合计扫荡次数', 842, 351), (str(total), 872, 381),
+                (str(len(amounts))+'处', 730, 381), ('取消', 370, 480), ('挑战', 590, 480),
+                blue=('挑战',))
         if self.page == 'normal':
             q = '使用'+str(self.quantity)+'张'
             return screen(('前哨关卡', 110, 52), (self.difficulty, 255, 52),
@@ -156,8 +178,10 @@ class Game:
             return screen(('自动特别装备设定' if self.page == 'special_auto' else '特别装备设定', 480, 42),
                           ('取消', 370 if self.page == 'special_auto' else 145, 479))
         if self.page == 'confirmation':
-            cost_label = '消耗体力' if self.kind == 'outpost' else '消耗讨伐委托证'
-            cost = self.quantity*25 if self.kind == 'outpost' else self.quantity
+            cost_label = '消耗体力' if self.kind.startswith('outpost') else '消耗讨伐委托证'
+            cost = self.quantity*25 if self.kind.startswith('outpost') else self.quantity
+            if self.kind == 'outpost_batch':
+                cost += self.batch_confirmation_delta
             return screen(('扫荡券确认', 480, 147), (cost_label, 300, 281),
                           (str(cost+self.confirmation_cost_delta), 466, 281), ('消耗券', 300, 307),
                           (str(self.quantity), 470, 307), ('取消', 370, 370), ('确认', 590, 370), blue=('确认',))
@@ -167,6 +191,9 @@ class Game:
             return screen(('战斗失败', 480, 42), ('前往深渊讨伐战', 810, 495))
         if self.page == 'receipt':
             return screen(('扫荡结果', 480, 42), ('关闭', 480, 480))
+        if self.page == 'boss_settlement':
+            return screen(('首领结算', 480, 42), ('跳过次数', 300, 91),
+                          ('击破次数', 520, 91), ('关闭', 480, 480))
         raise AssertionError(self.page)
 
     def click(self, target, **kwargs):
@@ -176,7 +203,10 @@ class Game:
         if self.page == 'adventure':
             self.page = 'home'
         elif self.page == 'home':
-            if text in field.DIFFICULTIES:
+            if text == '一键扫荡':
+                self.kind, self.page = 'outpost_batch', 'outpost_batch'
+                self.batch_quantities = {d: n for d, n in self.attempts.items() if d in self.outpost_clears and n}
+            elif text in field.DIFFICULTIES:
                 self.kind, self.difficulty, self.page = 'outpost', text, 'normal'
                 self.quantity = self.attempts[text] if text in self.outpost_clears else 1
             elif text == '首领':
@@ -206,26 +236,39 @@ class Game:
                 self.page = 'normal' if self.kind == 'outpost' else 'boss'
             elif text == '战斗开始':
                 self.page = 'battle'
+        elif self.page == 'outpost_batch':
+            if text == '取消':
+                self.page = 'home'
+            elif text == '挑战':
+                self.quantity = sum(self.batch_quantities.values())
+                self.page = 'confirmation'
         elif self.page in ('special', 'special_auto'):
             if text != '取消':
                 raise AssertionError('Uncommitted equipment must only be cancelled')
             self.page = 'special' if self.page == 'special_auto' else 'formation'
         elif self.page == 'confirmation':
             if text == '取消':
-                self.page = 'normal' if self.kind == 'outpost' else 'boss'
+                self.page = 'outpost_batch' if self.kind == 'outpost_batch' else 'normal' if self.kind == 'outpost' else 'boss'
             else:
                 plan = self.task.state['pending']
-                if self.kind == 'outpost':
+                if self.kind.startswith('outpost'):
                     self.normal_commits += 1
                     if not self.corrupt_counter:
-                        self.attempts[self.difficulty] -= self.quantity
+                        amounts = self.batch_quantities if self.kind == 'outpost_batch' else {self.difficulty: self.quantity}
+                        for difficulty, quantity in amounts.items():
+                            self.attempts[difficulty] -= quantity
                     self.stamina -= plan['stamina_cost']
-                    self.tickets += self.quantity
+                    self.tickets += self.quantity+(self.batch_ticket_delta if self.kind == 'outpost_batch' else 0)
                 else:
                     self.tickets -= self.quantity
-                self.sweeps.append((self.kind, self.index, self.difficulty, self.quantity))
+                self.sweeps.append(('outpost_batch', dict(self.batch_quantities)) if self.kind == 'outpost_batch'
+                                   else (self.kind, self.index, self.difficulty, self.quantity))
                 self.page = 'receipt'
         elif self.page == 'receipt':
+            self.page = 'boss_settlement' if self.kind == 'boss' and self.boss_settlement else 'home'
+        elif self.page == 'boss_settlement':
+            if text != '关闭':
+                raise AssertionError('settlement must only be closed')
             self.page = 'home'
         elif self.page == 'limited_shop':
             if text != '取消':
@@ -289,6 +332,19 @@ class Game:
             raise AssertionError('wrong synthetic party')
 
 class SubjugationTests(TestCase):
+    def test_boss_sweep_costs_accept_the_upper_row_and_sweep_ticket_label(self):
+        for label, query, y in (('消耗讨伐委托证', '消耗讨伐委托证', 243),
+                                ('消耗扫荡券', '消耗券', 270)):
+            with self.subTest(label=label):
+                observed = screen((label, 325, y))
+                cv.rectangle(observed.image, (463, y-6), (474, y+6), (60, 60, 60), -1)
+                local = screen(('5', 469, y))
+                ui = Mock(number=Mock(return_value=None), read_region=Mock(return_value=local))
+                self.assertEqual(field.sweep_cost(ui, observed, query), 5)
+                crop = ui.read_region.call_args.args[1]
+                self.assertLessEqual(crop[0], 463)
+                self.assertGreaterEqual(crop[2], 475)
+
     def test_single_sweep_cost_recovers_only_one_high_confidence_glyph(self):
         for extra_glyph, confidence, expected in ((False, .99, 1), (False, .90, None), (True, .99, None)):
             with self.subTest(extra_glyph=extra_glyph, confidence=confidence):
@@ -303,6 +359,19 @@ class SubjugationTests(TestCase):
                 if extra_glyph:
                     ui.read_region.assert_not_called()
 
+    def test_sweep_cost_preserves_disconnected_strokes_and_rejects_multiple_digits(self):
+        for text, expected in (('5', 5), ('15', None)):
+            with self.subTest(text=text):
+                observed = screen(('消耗券', 306, 270))
+                cv.rectangle(observed.image, (467, 264), (473, 270), (60, 60, 60), -1)
+                cv.rectangle(observed.image, (467, 272), (469, 274), (60, 60, 60), -1)
+                local = screen((text, 470, 269))
+                ui = Mock(number=Mock(return_value=None), read_region=Mock(return_value=local))
+                self.assertEqual(field.sweep_cost(ui, observed, '消耗券'), expected)
+                crop = ui.read_region.call_args.args[1]
+                self.assertLessEqual(crop[1], 264)
+                self.assertGreaterEqual(crop[3], 275)
+
     def test_one_remaining_outpost_sweeps_after_thin_digit_recovery(self):
         game = Game()
         game.attempts = dict(普通=1, 困难=0, 高难=0)
@@ -316,14 +385,16 @@ class SubjugationTests(TestCase):
             return observed
         game.capture = capture
         task = self.task(game, first_clear=False)
+        def digit_crop(roi):
+            return roi[0] <= 470 and roi[1] <= 302 and roi[2] >= 474 and roi[3] >= 313 and roi[2]-roi[0] < 32
         task.ui.read_region = Mock(side_effect=lambda s, roi, **kwargs:
-            screen(('1', 471, 307)) if roi == (452, 295, 479, 319) else s)
+            screen(('1', 471, 307)) if digit_crop(roi) else s)
         report = task.run(EVENT)
         self.assertEqual(report['stamina_spent'], 25, report)
         self.assertEqual(game.attempts['普通'], 0)
         self.assertEqual(game.tickets, 1)
         self.assertEqual(len(report['history']), 1)
-        self.assertIn((452, 295, 479, 319), [call.args[1] for call in task.ui.read_region.call_args_list])
+        self.assertTrue(any(digit_crop(call.args[1]) for call in task.ui.read_region.call_args_list))
 
     def test_navigation_cancel_requires_detail_controls_without_overlay(self):
         game = Game()
@@ -347,8 +418,9 @@ class SubjugationTests(TestCase):
         robot = Robot(Mock(get_screen_size=Mock(return_value=(960, 540))), show_progress=False)
         options.setdefault('auto_collect_house_stamina', False)
         options.setdefault('discover_sources', False)
+        options.setdefault('account_key', 'synthetic')
         robot.configure({'AbyssSubjugation': dict(output=str(self.root/'output'), state_dir=str(self.root/'state'),
-                          account_key='synthetic', **options)})
+                          **options)})
         task = AbyssSubjugation(robot)
         task.avatars_ready = True
         task.event = EVENT
@@ -402,6 +474,156 @@ class SubjugationTests(TestCase):
         self.assertEqual(set(report['outpost_parties']), set(field.DIFFICULTIES))
         self.assertEqual(task.source_parties.call_count, 15)
         self.assertNotIn('pending', task.state)
+
+    def test_completed_outposts_use_one_batch_then_sweep_boss_tickets(self):
+        for counts in (dict.fromkeys(field.DIFFICULTIES, 4), dict(普通=1, 困难=2, 高难=4)):
+            with self.subTest(counts=counts):
+                # Separate account keys keep each replay's consumption state independent.
+                game = Game()
+                game.batch_outposts = True
+                game.attempts = dict(counts)
+                game.outpost_clears = set(field.DIFFICULTIES)
+                game.boss_clears = {(i, d) for i in range(3) for d in field.BOSS_DIFFICULTIES}
+                task = self.task(game, account_key=str(counts))
+                report = task.run(EVENT)
+                self.assertEqual(report['status'], 'complete', report['pending'])
+                self.assertEqual(game.normal_commits, 1)
+                self.assertEqual(report['stamina_spent'], sum(counts.values())*25)
+                self.assertEqual(game.attempts, dict.fromkeys(field.DIFFICULTIES, 0))
+                self.assertEqual(game.sweeps[0], ('outpost_batch', counts))
+                self.assertEqual(report['history'][0]['quantities'], counts)
+                self.assertEqual(game.tickets, 0)
+                self.assertFalse(any(page == 'normal' for page, *_ in game.clicks))
+
+    def test_batch_falls_back_when_budget_stamina_or_first_clears_limit_selection(self):
+        for reason in ('budget', 'stamina', 'first_clear'):
+            with self.subTest(reason=reason):
+                game = Game()
+                game.batch_outposts = True
+                game.outpost_clears = {'普通'} if reason == 'first_clear' else set(field.DIFFICULTIES)
+                game.boss_clears = {(i, d) for i in range(3) for d in field.BOSS_DIFFICULTIES}
+                if reason == 'stamina':
+                    game.stamina = 100
+                task = self.task(game, account_key=reason, first_clear=False,
+                                 max_stamina=100 if reason == 'budget' else 400)
+                report = task.run(EVENT)
+                self.assertEqual(report['stamina_spent'], 100, report['pending'])
+                self.assertEqual(game.attempts, dict(普通=0, 困难=4, 高难=4))
+                self.assertEqual(game.normal_commits, 1)
+                self.assertFalse(any(sweep[0] == 'outpost_batch' for sweep in game.sweeps))
+                self.assertIn(('outpost_batch', '取消', 370, 480), game.clicks)
+
+    def test_unknown_batch_preview_never_commits(self):
+        for unknown in ('total', 'identity', 'cost'):
+            with self.subTest(unknown=unknown):
+                game = Game()
+                game.batch_outposts = True
+                game.outpost_clears = set(field.DIFFICULTIES)
+                game.boss_clears = {(i, d) for i in range(3) for d in field.BOSS_DIFFICULTIES}
+                original = game.capture
+                def capture(**kwargs):
+                    observed = original(**kwargs)
+                    if game.page == 'outpost_batch':
+                        if unknown == 'total':
+                            observed.find('12', (840, 365, 905, 405), exact=True).text = '11'
+                        else:
+                            observed.items = [t for t in observed.items if t.text !=
+                                              ('深渊讨伐战' if unknown == 'identity' else '消耗体力')]
+                    return observed
+                game.capture = capture
+                task = self.task(game, account_key=unknown)
+                report = task.run(EVENT)
+                self.assertIn('前哨批量次数或消费未知', ' '.join(report['pending']))
+                self.assertEqual(game.normal_commits, 0)
+                self.assertNotIn('pending', task.state)
+
+    def test_batch_final_confirmation_rechecks_cost_before_persisting_consumption(self):
+        game = Game()
+        game.batch_outposts = True
+        game.outpost_clears = set(field.DIFFICULTIES)
+        game.boss_clears = {(i, d) for i in range(3) for d in field.BOSS_DIFFICULTIES}
+        game.batch_confirmation_delta = 1
+        task = self.task(game)
+        report = task.run(EVENT)
+        self.assertIn('扫荡最终体力消费不符', ' '.join(report['pending']))
+        self.assertEqual(game.normal_commits, 0)
+        self.assertEqual(game.stamina, 1000)
+        self.assertNotIn('pending', task.state)
+
+    def test_batch_navigation_does_not_click_through_the_final_confirmation(self):
+        game = Game()
+        game.page = 'outpost_batch'
+        game.batch_quantities = dict(game.attempts)
+        observed = game.capture()
+        self.assertEqual(field.navigation_exit(observed).text, '取消')
+        game.page = 'confirmation'
+        observed.items.extend(game.capture().items)
+        self.assertIsNone(field.navigation_exit(observed))
+
+    def test_batch_lost_receipt_recovers_all_counters_without_replaying(self):
+        game = Game()
+        game.batch_outposts = game.lose_receipt = True
+        game.outpost_clears = set(field.DIFFICULTIES)
+        game.boss_clears = {(i, d) for i in range(3) for d in field.BOSS_DIFFICULTIES}
+        first = self.task(game)
+        self.assertEqual(first.run(EVENT)['status'], 'blocked')
+        self.assertEqual(game.normal_commits, 1)
+        self.assertIn('pending', first.state)
+        second = self.task(game)
+        report = second.run(EVENT)
+        self.assertEqual(report['status'], 'complete', report['pending'])
+        self.assertEqual(report['stamina_spent'], 300)
+        self.assertEqual(game.normal_commits, 1)
+        self.assertEqual(game.tickets, 0)
+        self.assertNotIn('pending', second.state)
+
+    def test_batch_counter_or_reward_mismatch_preserves_pending(self):
+        for reason in ('attempts', 'tickets'):
+            with self.subTest(reason=reason):
+                game = Game()
+                game.batch_outposts = True
+                game.outpost_clears = set(field.DIFFICULTIES)
+                game.boss_clears = {(i, d) for i in range(3) for d in field.BOSS_DIFFICULTIES}
+                game.corrupt_counter = reason == 'attempts'
+                game.batch_ticket_delta = 1 if reason == 'tickets' else 0
+                first = self.task(game, account_key=reason)
+                self.assertEqual(first.run(EVENT)['status'], 'blocked')
+                self.assertIn('pending', first.state)
+                second = self.task(game, account_key=reason)
+                self.assertEqual(second.run(EVENT)['status'], 'blocked')
+                self.assertEqual(game.normal_commits, 1)
+
+    def test_batch_unsubmitted_confirmation_is_cancelled_then_replanned(self):
+        game = Game()
+        game.batch_outposts = True
+        game.page, game.kind = 'outpost_batch', 'outpost_batch'
+        game.batch_quantities = dict(game.attempts)
+        game.outpost_clears = set(field.DIFFICULTIES)
+        game.boss_clears = {(i, d) for i in range(3) for d in field.BOSS_DIFFICULTIES}
+        task = self.task(game)
+        task.state['pending'] = dict(kind='outpost_batch_sweep', quantity=12, quantities=dict(game.attempts),
+            stamina_cost=300, attempts=dict(game.attempts), tickets_before=0, day=task.day())
+        task.state_path = self.root/'state'/(sha256(b'synthetic|1').hexdigest()[:24]+'.json')
+        task.save()
+        report = task.run(EVENT)
+        self.assertEqual(report['status'], 'complete', report['pending'])
+        self.assertEqual(len(report['unspent_actions']), 1)
+        self.assertEqual(game.normal_commits, 1)
+        self.assertEqual(report['stamina_spent'], 300)
+
+    def test_batch_pending_across_server_reset_never_replays(self):
+        game = Game()
+        game.batch_outposts = game.lose_receipt = True
+        game.outpost_clears = set(field.DIFFICULTIES)
+        first = self.task(game)
+        self.assertEqual(first.run(EVENT)['status'], 'blocked')
+        second = self.task(game)
+        with patch('pcrscript.tasks.task_abyss_subjugation.time.time', return_value=(NOW+timedelta(days=1)).timestamp()):
+            report = second.run(EVENT)
+        self.assertEqual(report['status'], 'blocked', report['pending'])
+        self.assertIn('跨05:00刷新', ' '.join(report['pending']))
+        self.assertEqual(game.normal_commits, 1)
+        self.assertIn('pending', second.state)
 
     def test_resume_cancels_equipment_settings_and_preview_without_committing(self):
         for page in ('special_auto', 'special'):
@@ -1139,6 +1361,40 @@ class SubjugationTests(TestCase):
         self.assertEqual(report['status'], 'complete', report['pending'])
         self.assertEqual(game.normal_commits, 1)
         self.assertEqual(game.tickets, 0)
+
+    def test_boss_sweep_closes_the_secondary_settlement_and_reconciles_tickets(self):
+        game = Game()
+        game.attempts = dict.fromkeys(field.DIFFICULTIES, 0)
+        game.boss_clears = {(i, d) for i in range(3) for d in field.BOSS_DIFFICULTIES}
+        game.tickets = 5
+        game.boss_settlement = True
+        task = self.task(game)
+        report = task.run(EVENT)
+        self.assertEqual(report['status'], 'complete', report['pending'])
+        self.assertEqual(report['tickets_spent'], 5)
+        self.assertEqual(game.tickets, 0)
+        self.assertEqual(game.sweeps, [('boss', 0, '极难', 5)])
+        self.assertNotIn('pending', task.state)
+        self.assertIn(('boss_settlement', '关闭', 480, 480), game.clicks)
+
+    def test_resumed_boss_settlement_reconciles_without_a_second_sweep(self):
+        game = Game()
+        game.page, game.kind = 'boss_settlement', 'boss'
+        game.difficulty = '极难'
+        game.attempts = dict.fromkeys(field.DIFFICULTIES, 0)
+        game.boss_clears = {(i, d) for i in range(3) for d in field.BOSS_DIFFICULTIES}
+        task = self.task(game, preview_only=True)
+        task.state.update(clear_proof_version=1,
+            boss_clears={'0:极难': dict(name='合成首领0', maximum=80000000)})
+        task.state['pending'] = dict(kind='boss_sweep', index=0, difficulty='极难', quantity=5,
+            tickets_before=5, boss='合成首领0', health=[80000000, 80000000], day=task.day())
+        task.state_path = self.root/'state'/(sha256(b'synthetic|1').hexdigest()[:24]+'.json')
+        task.save()
+        report = task.run(EVENT)
+        self.assertEqual(report['status'], 'preview', report['pending'])
+        self.assertEqual(report['tickets_spent'], 5)
+        self.assertEqual(game.sweeps, [])
+        self.assertNotIn('pending', task.state)
 
     def test_unknown_counter_keeps_pending_and_prevents_second_spend(self):
         game = Game()
