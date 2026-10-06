@@ -303,10 +303,36 @@ class HardBulkTests(TestCase):
 
     def test_stale_remaining_counts_never_trigger_another_consumption(self):
         plan = {f"活动关卡H-{i}": 3 for i in (1, 2, 3)}
-        r = self.runner([self.preview(plan), self.bulk()])
-        with self.assertRaisesRegex(EventUIError, "停止重复消费"):
+        r = self.runner([self.preview(plan), *[self.bulk() for _ in range(39)]])
+        with patch("pcrscript.tasks.event_sweep.time.sleep"), self.assertRaisesRegex(EventUIError, "停止重复消费"):
             HardSweep(r).settle(plan)
         self.assertEqual(r.ui.clicks, ["挑战"])
+
+    def test_delayed_counters_and_receipt_over_old_list_are_reconciled_without_resubmission(self):
+        plan = {f"活动关卡H-{i}": 3 for i in (1, 2, 3)}
+        receipt = self.bulk()
+        receipt.items.extend(frame(("扫荡结果", 480, 175), ("确认", 480, 400)).items)
+        for intervening, expected in (([self.bulk(), self.bulk()], ["挑战"]),
+                                      ([receipt, self.bulk()], ["挑战", "确认"])):
+            with self.subTest(receipt=receipt in intervening):
+                r = self.runner([self.preview(plan), *intervening, self.bulk((0, 0, 0)),
+                                 frame(("活动关卡·首领", 155, 30))])
+                with patch("pcrscript.tasks.event_sweep.time.sleep"):
+                    HardSweep(r).settle(plan)
+                self.assertEqual(r.ui.clicks, expected)
+                self.assertEqual(r.report["pending"], [])
+
+    def test_story_selector_exit_requires_page_evidence_and_rejects_foreground_modals(self):
+        from pcrscript.game_ui.event_layout import navigation_exit
+        observed = self.bulk()
+        self.assertIsNone(navigation_exit(observed))
+        observed.items.extend(frame(("1个关卡的使用券张数", 600, 415)).items)
+        self.assertEqual(navigation_exit(observed).text, "取消")
+        for title in ("一键扫荡确认", "扫荡券确认", "扫荡结果", "获得道具"):
+            with self.subTest(title=title):
+                overlay = self.bulk()
+                overlay.items.extend(frame(("1个关卡的使用券张数", 600, 415), (title, 480, 175)).items)
+                self.assertIsNone(navigation_exit(overlay))
 
 
 class StrategyTests(TestCase):

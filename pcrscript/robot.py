@@ -248,18 +248,16 @@ class Robot:
         emit("task", message=msg)
         print("{}: {}".format(self._name, msg))
 
-    def action_squential(self, *actions: Action, delay=0.2, net_error_check=True, show_progress=False, progress_index=None, total_step=1, title=None):
-        label = title or (f'步骤 {progress_index}/{total_step}' if progress_index is not None else '界面操作')
+    def action_squential(self, *actions: Action, delay=0.2, net_error_check=True, show_progress=False, progress_index=None, total_step=None, title=None):
+        label = '界面操作' if progress_index is None else f'步骤 {progress_index}'
+        if progress_index is not None and isinstance(total_step, int) and 0 < progress_index <= total_step:
+            label += f'/{total_step}'
+        label = title or label
         action_total = len(actions)
         emit('progress', scope='action', current=0, total=action_total, label=label)
         if self.show_progress and show_progress and getattr(sys.stderr, 'isatty', lambda: False)():
             progress = tqdm(actions, unit="a", bar_format='{desc}|{bar}| {n_fmt}/{total_fmt} [{elapsed}, {rate_fmt}{postfix}]')
-            if title:
-                progress.set_description(f"{self._name} {title}")
-            elif progress_index is not None:
-                progress.set_description(f"{self._name} step({progress_index}/{total_step})")
-            else:
-                progress.set_description(f"{self._name}")
+            progress.set_description(f"{self._name} {label}")
             actions = progress
         for index, action in enumerate(actions, 1):
             emit("action", action=type(action).__name__, template=str(getattr(action, "template", "")))

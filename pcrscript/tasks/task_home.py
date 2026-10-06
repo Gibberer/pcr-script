@@ -26,11 +26,12 @@ class TaskPageNavigation(Action):
         from ..game_ui.dawn_labyrinth import navigation_exit as maze_exit
         from ..game_ui.recollection import navigation_exit as recollection_exit
         from ..game_ui.abyss_subjugation import navigation_exit as subjugation_exit
+        from ..game_ui.event_layout import navigation_exit as story_exit
         if self.ui is None:
             output = getattr(robot, '_task_output', None) or 'cache/daily/navigation'
             self.ui = EventUI(robot.driver, output)
         screen = self.ui.observe(screenshot)
-        target = maze_exit(screen) or recollection_exit(screen) or subjugation_exit(screen)
+        target = maze_exit(screen) or recollection_exit(screen) or subjugation_exit(screen) or story_exit(screen)
         if target is not None:
             self.ui.click(target)
             return

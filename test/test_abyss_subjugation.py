@@ -692,8 +692,13 @@ class SubjugationTests(TestCase):
                             ('冒险目的地',95,451),('冒险',538,526))
         maze_home = home()
         maze_home.items.extend(screen(('冒险',538,526)).items)
+        story_list = screen(('关卡一览',480,40),('活动关卡H-3',120,158),
+                            ('1个关卡的使用券张数',600,415),('取消',585,480))
+        story_quests = screen(('活动关卡·首领',155,30),('活动关卡',575,75),('首领战',790,75))
+        story_home = screen(('活动剧情',800,400),('报酬交换',200,400),('冒险',538,526))
         for pages, expected in (([expedition], ['冒险']),
-                                ([catalogue(),guild(),maze_home], ['取消',(30,30),'冒险'])):
+                                ([catalogue(),guild(),maze_home], ['取消',(30,30),'冒险']),
+                                ([story_list,story_quests,story_home], ['取消',(32,30),'冒险'])):
             with self.subTest(start=pages[0].text()):
                 game = Game()
                 game.page = 'home'

@@ -18,6 +18,7 @@ from ..constants import SERVER_TIMEZONE
 from ..game_ui import abyss_subjugation as field
 from ..game_ui.dawn_labyrinth import navigation_exit as maze_navigation_exit
 from ..game_ui.recollection import navigation_exit as recollection_navigation_exit
+from ..game_ui.event_layout import navigation_exit as story_navigation_exit
 from ..game_ui.special_equipment import cancel_special_equipment
 from ..game_ui.avatar_assets import read_json
 from ..game_ui.screen import EventUI, EventUIError, normalized
@@ -219,7 +220,8 @@ class AbyssSubjugation(TimeLimitTask):
                     continue
                 self.ui.click(entry)
                 activity_requested = True
-            elif (cancel := maze_navigation_exit(s) or recollection_navigation_exit(s)) is not None:
+            elif (cancel := maze_navigation_exit(s) or recollection_navigation_exit(s)
+                  or story_navigation_exit(s)) is not None:
                 self.ui.click(cancel)
             elif ((s.find('菜单', (840, 0, 960, 65), exact=True) and not s.expedition_home)
                   or s.find(r'\d:\d{2}', (750, 0, 850, 55))):
