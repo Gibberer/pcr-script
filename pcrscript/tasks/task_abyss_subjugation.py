@@ -796,7 +796,19 @@ class AbyssSubjugation(TimeLimitTask):
         raise BossPartyUnavailable('没有通过本期首领攻略核验及模拟的队伍；未追加实战消费')
 
     def bosses(self):
-        for difficulty in field.BOSS_DIFFICULTIES:
+        proofs = {key: row for key, row in self.state.get('boss_clears', {}).items()
+                  if isinstance(row, dict) and isinstance(row.get('name'), str) and row['name']
+                  and type(row.get('maximum')) is int and row['maximum'] > 0}
+        lower_complete = all(str(i)+':'+d in proofs for i in range(3) for d in field.DIFFICULTIES)
+        completed = lower_complete and all(str(i)+':极难' in proofs for i in range(3))
+        if lower_complete:
+            # Complete event/account lower-tier proofs can skip their menus.
+            # Still verify all three live Extreme details before any sweep;
+            # boss_cleared rejects conflicts with those recorded proofs.
+            self.report['bosses'].update({str(i)+':'+d: dict(
+                name=proofs[str(i)+':'+d]['name'], cleared=True, clear_basis='event_clear_record')
+                for i in range(3) for d in field.DIFFICULTIES})
+        for difficulty in ('极难',) if lower_complete else field.BOSS_DIFFICULTIES:
             if difficulty == '极难' and not all(
                     self.report['bosses'].get(str(i)+':'+d, {}).get('cleared') is True
                     for i in range(3) for d in field.DIFFICULTIES):
@@ -814,7 +826,7 @@ class AbyssSubjugation(TimeLimitTask):
                     self.report['pending'].append(f'首领{index+1} {difficulty}：{error}')
                     self.save()
                 s = self.enter()
-                if field.tickets(self.ui, s) == 0:
+                if field.tickets(self.ui, s) == 0 and (not completed or index == 2):
                     self.report['all_bosses_cleared'] = all(self.report['bosses'].get(str(i)+':'+d, {}).get('cleared') is True
                                                          for i in range(3) for d in field.BOSS_DIFFICULTIES)
                     return

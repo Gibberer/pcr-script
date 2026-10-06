@@ -743,19 +743,43 @@ class SubjugationTests(TestCase):
         self.assertFalse(game.task.state.get('pending'))
 
     def test_subsequent_day_uses_only_sweeps_and_needs_no_avatar_audit(self):
+        # The first pass writes complete clear proofs. The following daily
+        # keeps first_clear enabled but only needs the three live Extreme rows.
+        for first_clear in (False, True):
+            with self.subTest(first_clear=first_clear):
+                game = Game()
+                game.outpost_clears = set(field.DIFFICULTIES)
+                game.boss_clears = {(i, d) for i in range(3) for d in field.BOSS_DIFFICULTIES}
+                task = self.task(game, first_clear=first_clear)
+                report = task.run(EVENT)
+                self.assertEqual(report['status'], 'complete', report['pending'])
+                self.assertEqual(game.real_battles, 0)
+                self.assertEqual(game.sweeps[-1], ('boss', 0, '极难', 12))
+                task.source_parties.assert_not_called()
+                task.formation.select.assert_not_called()
+                self.assertEqual([text for page,text,*_ in game.clicks if page == 'home' and text in field.DIFFICULTIES],
+                                 list(field.DIFFICULTIES))
+                self.assertEqual([text for page,text,*_ in game.clicks if page == 'normal'], ['使用4张']*3)
+                if first_clear:
+                    self.assertTrue(all(text in ('关闭', '极难') for page,text,*_ in game.clicks if page == 'selector'))
+        empty = Game()
+        empty.attempts = dict.fromkeys(field.DIFFICULTIES, 0)
+        empty.boss_clears = {(i, d) for i in range(3) for d in field.BOSS_DIFFICULTIES}
+        report = self.task(empty).run(EVENT)
+        self.assertTrue(report['all_bosses_cleared'])
+        self.assertEqual(empty.sweeps, [])
+        # A live conflict must still prevent spending with the cached shortcut.
         game = Game()
+        game.tickets = 7
         game.outpost_clears = set(field.DIFFICULTIES)
-        game.boss_clears = {(i, d) for i in range(3) for d in field.BOSS_DIFFICULTIES}
-        task = self.task(game, first_clear=False)
-        report = task.run(EVENT)
-        self.assertEqual(report['status'], 'complete', report['pending'])
+        game.attempts = dict.fromkeys(field.DIFFICULTIES, 0)
+        game.boss_clears = {(i, d) for i in range(3) for d in field.BOSS_DIFFICULTIES} - {(1, '极难')}
+        report = self.task(game).run(EVENT)
+        self.assertEqual(report['status'], 'blocked')
+        self.assertTrue(any('首通记录与当前页面冲突' in reason for reason in report['pending']))
+        self.assertEqual(game.sweeps, [])
         self.assertEqual(game.real_battles, 0)
-        self.assertEqual(game.sweeps[-1], ('boss', 0, '极难', 12))
-        task.source_parties.assert_not_called()
-        task.formation.select.assert_not_called()
-        self.assertEqual([text for page,text,*_ in game.clicks if page == 'home' and text in field.DIFFICULTIES],
-                         list(field.DIFFICULTIES))
-        self.assertEqual([text for page,text,*_ in game.clicks if page == 'normal'], ['使用4张']*3)
+        self.assertEqual(game.tickets, 7)
 
     def test_cleared_outpost_sweep_still_obeys_stamina_and_budget_caps(self):
         for stamina, budget in ((1000,50),(60,400)):
