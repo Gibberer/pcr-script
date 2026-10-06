@@ -315,7 +315,9 @@ class SubjugationGuideTests(TestCase):
 
     def test_production_skips_media_for_unsupported_source_metadata(self):
         for field in ('title', 'description', 'author_comments'):
-            for condition in ('需要借角色', 'MP90', '特别装备五星要求'):
+            for condition in ('需要借角色', 'MP90', '特别装备五星要求',
+                              '参考练度 MP88，至少突破', '推荐MP90，必须突破',
+                              '参考练度 MP88；需要突破'):
                 with self.subTest(field=field, condition=condition), TemporaryDirectory() as folder:
                     options = source_options({}, EVENT, kind='boss', boss='合成首领', boss_number=2)
                     options['parsed_dir'] = folder
@@ -344,8 +346,41 @@ class SubjugationGuideTests(TestCase):
                 report = parse_video_source(source, options, index, api=Mock(), ocr=Mock(), media_fetcher=fetch)
                 self.assertEqual(fetch.call_count, int(not blocked))
                 self.assertEqual(bool(report['errors']), not blocked)
-                self.assertEqual(any(row['evidence']['method'] == 'source_requirements'
+                self.assertEqual(any(row['evidence']['method'] == 'author_comment:12'
                                      for row in report['global_requirements']), condition.startswith('Boss2'))
+
+    def test_reference_build_metadata_preserves_advice_and_its_origin(self):
+        for field in ('title', 'description', 'author_comments'):
+            with self.subTest(field=field), TemporaryDirectory() as folder:
+                reference = '参考练度 六页4合 MP88 精通4-2'
+                statement = '公主连结 国服 合成深渊\n'+reference if field == 'title' else reference
+                metadata = {field: [dict(text=statement, reply_id=12)] if field == 'author_comments' else statement}
+                report, options = self.parse_notes(folder, '前言', 'boss', '说明正文', metadata=metadata)
+                self.assertEqual(len(parties_for_target(report, options, allow_local_trials=True)), 1)
+                party = report['parties'][0]
+                self.assertEqual(party['global_requirements'], [])
+                self.assertEqual(len(party['recommendations']), 1)
+                advice = party['recommendations'][0]
+                self.assertEqual(advice['text'], reference)
+                self.assertIsNone(advice['evidence']['cid'])
+                self.assertEqual(advice['evidence']['method'],
+                                 'author_comment:12' if field == 'author_comments' else 'source_'+field)
+
+    def test_reference_build_notes_do_not_override_mandatory_or_manual_conditions(self):
+        for condition, eligible in (('练度参考 MP88', 1), ('推荐特别装备', 1),
+                                    ('参考练度MP88，最低MP80', 0), ('MP88', 0),
+                                    ('参考配置MP88，合成角色0关SET', 0)):
+            with self.subTest(condition=condition), TemporaryDirectory() as folder:
+                report, options = self.parse_notes(folder, 'Boss通用参考练度MP88', 'boss', condition)
+                self.assertEqual(len(parties_for_target(report, options, allow_local_trials=True)), eligible)
+                party = report['parties'][0]
+                self.assertTrue(any(row['text'] == 'Boss通用参考练度MP88'
+                                    for row in party['recommendations']))
+                if eligible:
+                    self.assertEqual(party['global_requirements'], [])
+                    self.assertEqual(party['manual_actions'], [])
+                    self.assertTrue(any(row['text'] == condition and row['evidence']['cid'] == 1
+                                        for row in party['recommendations']))
 
     def test_plain_auto_set_labels_do_not_turn_boss_names_into_switch_actions(self):
         for text in ('暗黑合成首领 全AUTO', '光亮合成首领 全SET', 'Boss2 全AUTO 关卡攻略'):

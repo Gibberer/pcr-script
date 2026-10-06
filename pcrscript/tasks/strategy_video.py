@@ -23,7 +23,7 @@ from .strategy_document import Evidence, Fact, empty_member, finalize, export_do
 from .strategy_sources import BORROW_PART, MANUAL_PART, UNVERIFIED_SETTING, discover_sources, unparsed_switch_requirement
 from .strategy_inputs import declared_region, preferred_sources, source_statements
 
-PARSER_VERSION = 83
+PARSER_VERSION = 84
 FRAME_OCR_VERSION = 1
 COMBAT_AUDIT_SECONDS = 20
 RECOLLECTION_UNSUPPORTED = re.compile(
@@ -680,15 +680,25 @@ def manual_requirement(text, *, unparsed_settings=False):
         text, re.I))
 
 
-def text_constraints(texts, proof: Evidence, *, unparsed_settings=False) -> tuple[list[dict], list[dict]]:
+def advisory_requirement(text):
+    """Explicit reference builds are advice; mandatory wording takes precedence."""
+    return (bool(re.search(r'参考练度|练度参考|参考配置|配置参考|建议|推荐|可选', text))
+            and not re.search(r'必须|必备|需要|要求|至少|最低|不低于|不可低于|才能|否则|'
+                              r'务必|一定要|不能少|不可缺', text))
+
+
+def text_constraints(texts, proof: Evidence, *, unparsed_settings=False,
+                     unsupported_builds=False) -> tuple[list[dict], list[dict]]:
     global_requirements, manual = [], []
     for t in texts:
         if t.score < .94:
             continue
         row = dict(text=t.text, evidence=asdict(Evidence(**{**asdict(proof), 'text': t.text,
                                                           'rectangle': list(t.rectangle), 'confidence': t.score})))
-        if re.search(r'属性等级|属性技能|公主骑士|(?<![A-Za-z0-9_.])MP\d+(?![A-Za-z0-9_])|突破', t.text, re.I):
-            row['advisory'] = bool(re.search(r'建议|推荐|可选', t.text))
+        unsupported = (RECOLLECTION_UNSUPPORTED.search(t.text) if unsupported_builds else re.search(
+            r'属性等级|属性技能|公主骑士|(?<![A-Za-z0-9_.])MP\d+(?![A-Za-z0-9_])|突破', t.text, re.I))
+        if unsupported and t.text not in ('特别装备设定', '可变更队伍角色的特别装备。'):
+            row['advisory'] = advisory_requirement(t.text)
             global_requirements.append(row)
         # This fixed combat HUD label describes the current switch. SET and
         # AUTO are independently read from their buttons, not inferred here.
@@ -781,13 +791,15 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
     source_region = declared_region('\n'.join(statement for statement, _ in metadata))
     text_source = '\n'.join(statement for statement, _ in metadata[1:])
     if options['task_type'] in ('recollection', 'subjugation'):
-        unsupported = source.get('title', '')+'\n'+text_source
-        if options['task_type'] == 'subjugation':
-            from .subjugation_guides import relevant_statements
-            unsupported = relevant_statements(unsupported, options)
-        if RECOLLECTION_UNSUPPORTED.search(unsupported):
-            globals_.append(dict(text=unsupported[:500], advisory=False, evidence=asdict(Evidence(
-                source['url'], method='source_requirements', text=unsupported[:500]))))
+        from .subjugation_guides import relevant_statements
+        for statement, method in metadata:
+            clauses = (relevant_statements(statement, options).splitlines()
+                       if options['task_type'] == 'subjugation' else re.split(r'[\r\n;；。!?！？|｜]+', statement))
+            for clause in clauses:
+                clause = clause.strip()
+                if RECOLLECTION_UNSUPPORTED.search(clause):
+                    globals_.append(dict(text=clause, advisory=advisory_requirement(clause),
+                        evidence=asdict(Evidence(source['url'], method=method, text=clause))))
     if options['task_type'] == 'subjugation':
         from .subjugation_guides import metadata_build_requirements
         metadata_build = metadata_build_requirements(metadata, options, names)
@@ -807,12 +819,13 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
                 method='source_title' if title_setting else 'source_description', text=setting_text[:240]))))
     # These metadata constraints apply to every candidate in this source.
     # Freeze them before page-specific conditions, which may belong to another plan.
-    blocked_source = bool(source_setting or options['task_type'] == 'subjugation' and globals_)
+    blocked_source = bool(source_setting or options['task_type'] == 'subjugation'
+                          and any(not row['advisory'] for row in globals_))
     for page in pages:
         check()
         page_name = page.get('part', page.get('title', ''))
         if options['task_type'] in ('recollection', 'subjugation') and RECOLLECTION_UNSUPPORTED.search(page_name):
-            globals_.append(dict(text=page_name, advisory=False, evidence=asdict(Evidence(
+            globals_.append(dict(text=page_name, advisory=advisory_requirement(page_name), evidence=asdict(Evidence(
                 source['url'], int(page['cid']), method='part_requirements', text=page_name))))
         requirements_page = bool(re.search(r'练度|培养|角色需求|配置要求', page_name))
         original_part = page.get('original_part', page_name)
@@ -941,13 +954,10 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
                 if detected_region != 'unknown':
                     source_region = detected_region if source_region == 'unknown' else source_region if source_region == detected_region else 'conflict'
                 global_rows, manual_rows = text_constraints(texts, proof,
-                    unparsed_settings=options['task_type'] == 'subjugation')
+                    unparsed_settings=options['task_type'] == 'subjugation',
+                    unsupported_builds=options['task_type'] in ('recollection', 'subjugation'))
                 globals_.extend(global_rows)
                 manual.extend(manual_rows)
-                if options['task_type'] in ('recollection', 'subjugation'):
-                    globals_.extend(dict(text=t.text, advisory=False, evidence=asdict(proof)) for t in texts
-                                    if t.score >= .94 and RECOLLECTION_UNSUPPORTED.search(t.text)
-                                    and t.text not in ('特别装备设定', '可变更队伍角色的特别装备。'))
                 if (options['task_type'] != 'subjugation' and not wide_crop
                         and (requirements_page or any('角色需求' in t.text or '练度' in t.text for t in texts))):
                     chapter_scope = requirement_scope(texts)
