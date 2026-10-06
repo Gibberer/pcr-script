@@ -33,9 +33,17 @@ def boss_selector(s):
                 and any(selector_difficulty(s, name) for name in BOSS_DIFFICULTIES))
 
 
-def selector_difficulty(s, name):
-    item = s.find(re.escape(name), (410, 75, 555, 402), exact=True)
-    return item if item and item.score >= .95 and max(p[1] for p in item.box) <= 399 else None
+def selector_difficulty(s, name, ui=None):
+    roi = (410, 75, 555, 402)
+    def visible(screen):
+        item = screen.find(re.escape(name), roi, exact=True)
+        return item if item and item.score >= .95 and max(p[1] for p in item.box) <= 399 else None
+    item = visible(s)
+    if item is None and ui is not None:
+        # A visible coloured label can be missed by whole-frame OCR. Read
+        # the button column before moving a list already at its boundary.
+        item = visible(ui.read_region(s, roi, classify=False))
+    return item
 
 
 def boss_detail(s):

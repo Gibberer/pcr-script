@@ -260,11 +260,11 @@ class AbyssSubjugation(TimeLimitTask):
         s = self.wait(lambda frame: field.boss_selector(frame) or (field.boss_detail(frame)
                       and field.difficulty(frame, self.ui) == difficulty), '首领入口')
         if field.boss_selector(s):
-            item = field.selector_difficulty(s, difficulty)
+            item = field.selector_difficulty(s, difficulty, self.ui)
             if (item is None and difficulty == '极难'
                     and str(index)+':高难' not in self.state.get('boss_clears', {})
-                    and all(field.selector_difficulty(s, name) for name in field.DIFFICULTIES)
-                    and not field.selector_cleared(s, field.selector_difficulty(s, '高难'))
+                    and all(field.selector_difficulty(s, name, self.ui) for name in field.DIFFICULTIES)
+                    and not field.selector_cleared(s, field.selector_difficulty(s, '高难', self.ui))
                     and self.ui.scrollbar_bounds(s, (696, 75, 708, 402)) is None):
                 # The complete three-tier list has no scrollbar until High
                 # is cleared. An incomplete or conflicting list stays unknown.
@@ -278,12 +278,12 @@ class AbyssSubjugation(TimeLimitTask):
                     s = self.capture()
                     if not field.boss_selector(s):
                         raise SubjugationBlocked('首领难度列表滚动后页面未知')
-                    item = field.selector_difficulty(s, difficulty)
+                    item = field.selector_difficulty(s, difficulty, self.ui)
             if item is None:
                 raise SubjugationBlocked('目标首领难度未完整显示')
             number = field.BOSS_DIFFICULTIES.index(difficulty)
             if number < len(field.BOSS_DIFFICULTIES)-1:
-                following = field.selector_difficulty(s, field.BOSS_DIFFICULTIES[number+1])
+                following = field.selector_difficulty(s, field.BOSS_DIFFICULTIES[number+1], self.ui)
                 if following is not None:
                     self.boss_unlocks[str(index)+':'+difficulty] = not field.selector_locked(s, following)
             if field.selector_locked(s, item):

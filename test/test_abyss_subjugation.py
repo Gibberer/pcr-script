@@ -592,20 +592,31 @@ class SubjugationTests(TestCase):
         self.assertEqual(game.real_battles, 0)
 
     def test_high_clear_reorders_selector_and_requires_scroll_to_its_original_row(self):
-        game = Game()
-        game.boss_clears = {(0, d) for d in field.DIFFICULTIES}
-        game.page = 'selector'
-        task = self.task(game)
-        initial = game.capture()
-        self.assertTrue(field.boss_selector(initial))
-        self.assertEqual(field.selector_difficulty(initial, '极难').center[1], 109)
-        self.assertIsNone(field.selector_difficulty(initial, '高难'))
-        detail = task.boss_detail(0, '高难')
-        self.assertEqual(field.difficulty(detail), '高难')
-        self.assertEqual(game.selector_scroll, 1)
-        extreme = task.boss_detail(0, '极难')
-        self.assertEqual(field.difficulty(extreme), '极难')
-        self.assertEqual(game.selector_scroll, 0)
+        for missed_label in (False, True):
+            with self.subTest(missed_label=missed_label):
+                game = Game()
+                game.boss_clears = {(0, d) for d in field.DIFFICULTIES}
+                game.page = 'selector'
+                task = self.task(game)
+                initial = game.capture()
+                self.assertTrue(field.boss_selector(initial))
+                self.assertEqual(field.selector_difficulty(initial, '极难').center[1], 109)
+                self.assertIsNone(field.selector_difficulty(initial, '高难'))
+                if missed_label:
+                    def observed(**kwargs):
+                        s = game.capture(**kwargs)
+                        if game.page == 'selector':
+                            s.items = [row for row in s.items if row.text != '高难']
+                        return s
+                    task.ui.capture = observed
+                    task.ui.read_region = lambda s, roi, **kwargs: game.capture() if game.page == 'selector' else s
+                detail = task.boss_detail(0, '高难')
+                self.assertEqual(field.difficulty(detail), '高难')
+                self.assertEqual(game.selector_scroll, 1)
+                extreme = task.boss_detail(0, '极难')
+                self.assertEqual(field.difficulty(extreme), '极难')
+                self.assertEqual(game.selector_scroll, 0)
+                self.assertEqual(game.real_battles, 0)
 
     def test_unreleased_extreme_needs_a_complete_unscrolled_three_tier_list(self):
         for condition in ('locked', 'missing_row', 'live_clear', 'saved_clear', 'scrollbar'):
