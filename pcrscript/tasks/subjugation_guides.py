@@ -6,9 +6,10 @@ import re
 
 from .event_strategy import EventParty, MemberRequirement
 from .strategy_document import missing_fields, to_event_party
-from .strategy_inputs import advisory_requirement, declared_region, source_statements
+from .strategy_inputs import advisory_requirement, declared_region, fixed_set_statement, source_statements
 from ..constants import SERVER_TIMEZONE
 from ..game_ui.screen import normalized
+from ..game_ui.guide_vision import combat_boss_labels
 
 ELEMENTS = ('fire', 'water', 'wind', 'light', 'dark')
 LABELS = ('火', '水', '风', '光', '暗')
@@ -140,6 +141,24 @@ def visible_scope(texts, page, options):
     return (found, True) if found else (metadata, bool(metadata))
 
 
+def combat_constraint_scope(texts, combat_scene):
+    """An exact boss HUD scopes battle actions, without authorizing a tier or party."""
+    labels = [t.text.replace(' ', '') for t in texts if t.score >= .95 and t.center[1] < 115]
+    controls = (any(t.text == '菜单' and t.center[0] > 1000 and t.center[1] < 115
+                    for t in texts if t.score >= .95)
+                and any(t.text == '自动' and t.center[0] > 1000 and 300 < t.center[1] < 660
+                        for t in texts if t.score >= .95))
+    if not combat_scene and not controls:
+        return {}
+    bosses = combat_boss_labels(texts)
+    health = [m for label in labels if (m := re.fullmatch(r'(\d{7,11})/(\d{7,11})', label))
+              and 0 <= int(m[1]) <= int(m[2])]
+    timers = [label for label in labels if re.fullmatch(r'\d{1,2}:[0-5]\d', label)]
+    if len(bosses) == len(health) == len(timers) == 1:
+        return dict(kind='boss', boss=next(iter(bosses))[0])
+    return {}
+
+
 def damage_reference(page, scope, maximum, source):
     """Use the verified plan's own title, never another Boss's advertised damage."""
     if scope.get('kind') != 'boss':
@@ -208,6 +227,18 @@ def relevant_statements(text, options):
             continue
         result.append(line)
     return '\n'.join(result)
+
+
+def metadata_set_requirements(metadata, options):
+    """Bind explicit fixed SET orders only to a named Boss, never infer off from a missing badge."""
+    rows = []
+    for statement, method in metadata:
+        for line in re.split(r'[\r\n,，;；。!?！？|｜]+', statement):
+            flags = fixed_set_statement(line)
+            bosses, _ = leading_boss_scope(line.strip().removeprefix('不想操作的'))
+            if flags is not None and bosses and options.get('boss_number') in bosses:
+                rows.append(dict(flags=flags, plan=None, difficulty=None, text=line, method=method))
+    return rows
 
 
 def metadata_build_requirements(metadata, options, names):

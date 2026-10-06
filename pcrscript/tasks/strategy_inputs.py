@@ -12,6 +12,14 @@ from ..run_session import atomic_json
 SOURCE_CACHE_VERSION = 5
 
 
+def video_metadata(data):
+    """The same public metadata schema for supplied links and search results."""
+    return dict(provider='bilibili', bvid=data['bvid'],
+                url=f'https://www.bilibili.com/video/{data["bvid"]}/',
+                title=data['title'], description=data.get('desc', ''),
+                published_at=data.get('pubdate'), pages=data.get('pages', []))
+
+
 def source_statements(source):
     """One metadata view for applicability, requirements and their provenance."""
     return [(source.get('title', ''), 'source_title'),
@@ -26,6 +34,20 @@ def advisory_requirement(text):
                  or re.search(r'^(?:我|本人|作者)[^\n；。]*(?:练度|属性|MP\d+|大师点)', text, re.I))
     return bool(reference) and not re.search(
         r'必须|必备|需要|要求|至少|最低|不低于|不可低于|才能|否则|务必|一定要|不能少|不可缺', text)
+
+
+def fixed_set_statement(text):
+    """An explicit five-slot initial setting, with no timed actions or extra instructions."""
+    compact = re.sub(r'\s+', '', text)
+    match = re.fullmatch(
+        r'(?:不想操作的)?(?:[【\[]?(?:Boss[1-3]|[1-3]王|首领[1-3])[】\]]?)?'
+        r'(?:开局)?(?:SET)?(?P<flags>[OX]{5}|全SET)'
+        r'(?:开自动|(?:AUTO|自动)(?:ON|开启))?(?:同样)?(?:[1-9]\d*|[一二两三四五六七八九十])?刀?',
+        compact, re.I)
+    if match is None:
+        return None
+    flags = match['flags'].upper()
+    return (True,)*5 if flags == '全SET' else tuple(flag == 'O' for flag in flags)
 
 
 def declared_region(text: str) -> str:
@@ -221,8 +243,7 @@ def preferred_sources(urls,api,*,directory='cache/game/strategies/user_sources',
             if urlsplit(url).hostname in ('www.bilibili.com','bilibili.com','m.bilibili.com') and bvid:
                 response=api.getVideoInfo(bvid=bvid[1]);data=response.get('data',{})
                 if response.get('code')!=0 or data.get('bvid')!=bvid[1]:raise ValueError('视频身份未核验')
-                entry=dict(provider='bilibili',bvid=bvid[1],title=data['title'],description=data.get('desc',''),
-                           published_at=data.get('pubdate'),pages=data.get('pages',[]))
+                entry=video_metadata(data)
                 try:
                     entry['comment_complete']=False
                     if require_complete_comments:

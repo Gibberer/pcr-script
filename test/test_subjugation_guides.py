@@ -444,7 +444,36 @@ class SubjugationGuideTests(TestCase):
                     rows = report['parties'][0]['global_requirements']+report['parties'][0]['manual_actions']
                     self.assertTrue(any(r['text'] == constraint and r['evidence']['cid'] == 1 for r in rows))
 
-    def parse_notes(self, folder, title, kind, constraint, *, combat_title=None, metadata=None, boss_number=1):
+    def test_other_boss_actions_in_one_video_are_isolated_only_with_a_complete_combat_hud(self):
+        cases = [('另一首领', True, True, '106角色XXOOO', 1),
+                 ('合成首领', True, True, '106角色XXOOO', 0),
+                 ('另一首领', False, True, '106角色XXOOO', 0),
+                 ('另一首领', True, False, '106角色XXOOO', 0),
+                 ('另一首领', True, True, '所有首领1:06关闭SET', 0)]
+        for boss, complete, controls, action, eligible in cases:
+            for split in (False, True):
+                with self.subTest(boss=boss, complete=complete, controls=controls, split=split), TemporaryDirectory() as folder:
+                    names = ([GuideText(boss, 1, (600, 30, 130, 20)),
+                              GuideText('等级.475', 1, (728, 25, 80, 30))] if split else
+                             [GuideText(boss+'等级.475', 1, (600, 30, 200, 20))])
+                    labels = names+[
+                              GuideText('1:29', 1, (1080, 30, 50, 20)),
+                              GuideText(action, 1, (400, 250, 300, 30))]
+                    if complete:
+                        labels.append(GuideText('80000000/80000000', 1, (600, 65, 250, 20)))
+                    if controls:
+                        labels.extend([GuideText('菜单', 1, (1190, 30, 45, 20)),
+                                       GuideText('自动', 1, (1200, 520, 45, 30))])
+                    report, options = self.parse_notes(folder, 'Boss1', 'boss', action, combat_note=labels)
+                    self.assertEqual(len(report['parties']), 1)
+                    self.assertEqual(len(parties_for_target(report, options, allow_local_trials=True)), eligible)
+                    self.assertTrue(report['manual_actions'])
+                    if eligible:
+                        self.assertEqual(report['parties'][0]['manual_actions'], [])
+                        self.assertEqual(report['manual_actions'][0]['scope']['boss'], boss)
+
+    def parse_notes(self, folder, title, kind, constraint, *, combat_title=None, metadata=None, boss_number=1,
+                    set_values=(True,)*5, combat_note=None):
         options = source_options({}, EVENT, kind=kind, boss='合成首领', boss_number=boss_number)
         options['parsed_dir'] = folder
         source = dict(bvid='BVSYNTHETIC', url='https://example.com/synthetic',
@@ -452,6 +481,8 @@ class SubjugationGuideTests(TestCase):
             pages=[dict(cid=1, part=title, duration=2),
                    dict(cid=2, part=combat_title or ('前哨' if kind == 'outpost' else f'Boss{boss_number}')+'打法2', duration=4)])
         source.update(metadata or {})
+        if combat_note is not None:
+            source['pages'] = [dict(cid=2, part=f'Boss{boss_number}打法2', duration=6)]
         boxes = [(100+i*120, 390, 100, 100) for i in range(5)]
         members = [dict(name=f'合成角色{i}', rectangle=list(b), score=.99) for i, b in enumerate(boxes)]
         index = SimpleNamespace(names=[m['name'] for m in members], matrix=np.ones((5,1728),np.float32))
@@ -459,18 +490,42 @@ class SubjugationGuideTests(TestCase):
         capture.read.side_effect = [(True, np.full((540,960,3), i*20, np.uint8)) for i in range(6)]
         detail = texts('前哨关卡', '高难') if kind == 'outpost' else texts(
             'BOSS详情', '高难', '合成首领', '80000000/80000000')
-        labels = [texts(constraint)]*2+[detail]*2+[
+        labels = [combat_note if combat_note is not None else texts(constraint)]*2+[detail]*2+[
             texts(timer, '79000000/80000000') for timer in ('1:29', '1:28')]
+        samples = [[.5, 1.5, 2.5, 3.5, 4.5, 5.5]] if combat_note is not None else [[.5,1.5],[.5,1.5,2.5,3.5]]
         with patch('pcrscript.tasks.strategy_video.cv.VideoCapture', return_value=capture), \
-             patch('pcrscript.tasks.strategy_video.sample_seconds', side_effect=[[.5,1.5],[.5,1.5,2.5,3.5]]), \
+             patch('pcrscript.tasks.strategy_video.sample_seconds', side_effect=samples), \
              patch('pcrscript.tasks.strategy_video.frame_texts', side_effect=labels), \
              patch('pcrscript.tasks.strategy_video.battle_rectangles', side_effect=[[]]*4+[boxes]*2), \
              patch('pcrscript.tasks.strategy_video.combat_team', side_effect=[[]]*4+[members]*2), \
              patch('pcrscript.tasks.strategy_video.formation_fields', return_value=[]), \
              patch('pcrscript.tasks.strategy_video.combat_auto', return_value=True), \
-             patch('pcrscript.tasks.strategy_video.combat_set', return_value=True):
+             patch('pcrscript.tasks.strategy_video.combat_set',
+                   side_effect=lambda image, member, labels: set_values[int(member['name'][-1])]):
             return parse_video_source(source, options, index, api=Mock(), ocr=Mock(),
                 media_fetcher=lambda *a, **k: (Path(folder)/'synthetic.avi', dict(duration=4))), options
+
+    def test_explicit_fixed_set_order_binds_to_the_boss_and_cannot_override_observed_buttons(self):
+        for statement, visible, eligible in (
+                ('不想操作的1王全set三刀，2王OXOOO开自动同样三刀', None, 1),
+                ('Boss2 SET OXOOO AUTO ON', None, 1),
+                ('2王OXOOO开自动', True, 0),
+                ('1王OXOOO开自动', None, 0),
+                ('OXOOO开自动', None, 0),
+                ('2王OXXOOO开自动', None, 0),
+                ('2王OXOOO开自动；104角色XXOOO', None, 0),
+                ('2王OXOOO开自动；2王OOOOO开自动', None, 0)):
+            with self.subTest(statement=statement, visible=visible), TemporaryDirectory() as folder:
+                report, options = self.parse_notes(folder, '前言', 'boss', '说明正文', boss_number=2,
+                    metadata=dict(description=statement), set_values=(True, visible, True, True, True))
+                parties = parties_for_target(report, options, allow_local_trials=True)
+                self.assertEqual(len(parties), eligible)
+                if eligible:
+                    self.assertEqual([m.instant for m in parties[0].members], [True, False, True, True, True])
+                    proof = report['parties'][0]['members'][1]['instant']['evidence'][0]
+                    self.assertEqual(proof['method'], 'fixed_set_source_description')
+                    self.assertIn('OXOOO', proof['text'].upper().replace(' ', ''))
+                    self.assertEqual(report['parties'][0]['manual_actions'], [])
 
     def test_common_character_fields_follow_the_current_plan_scope(self):
         for title, combat, expected in (('前言', 'Boss1打法2', 30),

@@ -64,6 +64,11 @@ class VideoStrategyTests(TestCase):
                 self.assertTrue(text_constraints([GuideText(text, .99, rectangle)],
                                 proof, unparsed_settings=True)[1])
 
+        # Compact timestamps and O/X orders still describe a manual axis.
+        for text in ('104角色XXOOO', '001角色OXOOO', '1:04角色全SET'):
+            self.assertTrue(text_constraints([GuideText(text, .99, (10, 170, 200, 20))],
+                            proof, unparsed_settings=True)[1])
+
     def test_event_starting_mode_caption_can_coexist_with_later_hud_phase(self):
         labels = [GuideText('SP模式1', 1, (10, 180, 150, 25)),
                   GuideText('阶段2', 1, (60, 50, 100, 25))]
@@ -678,6 +683,38 @@ class VideoStrategyTests(TestCase):
                 result=acquire_strategies(dict(task_type='abyss',area='测试',stage='4-1',element='fire',parsed_dir=folder),api=api,index=index)
                 self.assertEqual(result['status'],'complete');parse.assert_called_once()
                 self.assertTrue(Path(result['document']).is_file())
+
+    def test_task_source_rules_apply_to_supplied_and_searched_links_before_parse_budget(self):
+        from pcrscript.tasks.strategy_sources import SourceRules
+        with TemporaryDirectory() as folder:
+            api=Mock()
+            api.getVideoInfo.side_effect=lambda bvid:dict(code=0,data=dict(bvid=bvid,
+                title=('其他游戏' if bvid=='BVOTHER' else '公主连结')+' 火4-1',
+                desc='不适用' if bvid=='BVPREFERRED' else '适用',
+                pages=[dict(cid=1,part='火4-1')]))
+            rejected=[]
+            def reject(source,options):
+                rejected.append(source)
+                return '任务要求不符' if source['description']=='不适用' else None
+            rules=SourceRules('synthetic:1',reject=reject,scope_keys=('variant',))
+            index=SimpleNamespace(names=['角色'],matrix=np.ones((1,1728),np.float32))
+            with patch('pcrscript.tasks.strategy_video.preferred_sources',return_value=([
+                    dict(bvid='BVOTHER'),dict(bvid='BVPREFERRED')],[])), \
+                 patch('pcrscript.tasks.strategy_video.discover_sources',
+                       return_value=dict(candidates=[dict(bvid='BVSEARCHED')])) as search, \
+                 patch('pcrscript.tasks.strategy_video.parse_video_source',
+                       return_value=dict(parties=[complete_party()],errors=[])) as parse:
+                report=acquire_strategies(dict(task_type='abyss',stage='4-1',element='fire',
+                    variant='A',source_urls=['https://example.com/synthetic'],max_videos=1,
+                    parsed_dir=folder),api=api,index=index,rules=rules)
+            self.assertEqual(report['status'],'complete')
+            self.assertEqual([source['bvid'] for source in rejected],['BVPREFERRED','BVSEARCHED'])
+            self.assertTrue(all(source['provider']=='bilibili' and source['pages'][0]['part']=='火4-1'
+                                for source in rejected))
+            self.assertEqual(parse.call_count,1)
+            self.assertEqual(parse.call_args.args[0]['bvid'],'BVSEARCHED')
+            self.assertIs(search.call_args.kwargs['rules'],rules)
+            self.assertEqual(report['skipped_sources'][0]['reason'],'任务要求不符')
 
     def test_irrelevant_preferred_video_does_not_exhaust_parse_budget(self):
         with TemporaryDirectory() as folder:
