@@ -53,9 +53,11 @@ class VideoStrategyTests(TestCase):
     def test_fixed_hud_switch_status_does_not_discard_creator_operations(self):
         proof = Evidence('https://example.com/synthetic', method='video_ocr')
         label = '连结爆发立即发动开启'
-        self.assertEqual(text_constraints([GuideText(label, .99, (1080, 70, 180, 20))],
-                         proof, unparsed_settings=True), ([], []))
+        for character in ('爆', '螺', '煤'):
+            self.assertEqual(text_constraints([GuideText(label.replace('爆', character), .99, (1080, 70, 180, 20))],
+                             proof, unparsed_settings=True), ([], []))
         for text, rectangle in ((label, (10, 170, 200, 20)),
+                                (label.replace('爆', '煤'), (10, 170, 200, 20)),
                                 ('连结爆发立即发动关闭', (1080, 70, 180, 20)),
                                 ('需手动连结爆发立即发动开启', (1080, 70, 180, 20))):
             with self.subTest(text=text, rectangle=rectangle):

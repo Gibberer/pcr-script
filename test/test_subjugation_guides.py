@@ -368,6 +368,8 @@ class SubjugationGuideTests(TestCase):
 
     def test_reference_build_notes_do_not_override_mandatory_or_manual_conditions(self):
         for condition, eligible in (('练度参考 MP88', 1), ('推荐特别装备', 1),
+                                    ('我800属性MP88只能打2亿伤害', 1),
+                                    ('我MP88，至少属性等级800', 0),
                                     ('参考练度MP88，最低MP80', 0), ('MP88', 0),
                                     ('参考配置MP88，合成角色0关SET', 0)):
             with self.subTest(condition=condition), TemporaryDirectory() as folder:
@@ -523,6 +525,22 @@ class SubjugationGuideTests(TestCase):
                 metadata=dict(description='Boss1合成角色0Lv100\nBoss1合成角色0技能100'))
             member = parties_for_target(report, options, allow_local_trials=True)[0].members[0]
             self.assertEqual((member.level, member.skill_level), (100, 100))
+
+    def test_build_comparisons_do_not_invent_a_requirement_but_directives_still_block(self):
+        for statement, eligible in (('大师等级低了，差不多20级，如果没有倒人，装备最低12贯应该差不多', 1),
+                                    ('我的等级100MP88只能打2亿', 1),
+                                    ('合成角色0等级较低', 1), ('大师等级至少90', 0),
+                                    ('合成角色0技能要满', 0), ('角色等级如图', 0),
+                                    ('未知衣装Rank30', 0)):
+            with self.subTest(statement=statement), TemporaryDirectory() as folder:
+                report, options = self.parse_notes(folder, '前言', 'boss', '说明正文',
+                    metadata=dict(author_comments=[dict(text=statement, reply_id=12)]))
+                self.assertEqual(len(parties_for_target(report, options, allow_local_trials=True)), eligible)
+                if eligible:
+                    advice = report['parties'][0]['recommendations']
+                    self.assertTrue(any(row['text'] == statement and
+                        row['evidence']['method'] == 'unresolved_author_comment:12' for row in advice))
+                    self.assertEqual(report['parties'][0]['global_requirements'], [])
 
     def test_metadata_correction_conflicting_with_video_build_blocks_the_party(self):
         with TemporaryDirectory() as folder:

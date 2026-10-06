@@ -6,7 +6,7 @@ import re
 
 from .event_strategy import EventParty, MemberRequirement
 from .strategy_document import missing_fields, to_event_party
-from .strategy_inputs import declared_region, source_statements
+from .strategy_inputs import advisory_requirement, declared_region, source_statements
 from ..constants import SERVER_TIMEZONE
 from ..game_ui.screen import normalized
 
@@ -20,6 +20,8 @@ BUILD_VALUE = re.compile(
     r'专(?:用装备|武)?[12一二](?:强化)?(?:等级|阶段|Lv\.?)?[：:=]?'
     r'(?:\d{1,3}(?:[星★级])?|未开启|未装备|未实装|未开放|已装备|关闭|开启|装备|有|无)|'
     r'专[：:=]?\d{2,3}(?!\d))', re.I)
+BUILD_DIRECTIVE = re.compile(r'需|要|必须|必备|要求|至少|最低|不低于|不能|不可|不得|'
+                             r'满|相同|一致|突破|务必|按照|参照|请看|详见|如图')
 
 
 def source_options(options, event, *, kind='outpost', difficulty='高难', boss='', boss_number=None):
@@ -241,7 +243,14 @@ def metadata_build_requirements(metadata, options, names):
                 tail = tail[match.end():].lstrip('：:,，;；')
             tiers = {d for d in ('普通', '困难', '高难', '极难') if d in line}
             difficulty = next(iter(tiers)) if len(tiers) == 1 and not SHARED_REQUIREMENTS.search(line) else None
-            rows.append(dict(name=name if fields and not tail else None, fields=fields,
+            # A comparison such as "大师等级低了" is not a field declaration.
+            # Check directives in the same clause as the build label so an
+            # unrelated part of a reply cannot create a character requirement.
+            advisory = (name is None and not fields and advisory_requirement(line)
+                        or not BUILD_VALUE.search(line) and not any(
+                            BUILD_LABEL.search(clause) and BUILD_DIRECTIVE.search(clause)
+                            for clause in re.split(r'[,，]', line)))
+            rows.append(dict(name=name if fields and not tail else None, fields=fields, advisory=advisory,
                              text=line, method=method, plan=plan_number(dict(part=line)), difficulty=difficulty))
     return rows
 

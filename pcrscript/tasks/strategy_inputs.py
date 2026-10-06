@@ -20,6 +20,14 @@ def source_statements(source):
         for row in source.get('author_comments', [])]
 
 
+def advisory_requirement(text):
+    """Reference builds and the author's own stats do not impose a minimum."""
+    reference = (re.search(r'参考练度|练度参考|参考配置|配置参考|建议|推荐|可选', text)
+                 or re.search(r'^(?:我|本人|作者)[^\n；。]*(?:练度|属性|MP\d+|大师点)', text, re.I))
+    return bool(reference) and not re.search(
+        r'必须|必备|需要|要求|至少|最低|不低于|不可低于|才能|否则|务必|一定要|不能少|不可缺', text)
+
+
 def declared_region(text: str) -> str:
     # Guild recruitment does not declare the recorded battle's server.
     text = re.sub(r'(?:国服|國服|日服|台服|臺服)\s*(?:公会|公會|行会|行會)', '', text)

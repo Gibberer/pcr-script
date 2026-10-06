@@ -21,9 +21,9 @@ from ..run_session import atomic_json
 from ..game_ui.guide_vision import GuideText, combat_team, formation_team, wide_special_equipment_team, combat_set, combat_auto, combat_auto_labels, battle_rectangles, match_portrait, read_text, requirement_cells, labeled_fields, formation_fields
 from .strategy_document import Evidence, Fact, empty_member, finalize, export_document
 from .strategy_sources import BORROW_PART, MANUAL_PART, UNVERIFIED_SETTING, discover_sources, unparsed_switch_requirement
-from .strategy_inputs import declared_region, preferred_sources, source_statements
+from .strategy_inputs import advisory_requirement, declared_region, preferred_sources, source_statements
 
-PARSER_VERSION = 84
+PARSER_VERSION = 86
 FRAME_OCR_VERSION = 1
 COMBAT_AUDIT_SECONDS = 20
 RECOLLECTION_UNSUPPORTED = re.compile(
@@ -680,13 +680,6 @@ def manual_requirement(text, *, unparsed_settings=False):
         text, re.I))
 
 
-def advisory_requirement(text):
-    """Explicit reference builds are advice; mandatory wording takes precedence."""
-    return (bool(re.search(r'参考练度|练度参考|参考配置|配置参考|建议|推荐|可选', text))
-            and not re.search(r'必须|必备|需要|要求|至少|最低|不低于|不可低于|才能|否则|'
-                              r'务必|一定要|不能少|不可缺', text))
-
-
 def text_constraints(texts, proof: Evidence, *, unparsed_settings=False,
                      unsupported_builds=False) -> tuple[list[dict], list[dict]]:
     global_requirements, manual = [], []
@@ -702,7 +695,7 @@ def text_constraints(texts, proof: Evidence, *, unparsed_settings=False,
             global_requirements.append(row)
         # This fixed combat HUD label describes the current switch. SET and
         # AUTO are independently read from their buttons, not inferred here.
-        hud_status = (re.fullmatch(r'连结[爆螺]发立即发动开启', t.text)
+        hud_status = (re.fullmatch(r'连结[爆螺煤]发立即发动开启', t.text)
                       and t.rectangle[0] > 1000 and 40 <= t.center[1] <= 130)
         if not hud_status and manual_requirement(t.text, unparsed_settings=unparsed_settings):
             manual.append(row)
@@ -1249,7 +1242,7 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
                         or evidence.get('method') in ('source_title', 'source_description', 'source_requirements'))
             relevant_globals = [r for r in globals_ if applicable(r)]
             relevant_manual = [r for r in manual if applicable(r)]
-            relevant_globals.extend(dict(text=row['text'], advisory=False, evidence=asdict(Evidence(
+            relevant_globals.extend(dict(text=row['text'], advisory=row['advisory'], evidence=asdict(Evidence(
                 source['url'], method='unresolved_'+row['method'], text=row['text'])))
                 for row in build_rows if row['name'] is None)
         team['global_requirements'] = list({r['text']: r for r in relevant_globals if not r['advisory']}.values())
