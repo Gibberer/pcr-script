@@ -59,6 +59,12 @@ def task_result(record: dict, directory: Path | None = None) -> None:
         atomic_json(directory / 'result.json', record)
 
 
+def daily_result(report: dict) -> None:
+    emit('daily.result', **report)
+    if _current is not None:
+        atomic_json(_current.path / 'summary.json', report)
+
+
 class _Clock:
     def sleep(self, seconds):
         if _current is None or threading.get_ident() != _current.owner:

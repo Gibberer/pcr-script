@@ -379,6 +379,7 @@ def execute(path: Path, request: dict[str, Any], run_id: str) -> None:
     prepare_only = bool(section and isinstance(config.get(section), dict) and config[section].get('prepare_only') is True)
     if not prepare_only and not isinstance(extra, dict):
         raise ValueError('请先配置 Extra 运行环境')
+    report = None
     with RunSession(name, run_id=run_id):
         if name == 'daily':
             from pcrscript.runtime import open_leidian_emulator, run_script, select_driver
@@ -398,11 +399,13 @@ def execute(path: Path, request: dict[str, Any], run_id: str) -> None:
                 driver = select_driver(config)
                 subprocess.run([driver.adb_path, '-s', driver.device_name, 'shell', 'monkey', '-p', 'com.bilibili.priconne', '1'], check=True)
                 clock.sleep(30)
-            run_script(config)
+            report = run_script(config)
         else:
             args = request.get('args', [])
             validate_plan([dict(enabled=True, name=name, args=args)])
-            print_report(run_task_with_config(config, name, *args))
+            report = run_task_with_config(config, name, *args)
+    if isinstance(report, dict):
+        print_report(report)
 
 
 def main() -> None:

@@ -2,7 +2,7 @@ import argparse
 from pathlib import Path
 import subprocess
 from pcrscript.run_session import clock as time
-from pcrscript.runtime import load_config, modify_task_list, open_leidian_emulator, run_script, select_driver
+from pcrscript.runtime import load_config, modify_task_list, open_leidian_emulator, run_script, select_driver, print_report
 
 def main():
     parser = argparse.ArgumentParser(description="运行当前配置中的完整日常")
@@ -18,17 +18,24 @@ def main():
             raise RuntimeError(f"雷电启动失败（退出码 {return_code}）")
         else:
             print("leidian emulator install path is configured, use leidian console.")
-            run_script(config)
+            return run_script(config)
     else:
         driver = select_driver(config)
         print(f"使用 ADB 设备 {driver.device_name}")
         subprocess.run([driver.adb_path, "-s", driver.device_name, "shell", "monkey", "-p", "com.bilibili.priconne", "1"], check=True)
         time.sleep(30)
-        run_script(config)
+        return run_script(config)
         
 
 
-if __name__ == "__main__":
+def cli():
     from pcrscript.run_session import RunSession
+    report = None
     with RunSession("daily"):
-        main()
+        report = main()
+    if isinstance(report, dict):
+        print_report(report)
+
+
+if __name__ == "__main__":
+    cli()

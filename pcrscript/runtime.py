@@ -1,6 +1,7 @@
 """Shared configuration and registered-task dispatch for command-line tools."""
 from pathlib import Path
 from typing import Any, Type
+from collections import Counter
 import copy
 import json
 import subprocess
@@ -11,7 +12,7 @@ from pcrscript.driver import ADBDriver, Driver
 from pcrscript.tasks import EventNews, TimeLimitTask, find_taskclass
 from pcrscript.news import fetch_event_news
 from pcrscript.run_session import clock as time
-from pcrscript.run_session import emit, task_directory, task_result
+from pcrscript.run_session import emit, task_directory, task_result, daily_result
 
 
 def load_config(path: str | Path) -> dict[str, Any]:
@@ -159,7 +160,32 @@ def modify_task_list(news: EventNews, task_list: list[list[Any]]) -> None:
                 task_list.insert(i, [valid_class.name])
 
 
-def run_script(config: dict[str, Any], use_adb: bool = False) -> None:
+def summarize_daily(records: list[dict[str, Any]]) -> dict[str, Any]:
+    """Separate execution endings from tasks with verified postconditions."""
+    tasks = []
+    for index, record in enumerate(records, 1):
+        item = dict(index=index, task=record['task'], status=record['status'])
+        report = record.get('report')
+        reasons = [record['error']] if record.get('error') else []
+        if isinstance(report, dict):
+            if report.get('reason'):
+                reasons.append(report['reason'])
+            pending = report.get('pending') or []
+            reasons.extend([pending] if isinstance(pending, str) else pending)
+        if reasons:
+            item['reasons'] = reasons
+        tasks.append(item)
+    counts = dict(Counter(item['status'] for item in tasks))
+    verified = bool(tasks) and all(item['status'] in ('complete', 'already_complete', 'unavailable')
+                                   for item in tasks)
+    status = ('error' if counts.get('error') else
+              'cancelled' if counts.get('cancelled') else
+              'partial' if counts.get('partial') or counts.get('blocked') else
+              'complete' if verified else 'finished')
+    return dict(status=status, verified=verified, counts=counts, tasks=tasks)
+
+
+def run_script(config: dict[str, Any], use_adb: bool = False) -> dict[str, Any]:
     # Keep the legacy argument for callers; the configured transport selects the driver.
     emit('progress', scope='action', label='连接设备并读取活动情报', unit='task')
     robot = Robot(select_driver(config))
@@ -169,10 +195,12 @@ def run_script(config: dict[str, Any], use_adb: bool = False) -> None:
     for value in news.__dict__.values():
         if value:
             print(value)
-    task_list: list = next(iter(config["Task"].values()))  # 这里设置一个全量的任务列表
+    task_list = copy.deepcopy(next(iter(config["Task"].values())))
     # 根据当前进行的活动修改原始任务
     modify_task_list(news, task_list)
     # 日常沿用当前账号；从欢迎页进入，或从已打开的游戏页面返回首页。
     emit('progress', scope='action', label='进入游戏首页', unit='task')
     robot.changeaccount()
-    robot.work(task_list)
+    report = summarize_daily(robot.work(task_list))
+    daily_result(report)
+    return report
