@@ -18,7 +18,7 @@ def book(done=8, total=9):
 
 
 class ScheduleTests(TestCase):
-    def run_frames(self, frames, upright=None):
+    def run_frames(self, frames, upright=None, real_scroll=False):
         self.root = TemporaryDirectory()
         self.addCleanup(self.root.cleanup)
         ui = replay_ui(self.root.name)
@@ -27,6 +27,11 @@ class ScheduleTests(TestCase):
         ui.read_region.side_effect = lambda value, roi, classify: (upright or {}).get(id(value), value)
         robot = Robot(Mock(get_screen_size=Mock(return_value=(960,540))), show_progress=False)
         robot.driver.screenshot.return_value = frames[0].image
+        if real_scroll:
+            ui.driver = robot.driver
+            ui.width, ui.height = 960, 540
+            ui.swipe.side_effect = lambda *args, **kwargs: EventUI.swipe(ui, *args, **kwargs)
+            ui.scrollbar.side_effect = lambda *args, **kwargs: EventUI.scrollbar(ui, *args, **kwargs)
         with patch('pcrscript.tasks.task_routines.EventUI', return_value=ui):
             task = Schedule(robot)
         values = iter(frames)
@@ -100,7 +105,8 @@ class ScheduleTests(TestCase):
         lower.image[290:437,774:781] = (230,155,25)
         report = self.run_frames([lower,book(9)])
         self.assertEqual((report['status'],report['completed']), ('already_complete',9))
-        self.ui.scrollbar.assert_called_once_with(lower,(769,97,784,445),-1)
+        self.ui.scrollbar.assert_called_once()
+        self.assertEqual(self.ui.scrollbar.call_args.args, (lower,(769,97,784,445),-1))
         self.assertEqual([call.args[0].text for call in self.ui.click.call_args_list], ['关闭'])
 
     def test_scroll_restore_during_auto_reads_the_whole_counter(self):
@@ -109,7 +115,31 @@ class ScheduleTests(TestCase):
         lower.image[290:437,774:781] = (230,155,25)
         report = self.run_frames([book(8), lower, book(9)])
         self.assertEqual((report['status'],report['completed']), ('complete',9))
-        self.ui.scrollbar.assert_called_once_with(lower,(769,97,784,445),-1)
+        self.ui.scrollbar.assert_called_once()
+        self.assertEqual(self.ui.scrollbar.call_args.args, (lower,(769,97,784,445),-1))
+
+    def test_resized_scrollbar_stops_when_the_counter_is_visible_without_fallback(self):
+        lower = book(9)
+        lower.items = [item for item in lower.items if item.text not in ('交给可可萝','9/9')]
+        lower.image[341:438,774:781] = (230,155,25)
+        upper = book(9)
+        upper.image[98:281,774:781] = (230,155,25)
+        report = self.run_frames([book(0),lower,upper], real_scroll=True)
+        self.assertEqual((report['status'],report['completed'],report['total']), ('complete',9,9))
+        self.ui.driver.swipe.assert_called_once()
+        self.assertFalse(self.ui.driver.swipe.call_args.kwargs.get('fallback',False))
+        self.assertEqual([call.args[0].text for call in self.ui.click.call_args_list], ['一键自动','关闭'])
+
+    def test_scroll_still_rejects_unchanged_list_or_counter_behind_a_dialog(self):
+        lower = book(9)
+        lower.items = [item for item in lower.items if item.text not in ('交给可可萝','9/9')]
+        lower.image[341:438,774:781] = (230,155,25)
+        dimmed = book(9)
+        dimmed.image[:] //= 2
+        for after in (lower,dimmed):
+            with self.subTest(dimmed=after is dimmed), self.assertRaisesRegex(EventUIError,'未确认变化'):
+                self.run_frames([book(0),lower,after], real_scroll=True)
+            self.assertEqual([call.args[0].text for call in self.ui.click.call_args_list], ['一键自动'])
 
     def test_changed_total_does_not_claim_the_original_plan_complete(self):
         report = self.run_frames([book(8),book(10,10)])

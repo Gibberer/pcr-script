@@ -164,7 +164,9 @@ class Schedule(ImageTask):
             if not self.book(screen) or self.completion(screen) is not None:
                 return screen
             roi = (769, 97, 784, 445)
-            if self.ui.scrollbar_bounds(screen, roi) is None or not self.ui.scrollbar(screen, roi, -1):
+            if self.ui.scrollbar_bounds(screen, roi) is None or not self.ui.scrollbar(
+                    screen, roi, -1,
+                    reached=lambda view: self.book(view) and self.completion(view) is not None):
                 break
             screen = self.ui.capture()
         return screen

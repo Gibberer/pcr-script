@@ -287,8 +287,8 @@ class EventUI:
             return None
         return int(thumb[0]+y1), int(thumb[-1]+y1)
 
-    def scrollbar(self, screen, roi, direction):
-        """Verify a list drag before using its background input fallback."""
+    def scrollbar(self, screen, roi, direction, *, reached=None):
+        """Verify movement or a caller's visible destination before fallback."""
         bounds = self.scrollbar_bounds(screen, roi)
         if bounds is None:
             raise EventUIError('列表滚动条未确认')
@@ -308,6 +308,8 @@ class EventUI:
             until = time.monotonic()+timeout
             while time.monotonic() < until:
                 after = self.capture()
+                if reached is not None and reached(after):
+                    return True
                 actual = self.scrollbar_bounds(after, roi)
                 if actual is None:
                     # The game's touch highlight briefly covers the thumb.
