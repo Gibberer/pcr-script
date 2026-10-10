@@ -1,4 +1,5 @@
 """Offline boundaries for inventory destruction, gift recovery and scaling."""
+import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
@@ -9,13 +10,12 @@ import numpy as np
 import cv2 as cv
 
 from pcrscript.tasks.task_gifts import GetGift, inventory, stamina_excluded
-from pcrscript.game_ui.screen import EventUI, EventUIError, EventScreen, TextBox
+from pcrscript.game_ui.screen import EventUI, EventUIError
+from functools import partial
+from ui_fixtures import screen as synthetic_screen
 
 
-def screen(*items):
-    return EventScreen(np.zeros((540, 960, 3), np.uint8), [
-        TextBox(text, 1, [[x-15, y-8], [x+15, y-8], [x+15, y+8], [x-15, y+8]])
-        for text, x, y in items])
+screen = partial(synthetic_screen, background=0, score=1, box_half_size=(15, 8))
 
 
 class GiftTests(TestCase):
@@ -70,6 +70,7 @@ class GiftTests(TestCase):
             g.ui.click = Mock()
             g.ui.save = Mock()
             self.assertEqual(g.run()["status"], "partial")
+            self.assertEqual(json.loads((Path(folder)/'report.json').read_text(encoding='utf-8')), g.report)
             g.free_space.assert_called_once()
 
     def test_enough_space_does_not_auto_select_or_dismantle(self):

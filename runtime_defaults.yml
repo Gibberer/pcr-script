@@ -84,6 +84,11 @@ AbyssSubjugation:
   battle_timeout: 240
   max_stamina: 400
   max_boss_tickets: 99
+  boss_max_attacks:
+    普通: 1
+    困难: 1
+    高难: 2
+    极难: 6
   max_normal_trials: 6
   max_simulations: 30
   max_source_batches: 3

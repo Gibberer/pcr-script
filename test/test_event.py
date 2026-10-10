@@ -134,6 +134,24 @@ class EventRecognitionTests(TestCase):
         ui._ocr = Mock(return_value=SimpleNamespace(txts=["1"], scores=np.array([.99])))
         self.assertEqual(ui.number(frame(), (775, 395, 840, 436)), 1)
 
+    def test_numeric_crop_keeps_upright_six_and_nine(self):
+        ui = EventUI.__new__(EventUI)
+        for value in (6, 9):
+            def recognize(image, *, use_cls, **kwargs):
+                return SimpleNamespace(txts=[str(15-value if use_cls else value)], scores=[.99])
+            ui._ocr = Mock(side_effect=recognize)
+            self.assertEqual(ui.number(frame(), (820, 365, 930, 410)), value)
+            self.assertFalse(ui._ocr.call_args.kwargs['use_cls'])
+
+    def test_low_confidence_digit_detection_retries_recognition_without_lowering_threshold(self):
+        ui = EventUI.__new__(EventUI)
+        for score, expected in ((.99, 1), (.90, None)):
+            ui._ocr = Mock(side_effect=[SimpleNamespace(txts=['1'],scores=[.89]),
+                                       SimpleNamespace(txts=['1'],scores=[score])]*2)
+            self.assertEqual(ui.number(frame(), (443,382,490,427)), expected)
+            self.assertFalse(ui._ocr.call_args.kwargs['use_det'])
+            self.assertFalse(ui._ocr.call_args.kwargs['use_cls'])
+
     def test_crop_does_not_guess_between_two_numeric_results(self):
         ui = EventUI.__new__(EventUI)
         ui._ocr = Mock(return_value=SimpleNamespace(txts=["1", "2"], scores=np.array([.99, .99])))
@@ -285,10 +303,36 @@ class HardBulkTests(TestCase):
 
     def test_stale_remaining_counts_never_trigger_another_consumption(self):
         plan = {f"活动关卡H-{i}": 3 for i in (1, 2, 3)}
-        r = self.runner([self.preview(plan), self.bulk()])
-        with self.assertRaisesRegex(EventUIError, "停止重复消费"):
+        r = self.runner([self.preview(plan), *[self.bulk() for _ in range(39)]])
+        with patch("pcrscript.tasks.event_sweep.time.sleep"), self.assertRaisesRegex(EventUIError, "停止重复消费"):
             HardSweep(r).settle(plan)
         self.assertEqual(r.ui.clicks, ["挑战"])
+
+    def test_delayed_counters_and_receipt_over_old_list_are_reconciled_without_resubmission(self):
+        plan = {f"活动关卡H-{i}": 3 for i in (1, 2, 3)}
+        receipt = self.bulk()
+        receipt.items.extend(frame(("扫荡结果", 480, 175), ("确认", 480, 400)).items)
+        for intervening, expected in (([self.bulk(), self.bulk()], ["挑战"]),
+                                      ([receipt, self.bulk()], ["挑战", "确认"])):
+            with self.subTest(receipt=receipt in intervening):
+                r = self.runner([self.preview(plan), *intervening, self.bulk((0, 0, 0)),
+                                 frame(("活动关卡·首领", 155, 30))])
+                with patch("pcrscript.tasks.event_sweep.time.sleep"):
+                    HardSweep(r).settle(plan)
+                self.assertEqual(r.ui.clicks, expected)
+                self.assertEqual(r.report["pending"], [])
+
+    def test_story_selector_exit_requires_page_evidence_and_rejects_foreground_modals(self):
+        from pcrscript.game_ui.event_layout import navigation_exit
+        observed = self.bulk()
+        self.assertIsNone(navigation_exit(observed))
+        observed.items.extend(frame(("1个关卡的使用券张数", 600, 415)).items)
+        self.assertEqual(navigation_exit(observed).text, "取消")
+        for title in ("一键扫荡确认", "扫荡券确认", "扫荡结果", "获得道具"):
+            with self.subTest(title=title):
+                overlay = self.bulk()
+                overlay.items.extend(frame(("1个关卡的使用券张数", 600, 415), (title, 480, 175)).items)
+                self.assertIsNone(navigation_exit(overlay))
 
 
 class StrategyTests(TestCase):
@@ -582,6 +626,36 @@ class AvatarTests(TestCase):
         self.assertEqual([c.kwargs['expected_name'] for c in formation.inspect.call_args_list], names)
         formation.ui.driver.input.assert_called_once_with('合成角色')
 
+    def test_partial_source_selection_never_opens_empty_member_slots(self):
+        formation = EventFormation.__new__(EventFormation)
+        current = frame(('队伍编组',480,42), ('重置',690,135))
+        formation.ui = Mock(capture=Mock(return_value=current), wait=Mock(return_value=current))
+        formation.requires_declared_build = False
+        formation.search_rectangles = Mock(return_value=[(60,177,100,99)])
+        formation.avatars = Mock(query=Mock(return_value=[None]))
+        selected, inspected = [], []
+        formation.occupied_slots = lambda s: formation.slots[-len(selected):] if selected else []
+        def inspect(pos, **kwargs):
+            if pos in formation.slots:
+                occupied = formation.occupied_slots(current)
+                self.assertIn(pos, occupied, 'empty slots have no character detail')
+                name = selected[occupied.index(pos)]
+                inspected.append(name)
+            else:
+                name = kwargs['expected_name']
+            return SimpleNamespace(name=name, identity_verified=True)
+        formation.inspect = inspect
+        formation.member_readiness = Mock(return_value=[])
+        def search(ui, name, **kwargs):
+            formation.select_card = lambda pos: selected.append(name)
+            return current
+        names = ['合成角色甲', '合成角色乙', '合成角色丙']
+        with patch('pcrscript.tasks.event_formation.search_character', side_effect=search):
+            ready, details = formation.select(SimpleNamespace(members=[SimpleNamespace(name=n) for n in names]))
+        self.assertTrue(ready)
+        self.assertEqual(details['order'], names)
+        self.assertEqual(inspected, names)
+
     def test_search_waits_for_queued_input_before_defocusing(self):
         formation = EventFormation.__new__(EventFormation)
         formation.ui = Mock()
@@ -740,6 +814,29 @@ class AvatarTests(TestCase):
 
 
 class WorkflowTests(TestCase):
+    def test_entry_cancels_recollection_catalogue_with_its_own_layout(self):
+        from recollection_fixtures import sweep_selector
+        runner = CampaignClean.__new__(CampaignClean)
+        runner.check_deadline = Mock()
+        runner.ui = ReplayUI([sweep_selector(True), sweep_selector(),
+                             frame(('冒险', 538, 526)),
+                             frame(('主线关卡', 610, 200), ('剧情活动', 240, 330)),
+                             frame(('活动关卡·首领', 150, 30))])
+        self.assertTrue(runner.enter())
+        self.assertEqual(runner.ui.clicks, ['取消', '取消', '冒险', '剧情活动'])
+
+    def test_daily_entry_leaves_maze_selection_before_story_navigation(self):
+        from dawn_labyrinth_fixtures import catalogue, guild, home
+        maze_home = home()
+        maze_home.items.extend(frame(('冒险', 538, 526)).items)
+        ready = frame(('活动关卡·首领', 150, 30))
+        runner = CampaignClean.__new__(CampaignClean)
+        runner.check_deadline = Mock()
+        runner.ui = ReplayUI([catalogue(), guild(), maze_home,
+                             frame(('主线关卡', 610, 200), ('剧情活动', 240, 330)), ready])
+        self.assertTrue(runner.enter())
+        self.assertEqual(runner.ui.clicks, ['取消', (30, 30), '冒险', '剧情活动'])
+
     def test_cleared_story_memoir_and_mission_entries_never_open_pages(self):
         r = CampaignClean.__new__(CampaignClean)
         s = fixture("event_home")
@@ -935,6 +1032,7 @@ class WorkflowTests(TestCase):
             battles.return_value.bosses.side_effect = lambda: sequence.append("bosses")
             r.ui = SimpleNamespace(output=Path(folder), save=Mock())
             self.assertEqual(r.run()["status"], "complete")
+            self.assertEqual(json.loads((Path(folder)/'report.json').read_text(encoding='utf-8')), r.report)
             battles.assert_not_called()
         self.assertEqual(sequence, ["sweep", "stories", "memoirs", "missions", "exchange"])
 

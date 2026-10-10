@@ -1,9 +1,7 @@
 """Raise owned characters' bond with held gifts and read unlocked character stories."""
 from __future__ import annotations
 
-import json
 import re
-from pathlib import Path
 
 import cv2 as cv
 import numpy as np
@@ -11,7 +9,7 @@ import numpy as np
 from .base import BaseTask, TaskOptions, TaskReport
 from .registry import register
 from ..game_ui.screen import EventUI, EventUIError, normalized
-from ..run_session import clock as time
+from ..run_session import clock as time, atomic_json
 
 
 def gift_grades(screen) -> tuple[int, int] | None:
@@ -138,10 +136,7 @@ class MaxCharacterBonds(BaseTask):
             raise EventUIError('好感度任务超时，已保存接续记录')
 
     def save(self) -> None:
-        path = self.ui.output/'report.json'
-        temp = path.with_suffix('.tmp')
-        temp.write_text(json.dumps(self.report, ensure_ascii=False, indent=2), encoding='utf-8')
-        temp.replace(path)
+        atomic_json(self.ui.output/'report.json', self.report)
 
     def roster(self):
         return self.ui.wait(lambda s: s.find('角色一览', (25, 0, 250, 65)), '角色一览')

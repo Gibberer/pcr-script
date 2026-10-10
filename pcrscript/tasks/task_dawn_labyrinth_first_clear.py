@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from .base import BaseTask
+from .options import validated_options
 from .registry import register
 from .task_dawn_labyrinth import (DawnLabyrinth, SweepBlocked, load_daily_state,
                                   validate_options as validate_daily_options)
@@ -13,17 +14,9 @@ from ..run_session import RunCancelled, ResumeUnsafe, clock as time
 
 
 def validate_options(options):
-    if not isinstance(options, dict):
-        raise ValueError('DawnLabyrinthFirstClear必须是配置对象')
-    value = dict(options)
-    for key, default, upper in (('timeout', 1800, 7200), ('max_battles', 30, 60)):
-        number = value.setdefault(key, default)
-        if type(number) is not int or not 1 <= number <= upper:
-            raise ValueError(f'DawnLabyrinthFirstClear.{key}必须是1到{upper}的整数')
-    retry = value.setdefault('retry_failed_boss', False)
-    if type(retry) is not bool:
-        raise ValueError('DawnLabyrinthFirstClear.retry_failed_boss必须是布尔值')
-    return value
+    return validated_options(options, 'DawnLabyrinthFirstClear',
+                             integers=(('timeout', 1800, 7200), ('max_battles', 30, 60)),
+                             flags=(('retry_failed_boss', False),))
 
 
 @register('dawn_labyrinth_first_clear', requires_home=False)

@@ -7,7 +7,7 @@ from unittest.mock import Mock, patch
 import numpy as np
 import cv2 as cv
 
-from pcrscript.game_ui.screen import EventScreen, TextBox, EventUIError
+from pcrscript.game_ui.screen import EventScreen, EventUIError
 from pcrscript.game_ui.abyss import AbyssStage, next_stage, detail_stage, remaining, advanced
 from pcrscript.game_ui.guild_house import collect_produced_stamina, visible_stamina
 from pcrscript.tasks.task_abyss import AbyssPush, validate_options, equipment_retrial, source_for_stage, recent_unreleased, recent_previous_win
@@ -18,11 +18,11 @@ from pcrscript.tasks.abyss_party import AbyssFormation, archive_observations
 from pcrscript.tasks.abyss_history import AbyssHistory
 from pcrscript.run_session import RunCancelled
 from test_strategy_sources import fake_api
+from functools import partial
+from ui_fixtures import screen as synthetic_screen
 
 
-def screen(*labels):
-    return EventScreen(np.zeros((540, 960, 3), np.uint8), [
-        TextBox(text, 1, [[x-10,y-7],[x+10,y-7],[x+10,y+7],[x-10,y+7]]) for text,x,y in labels])
+screen = partial(synthetic_screen, background=0, score=1, box_half_size=(10, 7))
 
 
 def map_screen(number=1):
@@ -423,6 +423,7 @@ class AbyssTests(TestCase):
             self.assertTrue(actual.unique)
             # The final selected-slot verification must keep the same rule;
             # the shared base used to re-enable skill inspection here.
+            formation.occupied_slots = Mock(return_value=formation.slots)
             observed=formation.inspect_current(full=False)
             self.assertEqual(len(observed),5)
             self.assertTrue(all(a.identity_verified for a in observed))
@@ -707,24 +708,58 @@ class AbyssTests(TestCase):
             with self.subTest(recovered=recovered):
                 formation=object.__new__(AbyssFormation)
                 formation.ui=Mock(capture=Mock(return_value=SimpleNamespace(image=np.zeros((540,960,3),np.uint8))))
-                formation.avatars=Mock(query=Mock(return_value=[None]*5))
+                formation.avatars=Mock(query=Mock(side_effect=[[None]*5, ['old','b','c','d','e']]))
                 formation.occupied_slots=Mock(return_value=list(range(5)))
                 formation.owned_candidates=Mock(return_value=['replacement'])
                 formation.recover_equipment=Mock()
                 unknown=dict(unready=[dict(character='replacement',reasons=['专武1开启状态未知'])])
                 formation.select_source_members=Mock(side_effect=[(False,unknown),(recovered,unknown)])
-                party=EventParty('synthetic','local',[MemberRequirement(n,1,1,5,False,False,True,0) for n in adapted])
-                formation.current_trial=Mock(return_value=(party,dict(order=adapted,
-                    observed=[dict(name=n,stars=5) for n in adapted])))
+                def current_trial(stage):
+                    names = adapted if formation.select_source_members.call_count == 2 else ['old','b','c','d','e']
+                    party = EventParty('synthetic','local',[
+                        MemberRequirement(n,1,1,5,False,False,True,0) for n in names])
+                    return party,dict(order=names,observed=[dict(name=n,stars=5) for n in names])
+                formation.current_trial=Mock(side_effect=current_trial)
                 source=dict(source='synthetic',names=original.copy(),instant=[False]+[True]*4,required_stars=[None]*5)
-                with patch('pcrscript.tasks.strategy_formation.character_roles',return_value={'missing':role,'replacement':role}):
+                with patch('pcrscript.tasks.strategy_formation.character_roles',return_value={
+                        'missing':role,'replacement':role,'old':role}):
                     selected,audit=formation.adapt_source(stage,source,['missing'])
                 formation.recover_equipment.assert_called_once_with(stage,adapted)
                 self.assertEqual(formation.select_source_members.call_count,2)
+                self.assertEqual(source['names'],adapted)
+                self.assertEqual([(row['missing'],row['replacement']) for row in source['adaptations']],
+                                 [('missing','replacement')])
                 self.assertEqual(selected is not None,recovered)
                 if recovered:self.assertFalse(selected.members[0].instant)
 
-    def test_equipment_recovery_keeps_missing_versions_blocked_without_repeating_search(self):
+    def test_new_unknown_after_reselection_has_its_own_bounded_equipment_recovery(self):
+        stage = AbyssStage('water', 5, 4)
+        names = ['a', 'b', 'c', 'd', 'e']
+        for resolved in (False, True):
+            with self.subTest(resolved=resolved):
+                formation = object.__new__(AbyssFormation)
+                formation.allow_substitutions = False
+                formation.ui = Mock(capture=Mock(return_value=SimpleNamespace(image=np.zeros((540,960,3),np.uint8))))
+                formation.avatars = Mock(query=Mock(return_value=names))
+                formation.observed = {name: SimpleNamespace(unique=False, unique2=False) for name in names}
+                formation.recover_equipment = Mock()
+                party = EventParty('synthetic', 'local', [MemberRequirement(n,1,1,5,False,False,True,0) for n in names])
+                def audit(stage):
+                    attempt = formation.current_trial.call_count
+                    unknown = 'a' if attempt == 1 else 'b' if attempt == 2 or not resolved else None
+                    for name, status in formation.observed.items():
+                        status.unique = status.unique2 = None if name == unknown else False
+                    return (None if unknown else party, dict(order=names,
+                        observed=[dict(name=n,stars=5) for n in names],
+                        unready=[dict(character=unknown,reasons=['专武状态未知'])] if unknown else []))
+                formation.current_trial = Mock(side_effect=audit)
+                source = dict(source='synthetic',names=names,instant=[True]*5,required_stars=[None]*5)
+                selected, _ = formation.source_trial(stage, source)
+                self.assertEqual(selected is not None, resolved)
+                self.assertEqual(formation.current_trial.call_count, 3)
+                self.assertEqual([call.args[1] for call in formation.recover_equipment.call_args_list], [['a'], ['b']])
+
+    def test_missing_source_member_skips_equipment_recovery_when_substitutions_are_disabled(self):
         formation=object.__new__(AbyssFormation)
         formation.allow_substitutions=False
         formation.ui=Mock(capture=Mock(return_value=SimpleNamespace(image=np.zeros((540,960,3),np.uint8))))
@@ -739,10 +774,9 @@ class AbyssTests(TestCase):
                     instant=[True]*5,required_stars=[None]*5)
         party,_=formation.source_trial(AbyssStage('water',5,4),source)
         self.assertIsNone(party)
-        self.assertEqual([m.name for m in formation.select.call_args_list[1].args[0].members],
-                         ['held','c','d','e'])
+        formation.select.assert_called_once()
         formation.current_trial.assert_not_called()
-        formation.recover_equipment.assert_called_once_with(AbyssStage('water',5,4),['held','c','d','e'])
+        formation.recover_equipment.assert_not_called()
 
     def test_unready_or_disabled_trials_never_start(self):
         for enabled in (True,False):

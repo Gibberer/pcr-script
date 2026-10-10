@@ -19,7 +19,8 @@ from pcrscript.tasks import DawnLabyrinth, DawnLabyrinthFirstClear
 from pcrscript.tasks.dawn_labyrinth_party import LabyrinthFormation, LabyrinthBossStrategy
 from pcrscript.tasks.event_strategy import CharacterStatus, EventParty, MemberRequirement
 from pcrscript.tasks.party_variants import character_roles
-from test_dawn_labyrinth import screen, home, guild, preview, catalogue, bulk, mission_home, missions, mission_receipt
+from ui_fixtures import screen, replay_ui, TaskReplayMixin
+from dawn_labyrinth_fixtures import home, guild, preview, catalogue, bulk, mission_home, missions, mission_receipt
 
 
 def difficulty(selected=1):
@@ -559,7 +560,7 @@ class LabyrinthFormationTests(TestCase):
             formation.require_build(value)
 
 
-class FirstClearTaskTests(TestCase):
+class FirstClearTaskTests(TaskReplayMixin, TestCase):
     def setUp(self):
         self.temp = TemporaryDirectory()
         self.folder = Path(self.temp.name)
@@ -569,8 +570,7 @@ class FirstClearTaskTests(TestCase):
                                                'state_dir': str(self.folder/'state'),
                                                'account_key': 'synthetic-account'}})
         self.task = DawnLabyrinthFirstClear(self.robot)
-        self.task.ui = Mock(output=self.folder, last=None)
-        self.task.ui.save.return_value = self.folder/'synthetic.png'
+        self.task.ui = replay_ui(self.folder)
         self.task.ui.number.side_effect = lambda s, roi: s.number(roi)
         self.core_preparation = patch.object(self.task, 'prepare_core_equipment', side_effect=lambda s, before: s)
         self.core_preparation.start()
@@ -581,17 +581,6 @@ class FirstClearTaskTests(TestCase):
     def tearDown(self):
         self.sleep.stop()
         self.temp.cleanup()
-
-    def frames(self, values):
-        iterator = iter(values)
-        def capture():
-            value = next(iterator, values[-1])
-            self.task.ui.last = value
-            return value
-        self.task.ui.capture.side_effect = capture
-
-    def clicks(self):
-        return [getattr(call.args[0], 'text', call.args[0]) for call in self.task.ui.click.call_args_list]
 
     def core_proof(self, level=365, observed_at=1000, **changes):
         return dict(dict(level=level, rank=38, stars=6, skill_level=365,
@@ -607,8 +596,7 @@ class FirstClearTaskTests(TestCase):
                                 ({'training_evidence': []}, '星级与技能证据缺失')):
                 with self.subTest(name=name, gap=gap):
                     self.task = DawnLabyrinthFirstClear(self.robot)
-                    self.task.ui = Mock(output=self.folder, last=None)
-                    self.task.ui.save.return_value = self.folder/'synthetic.png'
+                    self.task.ui = replay_ui(self.folder)
                     self.task.ui.number.side_effect = lambda s, roi: s.number(roi)
                     self.frames([home(11), home(11), self.guild(), difficulty(), self.guild(),
                                  self.locked(), self.guild(), home(11)])
@@ -642,8 +630,7 @@ class FirstClearTaskTests(TestCase):
             for key in ('unique', 'unique2'):
                 with self.subTest(name=name, slot=key):
                     self.task = DawnLabyrinthFirstClear(self.robot)
-                    self.task.ui = Mock(output=self.folder, last=None)
-                    self.task.ui.save.return_value = self.folder/'synthetic.png'
+                    self.task.ui = replay_ui(self.folder)
                     self.task.ui.number.side_effect = lambda s, roi: s.number(roi)
                     self.frames([home(11), home(11), self.guild(), difficulty(), self.guild(),
                                  self.locked(), self.guild(), home(11)])
@@ -1048,8 +1035,7 @@ class FirstClearTaskTests(TestCase):
                       sweep_guild_choice(), bulk(guild_name='美食殿堂')):
             with self.subTest(page=value.text()):
                 self.task = DawnLabyrinthFirstClear(self.robot)
-                self.task.ui = Mock(output=self.folder, last=None)
-                self.task.ui.save.return_value = self.folder/'synthetic.png'
+                self.task.ui = replay_ui(self.folder)
                 self.frames([home(0), home(0), self.guild(), difficulty(), self.guild(),
                              value, self.guild(), home(0)])
                 report = self.task.run()
@@ -1074,8 +1060,7 @@ class FirstClearTaskTests(TestCase):
                       bulk(guild_name='合成公会')):
             with self.subTest(page=value.text()):
                 self.task = DawnLabyrinthFirstClear(self.robot)
-                self.task.ui = Mock(output=self.folder, last=None)
-                self.task.ui.save.return_value = self.folder/'synthetic.png'
+                self.task.ui = replay_ui(self.folder)
                 self.frames([home(11), home(11), self.guild(), difficulty(), self.guild(),
                              value, self.guild(), home(11)])
                 with patch.object(self.task, 'collect_mission_rewards') as missions:
@@ -1315,8 +1300,7 @@ class FirstClearTaskTests(TestCase):
         for retry in (False, True):
             with self.subTest(retry=retry):
                 self.task = DawnLabyrinthFirstClear(self.robot)
-                self.task.ui = Mock(output=self.folder, last=None)
-                self.task.ui.save.return_value = self.folder/'synthetic.png'
+                self.task.ui = replay_ui(self.folder)
                 self.task.options['retry_failed_boss'] = retry
                 self.task.exploration_verified = True
                 self.task.report.update(entries=1, pending_spend=dict(before=11, after=10, cost=1))

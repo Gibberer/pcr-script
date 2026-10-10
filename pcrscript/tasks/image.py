@@ -19,10 +19,10 @@ class ImageTask(BaseTask):
         self.define_width: int = BASE_WIDTH
         self.define_height: int = BASE_HEIGHT
         self.num_step: int = 1
-        self.total_step: int | str = 1
+        self.total_step: int | str | None = None
         self.show_progress: bool = True
 
-    def set_progress(self, total_step: int | str = 1, num_step: int = 1, show_progress: bool = True) -> None:
+    def set_progress(self, total_step: int | str | None = None, num_step: int = 1, show_progress: bool = True) -> None:
         self.total_step = total_step
         self.num_step = num_step
         self.show_progress = show_progress

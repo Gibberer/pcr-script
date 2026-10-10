@@ -4,7 +4,7 @@ from unittest import TestCase
 from unittest.mock import Mock,patch
 import json
 import requests
-from pcrscript.tasks.strategy_sources import discover_sources,relevant,source_queries
+from pcrscript.tasks.strategy_sources import SourceRules,discover_sources,relevant,source_queries,unparsed_switch_requirement
 from pcrscript.tasks import find_taskclass
 from pcrscript.run_session import RunCancelled
 
@@ -16,6 +16,56 @@ def fake_api():
  return a
 
 class SourceTests(TestCase):
+ def test_fixed_set_claims_do_not_hide_comma_separated_exceptions_or_actions(self):
+  for statement in ('Boss2全SET，除了第二人关闭', 'Boss2SET OXOOO,然后关掉',
+                    'Boss2全SET，只有第一人开启', 'Boss2全SET，别开自动',
+                    'Boss2 OXOOO开自动，0:40 全SET', 'Boss2 OXOOO开自动,104角色XXOOO',
+                    'Boss2 OXOOO开自动；Boss2 0:40全SET'):
+   with self.subTest(statement=statement):
+    self.assertTrue(unparsed_switch_requirement(statement))
+  self.assertFalse(unparsed_switch_requirement('不想操作的1王全set三刀，2王OXOOO开自动同样三刀'))
+
+ def test_task_rules_share_identity_checks_and_isolate_target_and_rule_caches(self):
+  with TemporaryDirectory() as folder:
+   api=fake_api();ids=[f'BV{i:010d}' for i in range(4)]
+   api.search.return_value={'code':0,'data':{'result':[{'result_type':'video','data':[
+    {'bvid':bvid,'title':'测试区域 攻略'} for bvid in ids]}]}}
+   def info(*,bvid):
+    index=ids.index(bvid)
+    return {'code':0,'data':{'bvid':bvid,
+     'title':('其他游戏' if index==0 else '公主连结 日服' if index==1 else '公主连结 国服')+' 测试区域',
+     'desc':'方案A' if index==2 else '方案B',
+     'pages':[{'cid':index+1,'page':1,'part':'测试阶段'}]}}
+   api.getVideoInfo.side_effect=info
+   rules=SourceRules('synthetic:1',queries=lambda options:['测试区域 指定查询'],
+    reject=lambda source,options:None if source['description']==options['variant'] else '方案不适用',
+    scope_keys=('variant',))
+   options=dict(task_type='dungeon',area='测试区域',variant='方案B',max_videos=1,cache_dir=folder,
+    search_queries=[' 测试区域 补充查询 ', '测试区域 指定查询'])
+   result=discover_sources(options,api=api,rules=rules)
+   self.assertEqual([c['bvid'] for c in result['candidates']],ids[3:])
+   self.assertEqual(len(result['excluded']),3)
+   self.assertEqual([call.args[0] for call in api.search.call_args_list],
+                    ['测试区域 指定查询','测试区域 补充查询'])
+   api.search.reset_mock()
+   self.assertTrue(discover_sources(options,api=api,rules=rules)['cache_hit'])
+   api.search.assert_not_called()
+   changed=discover_sources(dict(options,variant='方案A'),api=api,rules=rules)
+   self.assertEqual([c['bvid'] for c in changed['candidates']],ids[2:3])
+   self.assertNotEqual(changed['catalog'],result['catalog'])
+   revised=discover_sources(options,api=api,rules=SourceRules('synthetic:2',
+    queries=rules.queries,reject=lambda source,options:'规则已改变',scope_keys=('variant',)))
+   self.assertEqual(revised['candidates'],[])
+   self.assertNotEqual(revised['catalog'],result['catalog'])
+
+ def test_configured_query_limits_fail_before_network_access(self):
+  for queries in ('keyword',[None],[' '],['x'*201],['query']*21):
+   with self.subTest(queries=queries):
+    api=fake_api()
+    with self.assertRaisesRegex(ValueError,'search_queries'):
+     discover_sources(dict(task_type='dungeon',area='测试区域',search_queries=queries),api=api)
+    api.search.assert_not_called();api.getVideoInfo.assert_not_called()
+
  def test_exclusions_precede_metadata_limits_and_have_distinct_caches(self):
   for effort in ('normal','high'):
    with self.subTest(effort=effort),TemporaryDirectory() as folder:

@@ -6,23 +6,20 @@ import json
 from pathlib import Path
 
 from .base import BaseTask
+from .options import validated_options
 from .registry import register
 from ..game_ui import dawn_labyrinth as maze
 from ..game_ui.abyss_subjugation import navigation_exit as subjugation_navigation_exit
+from ..game_ui.recollection import navigation_exit as recollection_navigation_exit, sweep_receipt as recollection_receipt
 from ..game_ui.screen import EventUI, EventUIError, normalized
 from ..run_session import RunCancelled, ResumeUnsafe, atomic_json, clock as time, emit
 
 
 def validate_options(options: dict) -> dict:
-    if not isinstance(options, dict):
-        raise ValueError('DawnLabyrinth必须是配置对象')
-    value = dict(options)
+    value = validated_options(options, 'DawnLabyrinth',
+                              integers=(('timeout', 600, 3600), ('max_passes', 99, 99)))
     if 'account_key' in value and (not isinstance(value['account_key'], str) or not value['account_key'].strip()):
         raise ValueError('DawnLabyrinth.account_key必须是非空字符串')
-    for key, default, upper in (('timeout', 600, 3600), ('max_passes', 99, 99)):
-        number = value.setdefault(key, default)
-        if type(number) is not int or not 1 <= number <= upper:
-            raise ValueError(f'DawnLabyrinth.{key}必须是1到{upper}的整数')
     return value
 
 
@@ -75,7 +72,6 @@ class DawnLabyrinth(BaseTask):
         # First-clear exploration has a separate, conservative recovery flow.
         # Daily sweeps need a device/account record outside per-run evidence.
         if getattr(self, 'state_path', None) is not None:
-            self.state_path.parent.mkdir(parents=True, exist_ok=True)
             atomic_json(self.state_path, {name: self.report[name] for name in
                         ('pending_spend', 'pending_mission_claim') if name in self.report})
         atomic_json(self.ui.output / 'report.json', self.report)
@@ -97,6 +93,8 @@ class DawnLabyrinth(BaseTask):
     def enter(self):
         for _ in range(30):
             screen = self.capture()
+            if recollection_receipt(screen):
+                raise SweepBlocked('存在追忆战扫荡回执，请先运行追忆战核对；未记录为迷宫消费')
             if maze.mission_receipt(screen):
                 path = self.ui.save('missions_resumed_receipt', screen)
                 self.report.setdefault('resumed_mission_receipts', []).append(str(path))
@@ -123,7 +121,7 @@ class DawnLabyrinth(BaseTask):
                 continue
             if maze.home(screen):
                 return screen
-            if (cancel := subjugation_navigation_exit(screen)) is not None:
+            if (cancel := subjugation_navigation_exit(screen) or recollection_navigation_exit(screen)) is not None:
                 self.ui.click(cancel)
                 continue
             if maze.bulk_confirmation(screen) or maze.sweep_confirmation(screen):

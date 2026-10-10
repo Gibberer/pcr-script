@@ -6,9 +6,10 @@ import re
 
 from .event_strategy import EventParty, MemberRequirement
 from .strategy_document import missing_fields, to_event_party
-from .strategy_inputs import declared_region, source_statements
+from .strategy_inputs import advisory_requirement, declared_region, fixed_set_statement, source_statements
 from ..constants import SERVER_TIMEZONE
 from ..game_ui.screen import normalized
+from ..game_ui.guide_vision import combat_boss_labels
 
 ELEMENTS = ('fire', 'water', 'wind', 'light', 'dark')
 LABELS = ('火', '水', '风', '光', '暗')
@@ -20,6 +21,8 @@ BUILD_VALUE = re.compile(
     r'专(?:用装备|武)?[12一二](?:强化)?(?:等级|阶段|Lv\.?)?[：:=]?'
     r'(?:\d{1,3}(?:[星★级])?|未开启|未装备|未实装|未开放|已装备|关闭|开启|装备|有|无)|'
     r'专[：:=]?\d{2,3}(?!\d))', re.I)
+BUILD_DIRECTIVE = re.compile(r'需|要|必须|必备|要求|至少|最低|不低于|不能|不可|不得|'
+                             r'满|相同|一致|突破|务必|按照|参照|请看|详见|如图')
 
 
 def source_options(options, event, *, kind='outpost', difficulty='高难', boss='', boss_number=None):
@@ -138,6 +141,24 @@ def visible_scope(texts, page, options):
     return (found, True) if found else (metadata, bool(metadata))
 
 
+def combat_constraint_scope(texts, combat_scene):
+    """An exact boss HUD scopes battle actions, without authorizing a tier or party."""
+    labels = [t.text.replace(' ', '') for t in texts if t.score >= .95 and t.center[1] < 115]
+    controls = (any(t.text == '菜单' and t.center[0] > 1000 and t.center[1] < 115
+                    for t in texts if t.score >= .95)
+                and any(t.text == '自动' and t.center[0] > 1000 and 300 < t.center[1] < 660
+                        for t in texts if t.score >= .95))
+    if not combat_scene and not controls:
+        return {}
+    bosses = combat_boss_labels(texts)
+    health = [m for label in labels if (m := re.fullmatch(r'(\d{7,11})/(\d{7,11})', label))
+              and 0 <= int(m[1]) <= int(m[2])]
+    timers = [label for label in labels if re.fullmatch(r'\d{1,2}:[0-5]\d', label)]
+    if len(bosses) == len(health) == len(timers) == 1:
+        return dict(kind='boss', boss=next(iter(bosses))[0])
+    return {}
+
+
 def damage_reference(page, scope, maximum, source):
     """Use the verified plan's own title, never another Boss's advertised damage."""
     if scope.get('kind') != 'boss':
@@ -208,6 +229,18 @@ def relevant_statements(text, options):
     return '\n'.join(result)
 
 
+def metadata_set_requirements(metadata, options):
+    """Bind explicit fixed SET orders only to a named Boss, never infer off from a missing badge."""
+    rows = []
+    for statement, method in metadata:
+        for line in re.split(r'[\r\n,，;；。!?！？|｜]+', statement):
+            flags = fixed_set_statement(line)
+            bosses, _ = leading_boss_scope(line.strip().removeprefix('不想操作的'))
+            if flags is not None and bosses and options.get('boss_number') in bosses:
+                rows.append(dict(flags=flags, plan=None, difficulty=None, text=line, method=method))
+    return rows
+
+
 def metadata_build_requirements(metadata, options, names):
     """Bind only fully read named declarations; retain other build text as blocking evidence."""
     from ..game_ui.guide_vision import labeled_fields
@@ -241,7 +274,16 @@ def metadata_build_requirements(metadata, options, names):
                 tail = tail[match.end():].lstrip('：:,，;；')
             tiers = {d for d in ('普通', '困难', '高难', '极难') if d in line}
             difficulty = next(iter(tiers)) if len(tiers) == 1 and not SHARED_REQUIREMENTS.search(line) else None
-            rows.append(dict(name=name if fields and not tail else None, fields=fields,
+            # Only explicit comparisons are advisory. Failure to parse a value
+            # (such as "三星" or "专武已装备") must not erase a declaration.
+            build_clauses = [clause for clause in re.split(r'[,，]', line) if BUILD_LABEL.search(clause)]
+            advisory = (name is None and not fields and advisory_requirement(line)
+                        or not BUILD_VALUE.search(line) and all(
+                            not BUILD_DIRECTIVE.search(clause) and len(list(BUILD_LABEL.finditer(clause))) == 1
+                            and re.fullmatch(r'(?:较|偏)?[低高](?:了|一些|一点)?',
+                                             clause[BUILD_LABEL.search(clause).end():].strip())
+                            for clause in build_clauses))
+            rows.append(dict(name=name if fields and not tail else None, fields=fields, advisory=advisory,
                              text=line, method=method, plan=plan_number(dict(part=line)), difficulty=difficulty))
     return rows
 

@@ -147,6 +147,14 @@ class EventScreen:
     def story_list(self):
         return bool(self.find("活动剧情", (0, 0, 250, 60)))
 
+    @property
+    def expedition_home(self):
+        # Expedition has a top-right menu too; it is not an active battle.
+        return all((item := self.find(text, roi, exact=True)) and item.score >= .95
+                   for text, roi in (("探险", (45, 0, 180, 65)),
+                                     ("冒险目的地", (20, 415, 190, 480)),
+                                     ("冒险", (475, 475, 595, 540))))
+
 
 class EventUI:
     def __init__(self, driver, output="cache/agent/ui", timeout=45):
@@ -161,7 +169,10 @@ class EventUI:
         self.last = None
 
     def capture(self, ocr=True):
-        img = self.driver.screenshot()
+        return self.observe(self.driver.screenshot(), ocr=ocr)
+
+    def observe(self, img, ocr=True):
+        """Recognize a frame already captured by the shared action runner."""
         if img is None or not img.size:
             raise EventUIError("模拟器截图失败")
         # Capture size is authoritative (the emulator can change resolution
@@ -221,8 +232,10 @@ class EventUI:
         # high confidence for either scale; an uncertain field must stay unknown.
         for scale in (4, 3):
             patch = cv.resize(screen.image[y1:y2, x1:x2], None, fx=scale, fy=scale)
-            result = self._ocr(patch, use_det=True, use_cls=True, use_rec=True)
-            if result.txts is None or len(result.txts) == 0:
+            # Numeric fields are upright; classification can rotate 9 into 6.
+            result = self._ocr(patch, use_det=True, use_cls=False, use_rec=True)
+            scores = result.scores if result.scores is not None else []
+            if result.txts is None or len(result.txts) == 0 or not any(score >= .95 for score in scores):
                 result = self._ocr(patch, use_det=False, use_cls=False)
             raw_texts = result.txts if result.txts is not None else []
             raw_scores = result.scores if result.scores is not None else []
@@ -274,8 +287,8 @@ class EventUI:
             return None
         return int(thumb[0]+y1), int(thumb[-1]+y1)
 
-    def scrollbar(self, screen, roi, direction):
-        """Verify a list drag before using its background input fallback."""
+    def scrollbar(self, screen, roi, direction, *, reached=None):
+        """Verify movement or a caller's visible destination before fallback."""
         bounds = self.scrollbar_bounds(screen, roi)
         if bounds is None:
             raise EventUIError('列表滚动条未确认')
@@ -295,6 +308,8 @@ class EventUI:
             until = time.monotonic()+timeout
             while time.monotonic() < until:
                 after = self.capture()
+                if reached is not None and reached(after):
+                    return True
                 actual = self.scrollbar_bounds(after, roi)
                 if actual is None:
                     # The game's touch highlight briefly covers the thumb.

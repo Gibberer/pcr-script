@@ -53,14 +53,23 @@ class VideoStrategyTests(TestCase):
     def test_fixed_hud_switch_status_does_not_discard_creator_operations(self):
         proof = Evidence('https://example.com/synthetic', method='video_ocr')
         label = '连结爆发立即发动开启'
-        self.assertEqual(text_constraints([GuideText(label, .99, (1080, 70, 180, 20))],
-                         proof, unparsed_settings=True), ([], []))
+        for character in ('爆', '螺', '煤'):
+            self.assertEqual(text_constraints([GuideText(label.replace('爆', character), .99, (1080, 70, 180, 20))],
+                             proof, unparsed_settings=True), ([], []))
         for text, rectangle in ((label, (10, 170, 200, 20)),
+                                (label.replace('爆', '煤'), (10, 170, 200, 20)),
                                 ('连结爆发立即发动关闭', (1080, 70, 180, 20)),
                                 ('需手动连结爆发立即发动开启', (1080, 70, 180, 20))):
             with self.subTest(text=text, rectangle=rectangle):
                 self.assertTrue(text_constraints([GuideText(text, .99, rectangle)],
                                 proof, unparsed_settings=True)[1])
+
+        # Compact timestamps and O/X orders still describe a manual axis.
+        for text in ('104角色XXOOO', '001角色OXOOO', '1:04角色全SET',
+                     'Boss1 OXOOO开自动，0:40 全SET', 'Boss1 OXOOO开自动,104角色XXOOO',
+                     'Boss1 OXOOO开自动；Boss1 0:40全SET'):
+            self.assertTrue(text_constraints([GuideText(text, .99, (10, 170, 200, 20))],
+                            proof, unparsed_settings=True)[1])
 
     def test_event_starting_mode_caption_can_coexist_with_later_hud_phase(self):
         labels = [GuideText('SP模式1', 1, (10, 180, 150, 25)),
@@ -677,6 +686,38 @@ class VideoStrategyTests(TestCase):
                 self.assertEqual(result['status'],'complete');parse.assert_called_once()
                 self.assertTrue(Path(result['document']).is_file())
 
+    def test_task_source_rules_apply_to_supplied_and_searched_links_before_parse_budget(self):
+        from pcrscript.tasks.strategy_sources import SourceRules
+        with TemporaryDirectory() as folder:
+            api=Mock()
+            api.getVideoInfo.side_effect=lambda bvid:dict(code=0,data=dict(bvid=bvid,
+                title=('其他游戏' if bvid=='BVOTHER' else '公主连结')+' 火4-1',
+                desc='不适用' if bvid=='BVPREFERRED' else '适用',
+                pages=[dict(cid=1,part='火4-1')]))
+            rejected=[]
+            def reject(source,options):
+                rejected.append(source)
+                return '任务要求不符' if source['description']=='不适用' else None
+            rules=SourceRules('synthetic:1',reject=reject,scope_keys=('variant',))
+            index=SimpleNamespace(names=['角色'],matrix=np.ones((1,1728),np.float32))
+            with patch('pcrscript.tasks.strategy_video.preferred_sources',return_value=([
+                    dict(bvid='BVOTHER'),dict(bvid='BVPREFERRED')],[])), \
+                 patch('pcrscript.tasks.strategy_video.discover_sources',
+                       return_value=dict(candidates=[dict(bvid='BVSEARCHED')])) as search, \
+                 patch('pcrscript.tasks.strategy_video.parse_video_source',
+                       return_value=dict(parties=[complete_party()],errors=[])) as parse:
+                report=acquire_strategies(dict(task_type='abyss',stage='4-1',element='fire',
+                    variant='A',source_urls=['https://example.com/synthetic'],max_videos=1,
+                    parsed_dir=folder),api=api,index=index,rules=rules)
+            self.assertEqual(report['status'],'complete')
+            self.assertEqual([source['bvid'] for source in rejected],['BVPREFERRED','BVSEARCHED'])
+            self.assertTrue(all(source['provider']=='bilibili' and source['pages'][0]['part']=='火4-1'
+                                for source in rejected))
+            self.assertEqual(parse.call_count,1)
+            self.assertEqual(parse.call_args.args[0]['bvid'],'BVSEARCHED')
+            self.assertIs(search.call_args.kwargs['rules'],rules)
+            self.assertEqual(report['skipped_sources'][0]['reason'],'任务要求不符')
+
     def test_irrelevant_preferred_video_does_not_exhaust_parse_budget(self):
         with TemporaryDirectory() as folder:
             api=Mock()
@@ -760,7 +801,7 @@ class VideoStrategyTests(TestCase):
             self.assertEqual(buttons.call_count,page['frames']-2)
 
     def parse_targeted_auto_source(self, folder, kind, wide, *, auto_on=True,
-                                   existing='missing', local_label='AUTO'):
+                                   existing='missing', local_label='AUTO', target_difficulty='普通'):
         boxes = [(190+i*120, 390, 100, 100) for i in range(5)]
         members = [dict(name=f'合成角色{i}', rectangle=list(box), score=.99)
                    for i, box in enumerate(boxes)]
@@ -792,7 +833,10 @@ class VideoStrategyTests(TestCase):
                              else '公主连结 国服 深渊讨伐战 合成合集'),
                       pages=[dict(cid=1, part='合成合集', duration=1)])
         options = dict(task_type=kind, area='米洛克的领域', stage='1', parsed_dir=folder,
-                       kind='boss', difficulty='普通', boss='合成首领', observed_target=target)
+                       kind='boss', difficulty=target_difficulty, boss='合成首领', observed_target=target)
+        if target_difficulty != '普通':
+            options['observed_target'] = [dict(target, scope=dict(scope, difficulty=target_difficulty),
+                level=200, maximum_hp=150000000, image='synthetic_current_target.png'), target]
         capture = Mock()
         raw = cv.resize(frame, (raw_width, raw_height))
         capture.read.side_effect = [(True, raw), (True, raw.copy())]
@@ -817,6 +861,16 @@ class VideoStrategyTests(TestCase):
         candidates = (parties_for_floor(report, '米洛克的领域', 1, allow_local_trials=True)
                       if kind == 'recollection' else parties_for_target(report, options, allow_local_trials=True))
         return report['parties'][0], candidates
+
+    def test_higher_boss_target_can_parse_a_freshly_verified_lower_tier_trial(self):
+        with TemporaryDirectory() as folder:
+            raw, candidates = self.parse_targeted_auto_source(folder, 'subjugation', True,
+                                                              target_difficulty='困难')
+        self.assertEqual(raw['scope']['difficulty'], '普通')
+        self.assertEqual(raw['scope_evidence'][0]['target']['maximum_hp'], 80000000)
+        self.assertEqual(len(candidates), 1)
+        self.assertEqual(candidates[0].damage_reference, {})
+        self.assertTrue(any('普通' in note and '困难' in note for note in candidates[0].assumptions))
 
     def test_full_ocr_local_trials_retain_targeted_auto(self):
         for kind in ('recollection', 'subjugation'):

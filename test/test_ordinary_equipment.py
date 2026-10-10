@@ -6,7 +6,7 @@ import cv2 as cv
 from pcrscript.game_ui.ordinary_equipment import (SLOT_CENTERS, selected_slot,
     slot_fields, summarize_slots, read_slot_fields, inspect_ordinary_equipment)
 from pcrscript.game_ui.screen import EventUIError
-from test_dawn_labyrinth import screen
+from ui_fixtures import screen
 
 
 def slot(index, state='equipped'):

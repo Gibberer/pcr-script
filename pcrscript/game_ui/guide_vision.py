@@ -22,6 +22,24 @@ class GuideText:
         return x+w/2, y+h/2
 
 
+def combat_boss_labels(texts):
+    """Read joined or adjacent boss/level labels from the guide's top HUD."""
+    header = [t for t in texts if t.score >= .95 and t.center[1] < 115]
+    bosses = {(m[1], int(m[2])) for t in header if (m := re.fullmatch(
+        r'(.{2,40}?)(?:等级[.．:：]?|Lv\.?)([1-9]\d*)', t.text.replace(' ', ''), re.I))}
+    for level in header:
+        match = re.fullmatch(r'(?:等级[.．:：]?|Lv\.?)([1-9]\d*)', level.text.replace(' ', ''), re.I)
+        if match is None:
+            continue
+        for name in header:
+            label = name.text.replace(' ', '')
+            if (re.fullmatch(r'[^\d/:：]{2,40}', label)
+                    and abs(level.center[1]-name.center[1]) <= 10
+                    and -5 <= level.rectangle[0]-name.rectangle[0]-name.rectangle[2] <= 40):
+                bosses.add((label, int(match[1])))
+    return bosses
+
+
 def read_text(image, ocr) -> list[GuideText]:
     result = ocr(image, use_det=True, use_cls=True, use_rec=True)
     if result.txts is None or result.boxes is None:

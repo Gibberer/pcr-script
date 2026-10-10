@@ -8,7 +8,7 @@ from pcrscript.game_ui.character_training import (SKILL_GROUPS, owned_six_stars,
     training_skill_levels, inspect_owned_training)
 from pcrscript.game_ui.ordinary_equipment import inspect_ordinary_equipment
 from pcrscript.run_session import RunCancelled
-from test_dawn_labyrinth import screen
+from ui_fixtures import screen
 from test_ordinary_equipment import slot
 
 

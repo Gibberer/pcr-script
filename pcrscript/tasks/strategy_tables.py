@@ -8,6 +8,7 @@ import requests
 from rapidocr import RapidOCR
 from ..game_ui.avatars import AvatarIndex,face_crop,feature
 from ..game_ui.screen import normalized
+from ..run_session import atomic_json
 
 
 def universal_row(image,ocr,index):
@@ -118,5 +119,5 @@ def extract_tables(source,api,*,directory='cache/game/strategies/video_tables'):
             if row.get('chapters')==[1,3]:break
         capture.release()
     value=dict(version=5,source=source['url'],parties=parties,pending=[] if parties else ['未解析到两帧一致的五人通用配队表'])
-    if parties:saved.write_text(json.dumps(value,ensure_ascii=False,indent=2),encoding='utf-8')
+    if parties:atomic_json(saved, value)
     return value

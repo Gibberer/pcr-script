@@ -76,6 +76,9 @@ class SubjugationGuideTests(TestCase):
         runner = SimpleNamespace(options=dict(discover_sources=True, source_urls=[], allow_local_trials=True),
             source_pools={}, inspected_sources={}, event=EVENT, report={}, formation=Mock(),
             report_progress=Mock(), check_deadline=Mock(), save=Mock())
+        runner.source_targets = {(kind, tier, boss): dict(boss=boss, difficulty=tier)
+            for kind, tier, boss in (('boss', '普通', '合成首领甲'), ('boss', '困难', '合成首领甲'),
+                                     ('boss', '普通', '合成首领乙'), ('outpost', '高难', '合成首领甲'))}
         def acquire(options, **kwargs):
             report = trial_report()
             report['parties'][0]['scope'] = dict(kind='boss', boss=options['boss'], difficulty=options['difficulty'])
@@ -89,6 +92,10 @@ class SubjugationGuideTests(TestCase):
         self.assertEqual(fetch.call_count, 3)
         self.assertEqual([(c.args[0]['boss'], c.args[0]['difficulty']) for c in fetch.call_args_list],
                          [('合成首领甲', '普通'), ('合成首领甲', '困难'), ('合成首领乙', '普通')])
+        self.assertEqual(fetch.call_args_list[1].args[0]['observed_target'], [
+            runner.source_targets[('boss', tier, '合成首领甲')] for tier in ('普通', '困难')])
+        self.assertEqual(fetch.call_args_list[2].args[0]['observed_target'], [
+            runner.source_targets[('boss', '普通', '合成首领乙')]])
 
     def test_higher_outpost_guide_requires_account_trial_permission(self):
         report = trial_report()
@@ -306,20 +313,80 @@ class SubjugationGuideTests(TestCase):
                     else:
                         self.assertEqual(actions, [])
 
-    def test_production_skips_media_for_manual_source_metadata(self):
+    def test_production_skips_media_for_unsupported_source_metadata(self):
+        for field in ('title', 'description', 'author_comments'):
+            for condition in ('需要借角色', 'MP90', '特别装备五星要求',
+                              '参考练度 MP88，至少突破', '推荐MP90，必须突破',
+                              '推荐MP4，但不能低于MP4', '参考MP4，不得低于MP4',
+                              '参考练度 MP88；需要突破'):
+                with self.subTest(field=field, condition=condition), TemporaryDirectory() as folder:
+                    options = source_options({}, EVENT, kind='boss', boss='合成首领', boss_number=2)
+                    options['parsed_dir'] = folder
+                    source = dict(bvid='BVSYNTHETIC', url='https://example.com/synthetic',
+                        title='公主连结 国服 合成深渊', pages=[dict(cid=1, part='Boss2', duration=4)])
+                    source[field] = [dict(text=condition, reply_id=12)] if field == 'author_comments' else condition
+                    index = SimpleNamespace(names=['合成角色'], matrix=np.ones((1,1728),np.float32))
+                    fetch = Mock(side_effect=AssertionError('Unsupported source must not download media'))
+                    report = parse_video_source(source, options, index, api=Mock(), ocr=Mock(), media_fetcher=fetch)
+                    self.assertEqual(report['parties'], [])
+                    self.assertTrue(report['manual_actions'] or report['global_requirements'])
+                    fetch.assert_not_called()
+
+    def test_metadata_prefilter_keeps_other_boss_and_analysis_sources_readable(self):
+        for condition, automatic, blocked in (('Boss1 MP90', True, False),
+                                               ('Boss2 MP90', True, True),
+                                               ('Boss2 MP90', False, False)):
+            with self.subTest(condition=condition, automatic=automatic), TemporaryDirectory() as folder:
+                options = source_options({}, EVENT, kind='boss', boss='合成首领', boss_number=2)
+                options.update(parsed_dir=folder, skip_manual_media=automatic)
+                source = dict(bvid='BVSYNTHETIC', url='https://example.com/synthetic',
+                    title='公主连结 国服 合成深渊', author_comments=[dict(text=condition, reply_id=12)],
+                    pages=[dict(cid=1, part='Boss2', duration=4)])
+                index = SimpleNamespace(names=['合成角色'], matrix=np.ones((1,1728),np.float32))
+                fetch = Mock(side_effect=RuntimeError('synthetic media unavailable'))
+                report = parse_video_source(source, options, index, api=Mock(), ocr=Mock(), media_fetcher=fetch)
+                self.assertEqual(fetch.call_count, int(not blocked))
+                self.assertEqual(bool(report['errors']), not blocked)
+                self.assertEqual(any(row['evidence']['method'] == 'author_comment:12'
+                                     for row in report['global_requirements']), condition.startswith('Boss2'))
+
+    def test_reference_build_metadata_preserves_advice_and_its_origin(self):
         for field in ('title', 'description', 'author_comments'):
             with self.subTest(field=field), TemporaryDirectory() as folder:
-                options = source_options({}, EVENT, kind='boss', boss='合成首领', boss_number=2)
-                options['parsed_dir'] = folder
-                source = dict(bvid='BVSYNTHETIC', url='https://example.com/synthetic',
-                    title='公主连结 国服 合成深渊', pages=[dict(cid=1, part='Boss2', duration=4)])
-                source[field] = [dict(text='需要借角色', reply_id=12)] if field == 'author_comments' else '需要借角色'
-                index = SimpleNamespace(names=['合成角色'], matrix=np.ones((1,1728),np.float32))
-                fetch = Mock(side_effect=AssertionError('Unsupported source must not download media'))
-                report = parse_video_source(source, options, index, api=Mock(), ocr=Mock(), media_fetcher=fetch)
-                self.assertEqual(report['parties'], [])
-                self.assertTrue(report['manual_actions'])
-                fetch.assert_not_called()
+                reference = '参考练度 六页4合 MP88 精通4-2'
+                statement = '公主连结 国服 合成深渊\n'+reference if field == 'title' else reference
+                metadata = {field: [dict(text=statement, reply_id=12)] if field == 'author_comments' else statement}
+                report, options = self.parse_notes(folder, '前言', 'boss', '说明正文', metadata=metadata)
+                self.assertEqual(len(parties_for_target(report, options, allow_local_trials=True)), 1)
+                party = report['parties'][0]
+                self.assertEqual(party['global_requirements'], [])
+                self.assertEqual(len(party['recommendations']), 1)
+                advice = party['recommendations'][0]
+                self.assertEqual(advice['text'], reference)
+                self.assertIsNone(advice['evidence']['cid'])
+                self.assertEqual(advice['evidence']['method'],
+                                 'author_comment:12' if field == 'author_comments' else 'source_'+field)
+
+    def test_reference_build_notes_do_not_override_mandatory_or_manual_conditions(self):
+        for condition, eligible in (('练度参考 MP88', 1), ('推荐特别装备', 1),
+                                    ('我800属性MP88只能打2亿伤害', 1),
+                                    ('我MP88，至少属性等级800', 0),
+                                    ('参考练度MP88，最低MP80', 0), ('MP88', 0),
+                                    ('推荐MP4，但不能低于MP4', 0),
+                                    ('参考练度MP4，不得低于MP4', 0),
+                                    ('推荐MP4，不能超过MP4', 0),
+                                    ('参考配置MP88，合成角色0关SET', 0)):
+            with self.subTest(condition=condition), TemporaryDirectory() as folder:
+                report, options = self.parse_notes(folder, 'Boss通用参考练度MP88', 'boss', condition)
+                self.assertEqual(len(parties_for_target(report, options, allow_local_trials=True)), eligible)
+                party = report['parties'][0]
+                self.assertTrue(any(row['text'] == 'Boss通用参考练度MP88'
+                                    for row in party['recommendations']))
+                if eligible:
+                    self.assertEqual(party['global_requirements'], [])
+                    self.assertEqual(party['manual_actions'], [])
+                    self.assertTrue(any(row['text'] == condition and row['evidence']['cid'] == 1
+                                        for row in party['recommendations']))
 
     def test_plain_auto_set_labels_do_not_turn_boss_names_into_switch_actions(self):
         for text in ('暗黑合成首领 全AUTO', '光亮合成首领 全SET', 'Boss2 全AUTO 关卡攻略'):
@@ -381,7 +448,36 @@ class SubjugationGuideTests(TestCase):
                     rows = report['parties'][0]['global_requirements']+report['parties'][0]['manual_actions']
                     self.assertTrue(any(r['text'] == constraint and r['evidence']['cid'] == 1 for r in rows))
 
-    def parse_notes(self, folder, title, kind, constraint, *, combat_title=None, metadata=None, boss_number=1):
+    def test_other_boss_actions_in_one_video_are_isolated_only_with_a_complete_combat_hud(self):
+        cases = [('另一首领', True, True, '106角色XXOOO', 1),
+                 ('合成首领', True, True, '106角色XXOOO', 0),
+                 ('另一首领', False, True, '106角色XXOOO', 0),
+                 ('另一首领', True, False, '106角色XXOOO', 0),
+                 ('另一首领', True, True, '所有首领1:06关闭SET', 0)]
+        for boss, complete, controls, action, eligible in cases:
+            for split in (False, True):
+                with self.subTest(boss=boss, complete=complete, controls=controls, split=split), TemporaryDirectory() as folder:
+                    names = ([GuideText(boss, 1, (600, 30, 130, 20)),
+                              GuideText('等级.475', 1, (728, 25, 80, 30))] if split else
+                             [GuideText(boss+'等级.475', 1, (600, 30, 200, 20))])
+                    labels = names+[
+                              GuideText('1:29', 1, (1080, 30, 50, 20)),
+                              GuideText(action, 1, (400, 250, 300, 30))]
+                    if complete:
+                        labels.append(GuideText('80000000/80000000', 1, (600, 65, 250, 20)))
+                    if controls:
+                        labels.extend([GuideText('菜单', 1, (1190, 30, 45, 20)),
+                                       GuideText('自动', 1, (1200, 520, 45, 30))])
+                    report, options = self.parse_notes(folder, 'Boss1', 'boss', action, combat_note=labels)
+                    self.assertEqual(len(report['parties']), 1)
+                    self.assertEqual(len(parties_for_target(report, options, allow_local_trials=True)), eligible)
+                    self.assertTrue(report['manual_actions'])
+                    if eligible:
+                        self.assertEqual(report['parties'][0]['manual_actions'], [])
+                        self.assertEqual(report['manual_actions'][0]['scope']['boss'], boss)
+
+    def parse_notes(self, folder, title, kind, constraint, *, combat_title=None, metadata=None, boss_number=1,
+                    set_values=(True,)*5, combat_note=None):
         options = source_options({}, EVENT, kind=kind, boss='合成首领', boss_number=boss_number)
         options['parsed_dir'] = folder
         source = dict(bvid='BVSYNTHETIC', url='https://example.com/synthetic',
@@ -389,6 +485,8 @@ class SubjugationGuideTests(TestCase):
             pages=[dict(cid=1, part=title, duration=2),
                    dict(cid=2, part=combat_title or ('前哨' if kind == 'outpost' else f'Boss{boss_number}')+'打法2', duration=4)])
         source.update(metadata or {})
+        if combat_note is not None:
+            source['pages'] = [dict(cid=2, part=f'Boss{boss_number}打法2', duration=6)]
         boxes = [(100+i*120, 390, 100, 100) for i in range(5)]
         members = [dict(name=f'合成角色{i}', rectangle=list(b), score=.99) for i, b in enumerate(boxes)]
         index = SimpleNamespace(names=[m['name'] for m in members], matrix=np.ones((5,1728),np.float32))
@@ -396,18 +494,45 @@ class SubjugationGuideTests(TestCase):
         capture.read.side_effect = [(True, np.full((540,960,3), i*20, np.uint8)) for i in range(6)]
         detail = texts('前哨关卡', '高难') if kind == 'outpost' else texts(
             'BOSS详情', '高难', '合成首领', '80000000/80000000')
-        labels = [texts(constraint)]*2+[detail]*2+[
+        labels = [combat_note if combat_note is not None else texts(constraint)]*2+[detail]*2+[
             texts(timer, '79000000/80000000') for timer in ('1:29', '1:28')]
+        samples = [[.5, 1.5, 2.5, 3.5, 4.5, 5.5]] if combat_note is not None else [[.5,1.5],[.5,1.5,2.5,3.5]]
         with patch('pcrscript.tasks.strategy_video.cv.VideoCapture', return_value=capture), \
-             patch('pcrscript.tasks.strategy_video.sample_seconds', side_effect=[[.5,1.5],[.5,1.5,2.5,3.5]]), \
+             patch('pcrscript.tasks.strategy_video.sample_seconds', side_effect=samples), \
              patch('pcrscript.tasks.strategy_video.frame_texts', side_effect=labels), \
              patch('pcrscript.tasks.strategy_video.battle_rectangles', side_effect=[[]]*4+[boxes]*2), \
              patch('pcrscript.tasks.strategy_video.combat_team', side_effect=[[]]*4+[members]*2), \
              patch('pcrscript.tasks.strategy_video.formation_fields', return_value=[]), \
              patch('pcrscript.tasks.strategy_video.combat_auto', return_value=True), \
-             patch('pcrscript.tasks.strategy_video.combat_set', return_value=True):
+             patch('pcrscript.tasks.strategy_video.combat_set',
+                   side_effect=lambda image, member, labels: set_values[int(member['name'][-1])]):
             return parse_video_source(source, options, index, api=Mock(), ocr=Mock(),
                 media_fetcher=lambda *a, **k: (Path(folder)/'synthetic.avi', dict(duration=4))), options
+
+    def test_explicit_fixed_set_order_binds_to_the_boss_and_cannot_override_observed_buttons(self):
+        for statement, visible, eligible in (
+                ('不想操作的1王全set三刀，2王OXOOO开自动同样三刀', None, 1),
+                ('Boss2 SET OXOOO AUTO ON', None, 1),
+                ('2王OXOOO开自动', True, 0),
+                ('1王OXOOO开自动', None, 0),
+                ('OXOOO开自动', None, 0),
+                ('2王OXXOOO开自动', None, 0),
+                ('2王OXOOO开自动；104角色XXOOO', None, 0),
+                ('2王OXOOO开自动，0:40 全SET', None, 0),
+                ('2王OXOOO开自动,104角色XXOOO', None, 0),
+                ('2王OXOOO开自动；2王0:40全SET', None, 0),
+                ('2王OXOOO开自动；2王OOOOO开自动', None, 0)):
+            with self.subTest(statement=statement, visible=visible), TemporaryDirectory() as folder:
+                report, options = self.parse_notes(folder, '前言', 'boss', '说明正文', boss_number=2,
+                    metadata=dict(description=statement), set_values=(True, visible, True, True, True))
+                parties = parties_for_target(report, options, allow_local_trials=True)
+                self.assertEqual(len(parties), eligible)
+                if eligible:
+                    self.assertEqual([m.instant for m in parties[0].members], [True, False, True, True, True])
+                    proof = report['parties'][0]['members'][1]['instant']['evidence'][0]
+                    self.assertEqual(proof['method'], 'fixed_set_source_description')
+                    self.assertIn('OXOOO', proof['text'].upper().replace(' ', ''))
+                    self.assertEqual(report['parties'][0]['manual_actions'], [])
 
     def test_common_character_fields_follow_the_current_plan_scope(self):
         for title, combat, expected in (('前言', 'Boss1打法2', 30),
@@ -438,6 +563,11 @@ class SubjugationGuideTests(TestCase):
                  ('Boss1 合成角色0Rank30 技能要满', 0, None),
                  ('Boss1 合成角色0Rank0', 0, None),
                  ('Boss1 合成角色0专武2:6星', 0, None),
+                 ('Boss1 合成角色0三星', 0, None),
+                 ('Boss1 合成角色0专武已装备', 0, None),
+                 ('Boss1 合成角色0专武开启', 0, None),
+                 ('Boss1 未知衣装三星', 0, None),
+                 ('Boss1 合成角色0等级较低，合成角色1专武已装备', 0, None),
                  ('Boss1 合成角色0和合成角色1都要3星', 0, None)]
         for method in ('description', 'author_comments'):
             for statement, count, rank in cases:
@@ -462,6 +592,22 @@ class SubjugationGuideTests(TestCase):
                 metadata=dict(description='Boss1合成角色0Lv100\nBoss1合成角色0技能100'))
             member = parties_for_target(report, options, allow_local_trials=True)[0].members[0]
             self.assertEqual((member.level, member.skill_level), (100, 100))
+
+    def test_build_comparisons_do_not_invent_a_requirement_but_directives_still_block(self):
+        for statement, eligible in (('大师等级低了，差不多20级，如果没有倒人，装备最低12贯应该差不多', 1),
+                                    ('我的等级100MP88只能打2亿', 1),
+                                    ('合成角色0等级较低', 1), ('大师等级至少90', 0),
+                                    ('合成角色0技能要满', 0), ('角色等级如图', 0),
+                                    ('未知衣装Rank30', 0)):
+            with self.subTest(statement=statement), TemporaryDirectory() as folder:
+                report, options = self.parse_notes(folder, '前言', 'boss', '说明正文',
+                    metadata=dict(author_comments=[dict(text=statement, reply_id=12)]))
+                self.assertEqual(len(parties_for_target(report, options, allow_local_trials=True)), eligible)
+                if eligible:
+                    advice = report['parties'][0]['recommendations']
+                    self.assertTrue(any(row['text'] == statement and
+                        row['evidence']['method'] == 'unresolved_author_comment:12' for row in advice))
+                    self.assertEqual(report['parties'][0]['global_requirements'], [])
 
     def test_metadata_correction_conflicting_with_video_build_blocks_the_party(self):
         with TemporaryDirectory() as folder:
@@ -710,10 +856,14 @@ class SubjugationGuideTests(TestCase):
                 reference = damage_reference(dict(cid=1, part=title), scope, 1000000000,
                                              'https://example.com/synthetic')
                 self.assertEqual(reference, {})
-                runner = SimpleNamespace(last_result=dict(win=False, damage=100000000,
-                    retry=dict(action='continue'), samples=[dict(seconds=s, dark_portraits=0) for s in (7,4,1)]))
+                runner = object.__new__(AbyssSubjugation)
+                runner.options = {'boss_max_attacks': {'极难': 6}}
+                runner.state = {}
+                runner.last_result = dict(win=False, damage=100000000,
+                    retry=dict(action='continue'), samples=[dict(seconds=s, living_portraits=5) for s in (7,4,1)])
                 readiness = AbyssSubjugation.boss_trial_readiness(runner,
-                    SimpleNamespace(damage_reference=reference), dict(boss='合成首领', health=(1000000000,1000000000)),
+                    SimpleNamespace(damage_reference=reference), dict(index=0, difficulty='极难',
+                        boss='合成首领', health=(1000000000,1000000000)),
                     SimpleNamespace(outcome='settled', reason=''))
                 self.assertFalse(readiness['accepted'])
         for title in ('Boss2 伤害：3.7亿', 'Boss2 3.7亿伤害', 'Boss2 输出3.7亿'):
