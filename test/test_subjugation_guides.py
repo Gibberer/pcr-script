@@ -317,6 +317,7 @@ class SubjugationGuideTests(TestCase):
         for field in ('title', 'description', 'author_comments'):
             for condition in ('需要借角色', 'MP90', '特别装备五星要求',
                               '参考练度 MP88，至少突破', '推荐MP90，必须突破',
+                              '推荐MP4，但不能低于MP4', '参考MP4，不得低于MP4',
                               '参考练度 MP88；需要突破'):
                 with self.subTest(field=field, condition=condition), TemporaryDirectory() as folder:
                     options = source_options({}, EVENT, kind='boss', boss='合成首领', boss_number=2)
@@ -371,6 +372,9 @@ class SubjugationGuideTests(TestCase):
                                     ('我800属性MP88只能打2亿伤害', 1),
                                     ('我MP88，至少属性等级800', 0),
                                     ('参考练度MP88，最低MP80', 0), ('MP88', 0),
+                                    ('推荐MP4，但不能低于MP4', 0),
+                                    ('参考练度MP4，不得低于MP4', 0),
+                                    ('推荐MP4，不能超过MP4', 0),
                                     ('参考配置MP88，合成角色0关SET', 0)):
             with self.subTest(condition=condition), TemporaryDirectory() as folder:
                 report, options = self.parse_notes(folder, 'Boss通用参考练度MP88', 'boss', condition)
@@ -514,6 +518,9 @@ class SubjugationGuideTests(TestCase):
                 ('OXOOO开自动', None, 0),
                 ('2王OXXOOO开自动', None, 0),
                 ('2王OXOOO开自动；104角色XXOOO', None, 0),
+                ('2王OXOOO开自动，0:40 全SET', None, 0),
+                ('2王OXOOO开自动,104角色XXOOO', None, 0),
+                ('2王OXOOO开自动；2王0:40全SET', None, 0),
                 ('2王OXOOO开自动；2王OOOOO开自动', None, 0)):
             with self.subTest(statement=statement, visible=visible), TemporaryDirectory() as folder:
                 report, options = self.parse_notes(folder, '前言', 'boss', '说明正文', boss_number=2,
@@ -556,6 +563,11 @@ class SubjugationGuideTests(TestCase):
                  ('Boss1 合成角色0Rank30 技能要满', 0, None),
                  ('Boss1 合成角色0Rank0', 0, None),
                  ('Boss1 合成角色0专武2:6星', 0, None),
+                 ('Boss1 合成角色0三星', 0, None),
+                 ('Boss1 合成角色0专武已装备', 0, None),
+                 ('Boss1 合成角色0专武开启', 0, None),
+                 ('Boss1 未知衣装三星', 0, None),
+                 ('Boss1 合成角色0等级较低，合成角色1专武已装备', 0, None),
                  ('Boss1 合成角色0和合成角色1都要3星', 0, None)]
         for method in ('description', 'author_comments'):
             for statement, count, rank in cases:

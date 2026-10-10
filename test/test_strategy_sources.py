@@ -18,7 +18,9 @@ def fake_api():
 class SourceTests(TestCase):
  def test_fixed_set_claims_do_not_hide_comma_separated_exceptions_or_actions(self):
   for statement in ('Boss2全SET，除了第二人关闭', 'Boss2SET OXOOO,然后关掉',
-                    'Boss2全SET，只有第一人开启', 'Boss2全SET，别开自动'):
+                    'Boss2全SET，只有第一人开启', 'Boss2全SET，别开自动',
+                    'Boss2 OXOOO开自动，0:40 全SET', 'Boss2 OXOOO开自动,104角色XXOOO',
+                    'Boss2 OXOOO开自动；Boss2 0:40全SET'):
    with self.subTest(statement=statement):
     self.assertTrue(unparsed_switch_requirement(statement))
   self.assertFalse(unparsed_switch_requirement('不想操作的1王全set三刀，2王OXOOO开自动同样三刀'))

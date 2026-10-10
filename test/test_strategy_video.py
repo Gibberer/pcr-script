@@ -65,7 +65,9 @@ class VideoStrategyTests(TestCase):
                                 proof, unparsed_settings=True)[1])
 
         # Compact timestamps and O/X orders still describe a manual axis.
-        for text in ('104角色XXOOO', '001角色OXOOO', '1:04角色全SET'):
+        for text in ('104角色XXOOO', '001角色OXOOO', '1:04角色全SET',
+                     'Boss1 OXOOO开自动，0:40 全SET', 'Boss1 OXOOO开自动,104角色XXOOO',
+                     'Boss1 OXOOO开自动；Boss1 0:40全SET'):
             self.assertTrue(text_constraints([GuideText(text, .99, (10, 170, 200, 20))],
                             proof, unparsed_settings=True)[1])
 

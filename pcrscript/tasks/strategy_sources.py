@@ -56,9 +56,15 @@ def configured_queries(queries, options):
     return list(dict.fromkeys(q.strip() for q in queries+extra))
 
 
+def timed_switch_requirement(text):
+    """Timed O/X orders are operations even after a fixed starting setting."""
+    return bool(re.search(r'(?<![A-Za-z0-9])(?:[0-5]\d{2}|[0-5]?\d[:：][0-5]\d)'
+                          r'[^\r\n,，;；。!?！？|｜]{0,40}(?:[OX]{5}|全SET)', text, re.I))
+
+
 def unparsed_switch_requirement(text):
     """Unknown actions in a setting sentence remain required, including exceptions."""
-    return any(SWITCH_LABEL.search(sentence) and any(
+    return timed_switch_requirement(text) or any(SWITCH_LABEL.search(sentence) and any(
         SWITCH_ACTION.search(clause) and fixed_set_statement(clause) is None
         for clause in re.split(r'[,，]+', sentence))
         for sentence in re.split(r'[\r\n;；。!?！？|｜]+', text))

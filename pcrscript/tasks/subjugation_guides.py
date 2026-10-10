@@ -274,13 +274,15 @@ def metadata_build_requirements(metadata, options, names):
                 tail = tail[match.end():].lstrip('：:,，;；')
             tiers = {d for d in ('普通', '困难', '高难', '极难') if d in line}
             difficulty = next(iter(tiers)) if len(tiers) == 1 and not SHARED_REQUIREMENTS.search(line) else None
-            # A comparison such as "大师等级低了" is not a field declaration.
-            # Check directives in the same clause as the build label so an
-            # unrelated part of a reply cannot create a character requirement.
+            # Only explicit comparisons are advisory. Failure to parse a value
+            # (such as "三星" or "专武已装备") must not erase a declaration.
+            build_clauses = [clause for clause in re.split(r'[,，]', line) if BUILD_LABEL.search(clause)]
             advisory = (name is None and not fields and advisory_requirement(line)
-                        or not BUILD_VALUE.search(line) and not any(
-                            BUILD_LABEL.search(clause) and BUILD_DIRECTIVE.search(clause)
-                            for clause in re.split(r'[,，]', line)))
+                        or not BUILD_VALUE.search(line) and all(
+                            not BUILD_DIRECTIVE.search(clause) and len(list(BUILD_LABEL.finditer(clause))) == 1
+                            and re.fullmatch(r'(?:较|偏)?[低高](?:了|一些|一点)?',
+                                             clause[BUILD_LABEL.search(clause).end():].strip())
+                            for clause in build_clauses))
             rows.append(dict(name=name if fields and not tail else None, fields=fields, advisory=advisory,
                              text=line, method=method, plan=plan_number(dict(part=line)), difficulty=difficulty))
     return rows

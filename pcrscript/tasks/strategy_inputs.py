@@ -33,7 +33,8 @@ def advisory_requirement(text):
     reference = (re.search(r'参考练度|练度参考|参考配置|配置参考|建议|推荐|可选', text)
                  or re.search(r'^(?:我|本人|作者)[^\n；。]*(?:练度|属性|MP\d+|大师点)', text, re.I))
     return bool(reference) and not re.search(
-        r'必须|必备|需要|要求|至少|最低|不低于|不可低于|才能|否则|务必|一定要|不能少|不可缺', text)
+        r'必须|必备|需要|要求|至少|最低|不低于|才能|否则|务必|一定要|'
+        r'(?:不能|不可|不得|不允许)(?:低于|高于|少于|超过|少|缺|使用|用)|禁止', text)
 
 
 def fixed_set_statement(text):

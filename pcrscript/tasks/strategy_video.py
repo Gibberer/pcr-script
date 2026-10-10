@@ -20,10 +20,10 @@ from ..game_ui.avatar_assets import ensure_avatar_index, read_json
 from ..run_session import atomic_json
 from ..game_ui.guide_vision import GuideText, combat_team, formation_team, wide_special_equipment_team, combat_set, combat_auto, combat_auto_labels, combat_boss_labels, battle_rectangles, match_portrait, read_text, requirement_cells, labeled_fields, formation_fields
 from .strategy_document import Evidence, Fact, empty_member, finalize, export_document
-from .strategy_sources import BORROW_PART, MANUAL_PART, UNVERIFIED_SETTING, discover_sources, get_source_rules, unparsed_switch_requirement
+from .strategy_sources import BORROW_PART, MANUAL_PART, UNVERIFIED_SETTING, discover_sources, get_source_rules, timed_switch_requirement, unparsed_switch_requirement
 from .strategy_inputs import advisory_requirement, declared_region, preferred_sources, source_statements, video_metadata
 
-PARSER_VERSION = 90
+PARSER_VERSION = 91
 FRAME_OCR_VERSION = 1
 COMBAT_AUDIT_SECONDS = 20
 RECOLLECTION_UNSUPPORTED = re.compile(
@@ -666,9 +666,8 @@ def requirement_scope(texts) -> list[int] | None:
 
 def manual_requirement(text, *, unparsed_settings=False):
     return bool(unparsed_settings and unparsed_switch_requirement(text)
-        or MANUAL_PART.search(text) or BORROW_PART.search(text) or re.search(
-        r'手动|目押|卡[秒帧]|连点|关闭自动|关AUTO|轴[:：]|改星|调星|切星|降星|星级变更|\d[:：]\d{2}.*(?:开|关|点|放)|'
-        r'^(?:[0-5]\d{2}|[0-5]?\d[:：][0-5]\d).{0,40}(?:[OX]{5}|全SET)',
+        or MANUAL_PART.search(text) or BORROW_PART.search(text) or timed_switch_requirement(text) or re.search(
+        r'手动|目押|卡[秒帧]|连点|关闭自动|关AUTO|轴[:：]|改星|调星|切星|降星|星级变更|\d[:：]\d{2}.*(?:开|关|点|放)',
         text, re.I))
 
 
