@@ -159,7 +159,27 @@ class ShopBuy(BaseTask):
             self.ui.click(confirm)
             s = self.ui.wait(lambda s: s.find("购买完毕", (235, 15, 725, 90)), "购买结果", timeout=20)
         self.ui.save(f"shop_{tab}_purchase_result", s)
-        receipt = mana_receipt(s, cost, balance_before) if tab in (1, 9) else {}
+        receipt = {}
+        if tab in (1, 9):
+            try:
+                receipt = mana_receipt(s, cost, balance_before)
+            except EventUIError as error:
+                # The title can be recognized while the popup is still scaling.
+                # Re-read only; never replay the purchase when a receipt is unclear.
+                self.ui.save(f"shop_{tab}_purchase_result_unsettled", s)
+                def settled(frame):
+                    if not frame.find("购买完毕", (235, 15, 725, 90), exact=True):
+                        return False
+                    try:
+                        return bool(mana_receipt(frame, cost, balance_before))
+                    except EventUIError:
+                        return False
+                try:
+                    s = self.ui.wait(settled, "购买回执金额与余额核对", timeout=8)
+                except EventUIError as timeout:
+                    raise error from timeout
+                receipt = mana_receipt(s, cost, balance_before)
+                self.ui.save(f"shop_{tab}_purchase_result", s)
         close = s.find("确认|关闭", (355, 435, 605, 515), exact=True)
         if close is None:
             raise EventUIError("购买结果没有可识别的关闭按钮")

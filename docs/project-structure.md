@@ -35,7 +35,7 @@ GUI 的 `PortableTools.cs` 管理固定版本工具的下载、SHA-256 校验与
 
 ## 任务文件索引
 
-`task_*.py` 存放具体 Task 实现。`base.py`、`image.py` 是基类，`registry.py` 是注册表；`_actions.py`、`event_*.py`、`revival_map.py`、`revival_state.py` 是辅助逻辑，不是独立任务入口。
+`task_*.py` 存放具体 Task 实现。`base.py`、`image.py` 是基类，`registry.py` 是注册表；其余不以 `task_` 开头的模块提供配置、页面流程、配队和状态等辅助逻辑，不是独立任务入口。
 
 ### 可通过配置或通用命令运行的任务
 
@@ -65,21 +65,24 @@ GUI 的 `PortableTools.cs` 管理固定版本工具的下载、SHA-256 校验与
 
 `task_combat.py` 包含可复用的 `TeamFormation`、`TeamFormationEx`、`Combat` 子任务，供其他任务通过 Python 调用，未注册为独立命令，不能直接填入配置任务列表。
 
-通用命令：`./.venv/Scripts/python.exe -X utf8 scripts/daily/task.py <注册任务名>`（在项目根目录运行）。驾车游 `caravan` 仍仅按需启用。
+命令与配置见[命令行指南](guides/command-line.md)，是否加入日常列表见[任务指南](guides/tasks.md)。
 
 新增具体任务使用 `task_<功能>.py`，需要独立调度时使用 `@register(...)` 并在 `__init__.py` 导入，同时更新本表。对外优先从 `pcrscript.tasks` 导入任务类；文件改名不改变类名、注册名和脚本命令。
 
-追忆战场的共享页面识别在 `game_ui/recollection.py`，导航、限额及待核对记录在 `tasks/recollection_flow.py`，精确层数来源适配及编队审计在 `tasks/recollection_strategy.py`。首通调用共享视频解析、`EventFormation` 和 `EventCombat`；可选职能精通准备位于 `tasks/role_mastery_preparation.py`，复用 `game_ui/role_mastery.py` 并在同一任务内完成。日常使用游戏一键扫荡预览与消费核对，均经现有通用命令运行。见[追忆战场指南](guides/recollection.md)。
+## 共享模块索引
 
-深渊讨伐战在 `game_ui/abyss_subjugation.py` 维护页面与消费字段识别，`tasks/subjugation_guides.py` 为共享检索、视频解析和候选转换提供统一的本期目标／难度判断，`tasks/subjugation_party.py` 负责攻略成员的账号适配、活动属性及模拟后培养要求固定。所有新战斗均从适用攻略产生候选，当前／保存编组及旧运行队伍不作为兜底。选人、账号培养核验与缺员替补复用 `StrategyFormation.source_trial()` 和 `EventFormation`；有界候选遍历、培养差距、五星培养和特别装备准备位于 `tasks/party_preparation.py`。任务按目标持有候选迭代器，失败后接续而不重新打开搜索预算，见[公共准备流程](party-preparation.md)。战斗及体力领取复用 `EventCombat` 和公会之家模块。活动情报来自 `news.py` 的 `abyss_schedule`；GUI/CLI 共用注册任务及 `AbyssSubjugation` 配置。见[使用指南](guides/abyss-subjugation.md)。
+下列模块供任务组合调用，不注册为独立命令。这里维护文件位置；行为约束和验收条件在各专题维护。
 
-地下城识别位于 `game_ui/dungeon.py`，方案校验、跨队冲突与编队布局位于 `tasks/dungeon_party.py`，候选头像盘点位于 `game_ui/roster.py`，均非独立任务。运行与本地方案格式见 [地下城首通](guides/dungeon.md)。
+| 能力 | 模块 | 主文档 |
+|---|---|---|
+| 配置、记录与运行控制 | `tasks/options.py`、`run_session.py` | [任务架构](task-architecture.md)、[运行诊断](run-diagnostics.md) |
+| 编队、培养差距及特别装备 | `tasks/strategy_formation.py`、`party_preparation.py`；`game_ui/character_search.py`、`character_equipment.py`、`ordinary_equipment.py`、`character_stars.py`、`special_equipment.py`；`character_data.py` | [公共准备流程](party-preparation.md) |
+| 公共攻略与视频解析 | `tasks/strategy_sources.py`、`strategy_inputs.py`、`strategy_video.py`、`strategy_document.py`、`strategy_tables.py`、`strategy_party_pool.py`、`strategy_trial.py`；`extras/guide_media.py`；`game_ui/avatar_assets.py`、`guide_vision.py` | [视频解析](video-strategies.md) |
+| 深域尝试与替补 | `tasks/abyss_history.py`、`abyss_retry.py`、`party_variants.py`；`game_ui/abyss.py` | [深域推进](guides/abyss.md) |
+| 深渊来源与本期编队 | `tasks/subjugation_guides.py`、`subjugation_party.py`；`game_ui/abyss_subjugation.py`；`news.py` 的 `abyss_schedule` | [深渊讨伐战](guides/abyss-subjugation.md) |
+| 追忆导航、来源及恢复 | `tasks/recollection_flow.py`、`recollection_strategy.py`、`recollection_retry.py`；`game_ui/recollection.py` | [追忆战场](guides/recollection.md) |
+| 可选职能精通准备 | `tasks/role_mastery_preparation.py`、`game_ui/role_mastery.py` | [精通配置与消费恢复](guides/recollection.md#可选职能精通准备) |
+| 地下城方案与编队 | `tasks/dungeon_party.py`、`game_ui/dungeon.py`、`game_ui/roster.py` | [地下城首通](guides/dungeon.md) |
+| 迷宫页面与首通编队 | `game_ui/dawn_labyrinth.py`、`tasks/dawn_labyrinth_party.py` | [黎明界迷宫](guides/dawn-labyrinth.md) |
 
-`tasks/strategy_sources.py` 为内部共享的匿名来源搜索/身份核验/缓存能力，不注册为独立任务。深域与地下城首通按各自任务配置调用搜索，攻略链接分别配置于 `Abyss.source_urls`、`Dungeon.source_urls`。候选来源不是战斗方案。`tasks/strategy_formation.py` 为深域与深渊共用的账号编队与替补，`tasks/abyss_party.py` 只保留兼容导入，`game_ui/abyss.py` 为深域地图识别，均非独立任务。使用方式见 [深域推进](guides/abyss.md)。
-
-深域辅助模块：`pcrscript/tasks/abyss_history.py` 保存按账号/关卡隔离的尝试历史；`abyss_retry.py` 根据战斗证据决定重试价值；`party_variants.py` 按数据库技能描述生成本地替代组合，均不独立注册任务。
-
-
-深域与来源共享辅助模块：`tasks/strategy_inputs.py` 统一用户链接及UP评论引用；`tasks/strategy_tables.py` 解析简单通用头像表；两者均非独立任务。`game_ui/character_stars.py` 为默认关闭的五星培养/兑换与回执能力，由公共战前准备组合，非独立注册入口。`game_ui/character_search.py` 统一编队与角色一览的输入确认和重试，不能在人物培养中重新实现不核对回执的搜索。
-
-视频解析辅助模块：`tasks/strategy_video.py` 负责来源到字段证据的获取/关联，`tasks/strategy_document.py` 保留未知与冲突并适配正式任务，`tasks/strategy_party_pool.py` 整理活动首领的自动来源、有限试打和职责替补候选，`tasks/strategy_trial.py` 以账号实时观察核验试打编队；`extras/guide_media.py` 下载/校验视频，`game_ui/avatar_assets.py` 自动准备公共头像与国服身份，`game_ui/guide_vision.py` 提供视频布局识别。均不独立注册任务，由深域、地下城首通、剧情活动及复刻活动复用；深域和地下城支持 `prepare_only`，详见 [视频解析与复核](video-strategies.md)。
+`tasks/abyss_party.py` 只保留 `StrategyFormation` 的旧导入别名。公共能力在共享模块中维护，玩法任务负责自己的导航、目标、预算和结果核验。

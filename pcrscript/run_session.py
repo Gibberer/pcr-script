@@ -15,6 +15,7 @@ _current = None
 
 def atomic_json(path, value):
     path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + '.' + uuid.uuid4().hex + '.tmp')
     try:
         tmp.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding='utf-8')
@@ -56,6 +57,12 @@ def task_result(record: dict, directory: Path | None = None) -> None:
     emit('task.result', **record)
     if directory is not None:
         atomic_json(directory / 'result.json', record)
+
+
+def daily_result(report: dict) -> None:
+    emit('daily.result', **report)
+    if _current is not None:
+        atomic_json(_current.path / 'summary.json', report)
 
 
 class _Clock:

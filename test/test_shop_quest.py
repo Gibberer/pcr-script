@@ -7,6 +7,7 @@ from pcrscript.game_ui.screen import EventScreen, EventUIError, TextBox
 from pcrscript.tasks.task_shop import SHOP_TABS, ShopBuy, mana_receipt, parse_rule, selected_tab
 from pcrscript.tasks import task_story
 from pcrscript.tasks.task_story import GetQuestReward
+from ui_fixtures import screen
 
 
 def label(text, x, y):
@@ -54,6 +55,34 @@ class ShopQuestTests(unittest.TestCase):
                          {"balance_before": 510289942, "balance_after": 507505942})
         with self.assertRaisesRegex(EventUIError, "回执"):
             mana_receipt(screen, 2784000, 510289941)
+
+    def test_purchase_waits_for_receipt_animation_without_repeating_spend(self):
+        selection = screen(('批量购入100', 798, 439), ('1000', 873, 27))
+        moving = screen(('购买完毕',480,88),('消耗玛那×100',480,118),
+                        ('1000',502,349),('900',608,349),('确认',480,438))
+        ready = screen(('购买完毕',480,42),('消耗玛那×100',480,78),
+                       ('1000',502,370),('900',640,370),('确认',480,480))
+        for settles in (True, False):
+            with self.subTest(settles=settles):
+                task = ShopBuy.__new__(ShopBuy)
+                task.ui = Mock()
+                task.shop = Mock()
+                frames = iter([moving, ready if settles else moving])
+                def wait(predicate, *args, **kwargs):
+                    value = next(frames)
+                    if not predicate(value):
+                        raise EventUIError('synthetic timeout')
+                    return value
+                task.ui.wait.side_effect = wait
+                if settles:
+                    self.assertEqual(task.buy(9, selection),
+                                     {'shop':'限定','cost':100,'balance_before':1000,'balance_after':900})
+                else:
+                    with self.assertRaisesRegex(EventUIError, '购买已提交'):
+                        task.buy(9, selection)
+                    task.shop.assert_not_called()
+                self.assertEqual([c.args[0].text for c in task.ui.click.call_args_list],
+                                 ['批量购入100', '确认'] if settles else ['批量购入100'])
 
     def test_quest_tab_state_requires_blue_fill(self):
         image = np.full((540, 960, 3), 255, dtype=np.uint8)

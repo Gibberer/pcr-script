@@ -1,12 +1,11 @@
 """Local source-backed dungeon plans and finite, ordered party selection."""
 from dataclasses import asdict, dataclass
-import json
 from pathlib import Path
 import yaml
 from .event_formation import EventFormation
 from .event_strategy import EventParty, MemberRequirement
 from ..game_ui.screen import EventUIError, normalized
-from ..run_session import clock as time
+from ..run_session import clock as time, atomic_json
 
 
 class DungeonFormation(EventFormation):
@@ -54,8 +53,7 @@ class DungeonFormation(EventFormation):
             actual.equipment_evidence = proof[1]
             if kwargs.get('full', True):
                 self.observed[normalized(actual.name)] = actual
-                (self.ui.output/'roster.json').write_text(json.dumps(
-                    {k: asdict(v) for k, v in self.observed.items()}, ensure_ascii=False, indent=2), encoding='utf-8')
+                atomic_json(self.ui.output/'roster.json', {k: asdict(v) for k, v in self.observed.items()})
         return actual
 
     def select(self, party):

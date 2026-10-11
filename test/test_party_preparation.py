@@ -9,7 +9,7 @@ import cv2 as cv
 from pcrscript.game_ui.guide_vision import labeled_fields
 from pcrscript.game_ui.character_equipment import unique_equipment_fields, second_unique_selector
 from pcrscript.game_ui.character_search import search_character
-from pcrscript.game_ui.screen import EventUIError, EventScreen, TextBox
+from pcrscript.game_ui.screen import EventUIError
 from pcrscript.game_ui.special_equipment import loadout_items, same_loadout
 from pcrscript.tasks.event_strategy import CharacterStatus, EventParty, MemberRequirement, readiness
 from pcrscript.tasks.party_preparation import (audit_declared_build, cultivation_plan, rank_candidates,
@@ -18,6 +18,8 @@ from pcrscript.tasks.strategy_document import Evidence, empty_member, finalize, 
 from pcrscript.tasks.strategy_formation import StrategyFormation
 from pcrscript.tasks.abyss_party import AbyssFormation
 from pcrscript.tasks.subjugation_party import SubjugationFormation
+from functools import partial
+from ui_fixtures import screen as synthetic_screen
 
 
 def party(name='guide', names='abcde'):
@@ -32,9 +34,7 @@ def statuses(team):
                             unique_level=m.unique_level, unique2_stars=m.unique2_stars) for m in team.members]
 
 
-def screen(*labels):
-    return EventScreen(np.full((540, 960, 3), 100, np.uint8),
-        [TextBox(t, .999, [[x-20, y-8], [x+20, y-8], [x+20, y+8], [x-20, y+8]]) for t, x, y in labels])
+screen = partial(synthetic_screen, background=100, box_half_size=(20, 8))
 
 
 class PartyPreparationTests(TestCase):

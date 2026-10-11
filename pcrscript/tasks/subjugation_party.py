@@ -114,7 +114,8 @@ def recover_equipment(runner, names):
 def guide_party(runner, seed, reopen, *, allow_substitutions=True):
     """Keep source switches, while pinning a trial's separately observed build."""
     prepare_avatars(runner)
-    runner.report_progress('核验攻略队伍 · 衣装、等级、技能与专武')
+    phase = '核验攻略队伍 · 衣装、等级、技能与专武'
+    runner.report_progress(phase)
     issues = catalogue_issues(runner.formation, seed.members)
     if issues:
         runner.report.setdefault('party_audits', []).append(dict(source=seed.source, unready=issues,
@@ -128,6 +129,7 @@ def guide_party(runner, seed, reopen, *, allow_substitutions=True):
         try:
             recover_equipment(runner, numeric)
             reopen()
+            runner.report_progress(phase)
         finally:
             runner.formation.numeric_equipment_names = ()
     source = dict(source=seed.source, names=[normalized(m.name) for m in seed.members],
@@ -135,6 +137,7 @@ def guide_party(runner, seed, reopen, *, allow_substitutions=True):
     def recover(stage, names):
         recover_equipment(runner, names)
         reopen()
+        runner.report_progress(phase)
     runner.formation.recover_equipment = recover
     runner.formation.check_deadline = runner.check_deadline
     party, audit = runner.formation.source_trial(trial_stage(runner, seed.name), source)
@@ -166,6 +169,6 @@ def guide_party(runner, seed, reopen, *, allow_substitutions=True):
     party.assumptions = list(seed.assumptions)+['按共享编队流程核验当前账号，来源缺失字段仍保留为未知']
     party.assumptions.extend('共享编队缺员替补：'+a['missing']+' → '+a['replacement'] for a in adaptations)
     if adaptations:
-        party.assumptions.append('替补队伍不继承原攻略伤害；首领须免费模拟击杀后才可实战')
+        party.assumptions.append('替补队伍不继承原攻略伤害；首领须免费模拟击杀，或存活至时限且符合首通刀数预算')
     require_event_talent(runner, party)
     return party, order

@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 import re
 from .base import BaseTask, TaskReport
+from .options import validated_options
 from .registry import register
 from .strategy_formation import StrategyFormation
 from .event_battle import EventCombat
@@ -135,23 +136,17 @@ def recent_unreleased(path, now, lifetime):
 
 
 def validate_options(options: dict) -> dict:
-    value = dict(options)
+    value = validated_options(options, 'Abyss',
+        integers=(('max_failures_per_stage', 6, 50), ('max_repeat_failures_per_stage', 2, 50),
+                  ('max_battles', 100, 300), ('timeout', 3600, 14400), ('battle_timeout', 220, 600)),
+        flags=(('allow_local_trials', False), ('audit_only', False), ('discover_sources', True),
+               ('prepare_only', False), ('allow_five_star_upgrade', False),
+               ('allow_divine_amulets', False), ('auto_collect_house_stamina', False)))
     if value.setdefault('search_effort', 'normal') not in ('normal', 'high'):
         raise ValueError('Abyss.search_effort必须为normal或high')
-    for key, default, high in [('max_failures_per_stage', 6, 50), ('max_repeat_failures_per_stage', 2, 50), ('max_battles', 100, 300),
-                                ('timeout', 3600, 14400), ('battle_timeout', 220, 600)]:
-        number = value.setdefault(key, default)
-        if type(number) is not int or not 1 <= number <= high:
-            raise ValueError(f'Abyss.{key}必须为1到{high}的整数')
     elements = value.setdefault('elements', list(AREAS))
     if not isinstance(elements, list) or not elements or any(e not in AREAS for e in elements) or len(set(elements)) != len(elements):
         raise ValueError('Abyss.elements必须为不重复的fire/water/wind/light/dark列表')
-    for key, default in [('allow_local_trials', False), ('audit_only', False), ('discover_sources', True),
-                         ('prepare_only', False),
-                         ('allow_five_star_upgrade',False),('allow_divine_amulets',False),
-                         ('auto_collect_house_stamina',False)]:
-        if type(value.setdefault(key, default)) is not bool:
-            raise ValueError(f'Abyss.{key}必须为布尔值')
     return value
 
 
@@ -280,7 +275,7 @@ class AbyssPush(BaseTask):
             raise EventUIError('深域任务时间上限，停止后续挑战')
 
     def save_report(self) -> None:
-        (self.ui.output/'report.json').write_text(json.dumps(self.report, ensure_ascii=False, indent=2), encoding='utf-8')
+        atomic_json(self.ui.output/'report.json', self.report)
 
     def story_dialog(self, screen: EventScreen) -> bool:
         # Deep-area clears can open a character story before returning to the

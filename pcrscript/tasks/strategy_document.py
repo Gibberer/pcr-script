@@ -115,7 +115,7 @@ def to_event_party(party: dict) -> EventParty:
 
 
 def export_document(path: Path, report: dict) -> None:
-    from ..game_ui.avatar_assets import atomic_json
+    from ..run_session import atomic_json
     atomic_json(Path(path), dict(report, version=VERSION))
 
 

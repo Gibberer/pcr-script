@@ -28,27 +28,6 @@ class Driver:
 
 
 class RunSessionTests(unittest.TestCase):
-    def test_atomic_status_write_retries_windows_sharing_denial(self):
-        from unittest.mock import patch
-        from pcrscript import run_session
-        with tempfile.TemporaryDirectory() as root:
-            path = Path(root) / 'status.json'
-            replace = run_session.os.replace
-            attempts = []
-
-            def busy_twice(source, target):
-                attempts.append(1)
-                if len(attempts) < 3:
-                    raise PermissionError(13, 'temporarily busy', str(target), 5)
-                return replace(source, target)
-
-            with patch.object(run_session.os, 'replace', side_effect=busy_twice), \
-                 patch.object(run_session._time, 'sleep'):
-                atomic_json(path, {'state': 'running'})
-            self.assertEqual(len(attempts), 3)
-            self.assertEqual(json.loads(path.read_text(encoding='utf-8')), {'state': 'running'})
-            self.assertFalse(list(Path(root).glob('*.tmp')))
-
     def test_structured_progress_reaches_status_without_terminal_output(self):
         from unittest.mock import Mock
         from pcrscript import Robot

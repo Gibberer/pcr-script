@@ -5,16 +5,14 @@ from types import SimpleNamespace
 from unittest import TestCase, main
 from unittest.mock import Mock, patch
 import cv2 as cv
-import numpy as np
-from pcrscript.game_ui.screen import EventScreen, TextBox, EventUIError
+from pcrscript.game_ui.screen import EventScreen, EventUIError
 from pcrscript.game_ui.caravan import board, triple_mode, disabled_roll, progress, fastest_turn, helpful_food, surplus_food
 from pcrscript.tasks.task_caravan import Caravan
+from functools import partial
+from ui_fixtures import screen as synthetic_screen
 
 
-def screen(*items):
-    return EventScreen(np.zeros((540, 960, 3), np.uint8), [
-        TextBox(t, 1, [[x-10,y-5],[x+10,y-5],[x+10,y+5],[x-10,y+5]])
-        for t,x,y in items])
+screen = partial(synthetic_screen, background=0, score=1, box_half_size=(10, 5))
 
 
 def board_screen(count=10, mode='off'):

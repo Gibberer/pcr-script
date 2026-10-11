@@ -7,8 +7,10 @@ from pathlib import Path
 import re
 
 from .base import BaseTask
+from .options import validated_options
 from ..game_ui import recollection as field
 from ..game_ui.abyss_subjugation import navigation_exit as subjugation_navigation_exit
+from ..game_ui.dawn_labyrinth import navigation_exit as maze_navigation_exit
 from ..game_ui.screen import EventUI, EventUIError
 from ..run_session import atomic_json, checkpoint, clock as time
 
@@ -19,24 +21,16 @@ class RecollectionBlocked(EventUIError):
 
 def validate_options(options, *, first_clear=False):
     section = 'RecollectionFirstClear' if first_clear else 'Recollection'
-    if not isinstance(options, dict):
-        raise ValueError(section+'必须是配置对象')
-    value = dict(options)
     defaults = [('timeout', 3600 if first_clear else 600, 7200)]
     if first_clear:
         defaults += [('battle_timeout', 220, 600), ('max_battles', 30, 100),
                      ('max_attempts_per_stage', 2, 5), ('max_source_batches', 3, 10)]
     else:
         defaults += [('max_sweeps', 9, 99)]
-    for key, default, upper in defaults:
-        number = value.setdefault(key, default)
-        if type(number) is not int or not 1 <= number <= upper:
-            raise ValueError(f'{section}.{key}必须是1到{upper}的整数')
-    flags = ('discover_sources', 'allow_local_trials', 'auto_equip', 'retry_failed_parties') if first_clear else ('claim_rewards', 'sweep_dominion', 'preview_only')
-    for key in flags:
-        flag = value.setdefault(key, key not in ('allow_local_trials', 'auto_equip', 'retry_failed_parties', 'preview_only'))
-        if type(flag) is not bool:
-            raise ValueError(f'{section}.{key}必须为布尔值')
+    flags = ((('discover_sources', True), ('allow_local_trials', False),
+              ('auto_equip', False), ('retry_failed_parties', False)) if first_clear else
+             (('claim_rewards', True), ('sweep_dominion', True), ('preview_only', False)))
+    value = validated_options(options, section, integers=defaults, flags=flags)
     areas = value.setdefault('areas', list(field.AREAS) if first_clear else ['kaiser', 'zen', 'miroku'])
     reverse = {name: key for key, name in field.AREAS.items()}
     if not isinstance(areas, list) or not areas or any(not isinstance(a, str) for a in areas):
@@ -83,7 +77,6 @@ class RecollectionTask(BaseTask):
         self.state = json.loads(self.state_path.read_text(encoding='utf-8')) if self.state_path.exists() else {}
 
     def save(self):
-        self.state_path.parent.mkdir(parents=True, exist_ok=True)
         atomic_json(self.report_path, self.report)
         atomic_json(self.state_path, self.state)
 
@@ -134,8 +127,11 @@ class RecollectionTask(BaseTask):
         self.click(screen, '确认', (350, 440, 615, 525))
 
     def enter(self):
+        missing_entry = 0
         for _ in range(30):
             s = self.capture()
+            if not s.find('冒险', (30, 0, 175, 65), exact=True):
+                missing_entry = 0
             if field.home(s):
                 return s
             if field.battle_result_button(s):
@@ -148,6 +144,8 @@ class RecollectionTask(BaseTask):
             elif field.bulk_confirmation(s) or field.bulk_catalogue(s) or field.difficulty_selector(s):
                 self.click(s, '取消|关闭', (250, 440, 615, 525))
             elif (cancel := subjugation_navigation_exit(s)) is not None:
+                self.ui.click(cancel)
+            elif (cancel := maze_navigation_exit(s)) is not None:
                 self.ui.click(cancel)
             elif s.find('角色详情', (300, 0, 650, 70), exact=True):
                 self.click(s, '确认', (320, 450, 650, 515))
@@ -165,9 +163,13 @@ class RecollectionTask(BaseTask):
             elif s.find('冒险', (30, 0, 175, 65), exact=True):
                 entry = s.find('追忆的战场', (100, 65, 950, 470), exact=True)
                 if not entry:
-                    return None
+                    missing_entry = 0 if s.find('正在进行数据连接|加载') else missing_entry + 1
+                    if missing_entry >= 3:
+                        return None
+                    time.sleep(.5)
+                    continue
                 self.ui.click(entry)
-            elif (s.find('菜单', (840, 0, 960, 60), exact=True)
+            elif ((s.find('菜单', (840, 0, 960, 60), exact=True) and not s.expedition_home)
                   or s.find(r'\d:\d{2}', (750, 0, 850, 55))):
                 raise RecollectionBlocked('存在未结算战斗；保留现场，不开始新挑战')
             elif s.find('日程表', (650, 390, 810, 475), exact=True) or s.find('出发', (500, 260, 690, 330), exact=True):

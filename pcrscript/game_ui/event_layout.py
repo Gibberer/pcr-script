@@ -3,6 +3,25 @@ import cv2 as cv
 import numpy as np
 
 
+def navigation_exit(screen):
+    """Leave an observed story-event selector without clicking through a modal."""
+    if screen.find('一?键扫荡确认|扫荡券确认|扫荡结果|获得道具|扫荡完成|扫荡券使用结果|'
+                   'BOSS详情|关卡详情|队伍编组|自动推进设定'):
+        return None
+    quests = screen.find('活动关卡.*首领', (0, 0, 330, 65), exact=True)
+    if (quests and quests.score >= .95
+            and screen.find('活动关卡', (450, 55, 730, 95), exact=True)
+            and screen.find('首领战', (730, 55, 950, 95), exact=True)):
+        return (32, 30)
+    labels = [screen.find(pattern, roi, exact=True) for pattern, roi in (
+        ('关卡一览', (300, 0, 700, 70)),
+        (r'活动关卡[HN]-\d+', (35, 130, 350, 375)),
+        ('1个关卡的使用券张数', (480, 390, 705, 435)),
+        ('取消', (460, 440, 710, 520)),
+    )]
+    return labels[-1] if all(item and item.score >= .95 for item in labels) else None
+
+
 def map_dialogue(screen):
     """Observed map dialogue: pink nameplate above a wide white speech panel."""
     if screen.find('菜单|跳过|全文显示', (680, 0, 960, 380)):

@@ -207,6 +207,21 @@ class StrategyFormation(EventFormation):
     def _select_source_party(self, party):
         return self.select(party)
 
+    def recover_source_equipment(self, stage, source, names):
+        recovered = set(source.get('_equipment_recovered', ()))
+        observed = getattr(self, 'observed', {})
+        pending = [name for name in names if name not in recovered and (
+            observed.get(normalized(name)) is None
+            or observed[normalized(name)].unique is None
+            or observed[normalized(name)].unique2 is None)]
+        if not pending:
+            return False
+        # A later selection may reveal another unknown. Bound recovery per
+        # character instead of exhausting the whole team's chance at once.
+        source['_equipment_recovered'] = sorted(recovered | set(pending))
+        self.recover_equipment(stage, pending)
+        return True
+
     def source_trial(self,stage,source,*,recover=True):
         if source.get('document'):
             from .party_preparation import audit_declared_build, numeric_equipment_unknown, catalogue_issues
@@ -270,21 +285,9 @@ class StrategyFormation(EventFormation):
             if len(checked[1].get('order',[]))==5:
                 identities=checked[1]['order']
             else:checked=None
-        if self.allow_substitutions and len(identities)==5 and None not in identities and set(identities)!=set(source['names']):
-            missing=list(set(source['names'])-set(identities))
-            incoming=list(set(identities)-set(source['names']))
-            if len(missing)==len(incoming)==1:
-                roles=character_roles()
-                old,new=roles.get(missing[0]),roles.get(incoming[0])
-                if old and new and all(old[key]==new[key] for key in ('kind','heal','tank')):
-                    if checked is None:checked=self.current_trial(stage)
-                    if set(checked[1].get('order',[]))==set(identities):
-                        index=source['names'].index(missing[0])
-                        source.setdefault('original_names',list(source['names']))
-                        source['names'][index]=incoming[0]
-                        source['required_stars'][index]=None
-                        source.setdefault('adaptations',[]).append(dict(missing=missing[0],replacement=incoming[0],
-                            reason='复用已保存的一名同属性、同攻击类型及生存职能替补，当前账号重新核验'))
+        # Returning from equipment inspection can restore an older saved team.
+        # Select the intended members; only a confirmed missing identity may
+        # trigger adapt_source(), never a mismatch with that saved team.
         candidate=EventParty('用户攻略成员 '+stage.title,source['source'],
                              [MemberRequirement(n,1,1,1,None,None,True,0) for n in source['names']])
         if None in identities or set(identities)!=set(source['names']):
@@ -294,15 +297,12 @@ class StrategyFormation(EventFormation):
             if not ready:
                 unresolved=[f['character'] for f in details.get('unready',[]) if any('专武' in r for r in f.get('reasons',[]))]
                 missing=[f['character'] for f in details.get('unready',[]) if any('未在搜索结果' in r for r in f.get('reasons',[]))]
+                if missing and not self.allow_substitutions:
+                    return None,dict(source=source,selection=details,unready=['来源阵容缺员，继续其他原阵容候选'])
                 if unresolved and recover and hasattr(self,'recover_equipment'):
-                    # One character-page visit can establish every unreleased
-                    # weapon in this team. Auditing only the first unknown here
-                    # can repeatedly rebuild and inspect the same five cards.
                     source['_known_missing'] = sorted(set(known_missing) | set(missing))
-                    self.recover_equipment(stage,[n for n in source['names'] if n not in missing])
-                    return self.source_trial(stage,source,recover=False)
-                if self.allow_substitutions and missing and recover and not unresolved:
-                    return self.adapt_source(stage,source,missing)
+                    if self.recover_source_equipment(stage,source,[n for n in source['names'] if n not in missing]):
+                        return self.source_trial(stage,source)
                 # Equipment recovery is independent of a missing member.
                 if self.allow_substitutions and missing and not unresolved:
                     return self.adapt_source(stage,source,missing)
@@ -315,9 +315,8 @@ class StrategyFormation(EventFormation):
         if party is None and recover and hasattr(self,'recover_equipment'):
             unresolved=[f['character'] for f in audit.get('unready',[]) if f.get('character')
                         and any('专武' in r for r in f.get('reasons',[]))]
-            if unresolved:
-                self.recover_equipment(stage,source['names'])
-                return self.source_trial(stage,source,recover=False)
+            if unresolved and self.recover_source_equipment(stage,source,source['names']):
+                return self.source_trial(stage,source)
         if party:
             settings=dict(zip((normalized(name) for name in source['names']),source['instant']))
             if {normalized(member.name) for member in party.members} != set(settings):
@@ -353,9 +352,7 @@ class StrategyFormation(EventFormation):
             replacement=max(options)[1];i=adapted['names'].index(name);adapted['names'][i]=replacement;adapted['required_stars'][i]=None
             adapted['adaptations'].append(dict(missing=name,replacement=replacement,reason='同属性同攻击类型，按职能/治疗/坦克/输出技能相似度选本地替补'))
         source.update(adapted)
-        # New members need their own equipment proof. The source_trial
-        # recovery path is bounded to one character-page visit before a full
-        # reselection; disabling it here strands valid unreleased weapons.
+        # New members receive their own bounded equipment recovery.
         return self.source_trial(stage,source)
 
     def current_trial(self, stage):

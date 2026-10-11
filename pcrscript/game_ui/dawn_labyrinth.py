@@ -70,6 +70,18 @@ def sweep_catalogue(screen: EventScreen) -> bool:
                 and screen.find('一键扫荡', (700, 440, 930, 520), exact=True))
 
 
+def navigation_exit(screen: EventScreen):
+    """Leave selection pages without confirming a sweep or ending exploration."""
+    if screen.find('确认|关闭|确定|挑战|出发', (250, 300, 750, 525), exact=True):
+        return None
+    if sweep_catalogue(screen):
+        cancel = screen.find('取消', (480, 440, 695, 520), exact=True)
+        return cancel if cancel and cancel.score >= .95 else None
+    if guild_selection(screen) and not screen.find('取消', (250, 300, 750, 525), exact=True):
+        return (30, 30)
+    return None
+
+
 def catalogue_guilds(screen: EventScreen) -> list:
     if not sweep_catalogue(screen):
         return []
@@ -96,7 +108,9 @@ def catalogue_selected(screen: EventScreen, guild) -> bool:
 def catalogue_preview(ui, screen: EventScreen) -> tuple[int, int] | None:
     if not sweep_catalogue(screen) or not screen.find('通行证', (40, 405, 170, 450), exact=True):
         return None
-    before = ui.number(screen, (224, 411, 268, 452))
+    # The orange arrow starts immediately after the right-aligned balance.
+    # Including it makes an isolated 1 look like a second digit to crop OCR.
+    before = ui.number(screen, (220, 411, 254, 452))
     after = ui.number(screen, (323, 411, 371, 452))
     quantity = ui.number(screen, (740, 397, 792, 432))
     if (before is None or after is None or quantity is None

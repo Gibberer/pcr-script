@@ -61,3 +61,5 @@ Extra:
 ```
 
 不传 `--config` 时，优先使用 `daily_config.yml`，没有时使用根目录 `runtime_defaults.yml`。同一设备不要同时运行 GUI 和 CLI 任务。记录位于 `cache/daily/runs/`；查看任务回执和未完成原因，不能只凭进程退出判断目标完成。
+
+每日结束后输出各项状态和未完成原因。业务报告为 `partial`、`blocked` 或 `error` 时退出码为 2；任务异常也会返回非零。`finished` 表示执行结束但尚无业务核验，退出码 0 不保证游戏所有日课都已达成。

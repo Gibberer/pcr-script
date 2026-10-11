@@ -1,7 +1,6 @@
 """On-demand bulk character levelling and normal equipment upgrades."""
 from __future__ import annotations
 
-import json
 import re
 import cv2 as cv
 import numpy as np
@@ -9,7 +8,7 @@ import numpy as np
 from .base import BaseTask, TaskOptions, TaskReport
 from .registry import register
 from ..game_ui.screen import EventUI, EventUIError, normalized
-from ..run_session import clock as time
+from ..run_session import clock as time, atomic_json
 
 
 def selected_count(screen) -> int | None:
@@ -40,7 +39,7 @@ class UpgradeAllCharacters(BaseTask):
             raise EventUIError('角色强化任务超时')
 
     def save_report(self) -> None:
-        (self.ui.output/'report.json').write_text(json.dumps(self.report, ensure_ascii=False, indent=2), encoding='utf-8')
+        atomic_json(self.ui.output/'report.json', self.report)
 
     def bulk(self):
         return self.ui.wait(lambda s: s.find('一键强化', (300, 20, 670, 60), exact=True)

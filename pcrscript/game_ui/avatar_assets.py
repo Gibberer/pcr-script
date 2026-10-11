@@ -17,18 +17,12 @@ import numpy as np
 import requests
 
 from .avatars import AvatarIndex, face_crop
+from ..run_session import atomic_json
 
 ICON_SOURCE = 'https://redive.estertion.win/icon/unit/'
 DB_INFO = 'https://wthee.xyz/pcr/api/v1/db/info/v2'
 DB_SOURCE = 'https://wthee.xyz/db/redive_cn.db.br'
 ASSET_VERSION = 1
-
-
-def atomic_json(path: Path, value: dict) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(path.name+'.'+uuid4().hex+'.tmp')
-    temporary.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding='utf-8')
-    temporary.replace(path)
 
 
 def read_json(path: Path) -> dict:

@@ -148,6 +148,22 @@ class TaskIntegrationTests(TestCase):
         self.assertEqual(robot.task_results[-1]['status'],'error')
         self.assertIsNone(robot._task_output)
 
+    def test_task_error_is_preserved_after_writing_report(self):
+        for task_class, entry in ((CampaignClean, 'enter'), (GetGift, 'open_gifts')):
+            with self.subTest(task=task_class.name), TemporaryDirectory() as folder:
+                task = task_class(self.robot(), {'output': folder})
+                error = RuntimeError('synthetic entry failure')
+                with patch.object(task, entry, side_effect=error) as enter, \
+                     patch.object(task.ui, 'save') as screenshot, self.assertRaises(RuntimeError) as caught:
+                    task.run()
+                self.assertIs(caught.exception, error)
+                enter.assert_called_once()
+                screenshot.assert_called_once_with('error')
+                saved = json.loads((Path(folder)/'report.json').read_text(encoding='utf-8'))
+                self.assertEqual(saved, task.report)
+                self.assertEqual(saved['status'], 'error')
+                self.assertEqual(saved['pending'], [str(error)])
+
     def test_unsafe_resume_stops_daily_list_and_records_task_error(self):
         class UnsafeTask(BaseTask):
             def run(self):

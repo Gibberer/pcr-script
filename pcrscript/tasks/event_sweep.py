@@ -129,17 +129,20 @@ class HardSweep:
                 if button:
                     self.ui.click(button)
                     confirmed = True
-            elif confirmed and s.find("关卡一览", (300, 0, 700, 70)):
-                rows = hard_rows(s)
-                if any(name not in rows or attempts(s, rows[name]) != 0 for name in plan):
-                    raise EventUIError("困难批量扫荡后次数未能核实，停止重复消费")
-                self.ui.save("hard_bulk_finished", s)
-                self.leave()
-                return
             elif s.find("扫荡结果|获得道具|扫荡完成|扫荡券使用结果"):
                 button = s.find("全部跳过|跳过|确认|确定|关闭|OK", (200, 300, 950, 535), exact=True)
                 if button:
                     self.ui.click(button)
+            elif confirmed and s.find("关卡一览", (300, 0, 700, 70)):
+                rows = hard_rows(s)
+                if any(name not in rows or attempts(s, rows[name]) != 0 for name in plan):
+                    # The first returned frame can contain spent stamina but
+                    # old attempts. Wait for the counters; never submit again.
+                    time.sleep(.5)
+                    continue
+                self.ui.save("hard_bulk_finished", s)
+                self.leave()
+                return
             elif s.find("限定商店|限时商店"):
                 self.ui.expect_click("取消|关闭", (200, 300, 800, 525), exact=True)
             elif s.find("体力回复|体力恢复|购买体力"):
@@ -147,4 +150,4 @@ class HardSweep:
                 raise EventUIError("扫荡请求购买体力，已取消")
             else:
                 time.sleep(.5)
-        raise EventUIError("困难批量扫荡结算超时，停止重复消费")
+        raise EventUIError("困难批量扫荡结算超时，次数或结果未能核实，停止重复消费")

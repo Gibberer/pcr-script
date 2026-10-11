@@ -1,7 +1,6 @@
 """List-layout story-event workflow, reusable for new and revival editions."""
 from __future__ import annotations
 from .registry import register
-import json
 from difflib import SequenceMatcher
 from typing import TYPE_CHECKING, Any
 from .base import BaseTask, TimeLimitTask, EventNews, TaskOptions, TaskReport
@@ -9,9 +8,11 @@ from ..game_ui.screen import EventScreen
 if TYPE_CHECKING:
     from pcrscript import Robot
 import re
-from pcrscript.run_session import clock as time
+from ..run_session import atomic_json, clock as time, failure
 
 from ..game_ui.screen import EventUI, EventUIError, normalized
+from ..game_ui.dawn_labyrinth import navigation_exit as maze_navigation_exit
+from ..game_ui.recollection import navigation_exit as recollection_navigation_exit
 
 
 @register("campaign_clean")
@@ -154,6 +155,9 @@ class CampaignClean(TimeLimitTask):
         for _ in range(90):
             self.check_deadline()
             s = self.ui.capture()
+            if (cancel := maze_navigation_exit(s) or recollection_navigation_exit(s)) is not None:
+                self.ui.click(cancel)
+                continue
             if self.entry_dialog(s):
                 continue
             if s.find("角色详情", (300, 0, 700, 70)):
@@ -693,7 +697,7 @@ class CampaignClean(TimeLimitTask):
             self.ui.save('error')
             raise
         finally:
-            (self.ui.output / 'report.json').write_text(json.dumps(self.report, ensure_ascii=False, indent=2), encoding='utf-8')
+            atomic_json(self.ui.output / 'report.json', self.report)
 
     def run(self, hard_chapter: bool = True, exhaust_power: bool = False, *, only: str = 'all') -> TaskReport:
         if only != 'all':
@@ -731,14 +735,13 @@ class CampaignClean(TimeLimitTask):
             self.report["status"] = "complete" if not self.report["pending"] else "partial"
             return self.report
         except Exception as error:
-            from pcrscript.run_session import failure
             failure(error)
             self.report["status"] = "error"
             self.report["pending"].append(str(error))
             self.ui.save("error")
             raise
         finally:
-            (self.ui.output / "report.json").write_text(json.dumps(self.report, ensure_ascii=False, indent=2), encoding="utf-8")
+            atomic_json(self.ui.output / "report.json", self.report)
 
 @register("clear_campaign_first_time")
 class ClearCampaignFirstTime(TimeLimitTask):

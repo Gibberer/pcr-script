@@ -15,7 +15,7 @@ from .task_story_event import CampaignClean
 from ..game_ui.dungeon import completed_card, dungeon_map, floor_number, progress, auto_equip_party
 from ..game_ui.screen import EventScreen, EventUI, EventUIError, normalized
 from ..game_ui.character_equipment import inspect_unreleased_equipment
-from ..run_session import clock as time, emit
+from ..run_session import atomic_json, clock as time, emit
 
 
 @register('dungeon_first_clear')
@@ -57,10 +57,7 @@ class DungeonFirstClear(BaseTask):
             raise EventUIError('地下城任务超时')
 
     def save_state(self) -> None:
-        self.state_path.parent.mkdir(parents=True, exist_ok=True)
-        temp = self.state_path.with_suffix('.tmp')
-        temp.write_text(json.dumps(self.state, ensure_ascii=False, indent=2), encoding='utf-8')
-        temp.replace(self.state_path)
+        atomic_json(self.state_path, self.state)
 
     def ensure_plan(self):
         if self.plan is None:
@@ -92,8 +89,7 @@ class DungeonFirstClear(BaseTask):
             archive = self.state_path.parent/'archive'
             archive.mkdir(parents=True, exist_ok=True)
             from uuid import uuid4
-            (archive/(self.state_path.stem+'-'+uuid4().hex+'.json')).write_text(
-                json.dumps(self.state, ensure_ascii=False, indent=2), encoding='utf-8')
+            atomic_json(archive/(self.state_path.stem+'-'+uuid4().hex+'.json'), self.state)
         self.state = {'used': [], 'in_flight': None, 'history': [], 'entry_pending': True,
                       'started_at': time.time()}
         self.save_state()
@@ -123,7 +119,7 @@ class DungeonFirstClear(BaseTask):
             audits.append(dict(party=entry.key, ready=ready, role=entry.role, source=entry.party.source,
                                build_basis=entry.party.build_basis, assumptions=entry.party.assumptions,
                                source_damage=entry.source_damage, formation=details))
-            (self.ui.output/'route_audit.json').write_text(json.dumps(audits,ensure_ascii=False,indent=2),encoding='utf-8')
+            atomic_json(self.ui.output/'route_audit.json', audits)
         self.detail(self.enter())
         blocked = [a['party'] for a in audits if not a['ready']]
         if blocked:
@@ -449,4 +445,4 @@ class DungeonFirstClear(BaseTask):
             self.ui.save('blocked')
             return self.report
         finally:
-            (self.ui.output/'report.json').write_text(json.dumps(self.report, ensure_ascii=False, indent=2), encoding='utf-8')
+            atomic_json(self.ui.output/'report.json', self.report)

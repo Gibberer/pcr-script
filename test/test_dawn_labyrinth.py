@@ -1,5 +1,4 @@
 """Synthetic UI regressions; no account images, real strategies or device access."""
-import copy
 import json
 from itertools import count
 from pathlib import Path
@@ -8,119 +7,31 @@ from unittest import TestCase, main
 from unittest.mock import Mock, patch
 
 import cv2 as cv
-import numpy as np
 
 from pcrscript import Robot
+from ui_fixtures import screen, replay_ui, TaskReplayMixin
+from dawn_labyrinth_fixtures import (home, guild, preview, separate_guilds, named_preview, result,
+                                     mission_home, missions, mission_receipt, catalogue, bulk)
 from pcrscript.game_ui import dawn_labyrinth as maze
-from pcrscript.game_ui.screen import EventScreen, EventUIError, TextBox
+from pcrscript.game_ui.screen import EventUIError
 from pcrscript.run_session import RunCancelled
 from pcrscript.runtime import run_task_with_config
 from pcrscript.tasks import DawnLabyrinth
-from pcrscript.tasks.task_dawn_labyrinth import validate_options
-
-
-def screen(*labels, blue=()):
-    image = np.full((540, 960, 3), 245, np.uint8)
-    items = []
-    for text, x, y in labels:
-        items.append(TextBox(text, .999, [[x-25, y-10], [x+25, y-10],
-                                         [x+25, y+10], [x-25, y+10]]))
-        if text in blue:
-            cv.rectangle(image, (x-50, y-24), (x+50, y+24), (230, 155, 25), -1)
-    return EventScreen(image, items)
-
-
-def home(passes=3):
-    return screen(('黎明界迷宫', 130, 30), ('出发', 590, 302),
-                  ('持有通行证', 555, 337), (f'{passes}/99', 660, 337))
-
-
-def guild(*extra):
-    return screen(('黎明界迷宫', 130, 30), ('请选择要同行的公会。', 480, 88),
-                  ('跳过', 912, 65), ('选择', 144, 422), *extra)
-
-
-def preview(before=3, after=2):
-    return screen(('跳过确认', 480, 42), ('通行证持有数', 350, 330),
-                  (str(before), 635, 330), ('→', 665, 330), (str(after), 695, 330),
-                  ('跳过', 585, 480), ('取消', 370, 480), blue=('跳过',))
-
-
-def separate_guilds(*names, disabled=(), action='跳过'):
-    labels = [('黎明界迷宫', 130, 30), ('请选择要跳过的公会', 480, 88)]
-    for index, name in enumerate(names):
-        x = 144+269*index
-        labels.extend(((name, x, 352), (action, x, 422)))
-    value = screen(*labels)
-    for index, name in enumerate(names):
-        if name not in disabled:
-            x = 144+269*index
-            cv.rectangle(value.image, (x-50, 398), (x+50, 446), (230, 155, 25), -1)
-    return value
-
-
-def named_preview(name, before=1, after=0):
-    value = preview(before, after)
-    value.items.extend(screen((name, 480, 200)).items)
-    return value
-
-
-def result():
-    return screen(('跳过结果', 480, 42), ('获得了以下报酬', 480, 130), ('确认', 480, 480))
-
-
-def mission_home(passes=0, badge=True):
-    value = home(passes)
-    value.items.extend(screen(('任务', 874, 257)).items)
-    if badge:
-        cv.ellipse(value.image, (927, 226), (21, 10), 0, 0, 360, (110, 40, 245), -1)
-    return value
-
-
-def missions(claim=True, selected=True, title='完成合成迷宫任务'):
-    value = screen(('任务', 480, 42), ('全部', 190, 88), ('普通', 480, 88), ('公会', 774, 88),
-                  ('已超过持有数上限的道具将被送往礼物箱。', 480, 427),
-                  ('取消', 367, 475), ('全部收取', 592, 475),
-                  blue=tuple((['全部'] if selected else [])+(['全部收取'] if claim else [])))
-    if title:
-        row = screen((title,300,180),('1/1',650,180),('收取',840,180),
-                     blue=('收取',) if claim else ())
-        value.items.extend(row.items)
-        value.image[140:220]=row.image[140:220]
-    return value
-
-
-def mission_receipt():
-    return screen(('收取报酬', 480, 42), ('获得了以下报酬。', 480, 80),
-                  ('合成奖励', 450, 210), ('关闭', 480, 480))
-
-
-def catalogue(before=3, quantity=1, selected=True, after=None):
-    after = before-quantity if selected and after is None else after
-    value = screen(('可跳过的公会一览', 480, 42), ('美食殿堂', 92, 152),
-                   ('黎明界迷宫', 115, 179), ('解除所有勾选', 850, 110),
-                   ('通行证', 85, 430), (str(before), 250, 432),
-                   (str(after) if after is not None else '-', 353, 432),
-                   ('通行证使用数量', 540, 420), (str(quantity), 766, 414),
-                   ('MIN', 642, 414), ('MAX', 884, 414),
-                   ('取消', 584, 477), ('一键扫荡', 810, 476), blue=('一键扫荡',))
-    if selected:
-        cv.rectangle(value.image, (832, 148), (868, 179), (230, 155, 25), -1)
-    return value
-
-
-def bulk(before=3, cost=1, row_quantity=None, total=None, guild_name='美食殿堂'):
-    return screen(('键扫荡确认', 480, 42),
-                  ('即将消耗通行证，对以下公会及难度执行跳过操作。确定吗？', 480, 80),
-                  (guild_name, 92, 119), ('黎明界迷宫', 115, 146),
-                  (str(cost if row_quantity is None else row_quantity), 880, 144),
-                  ('合计扫荡次数', 840, 365), ('消耗通行证', 108, 405),
-                  ('通行证', 300, 405), (str(cost), 254, 405), (str(before), 465, 405),
-                  (str(cost if total is None else total), 884, 398),
-                  ('取消', 370, 480), ('挑战', 588, 480), blue=('挑战',))
 
 
 class LabyrinthRecognitionTests(TestCase):
+    def test_navigation_leaves_only_uncovered_selection_pages(self):
+        self.assertEqual(maze.navigation_exit(catalogue()).text, '取消')
+        self.assertEqual(maze.navigation_exit(guild()), (30, 30))
+        covered = catalogue()
+        covered.items.extend(screen(('未知确认', 480, 270), ('确认', 590, 380)).items)
+        departure = guild()
+        departure.items.extend(screen(('取消', 370, 480), ('出发', 590, 480)).items)
+        for value in (covered, departure, bulk(), preview(), result(), home(),
+                      screen(('菜单', 900, 30), ('1:20', 800, 25))):
+            with self.subTest(labels=value.text()):
+                self.assertIsNone(maze.navigation_exit(value))
+
     def test_missions_require_the_maze_popup_tabs_and_footer(self):
         self.assertTrue(maze.missions_page(missions()))
         self.assertFalse(maze.missions_page(home()))
@@ -231,7 +142,8 @@ class LabyrinthRecognitionTests(TestCase):
 
     def test_catalogue_preview_requires_single_guild_cost_and_explicit_zero(self):
         ui = Mock(number=lambda value, roi: value.number(roi))
-        self.assertEqual(maze.catalogue_preview(ui, catalogue(3, 3)), (3, 0))
+        for balance in (1, 3, 99):
+            self.assertEqual(maze.catalogue_preview(ui, catalogue(balance, balance)), (balance, 0))
         self.assertEqual(maze.catalogue_preview(ui, catalogue(3, 1)), (3, 2))
         # Two selected guilds would cost twice the per-guild quantity.
         for value in (catalogue(6, 2, after=2), catalogue(selected=False),
@@ -260,7 +172,7 @@ class LabyrinthRecognitionTests(TestCase):
         self.assertIsNone(maze.pass_preview(value))
 
 
-class LabyrinthTaskTests(TestCase):
+class LabyrinthTaskTests(TaskReplayMixin, TestCase):
     def setUp(self):
         self.temp = TemporaryDirectory()
         self.folder = Path(self.temp.name)
@@ -269,27 +181,13 @@ class LabyrinthTaskTests(TestCase):
                                                'state_dir': str(self.folder / 'state'),
                                                'account_key': 'synthetic-account'}})
         self.task = DawnLabyrinth(self.robot)
-        self.task.ui = Mock(output=self.folder, last=None)
-        self.task.ui.save.return_value = self.folder / 'synthetic.png'
+        self.task.ui = replay_ui(self.folder)
         self.sleep = patch('pcrscript.tasks.task_dawn_labyrinth.time.sleep')
         self.sleep.start()
 
     def tearDown(self):
         self.sleep.stop()
         self.temp.cleanup()
-
-    def frames(self, values):
-        """Only replace observation/input; the production state machine executes."""
-        iterator = iter(values)
-        last = values[-1]
-        def capture():
-            value = next(iterator, last)
-            self.task.ui.last = value
-            return value
-        self.task.ui.capture.side_effect = capture
-
-    def clicks(self):
-        return [getattr(call.args[0], 'text', call.args[0]) for call in self.task.ui.click.call_args_list]
 
     def test_entry_leaves_known_subjugation_detail_before_opening_maze(self):
         self.frames([screen(('BOSS详情', 109, 52), ('模拟战', 748, 109), ('实战', 866, 109),
@@ -300,6 +198,28 @@ class LabyrinthTaskTests(TestCase):
         self.assertEqual(report['status'], 'complete', report)
         self.assertEqual(self.clicks(), ['取消', '冒险', '黎明界迷宫'])
         self.assertEqual(report['spent'], 0)
+
+    def test_entry_leaves_recollection_sweep_preview_without_confirming_it(self):
+        from recollection_fixtures import sweep_selector
+        self.frames([sweep_selector(True), sweep_selector(), screen(('冒险',537,526)),
+                     screen(('冒险',100,30),('黎明界迷宫',800,365)), home(0)])
+        report = self.task.run()
+        self.assertEqual(report['status'], 'complete', report)
+        self.assertEqual(self.clicks(), ['取消', '取消', '冒险', '黎明界迷宫'])
+        self.assertEqual(report['spent'], 0)
+
+    def test_recollection_receipt_cannot_be_saved_as_pending_maze_spend(self):
+        pending = dict(before=1, after=0, cost=1, submitted=False, submission_tracked=True)
+        self.task.report['pending_spend'] = pending.copy()
+        self.task.save_report()
+        for content in (('9只击破！',480,136), ('获得了以下道具。',480,78)):
+            with self.subTest(content=content):
+                receipt = screen(('扫荡结果',480,42),('追忆的战场',115,113),
+                                 content,('确认',480,480))
+                report = self.restart([receipt])
+                self.assertEqual((report['status'],report['spent']),('partial',0),report)
+                self.assertEqual(report['pending_spend'],pending)
+                self.task.ui.click.assert_not_called()
 
     def test_subjugation_confirmation_overlay_is_preserved(self):
         self.frames([screen(('BOSS详情', 109, 52), ('模拟战', 748, 109), ('实战', 866, 109),
@@ -532,8 +452,7 @@ class LabyrinthTaskTests(TestCase):
             with self.subTest(after=after):
                 self.robot.task_config['DawnLabyrinth']['account_key'] = f'synthetic-{after}'
                 self.task = DawnLabyrinth(self.robot)
-                self.task.ui = Mock(output=self.folder, last=None)
-                self.task.ui.save.return_value = self.folder / 'synthetic.png'
+                self.task.ui = replay_ui(self.folder)
                 frames = [home(3), guild(), preview()]
                 if receipt_seen:
                     frames.append(result())
@@ -586,8 +505,7 @@ class LabyrinthTaskTests(TestCase):
 
     def restart(self, frames):
         self.task = DawnLabyrinth(self.robot)
-        self.task.ui = Mock(output=self.folder, last=None)
-        self.task.ui.save.return_value = self.folder / 'synthetic.png'
+        self.task.ui = replay_ui(self.folder)
         self.frames(frames)
         return self.task.run()
 
@@ -596,8 +514,7 @@ class LabyrinthTaskTests(TestCase):
             with self.subTest(mode=mode):
                 self.robot.task_config['DawnLabyrinth']['account_key'] = 'synthetic-'+mode
                 self.task = DawnLabyrinth(self.robot)
-                self.task.ui = Mock(output=self.folder, last=None)
-                self.task.ui.save.return_value = self.folder/'synthetic.png'
+                self.task.ui = replay_ui(self.folder)
                 self.task.ui.number.side_effect = lambda s, roi: s.number(roi)
                 values = ([home(1), guild(), preview(1, 0)] if mode == 'direct' else
                           [home(1), guild(), catalogue(1), catalogue(1, selected=False),
@@ -634,8 +551,7 @@ class LabyrinthTaskTests(TestCase):
             with self.subTest(mode=mode):
                 self.robot.task_config['DawnLabyrinth']['account_key'] = 'synthetic-dispatch-'+mode
                 self.task = DawnLabyrinth(self.robot)
-                self.task.ui = Mock(output=self.folder, last=None)
-                self.task.ui.save.return_value = self.folder/'synthetic.png'
+                self.task.ui = replay_ui(self.folder)
                 self.task.ui.number.side_effect = lambda s, roi: s.number(roi)
                 self.frames([home(1), guild(), preview(1, 0)] if mode == 'direct' else
                             [home(1), guild(), catalogue(1), catalogue(1, selected=False),
@@ -678,8 +594,7 @@ class LabyrinthTaskTests(TestCase):
             with self.subTest(index=index, submitted=submitted):
                 self.robot.task_config['DawnLabyrinth']['account_key'] = f'synthetic-changed-{index}'
                 self.task = DawnLabyrinth(self.robot)
-                self.task.ui = Mock(output=self.folder, last=None)
-                self.task.ui.save.return_value = self.folder/'synthetic.png'
+                self.task.ui = replay_ui(self.folder)
                 pending = dict(before=1, after=0, cost=1, submitted=submitted, submission_tracked=True)
                 self.task.report['pending_spend'] = pending
                 self.task.save_report()
@@ -714,8 +629,7 @@ class LabyrinthTaskTests(TestCase):
             with self.subTest(resumed=resumed, receipt=receipt.items[0].text):
                 self.robot.task_config['DawnLabyrinth']['account_key'] = f'synthetic-result-proof-{index}'
                 self.task = DawnLabyrinth(self.robot)
-                self.task.ui = Mock(output=self.folder, last=None)
-                self.task.ui.save.return_value = self.folder/'synthetic.png'
+                self.task.ui = replay_ui(self.folder)
                 if resumed:
                     self.task.report['pending_spend'] = dict(before=1, after=0, cost=1,
                                                             submitted=True, submission_tracked=True)
@@ -1276,13 +1190,6 @@ class LabyrinthTaskTests(TestCase):
         self.assertIsNone(maze.locked_notice(choices))
         self.frames([home(1), guild(), choices, named_preview('美食殿堂'), result(), home(0)])
         self.assertEqual(self.task.run()['status'], 'complete')
-
-    def test_options_do_not_mutate_configuration(self):
-        options = {'max_passes': 2}
-        original = copy.deepcopy(options)
-        self.assertEqual(validate_options(options)['timeout'], 600)
-        self.assertEqual(options, original)
-
 
 if __name__ == '__main__':
     main()

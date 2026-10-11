@@ -7,8 +7,17 @@ import re
 import time
 from urllib.parse import urlsplit,urljoin
 import requests
+from ..run_session import atomic_json
 
 SOURCE_CACHE_VERSION = 5
+
+
+def video_metadata(data):
+    """The same public metadata schema for supplied links and search results."""
+    return dict(provider='bilibili', bvid=data['bvid'],
+                url=f'https://www.bilibili.com/video/{data["bvid"]}/',
+                title=data['title'], description=data.get('desc', ''),
+                published_at=data.get('pubdate'), pages=data.get('pages', []))
 
 
 def source_statements(source):
@@ -17,6 +26,29 @@ def source_statements(source):
             (source.get('description', source.get('desc', '')), 'source_description')]+[
         (row.get('text', ''), 'author_comment:'+str(row.get('reply_id')))
         for row in source.get('author_comments', [])]
+
+
+def advisory_requirement(text):
+    """Reference builds and the author's own stats do not impose a minimum."""
+    reference = (re.search(r'参考练度|练度参考|参考配置|配置参考|建议|推荐|可选', text)
+                 or re.search(r'^(?:我|本人|作者)[^\n；。]*(?:练度|属性|MP\d+|大师点)', text, re.I))
+    return bool(reference) and not re.search(
+        r'必须|必备|需要|要求|至少|最低|不低于|才能|否则|务必|一定要|'
+        r'(?:不能|不可|不得|不允许)(?:低于|高于|少于|超过|少|缺|使用|用)|禁止', text)
+
+
+def fixed_set_statement(text):
+    """An explicit five-slot initial setting, with no timed actions or extra instructions."""
+    compact = re.sub(r'\s+', '', text)
+    match = re.fullmatch(
+        r'(?:不想操作的)?(?:[【\[]?(?:Boss[1-3]|[1-3]王|首领[1-3])[】\]]?)?'
+        r'(?:开局)?(?:SET)?(?P<flags>[OX]{5}|全SET)'
+        r'(?:开自动|(?:AUTO|自动)(?:ON|开启))?(?:同样)?(?:[1-9]\d*|[一二两三四五六七八九十])?刀?',
+        compact, re.I)
+    if match is None:
+        return None
+    flags = match['flags'].upper()
+    return (True,)*5 if flags == '全SET' else tuple(flag == 'O' for flag in flags)
 
 
 def declared_region(text: str) -> str:
@@ -212,8 +244,7 @@ def preferred_sources(urls,api,*,directory='cache/game/strategies/user_sources',
             if urlsplit(url).hostname in ('www.bilibili.com','bilibili.com','m.bilibili.com') and bvid:
                 response=api.getVideoInfo(bvid=bvid[1]);data=response.get('data',{})
                 if response.get('code')!=0 or data.get('bvid')!=bvid[1]:raise ValueError('视频身份未核验')
-                entry=dict(provider='bilibili',bvid=bvid[1],title=data['title'],description=data.get('desc',''),
-                           published_at=data.get('pubdate'),pages=data.get('pages',[]))
+                entry=video_metadata(data)
                 try:
                     entry['comment_complete']=False
                     if require_complete_comments:
@@ -237,7 +268,7 @@ def preferred_sources(urls,api,*,directory='cache/game/strategies/user_sources',
                            resolved_url=response.url)
             entry.update(version=SOURCE_CACHE_VERSION,url=url,fetched_at=time.time(),priority=priority,user_provided=True,
                          readiness='source_only',pending=['仍需核验任务范围和解析角色/培养要求'])
-            path.write_text(json.dumps(entry,ensure_ascii=False,indent=2),encoding='utf-8')
+            atomic_json(path, entry)
             result.append(entry)
         except (requests.RequestException,ValueError,KeyError,TypeError,OSError) as error:
             errors.append(dict(url=url,error=type(error).__name__+': '+str(error)[:180]))
