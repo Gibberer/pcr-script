@@ -751,6 +751,9 @@ class StadiumRosterTests(TestCase):
         self.assertEqual(details['unready'], [{'character':'合成角色','reasons':['专武状态未知']}])
         roster.member_readiness.assert_called_once_with(member,actual)
         self.assertTrue(all(c.args[0] == (110,226) for c in roster.inspect.call_args_list))
+        # The scan relies on inspect() to open skills only when still needed.
+        full = [c for c in roster.inspect.call_args_list if c.kwargs.get('full')]
+        self.assertTrue(full and all(c.kwargs.get('verify_skills') is False for c in full))
         roster.ui.click.assert_not_called()
         self.assertTrue(all(c.args == ((797,250),(797,340)) for c in roster.ui.swipe.call_args_list))
 
@@ -928,11 +931,13 @@ class StadiumReplayTests(TaskReplayMixin, TestCase):
         self.assertEqual(result['status'],'partial')
         self.assertEqual(result['battles'],1)
         self.assertEqual(self.task.find_round.call_args.kwargs['exclude_rounds'],{2})
+        # The blocked round left stars unchanged; only the new stars rescan rewards.
+        self.assertEqual(self.task.collect.call_count,2)
         self.assertIn('回合2尚未满星',result['pending'][0])
 
     def test_full_stars_and_received_rewards_skip_battles_and_cache_still_needs_live_proof(self):
         h = home(stars=9, unlocked=3, total=3, round_stars=(3, 3, 3))
-        self.frames([h, h, reward_page(received=True), h, h])
+        self.frames([h, h, h, reward_page(received=True), h, h])
         report = self.task.run(self.event)
         self.assertEqual(report['status'], 'already_complete')
         self.assertEqual(report['battles'], 0)
@@ -940,7 +945,7 @@ class StadiumReplayTests(TaskReplayMixin, TestCase):
 
     def test_full_stars_do_not_prove_rewards_received(self):
         h = home(stars=9, unlocked=3, total=3)
-        self.frames([h, h, reward_page(), h, h])
+        self.frames([h, h, h, reward_page(), h, h])
         result = self.task.run(self.event)
         self.assertEqual(result['status'], 'partial')
         self.assertIn('累计报酬尚未全部领取', result['pending'][0])
@@ -1041,6 +1046,36 @@ class StadiumReplayTests(TaskReplayMixin, TestCase):
         self.assertEqual(self.task.report['history'][-1]['stars_after'], 3)
         self.assertNotIn('战斗开始', self.clicks())
 
+    def test_known_round_on_current_page_needs_no_rewind(self):
+        last = home(stars=52, unlocked=18, first=16, round_stars=(3, 2, 2))
+        middle = home(stars=52, unlocked=18, first=13, round_stars=(3, 3, 3))
+        self.frames([last])
+        _, row = self.task.find_round(17)
+        self.assertEqual((row.number, row.stars), (17, 2))
+        self.assertEqual(self.task.ui.click.call_count, 0)
+        self.frames([last, middle])
+        _, row = self.task.find_round(14)
+        self.assertEqual(row.number, 14)
+        self.assertEqual(self.task.ui.click.call_count, 1)
+
+    def test_rerun_recovery_navigates_back_and_releases_unproven_fight(self):
+        from ui_fixtures import screen
+        self.task.event = self.event
+        self.task.state['pending_battle'] = dict(round=1, stars_before=0, signature='synthetic')
+        # The rerun starts on the game's home page, outside the stadium.
+        self.frames([screen(('我的主页', 80, 515), ('冒险', 535, 507)), home()])
+        self.task.finish_battle(recovering=True)
+        self.assertNotIn('pending_battle', self.task.state)
+        self.assertEqual(self.task.report['history'][-1]['outcome'], 'unverified_no_progress')
+        self.assertNotIn('failed', self.task.state)
+        self.assertNotIn('战斗开始', self.clicks())
+        # The start tap may never have landed: the formation is still open.
+        self.task.state['pending_battle'] = dict(round=1, stars_before=0, signature='synthetic')
+        self.frames([formation(), detail(), home()])
+        self.task.finish_battle(recovering=True)
+        self.assertNotIn('pending_battle', self.task.state)
+        self.assertNotIn('战斗开始', self.clicks())
+
     def synthetic_party_boundary(self):
         """Shared formation's audited output; no real character or gear data."""
         self.task.event = self.event
@@ -1109,6 +1144,9 @@ class StadiumReplayTests(TaskReplayMixin, TestCase):
         # Read the persisted state as a later run would. Tiny image variation
         # and another guide URL must not authorize the same failed team.
         self.task.state = json.loads(self.task.state_path.read_text(encoding='utf-8'))
+        # Records from runs that read skill pages still identify the build.
+        for member in self.task.state['failed'][0]['build']:
+            member['skill_level'] = 300
         gear['items'][0][0][0] = 1
         party.source = 'https://example.com/another-synthetic'
         self.frames([failed, detail(), formation(), formation(), detail(), failed])

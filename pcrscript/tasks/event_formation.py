@@ -411,6 +411,9 @@ class EventFormation:
             # Drag beside the cards. A drag starting on a portrait can open
             # character details instead of scrolling the roster.
             self.ui.swipe(self.roster_scroll[1], self.roster_scroll[0])
+        # Formations that opt out of current skill audits (stadium) keep the
+        # search path's avatar-first rule; others still read every skill page.
+        scan_skills = getattr(self, 'require_current_skills', True)
         pending = {normalized(m.name): m for m in party.members}
         scanned = set()
         previous = None
@@ -458,7 +461,7 @@ class EventFormation:
                 name = normalized(actual.name)
                 if name not in pending:
                     continue
-                actual = self.inspect(pos, full=True)
+                actual = self.inspect(pos, full=True, verify_skills=scan_skills)
                 reasons = self.member_readiness(pending[name], actual)
                 if reasons:
                     failures.append({"character": actual.name, "reasons": reasons})
@@ -472,7 +475,7 @@ class EventFormation:
             self.ui.swipe(*self.roster_scroll)
         if pending or failures:
             return False, {"missing": list(pending), "unready": failures}
-        actual_party = self.inspect_current(expected_names=[m.name for m in party.members])
+        actual_party = self.inspect_current(expected_names=[m.name for m in party.members], verify_skills=scan_skills)
         required = {normalized(m.name): m for m in party.members}
         errors = []
         for actual in actual_party:

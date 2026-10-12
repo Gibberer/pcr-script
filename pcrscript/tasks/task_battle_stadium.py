@@ -35,6 +35,13 @@ def validate_options(options):
     return value
 
 
+def build_key(member):
+    # Skill levels are read only when an avatar cannot prove the outfit or a
+    # source declares one, so they cannot identify a repeated build.
+    return {k: member.get(k) for k in ('name', 'level', 'rank', 'stars', 'unique', 'unique2',
+                                         'unique_level', 'unique2_stars', 'equipment')}
+
+
 @register('battle_stadium')
 class BattleStadium(TimeLimitTask):
     config_section = 'BattleStadium'
@@ -154,6 +161,23 @@ class BattleStadium(TimeLimitTask):
     def find_round(self, number=None, *, exclude_rounds=()):
         s = self.enter()
         p = self.progress(s)
+        if number is not None:
+            # A known round pages from the current map position instead of
+            # rewinding; the map usually stays on the page of the last fight.
+            for _ in range(34):
+                rows = field.rounds(s)
+                if not rows:
+                    raise EventUIError('斗技场回合卡片未确认')
+                row = next((r for r in rows if r.number == number), None)
+                if row is not None:
+                    if row.stars is None:
+                        raise EventUIError('目标回合星级未知')
+                    return s, row
+                direction = -1 if number < rows[0].number else 1
+                if rows[0].number == 1 and direction < 0 or rows[-1].number >= p['rounds'] and direction > 0:
+                    return s, None
+                s = self.page(direction, s)
+            raise EventUIError('斗技场回合扫描达到上限')
         for _ in range(34):
             rows = field.rounds(s)
             if not rows:
@@ -171,18 +195,14 @@ class BattleStadium(TimeLimitTask):
                 raise EventUIError('斗技场回合列表不完整或重复')
             for row in rows:
                 seen.add(row.number)
-                if number == row.number:
-                    if row.stars is None:
-                        raise EventUIError('目标回合星级未知')
-                    return s, row
-                if number is None and row.number <= p['unlocked'] and row.number not in exclude_rounds:
+                if row.number <= p['unlocked'] and row.number not in exclude_rounds:
                     if row.stars is None:
                         raise EventUIError('回合星级未知，未开战')
                     if row.stars == 0:
                         return s, row
                     if row.stars < 3 and partial is None:
                         partial = row
-            if rows[-1].number >= (p['unlocked'] if number is None else p['rounds']):
+            if rows[-1].number >= p['unlocked']:
                 if partial is not None:
                     # Clear untouched unlocked rounds before revisiting a
                     # partial win; later return to the earliest missing star.
@@ -397,15 +417,14 @@ class BattleStadium(TimeLimitTask):
             self.save()
             if special.get('unknown'):
                 raise EventUIError('特别装备分配后的状态未知，未开战')
-        build = [{k: a.get(k) for k in ('name', 'level', 'rank', 'stars', 'skill_level',
-                  'unique', 'unique2', 'unique_level', 'unique2_stars', 'equipment')}
-                 for a in audit.get('observed', {}).values()]
-        build.sort(key=lambda a: a['name'])
+        build = sorted((build_key(a) for a in audit.get('observed', {}).values()), key=lambda a: str(a['name']))
         context = dict(round=row.number, build=build, special=special)
         signature = sha256(json.dumps([row.number, build], sort_keys=True).encode()).hexdigest()
         from ..game_ui.special_equipment import same_loadout
         if any(isinstance(old, dict) and old.get('round') == row.number
-               and old.get('build') == build and same_loadout(old.get('special', {}), special)
+               and isinstance(old.get('build'), list) and all(isinstance(m, dict) for m in old['build'])
+               and sorted(map(build_key, old['build']), key=lambda a: str(a['name'])) == build
+               and same_loadout(old.get('special', {}), special)
                for old in self.state.get('failed', [])):
             self.enter()
             return False
@@ -430,12 +449,18 @@ class BattleStadium(TimeLimitTask):
         self.finish_battle()
         return True
 
-    def finish_battle(self):
+    def finish_battle(self, recovering=False):
         record = self.state['pending_battle']
         until = time.monotonic()+self.options['battle_timeout']
         while time.monotonic() < until:
             s = self.capture()
             if field.home(s):
+                break
+            # A rerun may start outside the stadium, or on the unstarted round
+            # pages if the start tap never landed. Combat and result pages show
+            # neither; find_round() navigates back to the map.
+            if recovering and (s.find('冒险', (475, 475, 595, 540), exact=True)
+                               or field.detail(s) or field.formation(s)):
                 break
             if s.find('战斗胜利|战斗失败|WIN|LOSE', (0, 0, 960, 450)):
                 results = record.setdefault('result_images', [])
@@ -451,8 +476,18 @@ class BattleStadium(TimeLimitTask):
         else:
             raise EventUIError('战斗结算未知，保留待核对战斗')
         _, row = self.find_round(record['round'])
-        if row is None or row.stars is None or (row.stars <= record['stars_before'] and not record.get('result')):
-            raise EventUIError('战后星级变化未确认，未重放战斗')
+        if row is None or row.stars is None:
+            raise EventUIError('战后星级未确认，未重放战斗')
+        if row.stars <= record['stars_before'] and not record.get('result'):
+            if not recovering:
+                raise EventUIError('战后星级变化未确认，未重放战斗')
+            # Stadium fights consume no resource. An interrupted fight with
+            # no result and unchanged stars proves nothing about this team,
+            # so it is released without a failure record.
+            self.report['history'].append(dict(record, stars_after=row.stars, outcome='unverified_no_progress'))
+            self.state.pop('pending_battle')
+            self.save()
+            return
         record['stars_after'] = row.stars
         if row.stars < 3:
             self.state.setdefault('failed', []).append(record.get('context', record['signature']))
@@ -477,7 +512,7 @@ class BattleStadium(TimeLimitTask):
             self.report['event_id'] = event.extras['schedule_id']
             self.report_progress('斗技场 · 核对活动与已有星级')
             if self.state.get('pending_battle'):
-                self.finish_battle()
+                self.finish_battle(recovering=True)
             s = self.enter()
             # The event identity is never inferred from a cached completion.
             from datetime import datetime
@@ -488,10 +523,14 @@ class BattleStadium(TimeLimitTask):
                 raise EventUIError('游戏举办时间与本期数据库不一致')
             self.progress(s)
             blocked_rounds = set()
+            collected_stars = None
             while self.report['battles'] < self.options['max_battles']:
-                collected = self.collect()
-                s = self.enter()
-                p = self.progress(s)
+                p = self.progress(self.enter())
+                # New claims require new stars; skip rescanning an unchanged list.
+                if p['stars'] != collected_stars:
+                    collected = self.collect()
+                    collected_stars = self.report['progress']['stars']
+                    p = self.report['progress']
                 if p['stars'] == p['maximum_stars']:
                     if not collected:
                         raise EventUIError('星级已满，累计报酬尚未全部领取')
