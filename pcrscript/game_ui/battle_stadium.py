@@ -161,7 +161,11 @@ class SourceScope:
         labels = {normalized(t.text) for t in texts if t.score >= .95}
         detail_page = ({'编组详情', '挑战目标', '战斗效果'} <= labels
                        or {'编组详情', '取消', '挑战', '战斗效果'} <= labels)
-        formation_page = {'队伍编组', '当前的成员', '对战对手的队伍', '战斗效果'} <= labels
+        # Scrolling the roster can blur the opponent label; the bottom
+        # controls then still identify the same unstarted formation.
+        formation_page = ({'队伍编组', '当前的成员', '战斗效果'} <= labels
+                          and ('对战对手的队伍' in labels or {'取消', '战斗开始'} <= labels))
+        saved_parties = {'我的队伍一览', '呼出此编组'} <= labels
         equipment_page = ({'选择装备', '特别装备替换详情', '取消', '装备确定'} <= labels
                           or {'选择装备', '取消', '全部卸下', '稀有度', '降序'} <= labels
                           or {'选择装备', '特别装备替换确认', '替换特别装备。', '关闭', '装备确定'} <= labels
@@ -207,10 +211,17 @@ class SourceScope:
             self.on_formation = False
             self.loading_at = seconds
             return {}, False, None
-        if (loading_scene and self.scope and self.names
+        if ((loading_scene or not labels) and self.scope and self.names
                 and 0 <= seconds-self.loading_at <= 1 and seconds-self.at <= 20):
-            # A short black fade immediately after an explicit loading frame
-            # supplies no scope proof and cannot renew any authorization.
+            # A short black or dimmed, textless fade immediately after an
+            # explicit loading frame supplies no scope proof and cannot renew
+            # any authorization.
+            return {}, False, None
+        if (saved_parties and self.scope and not (scope and verified and scope != self.scope)
+                and seconds-self.at <= 40):
+            # Loading a saved roster keeps the round context only. The
+            # following formation frames must still supply the final team.
+            self.names = []
             return {}, False, None
         if equipment_page and self.scope and scope and verified and scope != self.scope:
             self.reset()
@@ -250,9 +261,14 @@ class SourceScope:
             # A dim loading overlay can reduce the already-bound header's
             # confidence. It cannot supply a new round or extend its deadline.
             hints = {int(m[1]) for t in texts if t.score >= .85
-                     and (m := re.fullmatch(r'回合([1-9]\d?)', normalized(t.text)))}
+                     and (m := re.fullmatch(r'.?合([1-9]\d?)', normalized(t.text)))}
             if (not verified and self.scope and hints == {self.scope['round']}
                     and seconds-self.at <= 15):
+                return {}, False, None
+            # The post-start flash can leave the badge wholly unreadable.
+            # With a bound final roster and no other round, keep it unrenewed.
+            if (not verified and not scope and not hints and self.scope and self.names
+                    and 0 <= seconds-self.formation_at <= 8 and seconds-self.at <= 20):
                 return {}, False, None
             self.reset()
             if verified and set(scope) == {'round'}:

@@ -226,6 +226,33 @@ class StadiumRecognitionTests(TestCase):
         self.assertIsNone(field.round_number(home(), ui))
         ui.read_region.assert_not_called()
 
+    def test_saved_party_dialog_and_start_fades_keep_only_the_bound_round(self):
+        labels = lambda *names: [GuideText(n, 1, (10, 10, 100, 20)) for n in names]
+        context = field.SourceScope()
+        detail = labels('编组详情', '取消', '挑战', '挑战目标', '战斗效果')
+        context.resolve({'round': 17}, True, detail, 1, {})
+        context.resolve({}, False, labels('队伍编组', '当前的成员', '对战对手的队伍', '战斗效果'), 2, {})
+        context.observe_formation([dict(name='旧角色')], 2)
+        # Loading a saved roster clears the old team but keeps the round.
+        self.assertEqual(context.resolve({}, False, labels('我的队伍一览', '呼出此编组', '关闭'), 3, {})[:2],
+                         ({}, False))
+        self.assertEqual((context.scope, context.names), ({'round': 17}, []))
+        # A scrolled roster can hide the opponent label; bottom controls remain.
+        scrolled = labels('队伍编组', '当前的成员', '战斗效果', '取消', '战斗开始')
+        self.assertEqual(context.resolve({}, False, scrolled, 4, {})[:2], ({'round': 17}, True))
+        context.observe_formation([dict(name='合成角色')], 4)
+        # The post-start detail flash may leave its badge unreadable.
+        unreadable = detail+[GuideText('小号', .71, (330, 79, 51, 26))]
+        self.assertEqual(context.resolve({}, False, unreadable, 5, {})[:2], ({}, False))
+        context.resolve({}, False, labels('加载中'), 6, {})
+        self.assertEqual(context.resolve({}, False, [GuideText('水印', .9, (900, 10, 300, 50))], 6.5, {})[:2],
+                         ({}, False))
+        self.assertEqual(context.resolve({}, False, [], 7, {}, combat_scene=True,
+                                         combat_names=['合成角色'])[:2], ({'round': 17}, True))
+        # Another round's saved-party dialog cannot keep the old context.
+        context.resolve({'round': 18}, True, labels('我的队伍一览', '呼出此编组'), 8, {})
+        self.assertEqual(context.scope, {})
+
     def test_dim_loading_hint_retains_deadline_without_supplying_scope_proof(self):
         labels = lambda *names: [GuideText(n, 1, (10, 10, 100, 20)) for n in names]
         context = field.SourceScope()

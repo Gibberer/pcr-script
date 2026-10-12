@@ -19,12 +19,12 @@ from ..extras.guide_media import fetch_video
 from ..game_ui.avatar_assets import ensure_avatar_index, read_json
 from ..game_ui.screen import normalized
 from ..run_session import atomic_json
-from ..game_ui.guide_vision import GuideText, combat_team, formation_team, wide_special_equipment_team, combat_set, combat_auto, combat_auto_labels, combat_boss_labels, battle_rectangles, match_portrait, read_text, requirement_cells, labeled_fields, formation_fields
+from ..game_ui.guide_vision import GuideText, combat_team, formation_team, wide_special_equipment_team, combat_set, combat_auto, combat_auto_labels, combat_boss_labels, battle_rectangles, match_portrait, read_text, requirement_cells, labeled_fields, formation_fields, stadium_formation_viewport, viewport_error, viewport_frame
 from .strategy_document import Evidence, Fact, empty_member, finalize, export_document
 from .strategy_sources import BORROW_PART, MANUAL_PART, UNVERIFIED_SETTING, discover_sources, get_source_rules, timed_switch_requirement, unparsed_switch_requirement
 from .strategy_inputs import advisory_requirement, declared_region, preferred_sources, source_statements, video_metadata
 
-PARSER_VERSION = 126
+PARSER_VERSION = 131
 FRAME_OCR_VERSION = 1
 COMBAT_AUDIT_SECONDS = 20
 RECOLLECTION_UNSUPPORTED = re.compile(
@@ -230,6 +230,38 @@ def frame_texts(frame: np.ndarray, image_path: Path, ocr) -> list[GuideText]:
     atomic_json(text_path, dict(frame_sha256=digest, ocr_version=FRAME_OCR_VERSION,
                                 texts=[asdict(t) for t in texts]))
     return texts
+
+
+def stadium_round_badge(frame: np.ndarray, texts: list[GuideText], ocr) -> list[GuideText]:
+    """Re-read a small, low-confidence round badge on a confirmed detail page.
+
+    Only enlarged crops of its digits are read. Each must repeat the original
+    number with high confidence; the decorative 回合 glyphs are never trusted.
+    """
+    labels = {t.text for t in texts if t.score >= .95}
+    title = next((t for t in texts if t.score >= .95 and t.text == '编组详情'), None)
+    if title is None or not labels & {'挑战目标', '战斗效果'}:
+        return texts
+    result = []
+    for t in texts:
+        # The 回 glyph is often dropped or misread at small sizes.
+        match = re.fullmatch(r'.?合([1-9]\d?)', t.text)
+        x, y, w, h = t.rectangle
+        if (match and .7 <= t.score and not (t.score >= .95 and t.text.startswith('回合'))
+                and abs(t.center[1]-title.center[1]) <= title.rectangle[3]
+                and 0 <= x-title.rectangle[0]-title.rectangle[2] <= 3*title.rectangle[2]):
+            digits = len(match[1])
+            for share in ((len(t.text)-digits)*2/((len(t.text)-digits)*2+digits), .6, .75):
+                left = x+round(w*share)-4
+                crop = frame[max(0, y-4):y+h+4, max(0, left):x+w+6]
+                if crop.size == 0:
+                    continue
+                read = read_text(cv.resize(crop, None, fx=3, fy=3, interpolation=cv.INTER_CUBIC), ocr)
+                if len(read) == 1 and read[0].text == match[1] and read[0].score >= .95:
+                    t = GuideText('回合'+match[1], read[0].score, t.rectangle)
+                    break
+        result.append(t)
+    return result
 
 
 def unread_active_set_badge(small: np.ndarray, boxes, texts) -> bool:
@@ -985,6 +1017,9 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
         confirmation_rows = set()
         stadium_detail_rows = set()
         stadium_combat_probes = set()
+        # A formation page can recalibrate a recording whose game viewport
+        # is smaller or unequally scaled; it then applies to later frames.
+        stadium_view = None
         try:
             for seconds in seconds_list:
                 check()
@@ -1004,6 +1039,8 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
                 if options['task_type'] == 'stadium':
                     from ..game_ui.guide_vision import stadium_video_frame
                     small, wide_crop, (crop_left, crop_top, crop_width, crop_height) = stadium_video_frame(raw, with_bounds=True)
+                    if stadium_view:
+                        small = viewport_frame(frame, stadium_view)
                 elif wide_crop:
                     crop_width = round(raw.shape[0]*16/9)
                     crop_left = (raw.shape[1]-crop_width)//2
@@ -1060,6 +1097,19 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
                     page_record['full_ocr_frames'] = page_record.get('full_ocr_frames', 0)+1
                     if any(t.score >= .94 and t.text.strip() for t in texts):
                         page_record['readable_text_frames'] = page_record.get('readable_text_frames', 0)+1
+                    view = None
+                    if options['task_type'] == 'stadium':
+                        texts = stadium_round_badge(frame, texts, ocr)
+                        view = stadium_formation_viewport(texts)
+                    if view:
+                        default_view = (crop_width/960*1280/raw.shape[1], crop_left*1280/raw.shape[1],
+                                        crop_height/540*720/raw.shape[0], crop_top*720/raw.shape[0])
+                        # Keep the established crop unless it misplaces the
+                        # page's own controls; the fit then covers the page.
+                        stadium_view = view if viewport_error(texts, default_view) > 8 else None
+                        if stadium_view:
+                            small = viewport_frame(frame, stadium_view)
+                            page_record['viewport'] = [round(v, 3) for v in stadium_view]
                     if combat_scene:
                         last_combat_audit = seconds
                         last_caption = caption
@@ -1295,10 +1345,12 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
                         Evidence(**{**asdict(proof), 'method':'combat_auto_button'})))
                 for member, match in zip(team['members'], found):
                     rect = match['rectangle']
-                    rectangle = [round((crop_left+rect[0]*crop_width/960)*1280/raw.shape[1]),
-                                 round((crop_top+rect[1]*crop_height/540)*720/raw.shape[0]),
-                                 round(rect[2]*crop_width/960*1280/raw.shape[1]),
-                                 round(rect[3]*crop_height/540*720/raw.shape[0])] if len(rect) == 4 else [round(v*4/3) for v in rect]
+                    if len(rect) != 4:
+                        rectangle = [round(v*4/3) for v in rect]
+                    else:
+                        sx, ox, sy, oy = stadium_view or (crop_width/960*1280/raw.shape[1], crop_left*1280/raw.shape[1],
+                                                          crop_height/540*720/raw.shape[0], crop_top*720/raw.shape[0])
+                        rectangle = [round(ox+rect[0]*sx), round(oy+rect[1]*sy), round(rect[2]*sx), round(rect[3]*sy)]
                     p = Evidence(**{**asdict(proof), 'rectangle': rectangle,
                                     'method': 'avatar_feature_formation' if formation_found else 'avatar_feature',
                                     'confidence': match['score']})

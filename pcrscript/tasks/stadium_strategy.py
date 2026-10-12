@@ -105,6 +105,16 @@ def parties_for_round(report, number, *, allow_local_trials=False):
 
 class StadiumFormation(RecollectionFormation):
     """Stadium uses five formation slots and requires known live equipment."""
+    # Stadium fights are forced auto from zero TP and sources rarely state
+    # skill levels. A verified public avatar proves the outfit; the skill
+    # page opens only when it cannot, or when the source declares a level.
+    require_current_skills = False
+    trial_fields = ('level', 'rank', 'stars', 'unique', 'unique2')
+
+    def select(self, party):
+        self.require_current_skills = any(m.skill_level for m in party.members)
+        return super().select(party)
+
     all_filter_area = (30, 135, 115, 178)
     search_field_area = (300, 180, 640, 235)
     search_reset_area = (640, 175, 755, 240)

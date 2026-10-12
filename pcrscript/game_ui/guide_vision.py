@@ -37,6 +37,48 @@ def stadium_video_frame(raw, *, with_bounds=False):
     return (*result, (left, crop_top, crop_width, raw.shape[0])) if with_bounds else result
 
 
+# Text centres of the stadium formation page in the 960x540 design space.
+STADIUM_FORMATION_ANCHORS = {'队伍编组': (479, 42), '战斗效果': (94, 80), '对战对手的队伍': (462, 80),
+                             '当前的成员': (102, 388), '取消': (711, 454), '战斗开始': (850, 452)}
+
+
+def stadium_formation_viewport(texts):
+    """Fit (sx, ox, sy, oy), mapping design coordinates to the OCR frame.
+
+    Some recordings draw the game smaller, or scaled unequally per axis,
+    inside the video. Only a formation page whose unique anchors agree on
+    one axis-aligned map can calibrate it; anything else returns None.
+    """
+    labels = [t for t in texts if t.score >= .95 and t.text in STADIUM_FORMATION_ANCHORS]
+    if len(labels) < 5 or len({t.text for t in labels}) != len(labels):
+        return None
+    design = np.array([STADIUM_FORMATION_ANCHORS[t.text] for t in labels], float)
+    actual = np.array([t.center for t in labels], float)
+    sx, ox = np.polyfit(design[:, 0], actual[:, 0], 1)
+    sy, oy = np.polyfit(design[:, 1], actual[:, 1], 1)
+    if not (.5 <= sx <= 3 and .5 <= sy <= 3 and .75 <= sx/sy <= 1.35):
+        return None
+    if (np.max(np.abs(design[:, 0]*sx+ox-actual[:, 0])) > 4*sx
+            or np.max(np.abs(design[:, 1]*sy+oy-actual[:, 1])) > 4*sy):
+        return None
+    return float(sx), float(ox), float(sy), float(oy)
+
+
+def viewport_error(texts, viewport):
+    """Largest design-space distance between formation anchors and a map."""
+    sx, ox, sy, oy = viewport
+    return max((max(abs((t.center[0]-ox)/sx-STADIUM_FORMATION_ANCHORS[t.text][0]),
+                    abs((t.center[1]-oy)/sy-STADIUM_FORMATION_ANCHORS[t.text][1]))
+                for t in texts if t.score >= .95 and t.text in STADIUM_FORMATION_ANCHORS), default=0)
+
+
+def viewport_frame(frame, viewport):
+    """Resample the OCR frame into the 960x540 design space."""
+    sx, ox, sy, oy = viewport
+    return cv.warpAffine(frame, np.float32([[sx, 0, ox], [0, sy, oy]]), (960, 540),
+                         flags=cv.INTER_LINEAR | cv.WARP_INVERSE_MAP)
+
+
 @dataclass
 class GuideText:
     text: str

@@ -509,6 +509,31 @@ class AvatarTests(TestCase):
             self.assertEqual(again.skill_level,355)
             formation.ui.click.assert_not_called()
 
+    def test_stadium_known_avatar_skips_skill_page_unless_source_declares_level(self):
+        from pcrscript.tasks.stadium_strategy import StadiumFormation
+        detail=frame(('角色详情',480,42),('合成角色',540,80),('355',560,115),('38',790,115),('技能',704,150))
+        with TemporaryDirectory() as root:
+            formation=StadiumFormation.__new__(StadiumFormation)
+            formation.observed={};formation.unreleased={}
+            formation.ui=Mock(output=Path(root),capture=Mock(return_value=detail))
+            formation.ui.save.return_value=Path(root)/'evidence.png'
+            formation.ui.wait.return_value=detail
+            formation.avatars=Mock(query=Mock(return_value=['合成角色']))
+            formation.badges=Mock(observe=Mock(return_value=((True,False),detail)))
+            with patch('pcrscript.tasks.event_formation.count_stars',return_value=5):
+                actual=formation.inspect((96,452),rectangle=(48,405,96,96),expected_name='合成角色',verify_skills=False)
+            self.assertTrue(actual.identity_verified)
+            self.assertIsNone(actual.skill_level)
+            formation.ui.click.assert_not_called()
+            formation.use_current_build=True
+            requirement=MemberRequirement('合成角色',None,None,None,None,None,True,None)
+            self.assertNotIn('账号培养或装备未明确：skill_level',formation.member_readiness(requirement,actual))
+            with patch('pcrscript.tasks.recollection_strategy.RecollectionFormation.select',return_value=(False,{})):
+                formation.select(SimpleNamespace(members=[requirement]))
+                self.assertFalse(formation.require_current_skills)
+                formation.select(SimpleNamespace(members=[MemberRequirement('合成角色',1,1,1,skill_level=300)]))
+                self.assertTrue(formation.require_current_skills)
+
     def test_requested_costume_cannot_relabel_another_costumes_verified_skills(self):
         detail=frame(('角色详情',480,42),('合成角色',540,80),('355',560,115),('38',790,115),('技能',704,150))
         skills=frame(('连结爆发',650,180),('合成爆发',650,205),('等级',815,205),('355',870,205),

@@ -80,6 +80,46 @@ class VideoStrategyTests(TestCase):
         self.assertTrue(wide)
         np.testing.assert_array_equal(actual,cv.resize(game,(960,540)))
 
+    def test_stadium_formation_anchors_calibrate_unequally_scaled_viewport(self):
+        from pcrscript.game_ui.guide_vision import (GuideText, STADIUM_FORMATION_ANCHORS,
+            stadium_formation_viewport, viewport_error, viewport_frame)
+        def texts(sx, ox, sy, oy, skip=()):
+            return [GuideText(label, .99, (round(x*sx+ox-20), round(y*sy+oy-10), 40, 20))
+                    for label,(x,y) in STADIUM_FORMATION_ANCHORS.items() if label not in skip]
+        observed = texts(1.042, 139, 1.167, 28)
+        view = stadium_formation_viewport(observed)
+        np.testing.assert_allclose(view, (1.042, 139, 1.167, 28), atol=.02*139)
+        self.assertGreater(viewport_error(observed, (4/3, 0, 4/3, 0)), 8)
+        self.assertLessEqual(viewport_error(texts(4/3, 0, 4/3, 0), (4/3, 0, 4/3, 0)), 1)
+        # Too few anchors, or anchors that disagree on one map, never calibrate.
+        self.assertIsNone(stadium_formation_viewport(texts(1.042, 139, 1.167, 28, skip=('取消','战斗开始'))))
+        moved = observed[:-1]+[GuideText('战斗开始', .99, (900, 300, 40, 20))]
+        self.assertIsNone(stadium_formation_viewport(moved))
+        game = np.full((540,960,3),190,np.uint8)
+        cv.rectangle(game,(50,405),(146,501),(10,140,220),-1)
+        frame = cv.warpAffine(game, np.float32([[1.042,0,139],[0,1.167,28]]), (1280,720))
+        actual = viewport_frame(frame, (1.042, 139, 1.167, 28))
+        self.assertLess(float(np.mean(np.abs(actual[410:495,55:140].astype(int)-game[410:495,55:140]))), 2)
+
+    def test_stadium_round_badge_rereads_only_confirmed_detail_digits(self):
+        from pcrscript.tasks.strategy_video import stadium_round_badge
+        from pcrscript.game_ui.guide_vision import GuideText
+        frame = np.zeros((720,1280,3),np.uint8)
+        page = [GuideText('编组详情',1,(185,73,110,35)),GuideText('挑战目标',.98,(248,392,73,25))]
+        badge = GuideText('厨合18',.9,(320,76,70,28))
+        def reread(text, score):
+            return patch('pcrscript.tasks.strategy_video.read_text',
+                         return_value=[GuideText(text,score,(0,0,10,10))])
+        with reread('18',.99):
+            self.assertEqual(stadium_round_badge(frame,page+[badge],Mock())[-1].text,'回合18')
+            # Without the confirmed detail page nothing is rewritten.
+            self.assertEqual(stadium_round_badge(frame,page[:1]+[badge],Mock())[-1].text,'厨合18')
+            far = GuideText('回合18',.8,(320,300,70,28))
+            self.assertEqual(stadium_round_badge(frame,page+[far],Mock())[-1].score,.8)
+        for text, score in (('16',.99),('18',.9)):
+            with reread(text,score):
+                self.assertEqual(stadium_round_badge(frame,page+[badge],Mock())[-1].text,'厨合18')
+
     def test_stadium_dark_and_asymmetric_scenes_keep_existing_viewport(self):
         from pcrscript.game_ui.guide_vision import stadium_video_frame
         for black in (True,False):

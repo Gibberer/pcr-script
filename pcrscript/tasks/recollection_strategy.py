@@ -55,6 +55,8 @@ class RecollectionFormation(EventFormation):
     use_current_build = False
     infer_costume_from_skills = True
     require_current_skills = True
+    # Local trials bind these unstated source fields to the audited account.
+    trial_fields = ('level', 'rank', 'stars', 'skill_level', 'unique', 'unique2')
 
     def __init__(self, ui):
         super().__init__(ui)
@@ -81,7 +83,7 @@ class RecollectionFormation(EventFormation):
         reasons = []
         if not actual.identity_verified or normalized(actual.name) != normalized(requirement.name):
             reasons.append('试打角色身份未核验')
-        for key in ('level', 'rank', 'stars', 'skill_level', 'unique', 'unique2'):
+        for key in self.trial_fields:
             if getattr(actual, key) is None:
                 reasons.append('账号培养或装备未明确：'+key)
         # Missing source fields may be bound to this audited account. A
