@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import subprocess
+import numpy as np
 
 from .screen import EventUIError, normalized
 from ..run_session import clock as time
@@ -35,6 +36,19 @@ def search_input_confirmation(base, screen, *, page='队伍编组', page_area=(3
     return screen.find('确定', (800, 450, 940, 530), exact=True)
 
 
+def commit_native_input(ui, screen, confirm):
+    """Recheck the edit strip without OCR before clicking its transient button."""
+    fresh = ui.capture(ocr=False)
+    if fresh.image.shape != screen.image.shape:
+        return False
+    before = screen.image[436:540].astype(np.int16)
+    after = fresh.image[436:540].astype(np.int16)
+    if not before.size or float(np.mean(np.abs(before-after))) > 2:
+        return False
+    ui.click(confirm)
+    return True
+
+
 def search_character(ui, name, *, page='队伍编组', page_area=(300, 0, 650, 70),
                      field_area=(300, 110, 640, 165), reset=(691, 135),
                      field=(480, 136), defocus=(190, 390)):
@@ -43,9 +57,11 @@ def search_character(ui, name, *, page='队伍编组', page_area=(300, 0, 650, 7
     failed = False
     for _ in range(3):
         screen = ui.capture()
+        if not screen.find(page, page_area):
+            raise EventUIError('角色搜索前未处于'+page+'页面')
         confirm = search_input_confirmation(base, screen, page=page, page_area=page_area)
         if confirm:
-            ui.click(confirm)
+            commit_native_input(ui, screen, confirm)
             screen = ui.capture()
         if search_text_confirmed(base, screen, exact=True, area=field_area):
             ui.click(defocus, delay=1)
@@ -79,7 +95,7 @@ def search_character(ui, name, *, page='队伍编组', page_area=(300, 0, 650, 7
                 raise EventUIError('角色搜索后未处于'+page+'页面')
             confirm = search_input_confirmation(base, screen, page=page, page_area=page_area)
             if confirm and time.monotonic() < deadline:
-                ui.click(confirm)
+                commit_native_input(ui, screen, confirm)
                 continue
             if search_text_confirmed(base, screen, exact=True, area=field_area):
                 ui.click(defocus, delay=1)
@@ -91,3 +107,21 @@ def search_character(ui, name, *, page='队伍编组', page_area=(300, 0, 650, 7
     ui.save('search_input_unconfirmed_'+normalized(name), ui.capture())
     reason = '后台角色搜索输入失败' if failed else '搜索词未确认写入'
     raise EventUIError(reason+'，不能判断缺少角色：'+name)
+
+
+def search_character_candidates(ui, name, **options):
+    """Broaden a confirmed empty query; results never establish identity."""
+    screen = search_character(ui, name, **options)
+    base = normalized(name).split('(')[0].split('=')[0]
+    def empty_result(frame):
+        label = frame.find(r'未搜索到该角色[。.]?', (50, 170, 900, 400), exact=True)
+        return label is not None and label.score >= .95
+    if not empty_result(screen) or len(base) <= 1:
+        return screen
+    # At most two broader queries. The caller still inspects the requested
+    # full outfit and its skills; the shortened text is only a search key.
+    for term in dict.fromkeys((base[:-1], base[:1])):
+        screen = search_character(ui, term, **options)
+        if not empty_result(screen):
+            break
+    return screen

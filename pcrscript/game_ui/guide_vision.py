@@ -10,6 +10,33 @@ import numpy as np
 from .avatars import AvatarIndex, face_crop, feature, card_rectangles
 
 
+def stadium_video_frame(raw, *, with_bounds=False):
+    """Normalize the game viewport after symmetric video letterboxing.
+
+    Check only bounded, nearly black border rows. A black loading screen or
+    asymmetric dark scene cannot establish a viewport.
+    """
+    height, width = raw.shape[:2]
+    band = raw[:, width//5:width*4//5]
+    dark = np.mean(np.max(band, axis=2) <= 12, axis=1) >= .995
+    limit = max(1, height//10)
+    top = next((i for i in range(limit+1) if not dark[i]), limit+1)
+    bottom = next((i for i in range(limit+1) if not dark[height-1-i]), limit+1)
+    crop_top = 0
+    if 4 <= top <= limit and 4 <= bottom <= limit and abs(top-bottom) <= 2:
+        raw = raw[top:height-bottom]
+        crop_top = top
+    aspect = raw.shape[1]/raw.shape[0]
+    wide = 1.9 < aspect <= 2.4
+    left, crop_width = 0, width
+    if wide:
+        crop_width = round(raw.shape[0]*16/9)
+        left = (raw.shape[1]-crop_width)//2
+        raw = raw[:, left:left+crop_width]
+    result = (cv.resize(raw, (960, 540)), wide)
+    return (*result, (left, crop_top, crop_width, raw.shape[0])) if with_bounds else result
+
+
 @dataclass
 class GuideText:
     text: str
@@ -178,15 +205,48 @@ def combat_team(image, index: AvatarIndex, *, relaxed=False) -> list[dict]:
     return matched
 
 
-def formation_team(image, texts: list[GuideText], index: AvatarIndex) -> list[dict]:
-    """Read the five selected cards only on a confirmed formation page."""
+def formation_team(image, texts: list[GuideText], index: AvatarIndex, *, allow_partial=False) -> list[dict]:
+    """Read selected cards only on a confirmed formation page."""
     if not (any(t.score >= .95 and t.text == '队伍编组' for t in texts)
             and any(t.score >= .95 and t.text == '当前的成员' for t in texts)):
         return []
     boxes = [(96+109*i-48, 405, 96, 96) for i in range(5)]
-    matched = [match_portrait(image, box, index, align=False,
-                              minimum=.80, margin=.04) for box in boxes]
-    if any(m is None for m in matched) or len({m['name'] for m in matched}) != 5:
+    uncertain = set()
+    if allow_partial:
+        selected = []
+        for box in boxes:
+            x, y, w, h = box
+            saturation = cv.cvtColor(image[y+10:y+89, x+10:x+w-10], cv.COLOR_BGR2HSV)[:, :, 1]
+            occupied = float(np.mean(saturation > 70))
+            if occupied > .15:
+                selected.append(box)
+            elif occupied > .025:
+                # Pale costumes can fall just below the colour threshold.
+                # Nominate as occupied, then require a high-confidence identity;
+                # never turn an uncertain portrait into an empty slot.
+                uncertain.add(len(selected))
+                selected.append(box)
+        boxes = selected
+        if not boxes:
+            return []
+        # Selected cards can shrink during their entrance animation. Locate
+        # the actual outline inside each occupied slot before face alignment;
+        # fixed slot geometry alone can crop a different part of the portrait.
+        area = image[395:510, 35:595]
+        contours, _ = cv.findContours(cv.Canny(area, 80, 160), cv.RETR_LIST, cv.CHAIN_APPROX_SIMPLE)
+        outlines = [(x+35, y+395, w, h) for x, y, w, h in map(cv.boundingRect, contours)
+                    if 86 <= w <= 103 and 86 <= h <= 104 and abs(w-h) <= 4]
+        aligned = []
+        for i,box in enumerate(boxes):
+            candidates = [r for r in outlines if abs(r[0]-box[0]) <= 8 and abs(r[1]-box[1]) <= 8]
+            if i in uncertain and not candidates:
+                return []
+            aligned.append(max(candidates, key=lambda r: r[2]*r[3]) if candidates else box)
+        boxes = aligned
+    matched = [match_portrait(image, box, index, align=allow_partial,
+                              minimum=.92 if i in uncertain else .80, margin=.04)
+               for i,box in enumerate(boxes)]
+    if any(m is None for m in matched) or len({m['name'] for m in matched}) != len(boxes):
         return []
     return matched
 

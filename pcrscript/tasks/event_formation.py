@@ -16,7 +16,7 @@ from .event_strategy import CharacterStatus, skill_names, readiness
 from ..game_ui.screen import EventUIError, normalized
 from ..game_ui.avatars import AvatarIndex, card_rectangles, search_card_rectangles, face_crop, feature
 from ..game_ui.equipment import EquipmentBadges
-from ..game_ui.character_search import search_character, search_text_confirmed, search_input_confirmation
+from ..game_ui.character_search import search_character_candidates as search_character, search_text_confirmed, search_input_confirmation, search_reset_confirmed
 
 
 def count_stars(image: Screenshot) -> int | None:
@@ -43,6 +43,13 @@ class EventFormation:
     slot_top = 405
     search_top = 177
     defocus = (190, 390)
+    all_filter_area = (30, 65, 115, 108)
+    search_field_area = (300, 110, 640, 165)
+    search_reset_area = (640, 105, 755, 165)
+    search_reset = (691, 135)
+    search_field = (480, 136)
+    search_reveal = ((480, 170), (480, 350))
+    roster_scroll = ((914, 340), (914, 200))
 
     def occupied_slots(self, screen: EventScreen) -> list[Point]:
         top = self.slot_top
@@ -65,7 +72,7 @@ class EventFormation:
             # Roster-name OCR can omit an unchanged short label between frames.
             # The search field's reset plus the selected-member count is the
             # refresh boundary; noisy labels must not prevent it from settling.
-            stamp = normalized(screen.text((300, 105, 640, 165)))
+            stamp = normalized(screen.text(self.search_field_area))
             stable = stamp == previous
             previous = stamp
             return stable
@@ -220,7 +227,11 @@ class EventFormation:
                 if text == previous:
                     break
                 previous = text
-                if not self.ui.scrollbar(s, (903, 190, 912, 424), 1):
+                # Thumb travel scales with total content height; long UB
+                # descriptions can make it jump over an ordinary skill title.
+                # Keep overlapping body pages so titles and levels stay visible.
+                if not self.ui.scrollbar(s, (903, 190, 912, 424), 1,
+                                         content_distance=130, content_roi=(485, 175, 900, 438)):
                     break
             actual.skill_level = min(levels.values()) if len(levels) >= 3 else None
             # The UI omits costume suffixes. The two ordinary skill names
@@ -288,13 +299,13 @@ class EventFormation:
             # existing full-roster scan verifies costumes without text input.
             return self._select_by_scrolling(party)
         self.ui.wait(lambda s: s.find("队伍编组", (300, 0, 650, 70)), "队伍编组")
-        self.ui.expect_click("全部", (30, 65, 115, 108), exact=True)
+        self.ui.expect_click("全部", self.all_filter_area, exact=True)
         for _ in range(10):
             s = self.ui.capture()
-            search = s.find("用角色名搜索|角色名", (300, 105, 645, 165)) or s.find("重置", (640, 105, 755, 165), exact=True)
+            search = s.find("用角色名搜索|角色名", self.search_field_area) or s.find("重置", self.search_reset_area, exact=True)
             if search:
                 break
-            self.ui.swipe((480, 170), (480, 350))
+            self.ui.swipe(*self.search_reveal)
         else:
             return self._select_by_scrolling(party)
         for _ in range(10):
@@ -308,7 +319,15 @@ class EventFormation:
         failures = []
         for member in party.members:
             print(f"[编队] 搜索并核对 {member.name}", flush=True)
-            s = search_character(self.ui, member.name, defocus=self.defocus)
+            try:
+                s = search_character(self.ui, member.name, defocus=self.defocus,
+                                     field_area=self.search_field_area, reset=self.search_reset, field=self.search_field)
+            except EventUIError as error:
+                if not str(error).startswith(('后台角色搜索输入失败', '搜索词未确认写入')):
+                    raise
+                self._reset_search_for_scan()
+                print('[编队] 搜索输入未确认，改为核验完整角色列表', flush=True)
+                return self._select_by_scrolling(party)
             self.ui.save("search_"+normalized(member.name), s)
             if not s.find("队伍编组", (300, 0, 650, 70)):
                 raise EventUIError("角色搜索后未处于编队页面")
@@ -346,7 +365,7 @@ class EventFormation:
                 break
             if not found:
                 failures.append({"character": member.name, "reasons": ["未在搜索结果中确认该版本的角色"]})
-        self.ui.click((691, 135))
+        self.ui.click(self.search_reset)
         if failures:
             return False, {"unready": failures}
         actual_party = self.inspect_current(full=False, expected_names=[m.name for m in party.members])
@@ -354,6 +373,19 @@ class EventFormation:
         if set(order) != {normalized(m.name) for m in party.members} or not all(a.identity_verified for a in actual_party):
             return False, {"errors": ["最终编队与作业不一致"], "order": order}
         return True, {"order": order}
+
+    def _reset_search_for_scan(self):
+        screen = self.ui.capture()
+        if (not screen.find('队伍编组', (300, 0, 650, 70))
+                or not screen.find('重置', self.search_reset_area, exact=True)):
+            raise EventUIError('角色列表恢复前未确认编队搜索栏')
+        self.ui.click(self.defocus)
+        self.ui.click(self.search_reset)
+        self.ui.wait(lambda s: search_reset_confirmed(s, page='队伍编组',
+                     page_area=(300, 0, 650, 70), field_area=self.search_field_area)
+                     and s.find('重置', self.search_reset_area, exact=True)
+                     and not s.find('确定', (800, 450, 940, 530), exact=True),
+                     '角色列表恢复前清空搜索', timeout=5)
 
     def _select_by_scrolling(self, party: EventParty) -> tuple[bool, TaskReport]:
         """Scan actual owned cards; inspect the full name to disambiguate variants.
@@ -371,25 +403,28 @@ class EventFormation:
             self.ui.click(occupied[-1], delay=.3)
         else:
             raise EventUIError("当前队伍未能清空")
-        self.ui.expect_click("全部", (30, 65, 115, 108), exact=True)
+        self.ui.expect_click("全部", self.all_filter_area, exact=True)
+        # Hiding search moves the first stadium row from 247 back to 177.
+        # Keep that row while excluding the enemy strip above the filters.
+        roster_top = max(115, self.all_filter_area[1]+30)
         for _ in range(10):
             # Drag beside the cards. A drag starting on a portrait can open
             # character details instead of scrolling the roster.
-            self.ui.swipe((914, 200), (914, 340))
+            self.ui.swipe(self.roster_scroll[1], self.roster_scroll[0])
         pending = {normalized(m.name): m for m in party.members}
         scanned = set()
         previous = None
         failures = []
         for page in range(90):
             s = self.ui.capture(ocr=False)
-            rectangles = card_rectangles(s.image)
+            rectangles = [r for r in card_rectangles(s.image) if r[1] >= roster_top]
             # Once the target avatars are indexed (JP assets or verified local
             # samples), scrolling needs no full-frame OCR at all.
             if any(name not in self.avatars.names for name in pending) or not rectangles:
                 s = self.ui.capture()
             if page % 10 == 0:
                 print(f"[剧情活动] 扫描角色第 {page+1} 页，待查：{', '.join(pending)}", flush=True)
-            signature = cv.resize(s.image[115:372, 40:905], (24, 12)).tobytes()
+            signature = cv.resize(s.image[roster_top:372, 40:905], (24, 12)).tobytes()
             identities = self.avatars.query([face_crop(s.image, r) for r in rectangles])
             candidates = []
             for rect, identity in zip(rectangles, identities):
@@ -397,7 +432,7 @@ class EventFormation:
                     x, y, w, h = rect
                     candidates.append((x+w//2, y+h//2))
             # Grid labels omit outfit names. Long press each matching base name.
-            for item in s.all(".+", (45, 115, 900, 350)):
+            for item in s.all(".+", (45, roster_top, 900, 350)):
                 short = normalized(item.text)
                 if not any(name.startswith(short) and len(short) >= 1 for name in pending):
                     continue
@@ -424,7 +459,7 @@ class EventFormation:
                 if name not in pending:
                     continue
                 actual = self.inspect(pos, full=True)
-                reasons = readiness(pending[name], actual)
+                reasons = self.member_readiness(pending[name], actual)
                 if reasons:
                     failures.append({"character": actual.name, "reasons": reasons})
                     del pending[name]
@@ -434,15 +469,15 @@ class EventFormation:
             if not pending or signature == previous:
                 break
             previous = signature
-            self.ui.swipe((914, 340), (914, 200))
+            self.ui.swipe(*self.roster_scroll)
         if pending or failures:
             return False, {"missing": list(pending), "unready": failures}
-        actual_party = self.inspect_current()
+        actual_party = self.inspect_current(expected_names=[m.name for m in party.members])
         required = {normalized(m.name): m for m in party.members}
         errors = []
         for actual in actual_party:
             need = required.get(normalized(actual.name))
-            errors.extend(readiness(need, actual) if need else [f"误选角色 {actual.name}"])
+            errors.extend(self.member_readiness(need, actual) if need else [f"误选角色 {actual.name}"])
         if {normalized(a.name) for a in actual_party} != set(required):
             errors.append("编队角色不完整或重复")
         return not errors, {"errors": errors, "order": [a.name for a in actual_party]}

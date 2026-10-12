@@ -25,11 +25,11 @@ class CharacterDataTests(TestCase):
                 CREATE TABLE skill_data (skill_id INTEGER, name TEXT);
                 CREATE TABLE unit_unique_equipment (unit_id INTEGER, equip_slot INTEGER, equip_id INTEGER);
                 CREATE TABLE unique_equipment_data (equipment_id INTEGER, equipment_name TEXT);
-                INSERT INTO unit_profile VALUES (1,'合成角色（夏日）'),(2,'合成角色（冬日）');
-                INSERT INTO unit_skill_data VALUES (1,1,2,3,0),(2,4,5,0,0);
+                INSERT INTO unit_profile VALUES (100101,'合成角色（夏日）'),(100201,'合成角色（冬日）');
+                INSERT INTO unit_skill_data VALUES (100101,1,2,3,0),(100201,4,5,0,0);
                 INSERT INTO skill_data VALUES (1,'合成技能甲'),(2,'合成技能乙'),(3,'合成技能甲+'),
                     (4,'合成技能丙'),(5,'合成技能丁');
-                INSERT INTO unit_unique_equipment VALUES (1,1,11);
+                INSERT INTO unit_unique_equipment VALUES (100101,1,11);
                 INSERT INTO unique_equipment_data VALUES (11,'合成专武一');
             ''')
         return path
@@ -75,7 +75,7 @@ class CharacterDataTests(TestCase):
                     INSERT INTO skill_data VALUES (6,'合成爆发'),(7,'合成爆发+'),
                         (8,'合成EX'),(9,'合成EX+');
                     UPDATE unit_skill_data SET union_burst=6,union_burst_evolution=7,
-                        ex_skill_1=8,ex_skill_evolution_1=9 WHERE unit_id=1;
+                        ex_skill_1=8,ex_skill_evolution_1=9 WHERE unit_id=100101;
                 ''')
             info = character('合成角色(夏日)',path)
             self.assertEqual(info['skills'],before)
@@ -106,6 +106,20 @@ class CharacterDataTests(TestCase):
             self.assertFalse(missing.exists())
             path = self.database(root)
             with closing(sqlite3.connect(path)) as conn:
-                conn.execute("INSERT INTO unit_profile VALUES (3,'合成角色（夏日）')")
+                conn.execute("INSERT INTO unit_profile VALUES (100301,'合成角色（夏日）')")
                 conn.commit()
             self.assertIsNone(character('合成角色(夏日)', path))
+
+    def test_enemy_name_copies_do_not_replace_playable_identity_or_skills(self):
+        with TemporaryDirectory() as root:
+            path = self.database(root)
+            with closing(sqlite3.connect(path)) as conn:
+                conn.executescript('''
+                    INSERT INTO unit_profile VALUES (900101,'合成角色（夏日）'),(900201,'合成敌人');
+                    INSERT INTO unit_skill_data VALUES (900101,4,5,0,0);
+                ''')
+            info = character('合成角色(夏日)', path)
+            self.assertEqual(info['unit_id'], 100101)
+            self.assertEqual(skill_names(info['name'], path)['main_skill_1'], '合成技能甲')
+            self.assertEqual(len(costume_skills('合成角色', path)), 2)
+            self.assertIsNone(character('合成敌人', path))

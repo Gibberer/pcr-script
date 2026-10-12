@@ -76,6 +76,20 @@ TeamBattle:
   battle_timeout: 220
   max_real_attacks: 3
   max_simulations: 12
+# 按需专项；可加入日常列表，满星且奖励全领后自动跳过战斗。
+BattleStadium:
+  auto_equip: false
+  auto_equip_priorities: {}
+  account_key: default
+  timeout: 7200
+  battle_timeout: 180
+  max_battles: 36
+  max_attempts_per_round: 2
+  claim_rewards: true
+  discover_sources: true
+  source_urls: []
+  allow_local_trials: true
+  sources: {}
 AbyssSubjugation:
   first_clear: true
   discover_sources: true

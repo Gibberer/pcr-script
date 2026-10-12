@@ -287,7 +287,7 @@ class EventUI:
             return None
         return int(thumb[0]+y1), int(thumb[-1]+y1)
 
-    def scrollbar(self, screen, roi, direction, *, reached=None):
+    def scrollbar(self, screen, roi, direction, *, reached=None, content_distance=None, content_roi=None):
         """Verify movement or a caller's visible destination before fallback."""
         bounds = self.scrollbar_bounds(screen, roi)
         if bounds is None:
@@ -296,13 +296,22 @@ class EventUI:
         if direction < 0 and bounds[0] <= y1+2 or direction > 0 and bounds[1] >= y2-2:
             return False
         center = sum(bounds)//2
-        body_roi = (max(0,x1-430), y1-15, x1-12, y2+24)
+        body_roi = content_roi or (max(0,x1-430), y1-15, x1-12, y2+24)
         before_text = normalized(screen.text(body_roi))
         # Near the lower end, dragging from the thumb's bottom leaves too
         # little travel for Android to recognize a swipe. Its center retains
         # room to reach the end of the verified track.
         start = ((x1+x2)//2, center)
         end = (start[0], max(y1, min(y2-1, start[1]+direction*max(120, round((bounds[1]-bounds[0])*.8)))))
+        if content_distance is not None:
+            if type(content_distance) is not int or not 30 <= content_distance <= y2-y1-20:
+                raise ValueError('内容滑动距离必须在30到列表高度减20之间')
+            # Short thumb gestures can fall below Android's drag threshold.
+            # Scroll the verified list body by less than one visible page;
+            # still verify the actual thumb movement and changed content.
+            cy = (y1+y2)//2
+            start = (max(20, x1-200), cy+direction*content_distance//2)
+            end = (start[0], start[1]-direction*content_distance)
         convert = lambda p: (round(p[0]*self.width/960), round(p[1]*self.height/540))
         def changed(timeout):
             until = time.monotonic()+timeout

@@ -184,6 +184,25 @@ def _query_abyss_subjugation(conn: sqlite3.Connection):
 def _iso_datetime(date):
     return str(datetime.strptime(date, _time_format))
 
+
+def _query_battle_stadium(conn: sqlite3.Connection):
+    """CN dome schedule separates battle end from the reward closing time."""
+    now = datetime.now(SERVER_TIMEZONE).replace(tzinfo=None).isoformat(' ', 'seconds')
+    try:
+        row = conn.execute(
+            'SELECT schedule_id, start_time, end_time, close_time FROM dome_schedule_data '
+            'WHERE ISO(start_time) <= ? AND ISO(close_time) > ? '
+            'ORDER BY ISO(start_time) DESC, schedule_id DESC LIMIT 1', (now, now)).fetchone()
+    except sqlite3.OperationalError as error:
+        if 'no such table' in str(error):
+            return None
+        raise
+    if row is None:
+        return None
+    event_id, start, end, close = row
+    return Event(_event_timestamp(start), _event_timestamp(close), '斗技场',
+                 dict(schedule_id=event_id, battle_end=_event_timestamp(end)))
+
 def _build_event_news(cache_path, db_file):
     with closing(sqlite3.connect(os.path.join(cache_path, db_file))) as conn:
         conn.create_function('ISO', 1, _iso_datetime)
@@ -196,9 +215,11 @@ def _build_event_news(cache_path, db_file):
         secret_dungeon = _query_secret_dungeon(conn)
         clan_battle = _query_clan_battle(conn)
         abyss_subjugation = _query_abyss_subjugation(conn)
+        battle_stadium = _query_battle_stadium(conn)
     return EventNews(freeGacha=free_gacha, hatsune=hatsune, tower=tower, dropItemNormal=drop_normal, 
                          dropItemHard=drop_hard, secretDungeon=secret_dungeon, revival=revival,
-                         clanBattle=clan_battle, abyssSubjugation=abyss_subjugation)
+                         clanBattle=clan_battle, abyssSubjugation=abyss_subjugation,
+                         battleStadium=battle_stadium)
 
 def fetch_event_news() -> EventNews:
     # 从redive.estertion.win抓国服信息

@@ -108,6 +108,7 @@ class EventNews:
     secretDungeon: Optional[Event] = None # 特别地下城
     revival: Optional[Event] = None # 单独查询复刻，避免与同期新活动互相覆盖
     abyssSubjugation: Optional[Event] = None  # 深渊讨伐战，区别于常驻深域
+    battleStadium: Optional[Event] = None  # 斗技场：包含结束后的报酬领取期
 
 
 class TimeLimitTask(BaseTask):

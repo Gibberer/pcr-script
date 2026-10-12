@@ -477,6 +477,27 @@ class DesktopTests(unittest.TestCase):
             desktop.control(run_id, 'resume')
         self.assertFalse((folder / 'control.json').exists())
 
+    def test_control_retries_transient_status_access_and_keeps_failure_bounded(self):
+        run_id = '00000000-0000-0000-0000-000000000003'
+        folder = desktop.run_folder(run_id)
+        folder.mkdir(parents=True)
+        state = json.dumps(dict(state='paused', heartbeat=time.time()))
+        with patch.object(Path, 'read_text', side_effect=[PermissionError('synthetic'), state]) as read, \
+             patch.object(desktop.time, 'sleep') as sleep:
+            self.assertTrue(desktop.control(run_id, 'stop')['requested'])
+        self.assertEqual(read.call_count, 2)
+        sleep.assert_called_once_with(.05)
+        command = json.loads((folder/'control.json').read_text(encoding='utf-8'))
+        self.assertEqual(command['action'], 'stop')
+        (folder/'control.json').unlink()
+        with patch.object(Path, 'read_text', side_effect=PermissionError('synthetic')) as read, \
+             patch.object(desktop.time, 'sleep') as sleep:
+            with self.assertRaises(PermissionError):
+                desktop.control(run_id, 'stop')
+        self.assertEqual(read.call_count, 5)
+        self.assertEqual(sleep.call_count, 4)
+        self.assertFalse((folder/'control.json').exists())
+
 
 if __name__ == '__main__':
     unittest.main()

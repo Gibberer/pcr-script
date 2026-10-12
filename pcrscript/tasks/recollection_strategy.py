@@ -24,10 +24,11 @@ def parties_for_floor(report, area, floor, *, allow_local_trials=False):
         elif allow_local_trials:
             members = raw.get('members', [])
             names = [m.get('name') for m in members]
+            count = len(names) if raw.get('task_type') == 'stadium' and 1 <= len(names) <= 5 else 5
             flags = [raw.get('auto', {})]+[m.get('instant', {}) for m in members]
             if (raw.get('region') != 'cn' or raw.get('global_requirements') or raw.get('manual_actions')
-                    or len(names) != 5 or any(not isinstance(n, str) or not n.strip() or n.startswith('unit:') for n in names)
-                    or len(set(map(normalized, names))) != 5
+                    or len(names) != count or any(not isinstance(n, str) or not n.strip() or n.startswith('unit:') for n in names)
+                    or len(set(map(normalized, names))) != count
                     or any(type(f.get('value')) is not bool or not f.get('evidence') or f.get('conflicts') for f in flags)
                     or any(m.get(k,{}).get('conflicts') for m in members for k in BUILD_FIELDS)):
                 continue
