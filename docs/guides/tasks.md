@@ -59,6 +59,7 @@ GUI 的“每日日常”会按顺序执行预设列表；配置好 Python 依�
 | 地下城首通 | `dungeon_first_clear` | `Dungeon` 配置；读层数/阶段 → 获取来源或本地路线 → 检查跨队占用与培养 → 有限挑战并核验进展；[详细指南](dungeon.md) |
 | 深域推进 | `abyss_push` | `Abyss` 配置；定位各属性 NEXT → 获取适用来源 → 核验账号 → 按结果与历史有限重试；以 NEXT 前进确认通关；[详细指南](abyss.md) |
 | 追忆战场首通 | `recollection_first_clear` | `RecollectionFirstClear` 配置；普通及霸领域逐层取得适用攻略，核验五人与培养、SET/AUTO，按通关标记确认进展；[详细指南](recollection.md) |
+| 斗技场满星与领奖 | `battle_stadium` | `BattleStadium`配置；本期补齐三星并领取累计报酬，完成后不再挑战，未解锁回合下次接续。[详细指南](battle-stadium.md) |
 | 全角色强化 | `upgrade_all_characters` | 游戏一键强化分批提升等级、技能和普通装备，消耗现有材料；[范围说明](character-upgrade.md) |
 | 好感度与角色剧情 | `max_character_bonds` | 使用持有礼物提升好感度，处理已开放剧情；[详细说明](character-bond.md) |
 | 驾车游 | `caravan` | 持有骰子达标前单骰、满足条件后快速通关；[详细说明](../game-knowledge/caravan.md) |

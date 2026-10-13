@@ -31,12 +31,17 @@ class SourceRules:
     reject: Callable[[dict, dict], str | None] | None = None
     require_complete_comments: bool = False
     scope_keys: tuple[str, ...] = ()
+    collection: Callable[[str, dict], bool] | None = None
 
     def cache_scope(self, options):
         return dict(key=self.key, target={key: options.get(key) for key in self.scope_keys})
 
 
 def get_source_rules(options):
+    if options.get('task_type') == 'stadium':
+        from .stadium_strategy import queries, source_rejection, collection_candidate
+        return SourceRules('stadium:2', queries, source_rejection, True,
+                           ('stage', 'event_id', 'period_start', 'period_end'), collection_candidate)
     if options.get('task_type') == 'subjugation':
         from .subjugation_guides import queries, source_rejection
         return SourceRules('subjugation:1', queries, source_rejection, True,
@@ -357,7 +362,8 @@ def discover_sources(options: dict, *, api=None, check=lambda: None, exclude_sou
                 continue
             if stage and not re.search(r'(?<!\d)'+re.escape(stage)+r'(?!\d)', detail_text):
                 if not ((kind == 'abyss' and effort == 'high' and abyss_chapter_collection(detail_text, stage))
-                        or (kind == 'recollection' and recollection_collection(detail_text, area, stage))):
+                        or (kind == 'recollection' and recollection_collection(detail_text, area, stage))
+                        or (rules.collection is not None and rules.collection(detail_text, options))):
                     excluded.append(dict(bvid=bvid,reason='视频详情未明确目标关卡或所在章节合集'))
                     continue
             if kind == 'abyss' and stage:

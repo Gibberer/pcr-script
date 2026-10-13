@@ -123,12 +123,16 @@ class DungeonTests(TestCase):
         formation.ui=Mock()
         formation.ui.capture.return_value=frame(('队伍编组',480,40),('重置',690,135))
         formation.occupied_slots=Mock(return_value=[])
-        formation.inspect=Mock(side_effect=AssertionError('must not inspect the unfiltered roster'))
+        formation.inspect=Mock(side_effect=AssertionError('search failure must use the verified scan'))
+        formation._select_by_scrolling=Mock(return_value=(False, {'missing': ['测试角色0']}))
         party=EventParty('synthetic','https://example.com',[
             MemberRequirement(f'测试角色{i}',1,1,3) for i in range(5)])
-        with patch('pcrscript.tasks.event_formation.time.sleep'):
-            with self.assertRaisesRegex(Exception,'搜索词未确认写入'):
-                formation.select(party)
+        with patch('pcrscript.tasks.event_formation.time.sleep'), patch(
+                'pcrscript.game_ui.character_search.time.monotonic', side_effect=range(0,1000,10)):
+            ready, details = formation.select(party)
+        self.assertFalse(ready)
+        self.assertEqual(details, {'missing': ['测试角色0']})
+        formation._select_by_scrolling.assert_called_once_with(party)
         self.assertEqual(formation.ui.driver.input.call_count,3)
         formation.inspect.assert_not_called()
 

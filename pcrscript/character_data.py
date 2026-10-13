@@ -19,7 +19,10 @@ def _catalogue(path, modified, size):
     # invalidates both costume and equipment metadata automatically.
     with closing(sqlite3.connect(Path(path).as_uri()+'?mode=ro', uri=True)) as conn:
         conn.row_factory = sqlite3.Row
-        profiles = conn.execute('SELECT unit_id,unit_name FROM unit_profile').fetchall()
+        # Match the playable roster used by the avatar index. Enemy copies can
+        # share a display name, but must not make the playable costume ambiguous.
+        profiles = conn.execute('SELECT unit_id,unit_name FROM unit_profile '
+                                'WHERE unit_id>=100100 AND unit_id<200000').fetchall()
         tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         skills = {}
         training_skills = {}

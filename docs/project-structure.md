@@ -53,6 +53,7 @@ GUI 的 `PortableTools.cs` 管理固定版本工具的下载、SHA-256 校验与
 | [task_dawn_labyrinth.py](../pcrscript/tasks/task_dawn_labyrinth.py) | `dawn_labyrinth`（仅已通关难度跳过） |
 | [task_dawn_labyrinth_first_clear.py](../pcrscript/tasks/task_dawn_labyrinth_first_clear.py) | `dawn_labyrinth_first_clear`（美食殿堂难度 1 的一次探索） |
 | [task_team_battle.py](../pcrscript/tasks/task_team_battle.py) | `team_battle` |
+| [task_battle_stadium.py](../pcrscript/tasks/task_battle_stadium.py) | `battle_stadium`（本期满星与累计奖励） |
 | [task_gacha.py](../pcrscript/tasks/task_gacha.py) | `free_gacha`、`normal_gacha` |
 | [task_gifts.py](../pcrscript/tasks/task_gifts.py) | `get_gift` |
 | [task_home.py](../pcrscript/tasks/task_home.py) | `tohomepage` |
@@ -80,6 +81,7 @@ GUI 的 `PortableTools.cs` 管理固定版本工具的下载、SHA-256 校验与
 | 公共攻略与视频解析 | `tasks/strategy_sources.py`、`strategy_inputs.py`、`strategy_video.py`、`strategy_document.py`、`strategy_tables.py`、`strategy_party_pool.py`、`strategy_trial.py`；`extras/guide_media.py`；`game_ui/avatar_assets.py`、`guide_vision.py` | [视频解析](video-strategies.md) |
 | 深域尝试与替补 | `tasks/abyss_history.py`、`abyss_retry.py`、`party_variants.py`；`game_ui/abyss.py` | [深域推进](guides/abyss.md) |
 | 深渊来源与本期编队 | `tasks/subjugation_guides.py`、`subjugation_party.py`；`game_ui/abyss_subjugation.py`；`news.py` 的 `abyss_schedule` | [深渊讨伐战](guides/abyss-subjugation.md) |
+| 斗技场回合与本期来源 | `tasks/stadium_strategy.py`、`game_ui/battle_stadium.py`；`news.py` 的 `dome_schedule_data` | [斗技场](guides/battle-stadium.md) |
 | 追忆导航、来源及恢复 | `tasks/recollection_flow.py`、`recollection_strategy.py`、`recollection_retry.py`；`game_ui/recollection.py` | [追忆战场](guides/recollection.md) |
 | 可选职能精通准备 | `tasks/role_mastery_preparation.py`、`game_ui/role_mastery.py` | [精通配置与消费恢复](guides/recollection.md#可选职能精通准备) |
 | 地下城方案与编队 | `tasks/dungeon_party.py`、`game_ui/dungeon.py`、`game_ui/roster.py` | [地下城首通](guides/dungeon.md) |

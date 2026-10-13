@@ -39,11 +39,12 @@ LABELS = {
     'clear_story': '阅读剧情', 'get_quest_reward': '首页任务 · 领取任务奖励',
     'luna_tower_clean': '露娜塔扫荡',
     'team_battle': '团队战',
+    'battle_stadium': '斗技场 · 本期满星与领奖',
     'clear_campaign_first_time': '活动首通',
 }
 SPECIAL_TASKS = {'clear_story', 'dungeon_first_clear', 'abyss_push',
                  'upgrade_all_characters', 'max_character_bonds', 'common_adventure', 'caravan', 'tohomepage',
-                 'dawn_labyrinth_first_clear', 'recollection_first_clear'}
+                 'dawn_labyrinth_first_clear', 'recollection_first_clear', 'battle_stadium'}
 
 PARAMETER_LABELS = {
     'multi': '抽取所有可用免费十连', 'exclude_stamina': '暂不领取体力',
@@ -53,6 +54,7 @@ PARAMETER_LABELS = {
     'estimate_combat_duration': '预估战斗时长（秒）',
 }
 DESCRIPTIONS = {
+    'battle_stadium': '活动期间补齐回合三星并领取累计报酬；已满星且奖励全领后不再挑战。程序取得本期回合攻略并核验出战成员、培养及装备，允许按账号培养有限试打；后续回合未解锁时保留进度。挑战不消耗体力或次数，不购买资源或培养专武。',
     'abyss_subjugation': '活动开放期间，从本期适用攻略结合账号角色选队，核验培养及 SET/AUTO；没有可执行攻略时停止新战斗。按实际难度首通前哨并扫荡剩余次数，首领先免费模拟达标再消耗讨伐委托证。全部首通后扫荡一个极难首领。可领取公会之家现有体力，不购买体力、回复次数或重置首领进度。',
     'abyss_push': '按五种属性推进深域NEXT关卡。按来源优先选队并核验当前培养，开战前自动装备特别装备；结合伤害、减员和历史失败记录调整阵容与重试次数。可选升5星并用女神秘石兑换所需碎片，默认关闭；不购买体力或重置次数。攻略搜索结果仅为候选来源，尚不能自动解析完整培养要求。',
     'upgrade_all_characters': '使用角色页一键强化，分批提升全部可强化角色至最高可用品级，并强化等级、技能和普通装备。使用现有玛那、装备与原矿；不购买资源、不改变星数或专武开关。',
@@ -353,13 +355,24 @@ def run_folder(run_id: str) -> Path:
 def control(run_id: str, action: str) -> dict[str, Any]:
     from pcrscript.run_session import atomic_json
     folder = run_folder(run_id)
-    state = json.loads((folder / 'status.json').read_text(encoding='utf-8'))
+    def read_control_json(path):
+        # Windows can briefly deny opens while the run replaces its status.
+        # A bounded read retry preserves control delivery; persistent access
+        # failures and malformed JSON still propagate to the caller.
+        for attempt in range(5):
+            try:
+                return json.loads(path.read_text(encoding='utf-8'))
+            except PermissionError:
+                if attempt == 4:
+                    raise
+                time.sleep(.05*(attempt+1))
+    state = read_control_json(folder / 'status.json')
     if state['state'] not in ('running', 'paused') or time.time() - state['heartbeat'] > 10:
         raise ValueError('运行已结束或心跳失联，不能发送控制命令')
     command = dict(id=uuid.uuid4().hex, action=action, requested_at=time.time())
     destination = folder / ('snapshot-request.json' if action == 'snapshot' else 'control.json')
     if destination.exists() and action != 'stop':
-        previous = json.loads(destination.read_text(encoding='utf-8'))
+        previous = read_control_json(destination)
         ack = state.get('snapshot_id' if action == 'snapshot' else 'command_id')
         if previous.get('id') != ack:
             raise ValueError('上一个控制请求尚未确认')

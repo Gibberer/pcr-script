@@ -14,7 +14,7 @@ from pcrscript.game_ui.avatars import AvatarIndex, face_crop
 from pcrscript.game_ui.avatar_assets import ensure_avatar_index
 from pcrscript.game_ui.guide_vision import GuideText, battle_rectangles, combat_team, formation_team, wide_special_equipment_team, combat_set, combat_auto, labeled_fields, formation_fields
 from pcrscript.tasks.strategy_document import Evidence, empty_member, finalize, to_event_party, abyss_candidate, event_parties, event_trial_parties, dungeon_plan
-from pcrscript.tasks.strategy_video import choose_pages, observed_scope, parse_video_source, acquire_strategies, task_source_options, texts_in_view, sample_seconds, frame_texts, combat_button_texts, unread_active_set_badge, combat_hud_visible, combat_caption_signature, text_constraints
+from pcrscript.tasks.strategy_video import choose_pages, observed_scope, parse_video_source, acquire_strategies, task_source_options, texts_in_view, sample_seconds, probe_stadium_transition, frame_texts, combat_button_texts, unread_active_set_badge, combat_hud_visible, combat_caption_signature, text_constraints
 from pcrscript.tasks.strategy_party_pool import boss_parties, next_boss_party
 from pcrscript.tasks.strategy_trial import TrialFormation
 from pcrscript.tasks.event_strategy import CharacterStatus, EventParty, MemberRequirement
@@ -36,6 +36,149 @@ def complete_party():
 
 
 class VideoStrategyTests(TestCase):
+    def test_stadium_letterbox_projects_ocr_into_active_view(self):
+        text = GuideText('合成标记',1,(719,522,102,115))
+        projected = texts_in_view([text],1280,128,1024,
+                                  raw_height=640,crop_top=32,crop_height=576)
+        self.assertEqual(projected[0].rectangle,(554,405,96,96))
+
+    def test_stadium_letterboxed_combat_writes_original_frame_identity_evidence(self):
+        with TemporaryDirectory() as folder:
+            members = [dict(name=f'合成角色{i}',rectangle=[554+120*i,405,96,96],score=.99) for i in range(2)]
+            source = dict(bvid='BVSYNTHETIC',url='https://example.com/synthetic',
+                          title='国服斗技场',pages=[dict(cid=1,part='R1',duration=4)])
+            index = SimpleNamespace(names=[m['name'] for m in members],matrix=np.ones((2,1728),np.float32))
+            frames = []
+            for value in (40,80):
+                raw = np.zeros((640,1280,3),np.uint8)
+                raw[32:608] = value
+                frames.append((True,raw))
+            capture = Mock()
+            capture.read.side_effect = frames
+            with patch('pcrscript.tasks.strategy_video.cv.VideoCapture',return_value=capture), \
+                 patch('pcrscript.tasks.strategy_video.sample_seconds',return_value=[1,2]), \
+                 patch('pcrscript.tasks.strategy_video.frame_texts',return_value=[]), \
+                 patch('pcrscript.tasks.strategy_video.battle_rectangles',return_value=[m['rectangle'] for m in members]), \
+                 patch('pcrscript.tasks.strategy_video.combat_team',return_value=members), \
+                 patch('pcrscript.tasks.strategy_video.formation_fields',return_value=[]):
+                report = parse_video_source(source,dict(task_type='stadium',stage='1',parsed_dir=folder),index,
+                    api=Mock(),ocr=Mock(),media_fetcher=lambda *a,**k:(Path(folder)/'synthetic.avi',dict(duration=4)))
+            self.assertEqual(len(report['parties']),1)
+            evidence = report['parties'][0]['identity_evidence'][0]
+            self.assertEqual(evidence['rectangle'],[719,522,102,115])
+
+    def test_stadium_letterbox_preserves_game_slot_geometry(self):
+        from pcrscript.game_ui.guide_vision import stadium_video_frame
+        game = np.full((576,1024,3),190,np.uint8)
+        cv.rectangle(game,(70,440),(150,530),(10,140,220),-1)
+        raw = np.zeros((640,1280,3),np.uint8)
+        raw[32:608] = 190
+        raw[32:608,128:1152] = game
+        # A corner watermark does not alter the central border measurement.
+        raw[15:28,1160:1220] = 255
+        actual, wide = stadium_video_frame(raw)
+        self.assertTrue(wide)
+        np.testing.assert_array_equal(actual,cv.resize(game,(960,540)))
+
+    def test_stadium_formation_anchors_calibrate_unequally_scaled_viewport(self):
+        from pcrscript.game_ui.guide_vision import (GuideText, STADIUM_FORMATION_ANCHORS,
+            stadium_formation_viewport, viewport_error, viewport_frame)
+        def texts(sx, ox, sy, oy, skip=()):
+            return [GuideText(label, .99, (round(x*sx+ox-20), round(y*sy+oy-10), 40, 20))
+                    for label,(x,y) in STADIUM_FORMATION_ANCHORS.items() if label not in skip]
+        observed = texts(1.042, 139, 1.167, 28)
+        view = stadium_formation_viewport(observed)
+        np.testing.assert_allclose(view, (1.042, 139, 1.167, 28), atol=.02*139)
+        self.assertGreater(viewport_error(observed, (4/3, 0, 4/3, 0)), 8)
+        self.assertLessEqual(viewport_error(texts(4/3, 0, 4/3, 0), (4/3, 0, 4/3, 0)), 1)
+        # Too few anchors, or anchors that disagree on one map, never calibrate.
+        self.assertIsNone(stadium_formation_viewport(texts(1.042, 139, 1.167, 28, skip=('取消','战斗开始'))))
+        moved = observed[:-1]+[GuideText('战斗开始', .99, (900, 300, 40, 20))]
+        self.assertIsNone(stadium_formation_viewport(moved))
+        game = np.full((540,960,3),190,np.uint8)
+        cv.rectangle(game,(50,405),(146,501),(10,140,220),-1)
+        frame = cv.warpAffine(game, np.float32([[1.042,0,139],[0,1.167,28]]), (1280,720))
+        actual = viewport_frame(frame, (1.042, 139, 1.167, 28))
+        self.assertLess(float(np.mean(np.abs(actual[410:495,55:140].astype(int)-game[410:495,55:140]))), 2)
+
+    def test_stadium_round_badge_rereads_only_confirmed_detail_digits(self):
+        from pcrscript.tasks.strategy_video import stadium_round_badge
+        from pcrscript.game_ui.guide_vision import GuideText
+        frame = np.zeros((720,1280,3),np.uint8)
+        page = [GuideText('编组详情',1,(185,73,110,35)),GuideText('挑战目标',.98,(248,392,73,25))]
+        badge = GuideText('厨合18',.9,(320,76,70,28))
+        def reread(text, score):
+            return patch('pcrscript.tasks.strategy_video.read_text',
+                         return_value=[GuideText(text,score,(0,0,10,10))])
+        with reread('18',.99):
+            self.assertEqual(stadium_round_badge(frame,page+[badge],Mock())[-1].text,'回合18')
+            # Without the confirmed detail page nothing is rewritten.
+            self.assertEqual(stadium_round_badge(frame,page[:1]+[badge],Mock())[-1].text,'厨合18')
+            far = GuideText('回合18',.8,(320,300,70,28))
+            self.assertEqual(stadium_round_badge(frame,page+[far],Mock())[-1].score,.8)
+        for text, score in (('16',.99),('18',.9)):
+            with reread(text,score):
+                self.assertEqual(stadium_round_badge(frame,page+[badge],Mock())[-1].text,'厨合18')
+
+    def test_stadium_dark_and_asymmetric_scenes_keep_existing_viewport(self):
+        from pcrscript.game_ui.guide_vision import stadium_video_frame
+        for black in (True,False):
+            raw = np.zeros((640,1280,3),np.uint8)
+            if not black:
+                raw[32:] = 180
+            actual,_ = stadium_video_frame(raw)
+            expected = cv.resize(raw[:,71:1209],(960,540))
+            np.testing.assert_array_equal(actual,expected)
+
+    def test_stadium_r_parts_and_ranges_only_select_the_requested_round(self):
+        source = dict(title='国服斗技场',pages=[dict(cid=i+1,part=title)
+            for i,title in enumerate(('R1-15','R11b','R16','R17','R18'))])
+        self.assertEqual([p['part'] for p in choose_pages(source,dict(task_type='stadium',stage='10'))],['R1-15'])
+        self.assertEqual([p['part'] for p in choose_pages(source,dict(task_type='stadium',stage='17'))],['R17'])
+
+    def test_stadium_round_collection_part_is_not_a_rank_gear_requirement(self):
+        for title, blocked in (('R1-15',False),('R38-4',True),('R1-6',True)):
+            with self.subTest(title=title), TemporaryDirectory() as folder:
+                source = dict(bvid='BVSYNTHETIC',url='https://example.com/synthetic',
+                    title='公主连结 国服 合成斗技场',pages=[dict(cid=1,part=title,duration=1)])
+                def unavailable(*args,**kwargs):
+                    raise RuntimeError('synthetic unavailable media')
+                result = parse_video_source(source,dict(task_type='stadium',stage='10',
+                    parsed_dir=folder),SimpleNamespace(names=[],matrix=np.empty((0,1728),np.float32)),api=Mock(),ocr=Mock(),
+                    media_fetcher=unavailable)
+                requirements = [r for r in result['global_requirements']
+                                if r['evidence']['method']=='part_requirements']
+                self.assertEqual(bool(requirements),blocked)
+                self.assertEqual(result['parties'],[])
+
+    def test_dense_stadium_budget_still_probes_brief_transition(self):
+        samples = sample_seconds(437, 600, periodic=True)
+        before = list(samples)
+        detail = samples[120]
+        probe_stadium_transition(samples, detail, 437)
+        self.assertEqual(samples[121:124], [detail+.5, detail+1, detail+1.5])
+        self.assertEqual(samples[130:], before[130:])
+        self.assertEqual(len(samples), 600)
+        self.assertEqual(samples, sorted(set(samples)))
+
+    def test_loading_comic_body_is_not_a_creator_requirement(self):
+        image = np.zeros((720, 1280, 3), np.uint8)
+        image[65:525, 345:955] = 210
+        image[125:495, 395:885] = (90, 110, 150)
+        labels = [GuideText('加载中...', .99, (1030, 640, 180, 35)),
+                  GuideText('需要借用力量', .99, (840, 170, 30, 220)),
+                  GuideText('需要借用角色', .99, (25, 200, 200, 25)),
+                  GuideText('必须手动', .99, (30, 560, 150, 25))]
+        proof = Evidence('https://example.com/synthetic', method='video_ocr')
+        self.assertEqual([r['text'] for r in text_constraints(labels, proof, frame=image)[1]],
+                         ['需要借用角色', '必须手动'])
+        labels[0] = GuideText('加载...', .99, labels[0].rectangle)
+        self.assertEqual(len(text_constraints(labels, proof, frame=image)[1]), 2)
+        # Missing loading label or an ordinary bright page cannot hide advice.
+        self.assertEqual(len(text_constraints(labels[1:], proof, frame=image)[1]), 3)
+        image[:] = 210
+        self.assertEqual(len(text_constraints(labels, proof, frame=image)[1]), 3)
+
     def test_whole_frame_ocr_missing_active_set_requests_local_read_without_inventing_a_switch(self):
         image = np.zeros((540,960,3),np.uint8)
         box = (190,392,100,100)
@@ -328,6 +471,33 @@ class VideoStrategyTests(TestCase):
         for i in range(5):
             cv.rectangle(frame,(120+55*i,170),(145+55*i,205),(0,220,255),-1)
         self.assertTrue(combat_caption_signature(frame))
+
+    def test_periodic_sampling_covers_later_short_rounds_within_frame_budget(self):
+        samples = sample_seconds(437, 300, periodic=True)
+        self.assertLessEqual(len(samples), 300)
+        self.assertLess(sum(s < 60 for s in samples), 50)
+        self.assertLess(max(b-a for a, b in zip(samples, samples[1:])), 2)
+        self.assertGreater(samples[-1], 435)
+        self.assertEqual(len(sample_seconds(437, 1, periodic=True)), 1)
+        self.assertTrue(all(s < 2 for s in sample_seconds(2, 300, periodic=True)))
+        full_rounds = sample_seconds(437, 600, periodic=True)
+        self.assertLessEqual(len(full_rounds), 600)
+        self.assertLess(max(b-a for a, b in zip(full_rounds[2:], full_rounds[3:])), 1)
+
+    def test_round_probes_keep_budget_and_cover_short_formation_then_combat(self):
+        samples = sample_seconds(437, 300, periodic=True)
+        original_count = len(samples)
+        detail_time = samples[41]
+        probe_stadium_transition(samples, detail_time, 437)
+        self.assertEqual(len(samples), original_count)
+        self.assertEqual(samples, sorted(set(samples)))
+        self.assertIn(detail_time+1, samples)
+        self.assertIn(detail_time+4, samples)
+        # No extra or out-of-range samples at a video's end.
+        before = list(samples)
+        probe_stadium_transition(samples, samples[-2], 437)
+        self.assertEqual(len(samples), len(before))
+        self.assertLess(samples[-1], 437)
 
     def test_wide_video_samples_brief_formation_and_equipment_screens(self):
         samples = sample_seconds(96, 50, wide=True)
@@ -685,6 +855,26 @@ class VideoStrategyTests(TestCase):
                 result=acquire_strategies(dict(task_type='abyss',area='测试',stage='4-1',element='fire',parsed_dir=folder),api=api,index=index)
                 self.assertEqual(result['status'],'complete');parse.assert_called_once()
                 self.assertTrue(Path(result['document']).is_file())
+
+    def test_stadium_failed_preferred_metadata_consumes_the_round_source_budget(self):
+        from pcrscript.tasks.strategy_sources import SourceRules
+        with TemporaryDirectory() as folder:
+            api = Mock()
+            api.getVideoInfo.side_effect = ValueError('synthetic metadata unavailable')
+            index = SimpleNamespace(names=['合成角色'],matrix=np.ones((1,1728),np.float32))
+            preferred = [dict(bvid=f'BVSYNTH{i}',user_provided=True) for i in range(5)]
+            with patch('pcrscript.tasks.strategy_video.preferred_sources',return_value=(preferred,[])), \
+                 patch('pcrscript.tasks.strategy_video.discover_sources') as search, \
+                 patch('pcrscript.tasks.strategy_video.parse_video_source') as parse:
+                report = acquire_strategies(dict(task_type='stadium',stage='1',max_videos=2,
+                    source_urls=['https://example.com/synthetic'],parsed_dir=folder),
+                    api=api,index=index,rules=SourceRules('synthetic-stadium:1'))
+            self.assertEqual(api.getVideoInfo.call_count,2)
+            self.assertEqual(len(report['inspected_sources']),2)
+            self.assertEqual(len(report['errors']),2)
+            self.assertEqual(report['parties'],[])
+            search.assert_not_called()
+            parse.assert_not_called()
 
     def test_task_source_rules_apply_to_supplied_and_searched_links_before_parse_budget(self):
         from pcrscript.tasks.strategy_sources import SourceRules

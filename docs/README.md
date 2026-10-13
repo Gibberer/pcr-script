@@ -15,6 +15,7 @@
 | 黎明界迷宫通行证消费与任务奖励 | [使用指南](guides/dawn-labyrinth.md)、[游戏页面与规则](game-knowledge/dawn-labyrinth.md) |
 | 追忆战场首通、报酬与霸日常扫荡 | [使用指南](guides/recollection.md)、[游戏页面与规则](game-knowledge/recollection.md) |
 | 深渊讨伐战开放期、前哨与首领日常 | [使用指南](guides/abyss-subjugation.md)、[游戏页面与规则](game-knowledge/abyss-subjugation.md) |
+| 斗技场本期满星与报酬 | [使用指南](guides/battle-stadium.md)、[游戏页面与规则](game-knowledge/battle-stadium.md) |
 | 游戏中的页面、角色与机制 | [游戏知识](game-knowledge/README.md) |
 | 公会之家体力的游戏入口与回执 | [公会之家](game-knowledge/guild-house.md) |
 | 尚需真实环境的工程验收 | [工程待办](pending-validation.md) |

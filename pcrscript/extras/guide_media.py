@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import multiprocessing
 from pathlib import Path
+import re
 import time
 from uuid import uuid4
 
@@ -28,21 +29,51 @@ def media_chunks(response):
 
 def _transfer(url, headers, temporary, timeout, max_bytes, http=requests, check=lambda: None):
     size = 0
-    with http.get(url, headers=headers, timeout=(min(timeout, 15), timeout), stream=True) as response:
-        response.raise_for_status()
-        length = int(response.headers.get('Content-Length', 0))
-        if length > max_bytes:
-            raise ValueError('视频超出下载大小限制')
-        with Path(temporary).open('wb') as output:
-            for chunk in media_chunks(response):
-                check()
-                size += len(chunk)
-                if size > max_bytes:
+    total = None
+    block = 1024**2
+    # Some public CDNs slow long responses dramatically. Small verified byte
+    # ranges keep progress bounded; servers ignoring Range retain full reads.
+    with Path(temporary).open('wb') as output:
+        while True:
+            check()
+            requested_end = size+block-1
+            request_headers = dict(headers, Range=f'bytes={size}-{requested_end}')
+            with http.get(url, headers=request_headers, timeout=(min(timeout, 15), timeout), stream=True) as response:
+                response.raise_for_status()
+                partial = getattr(response, 'status_code', 200) == 206
+                length = int(response.headers.get('Content-Length', 0))
+                expected = length
+                if partial:
+                    span = re.fullmatch(r'bytes (\d+)-(\d+)/(\d+)', response.headers.get('Content-Range', ''))
+                    if not span:
+                        raise ValueError('视频分段范围未知')
+                    first, last, count = map(int, span.groups())
+                    if (first != size or not first <= last <= requested_end or last >= count
+                            or total is not None and count != total):
+                        raise ValueError('视频分段范围或总长度不一致')
+                    total = count
+                    expected = last-first+1
+                    if length and length != expected:
+                        raise ValueError('视频分段长度不一致')
+                elif size:
+                    raise ValueError('视频后续分段未获范围响应')
+                else:
+                    total = length or None
+                if (total or expected) > max_bytes:
                     raise ValueError('视频超出下载大小限制')
-                output.write(chunk)
-        if length and size != length:
-            raise ValueError('视频下载不完整')
-    return size
+                before = size
+                for chunk in media_chunks(response):
+                    check()
+                    size += len(chunk)
+                    if size > max_bytes:
+                        raise ValueError('视频超出下载大小限制')
+                    if expected and size-before > expected:
+                        raise ValueError('视频分段超出声明长度')
+                    output.write(chunk)
+                if expected and size-before != expected:
+                    raise ValueError('视频下载不完整')
+                if not partial or size == total:
+                    return size
 
 
 def _transfer_worker(connection, url, headers, temporary, timeout, max_bytes):
@@ -110,13 +141,15 @@ def video_info(path: Path) -> dict:
 
 def fetch_video(api, bvid: str, page: dict, directory: Path, *, http=requests,
                 timeout: float = 20, max_bytes: int = 250*1024**2,
-                max_seconds: float = 180, check=lambda: None) -> tuple[Path, dict]:
+                max_seconds: float = 180, check=lambda: None, refresh=False) -> tuple[Path, dict]:
+    if type(refresh) is not bool:
+        raise ValueError('refresh必须为布尔值')
     directory = Path(directory)/bvid
     directory.mkdir(parents=True, exist_ok=True)
     cid = int(page['cid'])
     path = directory/f'{cid}.mp4'
     expected = float(page.get('duration', 0))
-    if path.exists():
+    if path.exists() and not refresh:
         try:
             info = video_info(path)
             if expected <= 0 or abs(info['duration']-expected) < max(3, expected*.03):
@@ -129,7 +162,9 @@ def fetch_video(api, bvid: str, page: dict, directory: Path, *, http=requests,
                'Accept-Encoding': 'identity'}
     started = time.monotonic()
     errors = []
-    for requested_quality in (64, 32):
+    # One final metadata refresh can replace an immediately failed signed
+    # endpoint. It shares the original deadline, retaining a healthy stream.
+    for requested_quality, fraction in ((64, .25), (32, .5), (16, 1), (16, 1)):
         check()
         if time.monotonic()-started >= max_seconds:
             break
@@ -141,7 +176,7 @@ def fetch_video(api, bvid: str, page: dict, directory: Path, *, http=requests,
             continue
         # Reserve part of the bounded download window for a smaller stream
         # when every high-quality CDN endpoint fails mid-transfer.
-        phase_end = started + max_seconds * (.65 if requested_quality == 64 else 1)
+        phase_end = started + max_seconds * fraction
         for url in ([media[0].get('url')]+media[0].get('backup_url', []))[:3]:
             check()
             if not url or time.monotonic() >= phase_end:

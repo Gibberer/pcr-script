@@ -66,7 +66,82 @@ class _SlowHttp:
         return _SlowResponse(self.clock) if url.endswith('/64') else _Response()
 
 
+class _RangeHttp:
+    def __init__(self, *, corrupt=None):
+        self.payload = b'x'*(2*1024**2+73)
+        self.ranges = []
+        self.corrupt = corrupt
+
+    def get(self, url, *, headers, **kwargs):
+        first, last = map(int, headers['Range'].removeprefix('bytes=').split('-'))
+        self.ranges.append((first, last))
+        last = min(last, len(self.payload)-1)
+        response = _Response()
+        response.status_code = 206
+        total = len(self.payload)
+        if self.corrupt == 'offset':
+            first += 1
+        if self.corrupt == 'total' and first:
+            total += 1
+        if self.corrupt == 'ignored' and first:
+            response.status_code = 200
+        response.headers = {'Content-Length': str(last-first+1),
+                            'Content-Range': f'bytes {first}-{last}/{total}'}
+        data = self.payload[first:last+1]
+        if self.corrupt == 'short':
+            data = data[:-1]
+        response.iter_content = lambda size: iter([data])
+        return response
+
+
 class GuideMediaTests(TestCase):
+    def test_explicit_refresh_replaces_valid_cached_media_only_after_download(self):
+        with TemporaryDirectory() as folder, patch('pcrscript.extras.guide_media.video_info',
+                return_value=dict(width=1280,height=720,duration=10)):
+            path = Path(folder)/'BVsynthetic'/'1.mp4'
+            path.parent.mkdir()
+            path.write_bytes(b'old-valid')
+            api = _Api()
+            cached, info = fetch_video(api,'BVsynthetic',dict(cid=1,duration=10),Path(folder),http=_Http())
+            self.assertEqual(api.qualities,[])
+            self.assertEqual(cached.read_bytes(),b'old-valid')
+            self.assertTrue(info['cache_hit'])
+            updated, info = fetch_video(api,'BVsynthetic',dict(cid=1,duration=10),Path(folder),http=_Http(),refresh=True)
+            self.assertEqual(api.qualities,[64,32])
+            self.assertEqual(updated.read_bytes(),b'test')
+            self.assertFalse(info['cache_hit'])
+
+    def test_failed_refresh_preserves_existing_media_and_removes_partial_files(self):
+        with TemporaryDirectory() as folder:
+            path = Path(folder)/'BVsynthetic'/'1.mp4'
+            path.parent.mkdir()
+            path.write_bytes(b'old-valid')
+            http = Mock(get=Mock(side_effect=requests.ConnectionError('synthetic')))
+            with self.assertRaises(RuntimeError):
+                fetch_video(_Api(),'BVsynthetic',dict(cid=1,duration=10),Path(folder),http=http,refresh=True)
+            self.assertEqual(path.read_bytes(),b'old-valid')
+            self.assertFalse(list(Path(folder).rglob('*.part')))
+
+    def test_verified_ranges_publish_only_the_complete_video(self):
+        with TemporaryDirectory() as folder:
+            http = _RangeHttp()
+            with patch('pcrscript.extras.guide_media.video_info', return_value={
+                    'width': 854, 'height': 480, 'duration': 10}):
+                path, info = fetch_video(_Api(), 'BVsynthetic', {'cid': 1, 'duration': 10},
+                                        Path(folder), http=http)
+            self.assertEqual(path.read_bytes(), http.payload)
+            self.assertEqual(info['bytes'], len(http.payload))
+            self.assertEqual([r[0] for r in http.ranges], [0, 1024**2, 2*1024**2])
+
+    def test_corrupt_or_incomplete_ranges_never_publish_media(self):
+        for corrupt in ('offset', 'total', 'ignored', 'short'):
+            with self.subTest(corrupt=corrupt), TemporaryDirectory() as folder:
+                with self.assertRaises(RuntimeError), patch('pcrscript.extras.guide_media.video_info') as decode:
+                    fetch_video(_Api(), 'BVsynthetic', {'cid': 1}, Path(folder), http=_RangeHttp(corrupt=corrupt))
+                decode.assert_not_called()
+                self.assertFalse(list(Path(folder).rglob('*.mp4')))
+                self.assertFalse(list(Path(folder).rglob('*.part')))
+
     def test_invalid_media_url_is_not_exposed_in_diagnostics(self):
         secret='https://example.com/synthetic?signature=private-value'
         with TemporaryDirectory() as folder:
@@ -144,4 +219,59 @@ class GuideMediaTests(TestCase):
             self.assertEqual(api.qualities, [64, 32])
             self.assertEqual(info['quality'], 32)
             self.assertEqual(path.read_bytes(), b'test')
+            self.assertFalse(list(Path(folder).rglob('*.part')))
+
+    def test_standard_stream_remains_available_after_two_higher_quality_failures(self):
+        with TemporaryDirectory() as folder:
+            api = _Api()
+            http = Mock()
+            http.get.side_effect = [requests.ConnectionError(),requests.ConnectionError(),_Response()]
+            with patch('pcrscript.extras.guide_media.video_info',return_value={
+                    'width':640,'height':360,'duration':10}):
+                path,info = fetch_video(api,'BVsynthetic',{'cid':1,'duration':10},
+                                       Path(folder),http=http,max_seconds=30)
+            self.assertEqual(api.qualities,[64,32,16])
+            self.assertEqual(info['quality'],16)
+            self.assertEqual(path.read_bytes(),b'test')
+            self.assertFalse(list(Path(folder).rglob('*.part')))
+
+    def test_standard_stream_has_reserved_time_after_two_trickling_streams(self):
+        clock = [0.0]
+        class Trickle(_Response):
+            headers = {'Content-Length':'0'}
+            def iter_content(self,size):
+                while True:
+                    clock[0] += 2
+                    yield b'x'
+        class Standard(_Response):
+            def iter_content(self,size):
+                for byte in b'test':
+                    clock[0] += 2
+                    yield bytes([byte])
+        http = Mock()
+        http.get.side_effect = lambda url,**kwargs: Standard() if url.endswith('/16') else Trickle()
+        with TemporaryDirectory() as folder, \
+             patch('pcrscript.extras.guide_media.time.monotonic',side_effect=lambda:clock[0]), \
+             patch('pcrscript.extras.guide_media.video_info',return_value={'width':640,'height':360,'duration':10}):
+            api = _Api()
+            path,info = fetch_video(api,'BVsynthetic',{'cid':1,'duration':10},
+                                   Path(folder),http=http,max_seconds=30)
+            self.assertEqual(api.qualities,[64,32,16])
+            self.assertEqual(info['quality'],16)
+            self.assertEqual(path.read_bytes(),b'test')
+            self.assertLessEqual(clock[0],30)
+            self.assertFalse(list(Path(folder).rglob('*.part')))
+
+    def test_standard_endpoint_failure_refreshes_playback_once_within_deadline(self):
+        with TemporaryDirectory() as folder:
+            api = _Api()
+            http = Mock()
+            http.get.side_effect = [requests.ConnectionError()]*3+[_Response()]
+            with patch('pcrscript.extras.guide_media.video_info',return_value={
+                    'width':640,'height':360,'duration':10}):
+                path,info = fetch_video(api,'BVsynthetic',{'cid':1,'duration':10},
+                                       Path(folder),http=http,max_seconds=30)
+            self.assertEqual(api.qualities,[64,32,16,16])
+            self.assertEqual(info['quality'],16)
+            self.assertEqual(path.read_bytes(),b'test')
             self.assertFalse(list(Path(folder).rglob('*.part')))

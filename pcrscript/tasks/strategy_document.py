@@ -55,9 +55,10 @@ def empty_member(name: str) -> dict:
 def missing_fields(party: dict) -> list[str]:
     reasons = []
     members = party.get('members', [])
-    if (len(members) != 5 or len({m.get('name') for m in members}) != 5
+    count = len(members) if party.get('task_type') == 'stadium' and 1 <= len(members) <= 5 else 5
+    if (len(members) != count or len({m.get('name') for m in members}) != count
             or any(not isinstance(m.get('name'), str) or not m['name'].strip() or m['name'].startswith('unit:') for m in members)):
-        reasons.append('五人身份不完整或重复')
+        reasons.append('出战成员身份不完整或重复')
     for member in members:
         for key in BUILD_FIELDS:
             fact = member.get(key, {})

@@ -460,6 +460,8 @@ class AvatarTests(TestCase):
             self.assertTrue(actual.identity_verified)
             self.assertEqual(actual.skill_level, 355)
             self.assertEqual([call.args[2] for call in formation.ui.scrollbar.call_args_list], [-1,1])
+            self.assertEqual(formation.ui.scrollbar.call_args.kwargs,
+                             dict(content_distance=130,content_roi=(485,175,900,438)))
             formation.ui.read_region.assert_called_once_with(first,(570,322,785,358),classify=False)
 
     def test_skill_scroll_near_bottom_has_enough_travel_and_confirms_true_end(self):
@@ -506,6 +508,31 @@ class AvatarTests(TestCase):
                 again=formation.inspect((96,452),rectangle=(48,405,96,96),expected_name='合成角色',verify_skills=False)
             self.assertEqual(again.skill_level,355)
             formation.ui.click.assert_not_called()
+
+    def test_stadium_known_avatar_skips_skill_page_unless_source_declares_level(self):
+        from pcrscript.tasks.stadium_strategy import StadiumFormation
+        detail=frame(('角色详情',480,42),('合成角色',540,80),('355',560,115),('38',790,115),('技能',704,150))
+        with TemporaryDirectory() as root:
+            formation=StadiumFormation.__new__(StadiumFormation)
+            formation.observed={};formation.unreleased={}
+            formation.ui=Mock(output=Path(root),capture=Mock(return_value=detail))
+            formation.ui.save.return_value=Path(root)/'evidence.png'
+            formation.ui.wait.return_value=detail
+            formation.avatars=Mock(query=Mock(return_value=['合成角色']))
+            formation.badges=Mock(observe=Mock(return_value=((True,False),detail)))
+            with patch('pcrscript.tasks.event_formation.count_stars',return_value=5):
+                actual=formation.inspect((96,452),rectangle=(48,405,96,96),expected_name='合成角色',verify_skills=False)
+            self.assertTrue(actual.identity_verified)
+            self.assertIsNone(actual.skill_level)
+            formation.ui.click.assert_not_called()
+            formation.use_current_build=True
+            requirement=MemberRequirement('合成角色',None,None,None,None,None,True,None)
+            self.assertNotIn('账号培养或装备未明确：skill_level',formation.member_readiness(requirement,actual))
+            with patch('pcrscript.tasks.recollection_strategy.RecollectionFormation.select',return_value=(False,{})):
+                formation.select(SimpleNamespace(members=[requirement]))
+                self.assertFalse(formation.require_current_skills)
+                formation.select(SimpleNamespace(members=[MemberRequirement('合成角色',1,1,1,skill_level=300)]))
+                self.assertTrue(formation.require_current_skills)
 
     def test_requested_costume_cannot_relabel_another_costumes_verified_skills(self):
         detail=frame(('角色详情',480,42),('合成角色',540,80),('355',560,115),('38',790,115),('技能',704,150))
@@ -721,20 +748,70 @@ class AvatarTests(TestCase):
             search_character(ui,'纯')
         ui.driver.input.assert_called_once_with('纯')
 
-    def test_failed_background_search_resets_field_and_stops_safely(self):
+    def test_native_editor_closing_before_commit_never_clicks_old_confirm(self):
+        from pcrscript.game_ui.character_search import search_character
+        ui = Mock()
+        blank = frame(('角色一览',120,30),('重置',690,90))
+        typed = frame(('角色一览',120,30),('合成角色',400,480),('确定',875,490))
+        typed.image[436:540] = 255
+        delivered = frame(('角色一览',120,30),('重置',690,90),('合成角色',480,90))
+        ui.capture.side_effect = [blank,blank,typed,delivered,delivered,delivered]
+        with patch('pcrscript.game_ui.character_search.time.sleep'):
+            self.assertIs(search_character(ui,'合成角色',page='角色一览',page_area=(40,0,250,65),
+                field_area=(330,65,640,110),reset=(689,90),field=(480,90),defocus=(480,115)),delivered)
+        self.assertTrue(any(c.kwargs.get('ocr') is False for c in ui.capture.call_args_list))
+        self.assertTrue(all(c.args[0] is not typed.items[-1] for c in ui.click.call_args_list))
+        ui.driver.input.assert_called_once_with('合成角色')
+
+    def test_unchanged_native_editor_can_be_committed(self):
+        from pcrscript.game_ui.character_search import commit_native_input
+        ui = Mock()
+        s = frame(('合成角色',400,480),('确定',875,490))
+        s.image[436:540] = 255
+        ui.capture.return_value = s
+        self.assertTrue(commit_native_input(ui,s,s.items[-1]))
+        ui.click.assert_called_once_with(s.items[-1])
+
+    def test_unknown_search_page_never_resets_or_inputs(self):
+        from pcrscript.game_ui.character_search import search_character
+        ui = Mock()
+        ui.capture.return_value = frame(('主菜单',120,30))
+        with self.assertRaisesRegex(EventUIError,'角色搜索前未处于'):
+            search_character(ui,'合成角色')
+        ui.click.assert_not_called()
+        ui.driver.input.assert_not_called()
+
+    def test_failed_background_search_resets_before_verified_roster_fallback(self):
         formation = EventFormation.__new__(EventFormation)
         formation.ui = Mock()
         formation.ui.driver.supports_unicode_input = True
         formation.ui.driver.input.side_effect = subprocess.CalledProcessError(1, 'ldconsole')
         formation.ui.capture.return_value = frame(('队伍编组', 480, 42),
-                                                  ('用角色名搜索', 470, 135))
+                                                  ('用角色名搜索', 470, 135), ('重置', 690, 135))
         formation.occupied_slots = Mock(return_value=[])
+        formation._select_by_scrolling = Mock(return_value=(False, {'missing': ['似似花']}))
         formation.requires_declared_build = False
         party = SimpleNamespace(members=[SimpleNamespace(name='似似花')])
-        with self.assertRaisesRegex(EventUIError, '后台角色搜索输入失败'):
-            formation.select(party)
+        ready, details = formation.select(party)
+        self.assertFalse(ready)
+        self.assertEqual(details, {'missing': ['似似花']})
+        formation._select_by_scrolling.assert_called_once_with(party)
         self.assertEqual(formation.ui.driver.input.call_count, 3)
-        self.assertEqual(sum(c.args == ((691, 135),) for c in formation.ui.click.call_args_list), 3)
+        self.assertEqual(sum(c.args == ((691, 135),) for c in formation.ui.click.call_args_list), 4)
+        predicate = formation.ui.wait.call_args.args[0]
+        self.assertTrue(predicate(formation.ui.capture.return_value))
+        self.assertFalse(predicate(frame(('队伍编组',480,42),('重置',690,135),('旧查询',470,135))))
+        self.assertFalse(predicate(frame(('队伍编组',480,42),('重置',690,135),('确定',850,490))))
+
+    def test_search_recovery_blocks_unknown_page_and_unobserved_reset(self):
+        formation = EventFormation.__new__(EventFormation)
+        formation.ui = Mock()
+        for screen in (frame(('角色详情',480,42),('重置',690,135)),
+                       frame(('队伍编组',480,42))):
+            formation.ui.capture.return_value = screen
+            with self.assertRaisesRegex(EventUIError, '未确认编队搜索栏'):
+                formation._reset_search_for_scan()
+        formation.ui.click.assert_not_called()
 
     def test_fallback_roster_scan_drags_beside_cards(self):
         formation = EventFormation.__new__(EventFormation)
@@ -764,6 +841,32 @@ class AvatarTests(TestCase):
             shared_name, card, '合成角色(夏日)', '合成角色(冬日)'))
         self.assertFalse(EventFormation.search_identity_candidate(
             shared_name, card, '合成角色(夏日)', '其他角色(冬日)'))
+
+    def test_confirmed_empty_search_uses_bounded_prefixes_as_candidates_only(self):
+        from pcrscript.game_ui.character_search import search_character_candidates
+        empty=frame(('未搜索到该角色。',500,305))
+        found=frame(('合成候选',350,230))
+        options=dict(field_area=(300,180,640,235))
+        with patch('pcrscript.game_ui.character_search.search_character',side_effect=[empty,found]) as search:
+            self.assertIs(search_character_candidates('ui','合成姓名(夏日)',**options),found)
+            self.assertEqual([c.args[1] for c in search.call_args_list],['合成姓名(夏日)','合成姓'])
+            self.assertTrue(all(c.kwargs==options for c in search.call_args_list))
+        with patch('pcrscript.game_ui.character_search.search_character',return_value=empty) as search:
+            self.assertIs(search_character_candidates('ui','合成姓名(夏日)',**options),empty)
+            self.assertEqual([c.args[1] for c in search.call_args_list],['合成姓名(夏日)','合成姓','合'])
+
+    def test_shorter_search_needs_confirmed_empty_result_and_never_masks_input_failure(self):
+        from pcrscript.game_ui.character_search import search_character_candidates
+        found=frame(('合成角色',350,230))
+        weak=EventScreen(found.image,[TextBox('未搜索到该角色。',.94,[[400,290],[600,290],[600,320],[400,320]])])
+        for result in (found,weak,frame(('未搜索到该角色。',500,450))):
+            with patch('pcrscript.game_ui.character_search.search_character',return_value=result) as search:
+                self.assertIs(search_character_candidates('ui','合成角色'),result)
+                search.assert_called_once()
+        with patch('pcrscript.game_ui.character_search.search_character',side_effect=EventUIError('搜索词未确认写入')) as search:
+            with self.assertRaisesRegex(EventUIError,'搜索词未确认写入'):
+                search_character_candidates('ui','合成角色')
+            search.assert_called_once()
 
     def test_search_field_accepts_only_observed_name_ocr_confusion(self):
         def field(text, score=.81049, x=350, y=135):

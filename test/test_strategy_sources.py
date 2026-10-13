@@ -16,6 +16,22 @@ def fake_api():
  return a
 
 class SourceTests(TestCase):
+ def test_stadium_compilation_without_literal_round_is_discovered_but_not_round_proof(self):
+  from datetime import datetime,timezone
+  from pcrscript.tasks.stadium_strategy import round_scope
+  start=datetime(2026,10,9,4,tzinfo=timezone.utc).timestamp()
+  with TemporaryDirectory() as folder:
+   api=fake_api()
+   title='公主连结 国服 2026年10月斗技场18层全攻略'
+   api.search.return_value={'code':0,'data':{'result':[{'result_type':'video','data':[
+    {'bvid':BV,'title':title,'pubdate':start+3600}]}]}}
+   api.getVideoInfo.return_value={'code':0,'data':{'bvid':BV,'title':title,
+    'pubdate':start+3600,'pages':[{'cid':1,'page':1,'part':'攻略合集'}]}}
+   result=discover_sources(dict(task_type='stadium',area='斗技场',stage='2',region='cn',
+    period_start=start,period_end=start+5*86400,event_id=1,cache_dir=folder),api=api)
+   self.assertEqual([c['bvid'] for c in result['candidates']],[BV])
+   self.assertEqual(round_scope(title),{})
+
  def test_fixed_set_claims_do_not_hide_comma_separated_exceptions_or_actions(self):
   for statement in ('Boss2全SET，除了第二人关闭', 'Boss2SET OXOOO,然后关掉',
                     'Boss2全SET，只有第一人开启', 'Boss2全SET，别开自动',
