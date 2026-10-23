@@ -1,13 +1,9 @@
 """Synthetic schedule and database-update regressions; no network or game data."""
-from contextlib import closing, contextmanager
+from contextlib import closing
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
-from tempfile import TemporaryDirectory
 from unittest import TestCase
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 import sqlite3
-
-import brotli
 
 from pcrscript import news
 from pcrscript.tasks import Event, TimeLimitTask
@@ -122,90 +118,6 @@ class AbyssSubjugationScheduleTests(TestCase):
 
 
 class NewsDatabaseTests(TestCase):
-    def setUp(self):
-        self.temporary = TemporaryDirectory()
-        self.addCleanup(self.temporary.cleanup)
-        self.root = Path(self.temporary.name)
-        self.target = self.root / 'redive_cn.db'
-        self.old = self.database('old.db', 1)
-        self.new = self.database('new.db', 2)
-        self.target.write_bytes(self.old)
-        self.config = {'version': 1}
-
-    def database(self, name, value):
-        path = self.root / name
-        with closing(sqlite3.connect(path)) as conn:
-            conn.execute('CREATE TABLE marker (value INTEGER)')
-            conn.execute('INSERT INTO marker VALUES (?)', (value,))
-            conn.commit()
-        data = path.read_bytes()
-        path.unlink()
-        return data
-
-    @contextmanager
-    def remote(self, data=None, version=2):
-        response = MagicMock()
-        response.__enter__.return_value = response
-        response.iter_content.return_value = [brotli.compress(self.new if data is None else data)]
-        with patch.object(news.requests, 'post') as post, patch.object(news.requests, 'get', return_value=response) as get:
-            post.return_value.json.return_value = {'data': {'truthVersion': version}}
-            yield post, get, response
-
-    def test_missing_database_is_downloaded_even_when_version_matches(self):
-        self.target.unlink()
-        with self.remote(version=1) as (_, get, _):
-            news._upgrade_db_file(self.config, str(self.root), self.target.name)
-        self.assertEqual(self.target.read_bytes(), self.new)
-        get.assert_called_once()
-
-    def test_empty_database_is_downloaded_even_when_version_matches(self):
-        self.target.write_bytes(b'')
-        with self.remote(version=1):
-            news._upgrade_db_file(self.config, str(self.root), self.target.name)
-        self.assertEqual(self.target.read_bytes(), self.new)
-
-    def test_current_database_does_not_download_again(self):
-        with self.remote(version=1) as (_, get, _):
-            news._upgrade_db_file(self.config, str(self.root), self.target.name)
-        get.assert_not_called()
-        self.assertEqual(self.target.read_bytes(), self.old)
-
-    def test_invalid_download_preserves_database_and_version(self):
-        for data in (b'not a SQLite database', b''):
-            with self.subTest(data=data), self.remote(data=data):
-                with self.assertRaises((ValueError, sqlite3.DatabaseError)):
-                    news._upgrade_db_file(self.config, str(self.root), self.target.name)
-            self.assertEqual(self.target.read_bytes(), self.old)
-            self.assertEqual(self.config, {'version': 1})
-            self.assertEqual(list(self.root.iterdir()), [self.target])
-
-    def test_failed_download_leaves_version_retryable(self):
-        with self.remote() as (_, _, response):
-            response.iter_content.side_effect = news.requests.ConnectionError('interrupted download')
-            with self.assertRaises(news.requests.ConnectionError):
-                news._upgrade_db_file(self.config, str(self.root), self.target.name)
-        self.assertEqual(self.target.read_bytes(), self.old)
-        self.assertEqual(self.config, {'version': 1})
-        self.assertEqual(list(self.root.iterdir()), [self.target])
-
-    def test_failed_publication_preserves_old_database_and_version(self):
-        with self.remote(), patch.object(news.os, 'replace', side_effect=PermissionError('database busy')):
-            with self.assertRaises(PermissionError):
-                news._upgrade_db_file(self.config, str(self.root), self.target.name)
-        self.assertEqual(self.target.read_bytes(), self.old)
-        self.assertEqual(self.config, {'version': 1})
-        self.assertEqual(list(self.root.iterdir()), [self.target])
-
-    def test_successful_update_closes_database_before_publication(self):
-        with self.remote() as (post, get, _):
-            news._upgrade_db_file(self.config, str(self.root), self.target.name)
-        self.assertEqual(self.target.read_bytes(), self.new)
-        self.assertEqual(self.config, {'version': 2})
-        self.assertEqual(list(self.root.iterdir()), [self.target])
-        post.return_value.raise_for_status.assert_called_once()
-        self.assertIn('timeout', post.call_args.kwargs)
-        self.assertIn('timeout', get.call_args.kwargs)
-
     def test_build_news_releases_sqlite_connection(self):
         class StopQuery(Exception):
             pass
@@ -215,6 +127,35 @@ class NewsDatabaseTests(TestCase):
         with patch.object(news.sqlite3, 'connect', return_value=connection), \
                 patch.object(news, '_query_free_gacha_event', side_effect=StopQuery):
             with self.assertRaises(StopQuery):
-                news._build_event_news(str(self.root), self.target.name)
+                news._build_event_news('.', 'synthetic.db')
         with self.assertRaises(sqlite3.ProgrammingError):
             connection.execute('SELECT 1')
+
+
+class CollaborationScheduleTests(TestCase):
+    def test_local_schedule_keeps_ticket_types_and_exact_boundaries(self):
+        with closing(sqlite3.connect(':memory:')) as conn:
+            conn.create_function('ISO', 1, news._iso_datetime)
+            conn.execute('CREATE TABLE mre_schedule (schedule_id INTEGER,mre_id INTEGER,event_type INTEGER,'
+                         'boss_ticket_id INTEGER,gacha_ticket_id INTEGER,start_time TEXT,end_time TEXT)')
+            conn.execute('INSERT INTO mre_schedule VALUES (1,2,1,73001,72001,?,?)',
+                         ('2026/10/23 11:00:00','2026/11/2 10:59:59'))
+            for instant, active in [(datetime(2026,10,23,10,59,59,tzinfo=CN),False),
+                                    (datetime(2026,10,23,11,tzinfo=CN),True),
+                                    (datetime(2026,11,2,10,59,59,tzinfo=CN),False)]:
+                class Clock(datetime):
+                    @classmethod
+                    def now(cls, tz=None):
+                        return instant.astimezone(tz or TOKYO)
+                with patch.object(news, 'datetime', Clock):
+                    event = news._query_collaboration_raid(conn)
+                self.assertEqual(event is not None,active)
+                if event:
+                    self.assertEqual(event.extras['boss_ticket_id'],73001)
+                    self.assertEqual(event.extras['gacha_ticket_id'],72001)
+
+    def test_bad_optional_table_is_unknown_instead_of_closed(self):
+        with closing(sqlite3.connect(':memory:')) as conn:
+            conn.execute('CREATE TABLE secret_dungeon_schedule (broken INTEGER)')
+            with self.assertRaises(sqlite3.OperationalError):
+                news._query_secret_dungeon(conn)

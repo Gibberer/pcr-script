@@ -26,3 +26,5 @@ from .task_character_upgrade import UpgradeAllCharacters
 from .task_character_bond import MaxCharacterBonds
 from .task_abyss import AbyssPush
 from .task_abyss_subjugation import AbyssSubjugation
+from .task_collaboration_raid import CollaborationRaid
+from .task_activity import ActivityDaily

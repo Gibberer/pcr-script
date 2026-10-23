@@ -1,0 +1,352 @@
+"""Synthetic raid pages; no account evidence or real strategies."""
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from unittest import TestCase
+from unittest.mock import Mock, patch
+
+from ui_fixtures import screen, replay_ui, TaskReplayMixin
+from pcrscript.game_ui import collaboration_raid as field
+from pcrscript.game_ui.screen import EventUIError
+from pcrscript.tasks.task_collaboration_raid import CollaborationRaid, validate_options
+from pcrscript.tasks.collaboration_strategy import difficulty_scope, source_rejection, TITLE, BOSS
+from pcrscript.tasks.strategy_sources import get_source_rules
+from pcrscript.tasks.strategy_video import choose_pages, observed_scope
+from pcrscript.game_ui.guide_vision import GuideText
+
+
+def home(tickets=5):
+    return screen((TITLE+'！', 170, 50), ('讨伐券', 700, 430), (str(tickets), 820, 430),
+                  ('挑战', 740, 405), ('全体报酬', 603, 403), ('任务', 785, 32))
+
+
+def missions(blue=False):
+    return screen(('任务', 480, 42), ('限时任务：2026/10/23 11:00～2026/11/02 10:59', 480, 85),
+                  ('全部收取', 590, 478), ('取消', 365, 478), blue=('全部收取',) if blue else ())
+
+
+def detail(free=True):
+    return screen(('BOSS详情', 113, 45), ('普通', 230, 45), ('模拟战', 750, 125),
+                  ('实战', 865, 125), ('挑战', 840, 470), ('取消', 665, 470),
+                  (BOSS+' 等级.25', 327, 270), ('100,000/100,000', 635, 338),
+                  *((('完成初次讨伐前不消耗', 520, 482),) if free else (('跳过', 660, 470),)))
+
+
+def sweep_detail():
+    value = detail(False)
+    value.items[1].text = '高难'
+    extra = screen(('跳过伤害', 525, 390), ('120000000', 540, 412), ('使用5张', 755, 405),
+                   ('讨伐券', 525, 455), ('5', 510, 480), ('0', 580, 480), blue=('使用5张',))
+    value.items += extra.items
+    value.image[380:430, 705:815] = extra.image[380:430, 705:815]
+    return value
+
+
+def confirmation(cost=5):
+    return screen(('扫荡券确认', 480, 150), ('取消', 370, 375), ('确认', 590, 375),
+                  ('消耗讨伐券', 330, 260), (str(cost), 450, 260),
+                  ('消耗券', 330, 300), ('5', 450, 300), blue=('确认',))
+
+
+def exchange(balance=101):
+    return screen(('报酬交换', 140, 30), ('奖励券', 780, 444), (str(balance), 920, 444),
+                  ('当前的列表', 625, 304), ('100次交换', 830, 365), ('使用100张', 830, 398),
+                  ('1次交换', 610, 365), ('使用1张', 610, 398), blue=('100次交换', '1次交换'))
+
+
+def difficulty_menu(selected='困难'):
+    x, y = {'普通': (279, 229), '困难': (499, 229), '高难': (279, 300)}[selected]
+    return screen(('难度变更', 480, 147), ('取消', 370, 372), ('确认', 590, 372),
+                  ('合成选择标记', x, y), blue=('确认', '合成选择标记'))
+
+
+class RecognitionTests(TestCase):
+    def test_detail_to_fight_uses_both_health_bars_and_rejects_new_attempt(self):
+        from pcrscript.tasks.collaboration_strategy import ScopeContext
+        scope = dict(boss=BOSS, difficulty='高难', level=100, maximum_hp=10000000)
+        def bars(health, total=None):
+            total = 80000000000000-10000000+health if total is None else total
+            return [GuideText(str(total)+'/90000000000000', .99, (400, 40, 350, 25)),
+                    GuideText(str(health)+'/10000000', .99, (600, 80, 200, 25))]
+        c = ScopeContext()
+        self.assertTrue(c.resolve(scope, True, bars(10000000), 0, False, dict(image='synthetic-detail'))[1])
+        preparation = [GuideText('队伍编组', .99, (400, 30, 200, 30)),
+                       GuideText('战斗开始', .99, (1000, 600, 150, 35))]
+        self.assertFalse(c.resolve({}, False, preparation, 2, False, {})[1])
+        self.assertTrue(c.resolve({}, False, bars(9000000), 5, True, {})[1])
+        # A wrong OCR value is not evidence; a subsequent consistent frame
+        # inside the bound can recover without adopting the wrong health.
+        self.assertFalse(c.resolve({}, False, bars(1000000, 80000000000000), 6, True, {})[1])
+        self.assertTrue(c.resolve({}, False, bars(8000000), 7, True, {})[1])
+        self.assertFalse(c.resolve({}, False, bars(10000000), 8, True, {})[1])
+        self.assertFalse(c.resolve({}, False, bars(7000000), 20, True, {})[1])
+
+    def test_unknown_transition_clears_the_source_target(self):
+        from pcrscript.tasks.collaboration_strategy import ScopeContext
+        c = ScopeContext()
+        c.resolve(dict(boss=BOSS, difficulty='高难'), True, [], 0, False, {})
+        c.resolve({}, False, [GuideText('另一玩法', .99, (100, 30, 100, 30))], 1, False, {})
+        self.assertFalse(c.scope)
+
+    def test_year_before_full_set_is_not_a_timed_operation(self):
+        from pcrscript.tasks.strategy_sources import timed_switch_requirement
+        from pcrscript.tasks.strategy_video import manual_requirement, exact_full_set_claim
+        title = '公主连结国服2026年10月剧情活动全Set一刀'
+        self.assertFalse(timed_switch_requirement(title))
+        self.assertFalse(manual_requirement(title, unparsed_settings=True))
+        self.assertTrue(exact_full_set_claim(dict(title=title), dict(boss=BOSS), 'collaboration'))
+        self.assertTrue(timed_switch_requirement('104全SET'))
+
+    def test_required_metadata_blocks_media_before_download(self):
+        from types import SimpleNamespace
+        import numpy as np
+        from pcrscript.tasks.strategy_video import parse_video_source
+        with TemporaryDirectory() as folder:
+            media = Mock()
+            source = dict(bvid='BVSYNTHETIC', url='https://example.com/synthetic',
+                          title='公主连结 国服 '+TITLE+' 高难攻略',
+                          description='职能精通：全职业等级4及以上',
+                          comment_complete=True, author_comments=[], pages=[dict(cid=1, part='高难', duration=4)])
+            result = parse_video_source(source, dict(task_type='collaboration', parsed_dir=folder, skip_manual_media=True),
+                SimpleNamespace(names=['合成角色'], matrix=np.ones((1, 1728))), api=Mock(), ocr=Mock(), media_fetcher=media)
+            media.assert_not_called()
+            self.assertEqual(result['parties'], [])
+            self.assertTrue(result['global_requirements'])
+
+    def test_parser_binds_two_combat_frames_and_preserves_unknown_build(self):
+        from types import SimpleNamespace
+        import numpy as np
+        from pcrscript.tasks.strategy_video import parse_video_source
+        from pcrscript.tasks.collaboration_strategy import parties_for_difficulty
+        members = [dict(name='合成角色'+str(i), rectangle=[196+120*i, 400, 86, 85], score=.99) for i in range(5)]
+        texts = [GuideText(BOSS+'等级.350', .99, (20, 20, 210, 25)),
+                 GuideText('300000000/300000000', .99, (400, 70, 300, 25))]
+        with TemporaryDirectory() as folder:
+            source = dict(bvid='BVSYNTHETIC', url='https://example.com/synthetic', title='公主连结 国服 '+TITLE+' 高难攻略',
+                          description='', comment_complete=True, author_comments=[], pages=[dict(cid=1, part='高难', duration=4)])
+            capture = Mock()
+            capture.read.side_effect = [(True, np.full((720, 1280, 3), n, np.uint8)) for n in (40, 80)]
+            with patch('pcrscript.tasks.strategy_video.cv.VideoCapture', return_value=capture), \
+                 patch('pcrscript.tasks.strategy_video.sample_seconds', return_value=[1, 2]), \
+                 patch('pcrscript.tasks.strategy_video.frame_texts', return_value=texts), \
+                 patch('pcrscript.tasks.strategy_video.battle_rectangles', return_value=[m['rectangle'] for m in members]), \
+                 patch('pcrscript.tasks.strategy_video.combat_team', return_value=members), \
+                 patch('pcrscript.tasks.strategy_video.formation_fields', return_value=[]), \
+                 patch('pcrscript.tasks.strategy_video.combat_set', return_value=True), \
+                 patch('pcrscript.tasks.strategy_video.combat_auto', return_value=True):
+                result = parse_video_source(source, dict(task_type='collaboration', parsed_dir=folder),
+                    SimpleNamespace(names=[m['name'] for m in members], matrix=np.ones((5, 1728))),
+                    api=Mock(), ocr=Mock(), media_fetcher=lambda *a, **k: (Path(folder)/'synthetic.avi', dict(duration=4)))
+            self.assertEqual(len(result['parties']), 1)
+            self.assertEqual(result['parties'][0]['scope'], dict(boss=BOSS, difficulty='高难'))
+            self.assertIsNone(result['parties'][0]['members'][0]['unique']['value'])
+            self.assertFalse(parties_for_difficulty(result, '普通', allow_local_trials=False))
+            adapted = parties_for_difficulty(result, '普通', allow_local_trials=True)
+            self.assertEqual(len(adapted), 1)
+            self.assertEqual(adapted[0].build_basis, 'local_trial')
+
+    def test_numeric_source_identity_needs_exact_target_or_explicit_free_trial(self):
+        from pcrscript.tasks.strategy_document import empty_member, Evidence, finalize
+        from pcrscript.tasks.collaboration_strategy import parties_for_difficulty
+        members = [empty_member('合成角色'+str(i)) for i in range(5)]
+        for member in members:
+            member['instant'].add(True, Evidence('https://example.com/synthetic'))
+        raw = finalize(dict(task_type='collaboration', source='https://example.com/synthetic',
+            scope=dict(boss=BOSS, level=100, maximum_hp=10000000), scope_verified=True,
+            region='cn', target_region='cn', members=members, global_requirements=[], manual_actions=[],
+            auto=dict(value=True, evidence=[dict(method='synthetic')], conflicts=[])))
+        report = dict(parties=[raw])
+        normal = dict(level=25, maximum_hp=100000)
+        self.assertFalse(parties_for_difficulty(report, '普通', target=normal, allow_local_trials=False))
+        self.assertEqual(len(parties_for_difficulty(report, '普通', target=normal, allow_local_trials=True)), 1)
+        self.assertFalse(parties_for_difficulty(report, '高难', target=dict(level=350, maximum_hp=120000000), allow_local_trials=True))
+        self.assertFalse(parties_for_difficulty(report, '普通', target=dict(level=25, maximum_hp=100000000), allow_local_trials=True))
+
+    def test_activity_and_resource_identity(self):
+        ui = Mock(number=lambda s, r: s.number(r))
+        for n in (0, 5, 99):
+            self.assertTrue(field.home(home(n)))
+            self.assertEqual(field.tickets(ui, home(n)), n)
+        other = home()
+        other.items[0].text = '另一活动'
+        self.assertFalse(field.home(other))
+        self.assertIsNone(field.tickets(ui, other))
+
+    def test_period_comes_from_full_year_and_server_timezone(self):
+        self.assertEqual(field.period(missions()), (1792724400., 1793588399.))
+        wave = missions()
+        wave.items[1].text = wave.items[1].text.replace('～', '〜')
+        self.assertEqual(field.period(wave), (1792724400., 1793588399.))
+        invalid = missions()
+        invalid.items[1].text = '限时任务：2026/10/23 11:00～2026/12/02 10:59'
+        self.assertIsNone(field.period(invalid))
+
+    def test_first_clear_requires_explicit_free_message_and_exact_boss(self):
+        self.assertTrue(field.first_clear_free(detail()))
+        self.assertFalse(field.first_clear_free(detail(False)))
+        self.assertEqual(field.target(detail())['maximum_hp'], 100000)
+        other = detail()
+        other.items[6].text = '另一首领 等级.25'
+        self.assertIsNone(field.target(other))
+
+    def test_difficulty_scope_is_unique_and_not_hard_inside_very_hard(self):
+        for text in ('高难', 'VH', 'Very Hard'):
+            self.assertEqual(difficulty_scope(text), dict(boss=BOSS, difficulty='高难'))
+        self.assertFalse(difficulty_scope('普通 困难 高难'))
+
+    def test_source_rejects_other_period_region_and_unread_author_images(self):
+        options = dict(period_start=1000000, period_end=2000000)
+        source = dict(title='公主连结 国服 '+TITLE+' 攻略', description='', published_at=1100000)
+        self.assertIsNone(source_rejection(source, options))
+        for changes in (dict(published_at=1), dict(title='公主连结 日服 '+TITLE),
+                        dict(comment_complete=False), dict(author_comments=[dict(images=['synthetic'])])):
+            self.assertIsNotNone(source_rejection(dict(source, **changes), options))
+        self.assertTrue(get_source_rules(dict(task_type='collaboration')).require_complete_comments)
+
+    def test_all_pages_are_required_and_difficulty_title_does_not_prove_boss(self):
+        source = dict(title=TITLE+' 高难', pages=[dict(cid=1, part='录像')])
+        pages = choose_pages(source, dict(task_type='collaboration', max_pages_per_video=2))
+        self.assertEqual(pages[0]['part'], source['title'])
+        self.assertEqual(observed_scope([], pages[0], 'collaboration'), ({}, False))
+        with self.assertRaises(ValueError):
+            choose_pages(dict(source, pages=source['pages']*3), dict(task_type='collaboration', max_pages_per_video=2))
+
+
+class RaidFlowTests(TaskReplayMixin, TestCase):
+    def test_automatic_gem_reward_dismisses_only_matching_amounts(self):
+        reward = screen(('获得了宝石×450', 480, 360), ('x450', 518, 294), ('挑战', 745, 406))
+        self.frames([reward, home()])
+        self.assertTrue(field.home(self.task.enter()))
+        self.assertEqual(self.clicks(), ['获得了宝石×450'])
+        reward.items[1].text = 'x400'
+        self.assertIsNone(field.gem_reward(reward))
+
+    def test_known_unlock_notice_closes_without_starting_another_battle(self):
+        notice = screen(('困难解锁', 480, 147), ('困难已解锁。', 480, 273), ('关闭', 480, 372))
+        self.frames([notice, home()])
+        self.assertTrue(field.home(self.task.enter()))
+        self.assertEqual(self.clicks(), ['关闭'])
+        notice.items[1].text = '未知要求'
+        self.assertIsNone(field.unlock_dialog(notice))
+
+    def test_difficulty_switch_confirms_only_after_radio_selection(self):
+        hard = detail()
+        hard.items[1].text = '困难'
+        hard.items.extend(screen(('难度变更', 365, 44)).items)
+        self.task.enter = Mock(return_value=home())
+        self.frames([hard, difficulty_menu(), difficulty_menu('普通'), detail()])
+        self.assertEqual(field.difficulty(self.task.open_detail('普通')), '普通')
+        self.assertEqual(self.clicks(), ['挑战', '难度变更', (279, 229), '确认'])
+        self.assertFalse(field.selected_difficulty(difficulty_menu(), '高难'))
+
+    def test_exchange_uses_displayed_cost_and_requires_receipt_and_balance(self):
+        self.task.open_exchange = Mock(return_value=exchange())
+        self.frames([screen(('交换结果', 480, 42), ('关闭', 480, 480)), exchange(1),
+                     screen(('交换结果', 480, 42), ('关闭', 480, 480)), exchange(0), home()])
+        self.task.exchange()
+        self.assertEqual([p['quantity'] for p in self.task.report['exchanges']], [100, 1])
+        self.assertEqual(self.task.report['remaining_reward_tickets'], 0)
+        self.assertNotIn('pending_exchange', self.task.state)
+
+    def test_exchange_wrong_balance_retains_pending_and_never_repeats(self):
+        self.task.open_exchange = Mock(return_value=exchange())
+        self.frames([screen(('交换结果', 480, 42), ('关闭', 480, 480)), exchange(101)])
+        with self.assertRaisesRegex(EventUIError, '扣除'):
+            self.task.exchange()
+        self.assertIn('pending_exchange', self.task.state)
+        self.assertEqual(self.clicks().count('100次交换'), 1)
+
+    def test_last_allowed_exchange_batch_can_finish_at_zero(self):
+        self.task.options['max_exchange_batches'] = 1
+        self.task.open_exchange = Mock(return_value=exchange(100))
+        self.frames([screen(('交换结果', 480, 42), ('关闭', 480, 480)), exchange(0), home()])
+        self.task.exchange()
+        self.assertEqual(self.task.report['remaining_reward_tickets'], 0)
+
+    def test_sweep_requires_both_costs_receipt_and_exact_balance_change(self):
+        self.task.report['remaining_tickets'] = 5
+        self.frames([confirmation(), screen(('扫荡结果', 480, 42), ('关闭', 480, 480)), home(0)])
+        self.task.sweep(sweep_detail())
+        self.assertEqual(self.task.report['spent'], 5)
+        self.assertEqual(self.task.report['remaining_tickets'], 0)
+        self.assertNotIn('pending_spend', self.task.state)
+        self.assertEqual(self.clicks(), ['使用5张', '确认', '关闭'])
+
+    def test_wrong_cost_never_confirms_and_uncertain_balance_never_replays(self):
+        self.task.report['remaining_tickets'] = 5
+        self.frames([confirmation(4)])
+        with self.assertRaisesRegex(EventUIError, '消费不符'):
+            self.task.sweep(sweep_detail())
+        self.assertNotIn('确认', self.clicks())
+        self.task.ui.click.reset_mock()
+        self.frames([confirmation(), screen(('扫荡结果', 480, 42), ('关闭', 480, 480)), home(5)])
+        with self.assertRaisesRegex(EventUIError, '余额刷新未确认'):
+            self.task.sweep(sweep_detail())
+        self.assertIn('pending_spend', self.task.state)
+        self.assertEqual(self.clicks().count('确认'), 1)
+
+    def setUp(self):
+        self.folder = TemporaryDirectory()
+        self.addCleanup(self.folder.cleanup)
+        robot = Mock(driver=Mock(device_name='synthetic'), task_config=dict(CollaborationRaid=dict(output=self.folder.name)), _task_output=None)
+        self.task = CollaborationRaid(robot)
+        self.task.ui = replay_ui(self.folder.name)
+        self.task.ui.number.side_effect = lambda s, roi: s.number(roi)
+
+    def test_invalid_budgets_fail_before_device(self):
+        for value in (True, 0, -1, 1000):
+            with self.assertRaises(ValueError):
+                CollaborationRaid.prepare(dict(CollaborationRaid=dict(max_tickets=value)))
+        with self.assertRaises(ValueError):
+            validate_options(dict(first_clear='yes'))
+        with self.assertRaises(ValueError):
+            validate_options(dict(max_exchange_batches=201))
+
+    def test_unavailable_account_party_advances_source_discovery(self):
+        from pcrscript.tasks.task_collaboration_raid import NoUsableParty
+        url = 'https://example.com/synthetic'
+        self.task.sources = dict(parties=[dict(source=url)])
+        self.task.try_first_clear = Mock(side_effect=[NoUsableParty('缺少角色'), detail(False)])
+        self.task.open_detail = Mock(return_value=detail())
+        result = self.task.first_clear(detail())
+        self.assertFalse(field.first_clear_free(result))
+        self.assertEqual(self.task.excluded_sources, {url})
+        self.assertIsNone(self.task.sources)
+        self.assertEqual(self.task.try_first_clear.call_count, 2)
+
+    def test_entry_waits_through_a_footer_only_transition(self):
+        adventure = screen(('冒险', 90, 30), ('联动讨伐', 412, 440))
+        transition = screen(('冒险', 539, 525))
+        self.frames([adventure, transition, home()])
+        with patch('pcrscript.tasks.task_collaboration_raid.time.sleep'):
+            self.assertTrue(field.home(self.task.enter()))
+        self.assertEqual(self.clicks(), [(412, 406)])
+
+    def test_unknown_source_cannot_start_a_free_battle(self):
+        self.task.sources = dict(parties=[])
+        with self.assertRaisesRegex(EventUIError, '没有通过'):
+            self.task.first_clear(detail())
+        self.assertFalse(self.clicks())
+
+    def test_paid_detail_cannot_be_used_as_first_clear(self):
+        with self.assertRaises(EventUIError):
+            self.task.first_clear(detail(False))
+        self.assertFalse(self.clicks())
+
+    def test_zero_claims_require_disabled_button_and_do_not_submit(self):
+        self.frames([home(), missions()])
+        self.task.collect()
+        self.assertEqual(self.clicks(), ['任务', '取消'])
+        self.assertNotIn('pending_claim', self.task.state)
+
+    def test_pending_submission_is_durable_and_never_replayed(self):
+        self.task.options['state_dir'] = str(Path(self.folder.name)/'state')
+        self.task.period = (1792724400., 1793588399.)
+        self.frames([missions(), home()])
+        with patch('pcrscript.tasks.task_collaboration_raid.time.time', return_value=1792750000):
+            self.task.initialize(home())
+            self.task.state['pending_spend'] = dict(before=5, after=4)
+            self.task.save()
+            self.frames([missions(), home()])
+            with self.assertRaisesRegex(EventUIError, '上次未核对'):
+                self.task.initialize(home())
+        self.assertNotIn('挑战', self.clicks())

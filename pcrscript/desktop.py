@@ -22,12 +22,13 @@ def runtime_defaults_path() -> Path:
 
 PROTOCOL = 1
 LABELS = {
+    'collaboration_raid': '联动讨伐 · 首通与日常扫荡',
     'abyss_push': '深域关卡 · 尽力推进',
     'abyss_subjugation': '深渊讨伐战 · 每日首通与扫荡',
     'upgrade_all_characters': '强化所有角色装备和等级到上限',
     'max_character_bonds': '角色好感度与剧情解锁',
     'dungeon_first_clear': '地下城 · 首次通关',
-    'caravan': '驾车游 · 清空骰子', 'get_gift': '礼物箱 · 领取邮件与赠礼', 'campaign_clean': '剧情活动日常',
+    'caravan': '驾车游 · 清空骰子', 'get_gift': '礼物箱 · 领取邮件与赠礼', 'campaign_clean': '活动日常',
     'dawn_labyrinth': '黎明界迷宫 · 扫荡通行证',
     'dawn_labyrinth_first_clear': '黎明界迷宫 · 难度1首通',
     'recollection': '追忆战场 · 日常领奖与扫荡',
@@ -40,7 +41,7 @@ LABELS = {
     'luna_tower_clean': '露娜塔扫荡',
     'team_battle': '团队战',
     'battle_stadium': '斗技场 · 本期满星与领奖',
-    'clear_campaign_first_time': '活动首通',
+    'clear_campaign_first_time': '剧情活动首通',
 }
 SPECIAL_TASKS = {'clear_story', 'dungeon_first_clear', 'abyss_push',
                  'upgrade_all_characters', 'max_character_bonds', 'common_adventure', 'caravan', 'tohomepage',
@@ -54,6 +55,7 @@ PARAMETER_LABELS = {
     'estimate_combat_duration': '预估战斗时长（秒）',
 }
 DESCRIPTIONS = {
+    'collaboration_raid': '处理僵尸乐园连结联动讨伐。自动获取本期攻略并核验五人衣装、培养、装备与固定SET/AUTO；免费首通后扫荡高难并领奖。默认最多使用99张现有讨伐券，兑换已有奖励券最多200批；可在CollaborationRaid配置中关闭首通或兑换。',
     'battle_stadium': '活动期间补齐回合三星并领取累计报酬；已满星且奖励全领后不再挑战。程序取得本期回合攻略并核验出战成员、培养及装备，允许按账号培养有限试打；后续回合未解锁时保留进度。挑战不消耗体力或次数，不购买资源或培养专武。',
     'abyss_subjugation': '活动开放期间，从本期适用攻略结合账号角色选队，核验培养及 SET/AUTO；没有可执行攻略时停止新战斗。按实际难度首通前哨并扫荡剩余次数，首领先免费模拟达标再消耗讨伐委托证。全部首通后扫荡一个极难首领。可领取公会之家现有体力，不购买体力、回复次数或重置首领进度。',
     'abyss_push': '按五种属性推进深域NEXT关卡。按来源优先选队并核验当前培养，开战前自动装备特别装备；结合伤害、减员和历史失败记录调整阵容与重试次数。可选升5星并用女神秘石兑换所需碎片，默认关闭；不购买体力或重置次数。攻略搜索结果仅为候选来源，尚不能自动解析完整培养要求。',
@@ -66,7 +68,7 @@ DESCRIPTIONS = {
     'recollection': '领取普通追忆战的累计报酬，按本次上限扫荡追忆战·霸各领域已通关的最高层；核对扫荡券与挑战次数，不挑战未通关层。日程表能领取普通报酬，但不支持追忆战·霸扫荡。',
     'recollection_first_clear': '尽力推进记忆领域和追忆战·霸已解锁领域。程序获取对应层攻略、核对五人身份与培养后有限挑战；已完成层跳过，次数耗尽或来源、装备未知时保留进度。可选分配现有特别装备；不购买资源、重置次数或培养角色。',
     'get_gift': '从首页礼物箱领取邮件与赠礼，不是任务页面的成就/每日任务领奖。可选择暂不领取体力。特别装备满仓时按配置使用游戏已有自动分解规则释放空间；其他持有上限会停止并报告。',
-    'campaign_clean': '处理剧情活动重复日：困难扫荡、按标记检查剧情与任务、兑换奖励。首通和首领是否执行由活动配置控制，默认关闭。',
+    'campaign_clean': '统一处理联动讨伐、复刻和剧情活动，各类型分别核验开放状态并使用独立预算、攻略与消费记录。Activities.types选择类型，Activities.options按类型配置；也兼容原有StoryEvent、RevivalEvent、CollaborationRaid配置段。联动默认免费首通、最多99张现有讨伐券及200批现有奖励券兑换；奖池全部抽空才切换。剧情首通默认关闭。未核账时停止其余活动类型。',
     'revival_event_once': '检查当期复刻活动并按完成回执跳过已完成内容。未完成时根据布局和配置处理关卡、首领与奖励；开战依赖有效队伍方案及培养核验。',
     'tohomepage': '手动返回游戏首页。普通任务已自动处理首页前置条件，无需在配置中穿插此项。可调整首页按钮坐标和等待超时。',
     'free_gacha': '进行活动免费十连，可选择抽取所有累积次数。按配置执行时会根据活动情报筛选；单独执行前需确认活动可用。',
@@ -122,8 +124,8 @@ def catalog() -> list[dict[str, Any]]:
                                    required=p.default is inspect.Parameter.empty))
         result.append(dict(name=name, label=LABELS.get(name, name), description=DESCRIPTIONS.get(name, inspect.getdoc(cls) or '暂无任务说明'), parameters=parameters,
                            config_section=cls.config_section,
-                           category='special' if name in SPECIAL_TASKS else 'daily',
-                           category_label='按需专项' if name in SPECIAL_TASKS else '每日日常',
+                           category='compatibility' if name in ('collaboration_raid', 'revival_event_once') else 'special' if name in SPECIAL_TASKS else 'daily',
+                           category_label='旧配置兼容' if name in ('collaboration_raid', 'revival_event_once') else '按需专项' if name in SPECIAL_TASKS else '每日日常',
                            requires_device=True,
                            entry='执行前自动返回首页' if cls.requires_home else '需先进入目标冒险地图' if name == 'common_adventure' else '任务自行处理页面导航'))
     return result

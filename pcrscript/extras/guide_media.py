@@ -141,9 +141,11 @@ def video_info(path: Path) -> dict:
 
 def fetch_video(api, bvid: str, page: dict, directory: Path, *, http=requests,
                 timeout: float = 20, max_bytes: int = 250*1024**2,
-                max_seconds: float = 180, check=lambda: None, refresh=False) -> tuple[Path, dict]:
+                max_seconds: float = 180, check=lambda: None, refresh=False, preferred_quality=64) -> tuple[Path, dict]:
     if type(refresh) is not bool:
         raise ValueError('refresh必须为布尔值')
+    if type(preferred_quality) is not int or preferred_quality not in (16, 32, 64):
+        raise ValueError('preferred_quality必须为16、32或64')
     directory = Path(directory)/bvid
     directory.mkdir(parents=True, exist_ok=True)
     cid = int(page['cid'])
@@ -164,7 +166,9 @@ def fetch_video(api, bvid: str, page: dict, directory: Path, *, http=requests,
     errors = []
     # One final metadata refresh can replace an immediately failed signed
     # endpoint. It shares the original deadline, retaining a healthy stream.
-    for requested_quality, fraction in ((64, .25), (32, .5), (16, 1), (16, 1)):
+    qualities = ((64, .25), (32, .5), (16, 1), (16, 1)) if preferred_quality == 64 else (
+        ((32, .5), (16, 1), (16, 1)) if preferred_quality == 32 else ((16, 1), (16, 1)))
+    for requested_quality, fraction in qualities:
         check()
         if time.monotonic()-started >= max_seconds:
             break

@@ -1,0 +1,1269 @@
+{
+  "format": 1,
+  "tables": {
+    "abyss_schedule": {
+      "table": "v1_ce1ee85de1212a3b703dee0a7e3a36d42ed97ef21e5ad915d4016378ae9d5c48",
+      "columns": {
+        "abyss_id": {
+          "hash": "017a4bbfc10738707c5cce285dec37f152d4bc8e842b22be8cabb644ef080041",
+          "type": "INTEGER"
+        },
+        "talent_id": {
+          "hash": "475d70d3914b625837cb87200e37baf8fb036d97a51b3eb5558581ebc1f2f46f",
+          "type": "INTEGER"
+        },
+        "title": {
+          "hash": "c20f22627ee8c33fb78dcd7cf21196dbe48302a3f2c783abd48c1c6f74c00174",
+          "type": "TEXT"
+        },
+        "boss_ticket_id": {
+          "hash": "25f9cf873c3ed390d3560516d121b4c6055fb009c43699fde4cd8a6d11a9629b",
+          "type": "INTEGER"
+        },
+        "start_time": {
+          "hash": "6e0ff73f701c9c9064d5bf2a5796ebb7ed290630fe289c4ef3c43a5342d85975",
+          "type": "TEXT"
+        },
+        "end_time": {
+          "hash": "8bbfc751b2f5adfc55657c62b317f6dda4fcea31f07b066f4c8fa0162fc3a909",
+          "type": "TEXT"
+        }
+      }
+    },
+    "campaign_freegacha": {
+      "table": "v1_9d41984affcd757683e67e94e2a67aa907c6ca6320473149005b99239b98426c",
+      "columns": {
+        "id": {
+          "hash": "ecd476ec8dc4e6fb7ac7057183231771ff9c56622d482119f5f4ec4a0bf71444",
+          "type": "INTEGER"
+        },
+        "campaign_id": {
+          "hash": "54d68cc16d4923e690cbc6b483fed06b932e4ca64e332e762cef68474236ca8b",
+          "type": "INTEGER"
+        },
+        "freegacha_1": {
+          "hash": "d26eac79ea086c3a9393ce58546e1b5f0ea97f392d7c5bfa0e0e1c4aabc83b23",
+          "type": "INTEGER"
+        },
+        "freegacha_10": {
+          "hash": "d59c7371342c62aab967c2e15593c1f8315accdbee30cc1693894db27486e5c7",
+          "type": "INTEGER"
+        },
+        "start_time": {
+          "hash": "c03d4329b4e1c2a72d6c62b85f7d61326df43edb59d37d2b8cae8374fe2c139e",
+          "type": "TEXT"
+        },
+        "end_time": {
+          "hash": "9963659017bc8bac829f665c92be3f722f7a7b9f05676e7b871dc69b3057638c",
+          "type": "TEXT"
+        },
+        "stock_10_flag": {
+          "hash": "7933750951c33dd4bf2bb37faa1417b697a79f9304531b704d5ba46c1806841e",
+          "type": "INTEGER"
+        }
+      }
+    },
+    "campaign_schedule": {
+      "table": "v1_171aa5b05ca281a78b1aec827285ea642f8055dc66be3f0acca544060620cc76",
+      "columns": {
+        "id": {
+          "hash": "39a867fd6a26a68e0c6d52298e1f86fb5704019eef34c41922c918e9596f2738",
+          "type": "INTEGER"
+        },
+        "campaign_category": {
+          "hash": "574f17aa7f706c46fa94d3c6c54553f92303017beaf4a2f56e098846f31670e7",
+          "type": "INTEGER"
+        },
+        "value": {
+          "hash": "73cf363534c208fb8d07f901b52a15130eb6a4e630be35fdd8114b8e37d5703c",
+          "type": "REAL"
+        },
+        "system_id": {
+          "hash": "64a8640a3445786908ca5812803f6cab663205b9cd08882065883abe020b920e",
+          "type": "INTEGER"
+        },
+        "icon_image": {
+          "hash": "bfee307c5293f4e6199a277e7e544ebb229ce260f0153c92ea7973d1f3b7951d",
+          "type": "INTEGER"
+        },
+        "lv_from": {
+          "hash": "dd1932d5d01e3470e61113347bf9e5f1381418f9d428993b442efc7398b60f40",
+          "type": "INTEGER"
+        },
+        "lv_to": {
+          "hash": "a3b4d1762176620288fddcb4daa03fcf052a48e651c236acdf84bc548f4d2c3e",
+          "type": "INTEGER"
+        },
+        "start_time": {
+          "hash": "fb5e50af42e96b3ac5ec09f135693083bd5c0bee7c53bf07cb9dd13488b7113c",
+          "type": "TEXT"
+        },
+        "end_time": {
+          "hash": "7b05733e474cd13dd7606af237172304b7e7c99706c33b387adfb362b11e2434",
+          "type": "TEXT"
+        },
+        "level_id": {
+          "hash": "ca507aeb19f20a0fb92bf75ba83ae0f6e98a3c7ef0a84dd5c1dd54acba4fed8a",
+          "type": "INTEGER"
+        },
+        "shiori_group_id": {
+          "hash": "f7edbc222ffdfda44b328b02805cc2d1c40efb94810432512edc6ce6990d1776",
+          "type": "INTEGER"
+        },
+        "duplication_order": {
+          "hash": "8b4ab318b196449f33bac7a640bc54d4082d5a17cffac1051c2467266d7198da",
+          "type": "INTEGER"
+        },
+        "beginner_id": {
+          "hash": "b40de16dfbe06aae603fa9c11d8b046b95488cc709ffe263ee222112c97bc123",
+          "type": "INTEGER"
+        },
+        "campaign_type": {
+          "hash": "0094617f7d0ddb0480790ed39b6d35850cd3212a485c7b86492887d8ce630faa",
+          "type": "INTEGER"
+        }
+      }
+    },
+    "clan_battle_schedule": {
+      "table": "v1_d7ef5438493a89064692172e43228a376658ed055dd603592ea28d25056b6b48",
+      "columns": {
+        "clan_battle_id": {
+          "hash": "2c91513aa246f60d6967d4e2f9bbd34d97e3daa0be1471491e346ba55bc451e7",
+          "type": "INTEGER"
+        },
+        "release_month": {
+          "hash": "8de1a36595bbfbed548a81284e84ee16a584b1bda0bef3607d20d4f514c09c46",
+          "type": "INTEGER"
+        },
+        "last_clan_battle_id": {
+          "hash": "41bec11d23de8b5d097a6374d90207c4df52528925df2a485502cedf3ba30efc",
+          "type": "INTEGER"
+        },
+        "point_per_stamina": {
+          "hash": "f9790900a10f5c6567262720705f7f3c8a17d25bb016075d3b1feeb8045d0b95",
+          "type": "INTEGER"
+        },
+        "cost_group_id": {
+          "hash": "ef4779596f6a81556a2a984707fbe1be2c816e8845b6a5d7632fab083a0795e9",
+          "type": "INTEGER"
+        },
+        "cost_group_id_s": {
+          "hash": "6f113795e2ccd69276ee919bb0806872ac6900b30ca473b8798541fe2313febb",
+          "type": "INTEGER"
+        },
+        "map_bgm": {
+          "hash": "179a79c7e5d6a031f8ede1d2e28d204ddc22415d7a177a8ccd09a8fecdd56f0d",
+          "type": "TEXT"
+        },
+        "resource_id": {
+          "hash": "7a635bb0fb70d8db04bd5b85f23d1e14dff37a9ccd225ff2438257b5b1209dbd",
+          "type": "INTEGER"
+        },
+        "start_time": {
+          "hash": "e7374c67b00c2f9290df1dc848ea730880e4ccbdf3c1c1324e786194f08b0da3",
+          "type": "TEXT"
+        },
+        "end_time": {
+          "hash": "bb633fa36ff829125cfe757175b61ef35b885e2e6efc671caec318f5a42b9e83",
+          "type": "TEXT"
+        }
+      }
+    },
+    "dome_schedule_data": {
+      "table": "v1_3a38f8e7d64df43c1e40615a70d8faa8d9c106db7464d320d8df4dacbe5c94c9",
+      "columns": {
+        "schedule_id": {
+          "hash": "a7c875c8f49e38dfb60d963245b97bfe04a0d562a89dd25cc5c8874c381563c5",
+          "type": "INTEGER"
+        },
+        "start_time": {
+          "hash": "80d9ebbb557bdb9436efc21f44a8e096e822c0c68d52d6fae10b93af86f4b0df",
+          "type": "TEXT"
+        },
+        "count_start_time": {
+          "hash": "e55361b83e5917579187f43a701ebcb618349df9e1f4720a78b2d24cf922dd5d",
+          "type": "TEXT"
+        },
+        "end_time": {
+          "hash": "c673fbcde8568754b4c0c842346aa356391d4b034737727220e9779c8132f187",
+          "type": "TEXT"
+        },
+        "close_time": {
+          "hash": "c805f0f47ed0930222ed0c34321d043f5afc229259c1d5cedd5ec1896e9f509d",
+          "type": "TEXT"
+        }
+      }
+    },
+    "event_story_data": {
+      "table": "v1_62df7f590d43fdee8aee4206dacb223bb7c2000ec623099f38207878596f9369",
+      "columns": {
+        "story_group_id": {
+          "hash": "c28698797861ef9d7308f832be589a1ca716de21f43884a94e29dc158016a4de",
+          "type": "INTEGER"
+        },
+        "story_type": {
+          "hash": "553635faa3fce27de3be0884786161c3ba780cb1a07487af65ab120ed918fa30",
+          "type": "INTEGER"
+        },
+        "value": {
+          "hash": "44f356c928eb4a95ebd09e85c7269e82184751fda071932c0ac984a17f0e993e",
+          "type": "INTEGER"
+        },
+        "title": {
+          "hash": "15016c342f0795e6996b530574dcd4cabdefad5d0612169bd22eee226f87ed9e",
+          "type": "TEXT"
+        },
+        "thumbnail_id": {
+          "hash": "8c1ffe5b46921c03de1c160e93e63a9f8ece65ea562a978167d9bed39839730b",
+          "type": "INTEGER"
+        },
+        "disp_order": {
+          "hash": "33fbd62f2a94519a2a594ab7f899ea5db53cadc7636cd824901f0cfd1822cac3",
+          "type": "INTEGER"
+        },
+        "start_time": {
+          "hash": "c6467840fa5f40a1fb1d862630d4fe33f3e6e0d13d10feb9b5a7714e8af1ff03",
+          "type": "TEXT"
+        },
+        "end_time": {
+          "hash": "b97d1dc3181fc1c854b60efdd0003fa75b59e8635f3f52de58829b8467974efa",
+          "type": "TEXT"
+        }
+      }
+    },
+    "hatsune_schedule": {
+      "table": "v1_57196ec78c3fc98f7591935bb74d99c2f73cecf8e6b95e1e47760d927ccae498",
+      "columns": {
+        "event_id": {
+          "hash": "30a16f3388bcd96b57771921a4db0ccb5daa3f538909d4cdbaddae1c026237bf",
+          "type": "INTEGER"
+        },
+        "teaser_time": {
+          "hash": "9ec4ee75f20d1a68f47e6eaefa2c27a9c2e3115f911ecc2ec8e86d56f71b2f14",
+          "type": "TEXT"
+        },
+        "start_time": {
+          "hash": "1eacba52578799e8b9e4f4d6c35846706b66d4c656a0a9f7c567678c000f40f6",
+          "type": "TEXT"
+        },
+        "end_time": {
+          "hash": "18dbe9faec48f4d5525f18b9582de85f19475d94a3d6cc59a2df3176aef770f1",
+          "type": "TEXT"
+        },
+        "close_time": {
+          "hash": "5322ff468ef46dd9d0b481240cf6aa8d917c817195968bf676135d7c91f56915",
+          "type": "TEXT"
+        },
+        "background": {
+          "hash": "6522298c9aa3a5cfb6093f18899e4ec7573cd418c6c31bb3e3882650bf316c80",
+          "type": "INTEGER"
+        },
+        "sheet_id": {
+          "hash": "19b4056fab71aa4bd8ebfa718f589ad8c5cac851256b473fe14864fd5997827b",
+          "type": "TEXT"
+        },
+        "que_id": {
+          "hash": "7f2807c1d3ced447d3eaaa7ddcd002ae1761449e94781920b1e2d27b6d570e53",
+          "type": "TEXT"
+        },
+        "banner_unit_id": {
+          "hash": "d823694790388f05d63ea2386d9707d3daf99ec1fdd0e6c29dd076905a021d86",
+          "type": "INTEGER"
+        },
+        "count_start_time": {
+          "hash": "3539568efeffdf496476d023abfb93fb4c0bb0f12313abfecdec04357080fcfa",
+          "type": "TEXT"
+        },
+        "backgroud_size_x": {
+          "hash": "28342355a805e6cfe214074727c39b6aecb57d4caa9ea2f64cc357cb6c5ad112",
+          "type": "INTEGER"
+        },
+        "backgroud_size_y": {
+          "hash": "f7c122331db2585655409566230b5bf5f0b90ee511c8f232479e706508064543",
+          "type": "INTEGER"
+        },
+        "backgroud_pos_x": {
+          "hash": "c15af19f65c3cb3475580ccc23a3083a2329e94c96bd6f966e05e9d67301fab8",
+          "type": "INTEGER"
+        },
+        "backgroud_pos_y": {
+          "hash": "63a972018d7e32eadf834347b3c4e3272e20bdb0d02527bf1fd65c27aaeb9776",
+          "type": "INTEGER"
+        },
+        "original_event_id": {
+          "hash": "0dd060c47c926e550fde10306e2710ff4f9717dcbb40fd67409967314d925dda",
+          "type": "INTEGER"
+        },
+        "series_event_id": {
+          "hash": "64bfba42c82db8974d1301abb02807996fc8fdf549c8ddb2953ce3333f0393fd",
+          "type": "INTEGER"
+        },
+        "teaser_dialog_type": {
+          "hash": "9993c1cd58de815d525a2ec07ed791dd44d994e3a522130f8e5bd81ea26878dd",
+          "type": "INTEGER"
+        }
+      }
+    },
+    "mre_schedule": {
+      "table": "v1_2894fbec4694f161466a9ee49b1538214618bc1376ac7452b75feb9b5cc443e7",
+      "columns": {
+        "schedule_id": {
+          "hash": "9221d0290f961c5454e81109bd74f7b6ff7e999f23a9d89abd9d44ddab8df85b",
+          "type": "INTEGER"
+        },
+        "mre_id": {
+          "hash": "5fc81b59f1bedc9b6e12f134fcd83234098a9426022056b82747309e020eeadf",
+          "type": "INTEGER"
+        },
+        "event_type": {
+          "hash": "3ead0d0ab38b94c3ea1de90ba72d7f8fa9b6a32136cd099e6d327cd108b6c575",
+          "type": "INTEGER"
+        },
+        "max_raid_hp": {
+          "hash": "10a86cd860f31c4a7831593d0b7093ddfa2f2dee132efe4a2ba5896692337263",
+          "type": "INTEGER"
+        },
+        "teaser_time": {
+          "hash": "3862a93c0cf7b473e9eca87bd45fc262e1a2b17e59ca31aefac7085096f4920e",
+          "type": "TEXT"
+        },
+        "start_time": {
+          "hash": "5563a08f74a76a0cde9c68c3bbcf056f32635ce76e0153b83e43f06e0b437e4d",
+          "type": "TEXT"
+        },
+        "end_time": {
+          "hash": "917a171d08a7e897a48db09f7491ba3216ad952599335adae590ce269795f096",
+          "type": "TEXT"
+        },
+        "gacha_id": {
+          "hash": "9e4100e6f835af692ed4309cd05fb844a6f3782b357f61e1dad8e5434c1e85de",
+          "type": "INTEGER"
+        },
+        "gacha_ticket_id": {
+          "hash": "4aa38c8d64652fcfbfcc402df1448bdd4099eebcb917b2cac799769512e345b3",
+          "type": "INTEGER"
+        },
+        "boss_ticket_id": {
+          "hash": "4a5e028362a0defe95e8c001fd1acba64cf8f39001740cafe5517bea98060b00",
+          "type": "INTEGER"
+        },
+        "reminder_day": {
+          "hash": "0199ee799effcece21354757d1a051dab5c29032c13c6b0ce55077745a68eb8b",
+          "type": "INTEGER"
+        }
+      }
+    },
+    "secret_dungeon_schedule": {
+      "table": "v1_bbcb163276ca35f549b29cd61eaa8070bb31c8f8c785a838d12eb6494e5ab0f5",
+      "columns": {
+        "dungeon_area_id": {
+          "hash": "8899acc97de73cc6dc1b9eeb9ec3d411443bff9a7072d16ed366410a89538cff",
+          "type": "INTEGER"
+        },
+        "teaser_time": {
+          "hash": "fe5ad7083b8004caeb6ef3ede68e29694470c5fa3c74b2049ec6fb9ca76a14fb",
+          "type": "TEXT"
+        },
+        "start_time": {
+          "hash": "cb08f052fae7e030a2298d63abf0d7a1d10fa46a59f6d6ef1c0fe60c83440eb0",
+          "type": "TEXT"
+        },
+        "count_start_time": {
+          "hash": "f5a8f0d1a22ec2e7a59fd53cbdc49251000d662bd6a0816622d4990087a697fe",
+          "type": "TEXT"
+        },
+        "end_time": {
+          "hash": "54fbcf5bf020ef8d82dd1e6161bae08c56232721953135a410eb1a7dc210d2dd",
+          "type": "TEXT"
+        },
+        "close_time": {
+          "hash": "ab8c79b01fdfddf93beda6e2a5e6b8284828a099629892a753f897edd2b9a8d0",
+          "type": "TEXT"
+        }
+      }
+    },
+    "skill_data": {
+      "table": "v1_34f8b61469da2780301bcc1107f3f2f1ea341b55e898cc5b195e75e2c104d37f",
+      "columns": {
+        "skill_id": {
+          "hash": "ea4fe2d87313c4a405b2bf806ebb30215f370cada164af4d611ca2aefe1a567b",
+          "type": "INTEGER"
+        },
+        "name": {
+          "hash": "2cf74e466bb8ad600c7024104428c1c65332b592bb37b4a8753db7787a2d7cec",
+          "type": "TEXT"
+        },
+        "skill_type": {
+          "hash": "23d58d9f40bdefe9ca9a8eb47c72aba9c72a1a725e8fdc7a94cfc57c3370fb7c",
+          "type": "INTEGER"
+        },
+        "skill_area_width": {
+          "hash": "4e27adf75331d53cc19f3ed35d108b8546244748f3aeebac864af316fed0d26f",
+          "type": "INTEGER"
+        },
+        "skill_cast_time": {
+          "hash": "9e54c68bd4ecb5baf08d5b82d6a4b064a6ad494c1d04a0ecc8e632f9141764e0",
+          "type": "REAL"
+        },
+        "boss_ub_cool_time": {
+          "hash": "3b6e6df61f55582b68a67667bd59064e2710e4d6862bd7e1dca546689469c5f2",
+          "type": "REAL"
+        },
+        "action_1": {
+          "hash": "8e2df832da6a980be20885acb86770ece3faf762cb09f869b966cd4255a8e142",
+          "type": "INTEGER"
+        },
+        "action_2": {
+          "hash": "dfd0a586c3cd4cfc55dd6b4fa09443036057af742766498081e3ca65b33f91f3",
+          "type": "INTEGER"
+        },
+        "action_3": {
+          "hash": "e65a13497b474a01bcf38fe3ca376bb6e87605ddef246217b00ec26d60c7122c",
+          "type": "INTEGER"
+        },
+        "action_4": {
+          "hash": "3dabc489da76d91a4227b8d91bb77ab4923da44ec0fe2ddd8860abf231665be8",
+          "type": "INTEGER"
+        },
+        "action_5": {
+          "hash": "38d1997ef1f4bd3f65b7e008be570e3b90f1604ed93738f9442189ddc256635e",
+          "type": "INTEGER"
+        },
+        "action_6": {
+          "hash": "4ffe47f8a570efbac8b0d6efa791a6da8e8e8bb2e6e75cc6aa0e7c3d6f042430",
+          "type": "INTEGER"
+        },
+        "action_7": {
+          "hash": "5b9733e8393b7071f75cfb7522be2b5aaf8d479cff002cca6c70210b3c73c3e7",
+          "type": "INTEGER"
+        },
+        "action_8": {
+          "hash": "33a26c5e32fd2e56d36af436c90f8851e388ecc38e3033d6ef90870b267cb1b7",
+          "type": "INTEGER"
+        },
+        "action_9": {
+          "hash": "cad073dbe7e6e4052163a4debf23022bef486d1e170a7ab371847feb52f22314",
+          "type": "INTEGER"
+        },
+        "action_10": {
+          "hash": "6ec4fbc9b33ab1e41cba9fe14b5e759fa5853f1ef2863c53f97db7fb0cf9100a",
+          "type": "INTEGER"
+        },
+        "depend_action_1": {
+          "hash": "474698cb0911754e537295641f515e7c6b675d0d88d4ab3e2fd175189c4dbd74",
+          "type": "INTEGER"
+        },
+        "depend_action_2": {
+          "hash": "dca4be5d471ab7e74c949e04a361637513f7255cdb512b87be08dc0538291b05",
+          "type": "INTEGER"
+        },
+        "depend_action_3": {
+          "hash": "9e0f234f0374730bcfc3fae8194a06582b695e8cd6edc8d0a591bed669f9d817",
+          "type": "INTEGER"
+        },
+        "depend_action_4": {
+          "hash": "eef5ae8d462f3a07dfc78f0cf4fef1bcef42fbbeb471de95023acbd132917d77",
+          "type": "INTEGER"
+        },
+        "depend_action_5": {
+          "hash": "d1e1cab0f0cd66150349c8265043ab0cfc086909c87facb4421dc53b02e76a7f",
+          "type": "INTEGER"
+        },
+        "depend_action_6": {
+          "hash": "c58b96f7ecff8114b495331dfcffa2653f86a54ac37e271ae6cf691d1a866266",
+          "type": "INTEGER"
+        },
+        "depend_action_7": {
+          "hash": "ae371fbd7ec3613bfc1a067999baff43ad5c9d1115b7bd93921d16e003473083",
+          "type": "INTEGER"
+        },
+        "depend_action_8": {
+          "hash": "8046f2328a9c44f5440de27dd4ab90b9332031a9b86ca7378fe61c34d649b088",
+          "type": "INTEGER"
+        },
+        "depend_action_9": {
+          "hash": "d7cfcdc1a354961c9aaed7ae703f997f8b79bda500fcb7700070ab26483e2aa9",
+          "type": "INTEGER"
+        },
+        "depend_action_10": {
+          "hash": "a03c384557d65861adc238baa90dfa0a40966c7a53b98bcc2b90c9c35c9bca6c",
+          "type": "INTEGER"
+        },
+        "description": {
+          "hash": "233c18b6f30ba79664224c8d42e73c0a14479cbc5aeddaeffc9fe2fbc33d3168",
+          "type": "TEXT"
+        },
+        "icon_type": {
+          "hash": "6ccb0de64c44121a2a7c4d7a59020418d9f535af9c0044186180207efd149199",
+          "type": "INTEGER"
+        }
+      }
+    },
+    "tower_schedule": {
+      "table": "v1_5af40b6b82eb80bb533c7f88994a7cbae6cb9b59dd683682ec32e321646a0d20",
+      "columns": {
+        "tower_schedule_id": {
+          "hash": "6014180d2b4d31b694f9506ce10e4be219ec02c86afaa0f5572813dbee992042",
+          "type": "INTEGER"
+        },
+        "max_tower_area_id": {
+          "hash": "5b17dc6a7ee7a04fa3d67c2155ca61e758fd018094d68de19b53782162920ce1",
+          "type": "INTEGER"
+        },
+        "opening_story_id": {
+          "hash": "232ccfc32d13dd871ef19126bfa1a415281405f4873743d781795c099c4fa0ba",
+          "type": "INTEGER"
+        },
+        "count_start_time": {
+          "hash": "18d8dc3665f526fb5cbcb9054b656ef159714157b5f99adc47d50bf82cc3d17d",
+          "type": "TEXT"
+        },
+        "recovery_disable_time": {
+          "hash": "07208c025a5acf4163bf3011aa31ce21b4afb980afe7de54d1b86740de4ed3c6",
+          "type": "TEXT"
+        },
+        "start_time": {
+          "hash": "928dbc2fa55cca6f8814097b11dab8f3c3968be9fdb3739ffd23df1d0f83aefe",
+          "type": "TEXT"
+        },
+        "end_time": {
+          "hash": "c23500c5b71cd587a8523532a89ff58c88de9bb5db001acaa00d4135b8e87965",
+          "type": "TEXT"
+        }
+      }
+    },
+    "unique_equipment_data": {
+      "table": "v1_2a5dfcd9522db25827291b5260e9091b6e45f5d1995794083d9ef42b060d1c73",
+      "columns": {
+        "equipment_id": {
+          "hash": "4c64a2dadd3692490ecbceba9c7517c955ea8156ac1461e682c4279df69e7957",
+          "type": "INTEGER"
+        },
+        "equipment_name": {
+          "hash": "e02f14c8c1f06809a1f48804f8b589b0e9365376bde7beb328631a3413cced93",
+          "type": "TEXT"
+        },
+        "description": {
+          "hash": "ef816b320cc09275aae500647fe15b29591c66c962d2d7c981a2d6be05a12a4f",
+          "type": "TEXT"
+        },
+        "promotion_level": {
+          "hash": "8a7dc31e6c60b6b2e29d780fd21a393a1c30ddfceb2b844fff9d67cb34ef1918",
+          "type": "INTEGER"
+        },
+        "craft_flg": {
+          "hash": "feb6492aa4afb58d7e862db794163f898fea62f4fe359eae70918ee9a6a21363",
+          "type": "INTEGER"
+        },
+        "equipment_enhance_point": {
+          "hash": "a7f8d08989dc9f81b8a34920793e0c3174f92d7688695625bf98ebeed722e668",
+          "type": "INTEGER"
+        },
+        "sale_price": {
+          "hash": "57133ab11ba43125d17ce8ce68ae8c3ed3cfb7ae0a97dcfcf2b710fe31a5f698",
+          "type": "INTEGER"
+        },
+        "require_level": {
+          "hash": "29cb522ce7e39e91cf94698c524034f9fb1158a289fba5eadf926b4bf9f99274",
+          "type": "INTEGER"
+        },
+        "hp": {
+          "hash": "4d04ac93f18a28406b2f00987c53858a21a0da3b0bfcf0914d6329622c60aad6",
+          "type": "REAL"
+        },
+        "atk": {
+          "hash": "f65e63c18889896e18574f3b55f2789d8d2dd2ea5dc91484068500aa81523d85",
+          "type": "REAL"
+        },
+        "magic_str": {
+          "hash": "5e30e235cb178fae4ac044505a162c1c7fad80cd7aaf283b43b56d01df9df1ab",
+          "type": "REAL"
+        },
+        "def": {
+          "hash": "450bf81d338a9a44074001eca196eba1e6147479ed05fa373266b4cd60c9385e",
+          "type": "REAL"
+        },
+        "magic_def": {
+          "hash": "a69b0696360f5a3aebbcfd6f0d4b7115411e7108cc29b5760e7ac6e3ac55bc5c",
+          "type": "REAL"
+        },
+        "physical_critical": {
+          "hash": "ac06731702e766cba18acf0233475417921edbc0206ac2a847bf2c7d9205f352",
+          "type": "REAL"
+        },
+        "magic_critical": {
+          "hash": "c67f0399d31c38d3255d044b4c2549e79f1f96ac0f89fb6ea5a411a36b05b735",
+          "type": "REAL"
+        },
+        "wave_hp_recovery": {
+          "hash": "66c6b8fe73b33b7837fd8c2fde5a2f2d1b73a5d58add1193bca6023cdaafc947",
+          "type": "REAL"
+        },
+        "wave_energy_recovery": {
+          "hash": "6813d693472aa94aba2b37d7ad202f6610f262044399ef1b653827d76f2b7ead",
+          "type": "REAL"
+        },
+        "dodge": {
+          "hash": "9c0b5ef754b3653b5791a3c3ea1ad1d2b7ebbb4cfd3dc985e038983e64792c41",
+          "type": "REAL"
+        },
+        "physical_penetrate": {
+          "hash": "da339b3ffbef789eff1055b690c277646abb26d5d67ee6cd35a8176061db42d1",
+          "type": "REAL"
+        },
+        "magic_penetrate": {
+          "hash": "517c72727b4bd662e9efa1e7445f240b926f1339c742a27e15955420d9df9160",
+          "type": "REAL"
+        },
+        "life_steal": {
+          "hash": "00101ccc15df6a9c95ca299e350b9f97a586086da29933d245b6eb80906daf89",
+          "type": "REAL"
+        },
+        "hp_recovery_rate": {
+          "hash": "5c6dc4ce0f3efe2cb03e9cc977d16ef1c5aaaf9ba769939f06cee83a1b681286",
+          "type": "REAL"
+        },
+        "energy_recovery_rate": {
+          "hash": "c0587320ea780e81fcf475b6d6c21196bbcd861c4840bf08754c034c1044e14c",
+          "type": "REAL"
+        },
+        "energy_reduce_rate": {
+          "hash": "42614b2c2ff2c4621b870a0a2fad6a5e59059340cabb9e20690ce6db5689575e",
+          "type": "REAL"
+        },
+        "enable_donation": {
+          "hash": "56f4d1f42c0138b2680b5ab58a9e77a7c4e2e5b5ba7bf12f2c0864ee0a9bddc7",
+          "type": "INTEGER"
+        },
+        "accuracy": {
+          "hash": "5141b4c4710075c73e7f107db7c96c6d08a7e8b1f447571d754ac557ad840743",
+          "type": "REAL"
+        }
+      }
+    },
+    "unit_data": {
+      "table": "v1_971ef39611c1869321cf9f48c9344fd1783d1405487d2ae2736354ed4cd69c7c",
+      "columns": {
+        "unit_id": {
+          "hash": "f5340a82584796616ebbfcb8b957cf65b729cddb5407c82cd4dafb6b3dff3362",
+          "type": "INTEGER"
+        },
+        "unit_name": {
+          "hash": "bc45812011bf2c9a22528408fbfebb8759ac3ebc0b1aba8f4da8c556353bc4e8",
+          "type": "TEXT"
+        },
+        "kana": {
+          "hash": "0d87b04e0396236b454f52d227d07cd0c18afe1a8324b25eaff2b07ba967abd4",
+          "type": "TEXT"
+        },
+        "prefab_id": {
+          "hash": "101bc8a5cc7fa9b4b1eb5946a585bf03e25eabfe9af8a456779b660b902f8397",
+          "type": "INTEGER"
+        },
+        "prefab_id_battle": {
+          "hash": "c15c9662390410649114dedd7ec571ba322a08ba7042e051b2d63ddbc9084a85",
+          "type": "INTEGER"
+        },
+        "is_limited": {
+          "hash": "5f65550529f398d2c39708548044afa65650c3b552527a6432ab5c792c6eb0c7",
+          "type": "INTEGER"
+        },
+        "is_collab": {
+          "hash": "1aa1719df13af533638a6cd5033b93487e1627d86367a816d5382b52bfa74084",
+          "type": "INTEGER"
+        },
+        "rarity": {
+          "hash": "dc4b5ac766ff51ec4a00f79162fa432c7e1827433278d78e9899a51d1cfcaa48",
+          "type": "INTEGER"
+        },
+        "motion_type": {
+          "hash": "e7ba21f9cd642b59542690ccee39ccadd8776b5f3fbc881383b562ca20568182",
+          "type": "INTEGER"
+        },
+        "se_type": {
+          "hash": "13d60fa7ea9187c0ab9bcdf1bdff6dae2245a7b136671d43793ccfe2ac2becae",
+          "type": "INTEGER"
+        },
+        "move_speed": {
+          "hash": "a84c1958be074ba595f52246fef9e59398dc37d1abbc1a79ebe765a58c747a85",
+          "type": "INTEGER"
+        },
+        "search_area_width": {
+          "hash": "b03debe5a8e644d49118d97be1de11a00af3a435ec479841bf12dae61a75ea70",
+          "type": "INTEGER"
+        },
+        "atk_type": {
+          "hash": "859b8245b045a8838957e576f60dcc87c0ac62e069096c40dd1695f95eebaf09",
+          "type": "INTEGER"
+        },
+        "normal_atk_cast_time": {
+          "hash": "f2f1831c5a381e911629c1b4079ac4ed108805d17410f6839d17e3cec1886669",
+          "type": "REAL"
+        },
+        "cutin_1": {
+          "hash": "e24f697891a9a820e5df530b55ee3aac0031d89edaec9970b54d00c35f8fdc93",
+          "type": "INTEGER"
+        },
+        "cutin_2": {
+          "hash": "87a50c45479ef6e96179ab18c2172b5a3955a72fa684d08a6122351ed164866c",
+          "type": "INTEGER"
+        },
+        "cutin1_star6": {
+          "hash": "f4057891f3332481e7951895fcc4ad11b8a6073486aa6f4b548dc79d95bd4440",
+          "type": "INTEGER"
+        },
+        "cutin2_star6": {
+          "hash": "9a09fa01eb8212ab4e5b1d365b605666b32ea1115ca236b7c466f36340001949",
+          "type": "INTEGER"
+        },
+        "guild_id": {
+          "hash": "aea79651dcf185338569d5d380619adaac763ea2f98a7232ede1f016a7771649",
+          "type": "INTEGER"
+        },
+        "exskill_display": {
+          "hash": "a1e0f18a01138b4f1dedb43d793b8b670196b46b04eab303cb09cb52b1bfb912",
+          "type": "INTEGER"
+        },
+        "comment": {
+          "hash": "9b1ec13a6944a6d8cfecda4259df2612f4a48fffecc0980117987ce8a3634d2e",
+          "type": "TEXT"
+        },
+        "only_disp_owned": {
+          "hash": "6b6ed2d8e29fa43808d26adbb3fe087cd612e43de81df2d888d650cfa62a8d88",
+          "type": "INTEGER"
+        },
+        "start_time": {
+          "hash": "1e113742cde9bc32bf2dca226222652317393586f9bc55590b1b65e5537e35e6",
+          "type": "TEXT"
+        },
+        "end_time": {
+          "hash": "50a035ed3f4fecb153dd9e0790566be71aba75fa5adf90d9c8922deb0bb154a1",
+          "type": "TEXT"
+        },
+        "original_unit_id": {
+          "hash": "41532a105ace7a689c6c8b99cc545fff9963745bdf64b29232c56cd45ff17bc7",
+          "type": "INTEGER"
+        }
+      }
+    },
+    "unit_profile": {
+      "table": "v1_fef0f496d837740b499e695b77444e7732c99e6208b4637d7b2ed653ad57b4eb",
+      "columns": {
+        "unit_id": {
+          "hash": "e99b9b418aba40413678d5694c87eafb57fd3525f72da719c5f5df33eea68f50",
+          "type": "INTEGER"
+        },
+        "unit_name": {
+          "hash": "a69cd3f979710708083f195e09d42bf5c0a78f803519a7193bf1f5e0e21e8729",
+          "type": "TEXT"
+        },
+        "age": {
+          "hash": "97bff33967039c048496960de40ea811802853763cf552df565f40d15ba365b7",
+          "type": "TEXT"
+        },
+        "guild": {
+          "hash": "20caf7d3c917759b8c92cd2da14abf6152d36892aadd79075627e89ade38ea96",
+          "type": "TEXT"
+        },
+        "race": {
+          "hash": "26f02acfeeac635af96346e052216d8988937c134f29af94ce8fcdce67a70a7a",
+          "type": "TEXT"
+        },
+        "height": {
+          "hash": "db15503425922afa31d63789df8c5164d74b913e4ac6793118f6950a6e595334",
+          "type": "TEXT"
+        },
+        "weight": {
+          "hash": "47e5fe4cad5e5c400a050a2895b993471d6a33a4bf7ef59bbe5f7f3546a1456d",
+          "type": "TEXT"
+        },
+        "birth_month": {
+          "hash": "45e34047b7de6a495fca77786cdc8cac0b9f095d529313dd3a2606f2e649923f",
+          "type": "TEXT"
+        },
+        "birth_day": {
+          "hash": "c1711629afa8cf5ccc981148bdee6e8b4ff6e5eebe8f4dd04603fd14d6dd8e6f",
+          "type": "TEXT"
+        },
+        "blood_type": {
+          "hash": "30957f40d166271a3f7afa5366f78e69349e264a633b31ba1477d9572249fe70",
+          "type": "TEXT"
+        },
+        "favorite": {
+          "hash": "c24d3308fe9fc93abc6de3b55200a4a987adbcd24e693565ab3fee19bd1c274c",
+          "type": "TEXT"
+        },
+        "voice": {
+          "hash": "510e489f039bdc7657e5c2a23bfbcf27a7eb94f91a6137cadc1610a26b742cc6",
+          "type": "TEXT"
+        },
+        "voice_id": {
+          "hash": "75cb51a7b5e5f8870cd02d25bb45bc0142667e94cd8b205ea4a475ee5e430b05",
+          "type": "INTEGER"
+        },
+        "catch_copy": {
+          "hash": "ad64228e3d15b8b0729b5f3be2868e9a11cce9034c4e20ceab07b11f70f12751",
+          "type": "TEXT"
+        },
+        "self_text": {
+          "hash": "7718890e11b60573075c3a708f3ce1d6681ef6712405d5690f9ce54cac62a0c8",
+          "type": "TEXT"
+        },
+        "guild_id": {
+          "hash": "0bb1d8ed1a324a948aac56594e98a3e5c78e4a9f153ec0664df9dc8bf6d30f2b",
+          "type": "TEXT"
+        }
+      }
+    },
+    "unit_rarity": {
+      "table": "v1_a364efb893fcc4a73f2a728cef370dca0ce3c0acadb5e41b965e8a51f69ce12e",
+      "columns": {
+        "unit_id": {
+          "hash": "d98536cbebfd99ee47907d74dad856cd5dc7784341670c95fd7a05dd5a8fa198",
+          "type": "INTEGER"
+        },
+        "rarity": {
+          "hash": "be741eb88fb9dbe47407e3b87c5042185a3efe03860cbf19353dc12edfff55a4",
+          "type": "INTEGER"
+        },
+        "hp": {
+          "hash": "333b5f19ef815bb4361c04e5d821c6cc5869f2aee45a669527ac3898eb3e4457",
+          "type": "REAL"
+        },
+        "hp_growth": {
+          "hash": "d4884a9de39ee4c01568add2df26f2a8bbe81628dfea2ba8b55a2d7940ed5c9f",
+          "type": "REAL"
+        },
+        "atk": {
+          "hash": "2603798d63588d4001321bde736d670ef9963a85cdbcd99075b3f3d2cb1c40ab",
+          "type": "REAL"
+        },
+        "atk_growth": {
+          "hash": "06b735a1c76d4a2537770f9287b6c84c40a4442e83b072fe2549efc57b5632d1",
+          "type": "REAL"
+        },
+        "magic_str": {
+          "hash": "3d260d7e66c28abec8181d922b080600d061ff546209b9dc0d38c1f8995e6dea",
+          "type": "REAL"
+        },
+        "magic_str_growth": {
+          "hash": "3d42c539a4a0fdd90bc569a66f840fc3cc95e661a20f994e44fef9035f12cce9",
+          "type": "REAL"
+        },
+        "def": {
+          "hash": "bfd50f4b246de4feea2addfc05aa13661b99f297ce83fd95aa76bb48666c8ff6",
+          "type": "REAL"
+        },
+        "def_growth": {
+          "hash": "2576ba6542d4479bd944f54f757882ceb7e1d233a4d4f8c3e4eb97cf63dba3a2",
+          "type": "REAL"
+        },
+        "magic_def": {
+          "hash": "068230f068324dbc7e658f2da8b7e232d034974b66cce4e6e365651272840bb8",
+          "type": "REAL"
+        },
+        "magic_def_growth": {
+          "hash": "6dfc58f35dc847a30a323ff5be5d4670b766ecf295baf9ffb4c0d4c4a1b9a382",
+          "type": "REAL"
+        },
+        "physical_critical": {
+          "hash": "7eed3ba1bc0b4bf304d58999d45098b41d3855e5bdcb1a68a02c9c43ce62e28f",
+          "type": "REAL"
+        },
+        "physical_critical_growth": {
+          "hash": "301d144cda1964148544f8e5be9ab96f58b144918100fea95b8c65ad2037090f",
+          "type": "REAL"
+        },
+        "magic_critical": {
+          "hash": "893053e306fae680b6262ce7e71e3aa015ef55b8ba19a66e935146b9e989553f",
+          "type": "REAL"
+        },
+        "magic_critical_growth": {
+          "hash": "2f907757f68dfcb77d2d1387387092e3cdaa90cec4c9847486b1d89390741406",
+          "type": "REAL"
+        },
+        "wave_hp_recovery": {
+          "hash": "dab5d0bab2a0d0b5d64f9c997e05dcb3409c7d03994d997e6856b97c8fef5ccc",
+          "type": "REAL"
+        },
+        "wave_hp_recovery_growth": {
+          "hash": "7954936956365916062063e6ae864450e150ea90ee4480e2b3f3ee1028d99db2",
+          "type": "REAL"
+        },
+        "wave_energy_recovery": {
+          "hash": "e96cb69149271398e8951e44b3cd02e746550eb2b573ee1b58c182940c2cbced",
+          "type": "REAL"
+        },
+        "wave_energy_recovery_growth": {
+          "hash": "ab6e0d58793007ec81f3aac2909cf1ed86c551804d62f1d506c008dd667113d5",
+          "type": "REAL"
+        },
+        "dodge": {
+          "hash": "aa56db96d318d8c0a90b62b209012991b5f44534ab3ee9ee95aadc8fa0dd11c8",
+          "type": "REAL"
+        },
+        "dodge_growth": {
+          "hash": "080930f81ccb4cc8b2a0a05308162ece6862a24c8f9965196df1c190c3b2d092",
+          "type": "REAL"
+        },
+        "physical_penetrate": {
+          "hash": "4dad698db35811078320eb17516947b72805bbdb86bebfabf94a0d950c2bf604",
+          "type": "REAL"
+        },
+        "physical_penetrate_growth": {
+          "hash": "c8a64972dc0e70cff4aac4103eeb216192b268a3ad8d2ad3582f903ab4c44f56",
+          "type": "REAL"
+        },
+        "magic_penetrate": {
+          "hash": "2c686664be3b61abc6be57aeef1c546fd4c414c8538a86ea35f8763aa97be03f",
+          "type": "REAL"
+        },
+        "magic_penetrate_growth": {
+          "hash": "51a670674e96ad92f1cdc00b2d00f73beea4bde2a85400f796b10f1884bec0dc",
+          "type": "REAL"
+        },
+        "life_steal": {
+          "hash": "bde966f403574af52c466597db2b450f895181c38142d4c921c9442e2696206d",
+          "type": "REAL"
+        },
+        "life_steal_growth": {
+          "hash": "6114e4568a6361e3644ba47cd35d4af6c64afd7a9ef28603db4eb22265c3f48a",
+          "type": "REAL"
+        },
+        "hp_recovery_rate": {
+          "hash": "ac6c4c607c21ee32665811b7604212048e16a354ea962e28041b27bbfd231d9b",
+          "type": "REAL"
+        },
+        "hp_recovery_rate_growth": {
+          "hash": "7dc88fe655372b3f158b0561230386fc706515e6b073f3ca55c6bc913c477594",
+          "type": "REAL"
+        },
+        "energy_recovery_rate": {
+          "hash": "18279b04c4bf954d36e349a6e814fd912be9341f23f504a67cc012f89eaffc8d",
+          "type": "REAL"
+        },
+        "energy_recovery_rate_growth": {
+          "hash": "7dd4d3e54f43da76d457715438dc7b74d93f8458943605bbba36a097a5335571",
+          "type": "REAL"
+        },
+        "energy_reduce_rate": {
+          "hash": "b6b80e320fa69aee8dbdb8b0b9369c82aa5cff81b49c3367898364d0a0e5e961",
+          "type": "REAL"
+        },
+        "energy_reduce_rate_growth": {
+          "hash": "3126f519d4e915496a4574836df85e0f565b5c2a726ad38061360515f284711c",
+          "type": "REAL"
+        },
+        "unit_material_id": {
+          "hash": "11e16da5cd240fc54676bd164249e3e074129a99986dfccd8fd97f97c0c77930",
+          "type": "INTEGER"
+        },
+        "consume_num": {
+          "hash": "7d23764a25ccf0bebea4c27941c5535aee9e649e5f03071c7bad244a776c061c",
+          "type": "INTEGER"
+        },
+        "consume_gold": {
+          "hash": "aed66044b5480bf136ee7d7e91efc669afc082dda078695bb638d5ad1bf34574",
+          "type": "INTEGER"
+        },
+        "accuracy": {
+          "hash": "286dac4c6e4c6de8c058e37de19ca9323a4c282566d29cbdbb9c545a540ff5e9",
+          "type": "REAL"
+        },
+        "accuracy_growth": {
+          "hash": "a3952d7cded174768b37494bcad7bfce1244a781cb4bcac5f049d517db1438b3",
+          "type": "REAL"
+        }
+      }
+    },
+    "unit_role_data": {
+      "table": "v1_59864712bdb2a8f0e4a061b1ae567da41f162163d318e139d52c0e1e5d32dc5d",
+      "columns": {
+        "unit_id": {
+          "hash": "ebc7d34da21bb1a42bf4ea92abdaca4a20559911bedc5b38041992356e8c653a",
+          "type": "INTEGER"
+        },
+        "unit_role_id": {
+          "hash": "7dd65d88ae01b01b67a8ba159972a0f22dad0254b02ffb9e40c53cc0865507c9",
+          "type": "INTEGER"
+        }
+      }
+    },
+    "unit_skill_data": {
+      "table": "v1_f8efd652d913bb1852a41e75f327dc070df8361a7f0d03ce9d98e30cea44ae33",
+      "columns": {
+        "unit_id": {
+          "hash": "8beaa312eed30fbe81d43c65a8cda3b6976f03eca3931bd609e004e2e950efb0",
+          "type": "INTEGER"
+        },
+        "union_burst": {
+          "hash": "6747e99ab6cddfb56b4e3050c721f9a327481e378869696431ea0440e6d168e1",
+          "type": "INTEGER"
+        },
+        "main_skill_1": {
+          "hash": "479b32f3468127e1814f12e27395ac403c8634323ba709c9198f6315fa81f1c5",
+          "type": "INTEGER"
+        },
+        "main_skill_2": {
+          "hash": "1f040e6943def6d16d31d42e71330c890abb0b5ab6b9361f7fc5c362111cbf52",
+          "type": "INTEGER"
+        },
+        "main_skill_3": {
+          "hash": "67006c29f4daf4ab31c3a062a31bdf57edfdc7560ffa38d9946ba74f58101d02",
+          "type": "INTEGER"
+        },
+        "main_skill_4": {
+          "hash": "aac10551e4ebe4c7002ae1694b1ea0987a4ad09afc938297757d2312b42d319b",
+          "type": "INTEGER"
+        },
+        "main_skill_5": {
+          "hash": "c65b509dbc89073eac89384bce67406fe2ab7a9b391af1aa77321254efcb6cec",
+          "type": "INTEGER"
+        },
+        "main_skill_6": {
+          "hash": "3813db8e0ebe11bbc302291206d3235ab2b265ad1ff55a1e0ae20e02c079d11e",
+          "type": "INTEGER"
+        },
+        "main_skill_7": {
+          "hash": "c5a5de183df0d95d65c7431c4c8cb0c41c3f469add51fd03cb30fadfc5860534",
+          "type": "INTEGER"
+        },
+        "main_skill_8": {
+          "hash": "f2051280e19dd8485cd7582cd6d53fccd5a7a69c62411f92cf39bf4ecf9fe0eb",
+          "type": "INTEGER"
+        },
+        "main_skill_9": {
+          "hash": "219081da91db9a6c41829b12178650a375d04631af4469251ebf452e66fa2468",
+          "type": "INTEGER"
+        },
+        "main_skill_10": {
+          "hash": "7bc944517637f3fb86b2c218f41299785e9c5e9af7fd9c01c69a3f261c100111",
+          "type": "INTEGER"
+        },
+        "ex_skill_1": {
+          "hash": "8cfb90fbd6e9698b95be6ae448ae2470b354f2b28919a05351269d6997f167e2",
+          "type": "INTEGER"
+        },
+        "ex_skill_evolution_1": {
+          "hash": "ba58aaeeaba12939d3a81b2115c52b2171554e632a7848fdc1d02191a6a57b26",
+          "type": "INTEGER"
+        },
+        "ex_skill_2": {
+          "hash": "0e2f3e9cb679f1da651bd4a1091a041cd2e3a588b54abda9ee868f57ad3b1460",
+          "type": "INTEGER"
+        },
+        "ex_skill_evolution_2": {
+          "hash": "bc95c632a897f091dbba5f0a3e541ed152771ae89d79fcf2964b00bcc903f050",
+          "type": "INTEGER"
+        },
+        "ex_skill_3": {
+          "hash": "0dd9ae60372e508db604c2a32c5b3f2365f4f133987b6a0dc00a1563c1eab907",
+          "type": "INTEGER"
+        },
+        "ex_skill_evolution_3": {
+          "hash": "7758548e43cea4c5b3965edafb7f70d859b8df73828f54b9322cbaa721ce940f",
+          "type": "INTEGER"
+        },
+        "ex_skill_4": {
+          "hash": "3904907ce766ba45d6fe9c51464d76d8aa261c4cf118ca769ca2ff7bacf6cdfb",
+          "type": "INTEGER"
+        },
+        "ex_skill_evolution_4": {
+          "hash": "091bdf6c8f1ae691591dd662fb63c5a7288a11e52c56dbc61bd025cd4418dff8",
+          "type": "INTEGER"
+        },
+        "ex_skill_5": {
+          "hash": "65c174b949538985ea2d36c9245c544e89564072d55f32cd2262fb0f1d2b729b",
+          "type": "INTEGER"
+        },
+        "ex_skill_evolution_5": {
+          "hash": "2bcfc83d8ddf6154742b1a0f836fc0e06a68a24973a7018684163c8887f0a074",
+          "type": "INTEGER"
+        },
+        "sp_union_burst": {
+          "hash": "8bcaf7612b73efb417045b78eb08a0610889b00d52c984577b82cb314b34bc74",
+          "type": "INTEGER"
+        },
+        "sp_skill_1": {
+          "hash": "606db2a7cc3e47e2d0fd2e116c1fa4a4e191cb73bd568cfa785cd9c493e27601",
+          "type": "INTEGER"
+        },
+        "sp_skill_2": {
+          "hash": "7a12316388ea57b8ed4c90840f9d622df74cb33f615e87f3e01af931e3edfdff",
+          "type": "INTEGER"
+        },
+        "sp_skill_3": {
+          "hash": "d0005428bf3974edb01b0682cf5c682541cdf04ae501d286f71e39963839fff1",
+          "type": "INTEGER"
+        },
+        "sp_skill_4": {
+          "hash": "d5a4de12c035be5d84527050ea48abee3cf44bc7ce9c6b6ccaf96e989872f07c",
+          "type": "INTEGER"
+        },
+        "sp_skill_5": {
+          "hash": "4e585a27e881f032442bf273127a20adc6d96e238990784e32b415df0128a92d",
+          "type": "INTEGER"
+        },
+        "union_burst_evolution": {
+          "hash": "4d9a260fa0c552a2cf8df90a47f21d4cbce3476726df3ba9f996852f87e0f5f2",
+          "type": "INTEGER"
+        },
+        "main_skill_evolution_1": {
+          "hash": "e6e20e4737b336d86d782d2cab114ec0eae4e91f41f27987e0e45faa229bd7a8",
+          "type": "INTEGER"
+        },
+        "main_skill_evolution_2": {
+          "hash": "16255535050520c97d281dc95fd8551f0cca3de6f6eb860cd5aa1294b6f4eed4",
+          "type": "INTEGER"
+        },
+        "sp_skill_evolution_1": {
+          "hash": "89418d62f3ef3f7df4ea43aec1d527d47ba65fad2c8f1f47ee7209f33cca957a",
+          "type": "INTEGER"
+        },
+        "sp_skill_evolution_2": {
+          "hash": "04081068246feae7a87b93f3712a409442f498ffc06ce38e9142587d01572abd",
+          "type": "INTEGER"
+        }
+      }
+    },
+    "unit_talent": {
+      "table": "v1_f014576a0e454760092c7561f53c666138c8bc8610a46b68b50a8ce715c9eda9",
+      "columns": {
+        "setting_id": {
+          "hash": "8ad11dcc2e9c3d419ebb0860b11feafe5bcdd7c085849c6b44ce04e754ec266d",
+          "type": "INTEGER"
+        },
+        "unit_id": {
+          "hash": "d3426af17b5ec1e6011b5476b24750ef67f6bab0d2925b5db25e63232cedac3c",
+          "type": "INTEGER"
+        },
+        "talent_id": {
+          "hash": "b033f2ca032ba5072c44fa5702cd144bdd02ddf41f7e9f5314792ff8b23960b2",
+          "type": "INTEGER"
+        }
+      }
+    },
+    "unit_unique_equipment": {
+      "table": "v1_bc758b5132c27c8132a332eb05c4f872652a2b2141e70178c606bfb1650e6077",
+      "columns": {
+        "unit_id": {
+          "hash": "a3a88d72fb0c0bb8d451a40d4c2ba0122f1d7e325e642d42911a9a7b0e75c58e",
+          "type": "INTEGER"
+        },
+        "equip_slot": {
+          "hash": "d544c2a8b0a2c55960a97f6c6232c8ff738965f16f73ec436b317a12c4791add",
+          "type": "INTEGER"
+        },
+        "equip_id": {
+          "hash": "faa09d12f3daf39097b34ef4fa6918b9e19d1f8968a14492c6170d50ec68c2c4",
+          "type": "INTEGER"
+        }
+      }
+    },
+    "unlock_unit_condition": {
+      "table": "v1_d961ffd4e04c6a061f1dc3e9d6df32682832bc64a73870e8add6aaea1894eb9d",
+      "columns": {
+        "unit_id": {
+          "hash": "a70c855638a09d4825f89f6d06510d871cc0251ef50d8bb9842fa6ac9d03225d",
+          "type": "INTEGER"
+        },
+        "unit_name": {
+          "hash": "9a0224c4cdddc281c11eb8aca2780a42d49b29623b8c0fa7c77bb1f3d513fb50",
+          "type": "TEXT"
+        },
+        "class_id": {
+          "hash": "4ecc5260f8dcc5fa85e03e0e0f00782c24000779ee4563f6af9cb06acca8c809",
+          "type": "INTEGER"
+        },
+        "pre_unit_id": {
+          "hash": "2a17a52b1640125ace33c1dffbfccbfc84c692f8b8020f981219a0751569d789",
+          "type": "INTEGER"
+        },
+        "condition_type_1": {
+          "hash": "e3f39834fcdbdb4da1829fa706eb94c29110ed82451e166a0cc5c7212bc0edfc",
+          "type": "INTEGER"
+        },
+        "condition_type_detail_1": {
+          "hash": "c5d4da5c4c448b7e04c804afa948e0e3ec40cec69823cff19cff0d749b414fc2",
+          "type": "INTEGER"
+        },
+        "condition_id_1": {
+          "hash": "16dcfa52c40e6ee5b6c4022810a9e9c531cf86c06c5bfc420da2a8fc6294c0d4",
+          "type": "INTEGER"
+        },
+        "count_1": {
+          "hash": "e2a2587e67865f5d07ebfdfd38b9440bc98da17b52bb54d442d58d5c96baaf9e",
+          "type": "INTEGER"
+        },
+        "condition_type_2": {
+          "hash": "54411dade179c109b401b2a56efd0e0e9c39c46592c0e0052b6326d646883685",
+          "type": "INTEGER"
+        },
+        "condition_type_detail_2": {
+          "hash": "14ecb3499130f93dfbfa630ca0340ea31b45b76f5f942f612d80fdcc8779178f",
+          "type": "INTEGER"
+        },
+        "condition_id_2": {
+          "hash": "fd5f4dee8f6eb747854c0cdce6c0bd80acef9c0d028fb59b8af28235fca8c289",
+          "type": "INTEGER"
+        },
+        "count_2": {
+          "hash": "71692f0560b89251cd40b53e14166abe296bed946cb976c7197f4ef59fd93129",
+          "type": "INTEGER"
+        },
+        "condition_type_3": {
+          "hash": "2f9bd07ae554d4885083d768fcc94731f87dea9494e8cc89532c9c019f85ad3f",
+          "type": "INTEGER"
+        },
+        "condition_type_detail_3": {
+          "hash": "f1e8c6b0ac8c833a9399d134270a4f0f2b358c82480a8e32a878331e02635781",
+          "type": "INTEGER"
+        },
+        "condition_id_3": {
+          "hash": "153c52c597855776cfe29bac37e1248a092aaaee28c73bb8b3603f12445ff897",
+          "type": "INTEGER"
+        },
+        "count_3": {
+          "hash": "df33fcf385917f27e7d86083cbaccbcce4c628da4cbbf6698d3c6b19ccc9da9d",
+          "type": "INTEGER"
+        },
+        "condition_type_4": {
+          "hash": "0839bbea86bda2b9ce968f0cefaf3c82f1487443865fba9c919a49c63506be29",
+          "type": "INTEGER"
+        },
+        "condition_type_detail_4": {
+          "hash": "f870b8301349b043ffa5a5d82eac8dbf8344e6e11d719336e5c9bc87479fb0fa",
+          "type": "INTEGER"
+        },
+        "condition_id_4": {
+          "hash": "5df6b7ae728da2a0522b69703f57e6f8afd6813af213dbb866fe4a1c32cf0abf",
+          "type": "INTEGER"
+        },
+        "count_4": {
+          "hash": "4a3e041875b29b206b7286c5adf234482057b42052a5599e7260517400e128c6",
+          "type": "INTEGER"
+        },
+        "condition_type_5": {
+          "hash": "94bc70cb77b0ae2c8f94d3b701e62ecee929bf4563867f2b68eaeacafd5133c6",
+          "type": "INTEGER"
+        },
+        "condition_type_detail_5": {
+          "hash": "a25ece0380b120f84686d4fb7818e6982e05c0e01b5c040308206fe7cf248313",
+          "type": "INTEGER"
+        },
+        "condition_id_5": {
+          "hash": "bca9d31ae004289e631981a59d1c0d3b92adae0c3631855c5847bc1ab7ca03ec",
+          "type": "INTEGER"
+        },
+        "count_5": {
+          "hash": "f2a3d73f4193c520974b098626ac543a5b9491345f8c3996f2670803318a5e0a",
+          "type": "INTEGER"
+        },
+        "release_effect_type": {
+          "hash": "94a701fb4bf90ad1bd5cc8b1db6ec4b01574e68d4f98d63bd36bb557dc78276c",
+          "type": "INTEGER"
+        }
+      }
+    }
+  }
+}

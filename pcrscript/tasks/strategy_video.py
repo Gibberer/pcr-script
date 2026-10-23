@@ -24,11 +24,11 @@ from .strategy_document import Evidence, Fact, empty_member, finalize, export_do
 from .strategy_sources import BORROW_PART, MANUAL_PART, UNVERIFIED_SETTING, discover_sources, get_source_rules, timed_switch_requirement, unparsed_switch_requirement
 from .strategy_inputs import advisory_requirement, declared_region, preferred_sources, source_statements, video_metadata
 
-PARSER_VERSION = 131
+PARSER_VERSION = 135
 FRAME_OCR_VERSION = 1
 COMBAT_AUDIT_SECONDS = 20
 RECOLLECTION_UNSUPPORTED = re.compile(
-    r'特别装备|特別裝備|特装|粉装|属性等级|属性技能|公主骑士|大师点|大師點|'
+    r'特别装备|特別裝備|特装|粉装|属性等级|属性技能|公主骑士|职能精通|職能精通|全职业|大师点|大師點|'
     r'(?<![A-Za-z0-9_.])MP\d+(?![A-Za-z0-9_])|突破|TP\s*\+\s*2|'
     r'(?:Rank|R)\s*\d+\s*[-－]\s*[0-6]|满装|穿\s*\d+\s*件', re.I)
 ELEMENTS = {'火': 'fire', '水': 'water', '风': 'wind', '光': 'light', '暗': 'dark',
@@ -460,6 +460,9 @@ def event_page_difficulty(title: str) -> str | None:
 
 def page_scope(page: dict, kind: str) -> dict:
     title = page.get('part', page.get('title', ''))
+    if kind == 'collaboration':
+        from .collaboration_strategy import difficulty_scope
+        return difficulty_scope(title)
     if kind == 'stadium':
         from .stadium_strategy import round_scope
         return round_scope(title,part_title=True)
@@ -490,6 +493,11 @@ def page_scope(page: dict, kind: str) -> dict:
 
 def exact_full_set_claim(source: dict, scope: dict, kind: str) -> bool:
     """Use an explicit single-stage video title as SET evidence."""
+    if kind == 'collaboration':
+        from .collaboration_strategy import BOSS
+        title = source.get('title', '')
+        return (scope.get('boss') == BOSS and bool(re.search(r'全\s*SET', title, re.I))
+                and not MANUAL_PART.search(title) and not BORROW_PART.search(title))
     if kind != 'abyss' or len(source.get('pages', [])) != 1:
         return False
     title = source.get('title', '')
@@ -506,6 +514,15 @@ def choose_pages(source: dict, options: dict) -> list[dict]:
     stage, element = options.get('stage'), options.get('element')
     pages = source.get('pages', [])
     requirements = [p for p in pages if re.search(r'练度|培养|角色需求|配置要求', p.get('part', p.get('title', '')))]
+    if kind == 'collaboration':
+        # Every part may carry required build/operation notes. Never truncate
+        # them merely because another part already contains a usable party.
+        limit = options.get('max_pages_per_video', 12)
+        if type(limit) is not int or not 1 <= limit <= 30 or len(pages) > limit:
+            raise ValueError('联动攻略说明与战斗页超出完整解析预算')
+        if len(pages) == 1 and not page_scope(pages[0], kind) and page_scope({'part': source['title']}, kind):
+            return [dict(pages[0], original_part=pages[0].get('part', ''), part=source['title'])]
+        return pages
     if kind == 'stadium':
         from .stadium_strategy import round_collection_title
         wanted = dict(round=int(stage))
@@ -658,6 +675,30 @@ def choose_pages(source: dict, options: dict) -> list[dict]:
 
 def observed_scope(texts, page: dict, kind: str, *, battle_scope: dict | None = None) -> tuple[dict, bool]:
     metadata = page_scope(page, kind)
+    if kind == 'collaboration':
+        from .collaboration_strategy import BOSS, difficulty_scope, combat_scope, detail_scope
+        explicit = detail_scope(texts)
+        if explicit:
+            if metadata and any(explicit.get(k) != v for k, v in metadata.items()):
+                return {'conflict': True}, False
+            return explicit, True
+        labels = [t for t in texts if t.score >= .95]
+        # Exact author part labels can state difficulty; the game's boss
+        # identity must still occur in this frame. A title alone is no team.
+        detail = any(t.text == 'BOSS详情' for t in labels)
+        names = combat_boss_labels(texts)
+        boss_visible = (any(BOSS in t.text for t in labels) if detail
+                        else any(name == BOSS for name, _ in names))
+        scopes = [difficulty_scope(t.text) for t in labels
+                  if detail and t.center[0] < 450 and t.center[1] < 120]
+        scopes = [s for s in scopes if s]
+        if scopes and (any(s != scopes[0] for s in scopes) or metadata and metadata != scopes[0]):
+            return {'conflict': True}, False
+        value = scopes[0] if scopes else metadata
+        observed = combat_scope(texts)
+        if observed and value:
+            return dict(value, **{k: observed[k] for k in ('level', 'maximum_hp')}), True
+        return (value, True) if value and boss_visible else (observed, bool(observed))
     if kind == 'stadium':
         from .stadium_strategy import round_scope
         # R17 is an exact author part label; inside a frame it may be Rank.
@@ -857,7 +898,7 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
     """Return candidates plus field evidence, including incomplete/contradictory ones."""
     if type(options.get('refresh_media', False)) is not bool:
         raise ValueError('refresh_media必须为布尔值')
-    if options['task_type'] == 'subjugation':
+    if options['task_type'] in ('subjugation', 'collaboration'):
         if source.get('comment_pending') or source.get('comment_complete') is False:
             raise ValueError('作者评论补充未读取完成：'+str(source.get('comment_pending') or '仅取得部分评论'))
         for comment in source.get('author_comments', []):
@@ -876,7 +917,7 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
                          scope={k: options.get(k) for k in ('task_type', 'stage', 'element', 'area', 'difficulty', 'mode', 'region', 'max_frames_per_page', 'max_video_seconds', 'skip_manual_media', 'skip_long_media')},
                          observed_target=target_key,
                          event={k: options.get(k) for k in ('kind', 'boss', 'boss_number', 'event_id', 'period_start', 'period_end')}
-                               if options['task_type'] in ('subjugation', 'stadium') else {},
+                               if options['task_type'] in ('subjugation', 'stadium', 'collaboration') else {},
                          index=sha256(index.matrix.tobytes()+json.dumps(index.names, ensure_ascii=False).encode()).hexdigest()), ensure_ascii=False, sort_keys=True).encode()).hexdigest()
     cache = root/(fingerprint[:24]+'.json')
     saved = read_json(cache) if not options.get('refresh_media', False) else {}
@@ -913,7 +954,7 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
     metadata = source_statements(source)
     source_region = declared_region('\n'.join(statement for statement, _ in metadata))
     text_source = '\n'.join(statement for statement, _ in metadata[1:])
-    if options['task_type'] in ('recollection', 'subjugation', 'stadium'):
+    if options['task_type'] in ('recollection', 'subjugation', 'stadium', 'collaboration'):
         from .subjugation_guides import relevant_statements
         for statement, method in metadata:
             clauses = (relevant_statements(statement, options).splitlines()
@@ -941,9 +982,15 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
             manual.append(dict(text=setting_text[:240], evidence=asdict(Evidence(
                 source['url'], int(pages[0]['cid']) if pages else 0,
                 method='source_title' if title_setting else 'source_description', text=setting_text[:240]))))
+        if options['task_type'] == 'collaboration':
+            for statement, method in metadata:
+                for clause in re.split(r'[\r\n;；。!?！？|｜]+', statement):
+                    if manual_requirement(clause, unparsed_settings=True):
+                        manual.append(dict(text=clause, evidence=asdict(Evidence(source['url'], method=method, text=clause))))
+            source_setting = bool(source_setting or manual)
     # These metadata constraints apply to every candidate in this source.
     # Freeze them before page-specific conditions, which may belong to another plan.
-    blocked_source = bool(source_setting or options['task_type'] == 'subjugation'
+    blocked_source = bool(source_setting or options['task_type'] in ('subjugation', 'collaboration')
                           and any(not row['advisory'] for row in globals_))
     for page in pages:
         check()
@@ -952,7 +999,7 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
         if options['task_type'] == 'stadium':
             from .stadium_strategy import round_collection_title
             round_collection = round_collection_title(page_name)
-        if (options['task_type'] in ('recollection', 'subjugation', 'stadium')
+        if (options['task_type'] in ('recollection', 'subjugation', 'stadium', 'collaboration')
                 and RECOLLECTION_UNSUPPORTED.search(page_name) and not round_collection):
             globals_.append(dict(text=page_name, advisory=advisory_requirement(page_name), evidence=asdict(Evidence(
                 source['url'], int(page['cid']), method='part_requirements', text=page_name))))
@@ -985,6 +1032,7 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
                                        Path(options.get('media_dir', 'cache/game/strategies/media')),
                                        timeout=options.get('request_timeout', 20),
                                        max_seconds=options.get('max_download_seconds', 180), check=check,
+                                       **({'preferred_quality': options['media_quality']} if 'media_quality' in options else {}),
                                        **({'refresh': True} if options.get('refresh_media', False) else {}))
         except (requests.RequestException, RuntimeError, ValueError, OSError) as error:
             errors.append(dict(cid=page['cid'], error=str(error)))
@@ -1010,6 +1058,8 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
         stadium_outcome = SourceOutcome()
         from .subjugation_guides import ScopeContext
         subjugation_scope = ScopeContext()
+        from .collaboration_strategy import ScopeContext as CollaborationScope
+        collaboration_scope = CollaborationScope()
         combat_seen = 0
         last_combat_audit = float('-inf')
         last_combat_box = float('-inf')
@@ -1088,7 +1138,7 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
                     last_caption = frozenset()
                 caption_changed = bool(caption) and (
                     len(caption & last_caption)/max(1, len(caption | last_caption)) < .5)
-                full_ocr = (options['task_type'] in ('subjugation', 'stadium') or options.get('observed_target')
+                full_ocr = (options['task_type'] in ('subjugation', 'stadium', 'collaboration') or options.get('observed_target')
                             or not combat_scene or combat_seen <= 2
                             or seconds-last_combat_audit >= COMBAT_AUDIT_SECONDS
                             or caption_changed)
@@ -1129,13 +1179,17 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
                 if options['task_type'] in ('event', 'revival') and not wide_crop:
                     records.extend(dict(row, evidence=asdict(proof)) for row in event_record_rows(frame, texts, index))
                 detected_region = declared_region('\n'.join(t.text for t in texts if t.score >= .95))
-                if options['task_type'] in ('recollection', 'subjugation', 'stadium') and detected_region == 'unknown':
+                if options['task_type'] == 'collaboration':
+                    # Recruitment banners can mention several servers. Only
+                    # the client's fixed controls establish its region here.
+                    detected_region = recollection_client_region(texts)
+                if options['task_type'] in ('recollection', 'subjugation', 'stadium', 'collaboration') and detected_region == 'unknown':
                     detected_region = recollection_client_region(texts)
                 if detected_region != 'unknown':
                     source_region = detected_region if source_region == 'unknown' else source_region if source_region == detected_region else 'conflict'
                 global_rows, manual_rows = text_constraints(texts, proof,
                     unparsed_settings=options['task_type'] == 'subjugation',
-                    unsupported_builds=options['task_type'] in ('recollection', 'subjugation', 'stadium'),
+                    unsupported_builds=options['task_type'] in ('recollection', 'subjugation', 'stadium', 'collaboration'),
                     stadium=options['task_type'] == 'stadium',
                     frame=frame)
                 if options['task_type'] == 'subjugation':
@@ -1160,6 +1214,10 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
                 if options['task_type'] == 'stadium' and scope.get('conflict'):
                     stadium_outcome.clear()
                 scope_evidence = None
+                if options['task_type'] == 'collaboration':
+                    scope, verified, scope_evidence = collaboration_scope.resolve(
+                        scope, verified, texts, seconds, combat_scene, asdict(proof),
+                        loading=float(np.mean(np.max(frame[90:550, 120:1120], axis=2) < 20)) > .95)
                 if options['task_type'] == 'stadium':
                     stadium_before = dict(stadium_scope.scope)
                     scope, verified, scope_evidence = stadium_scope.resolve(
@@ -1195,7 +1253,7 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
                     continue
                 if verified:
                     last_scope = scope, verified
-                elif options['task_type'] in ('recollection', 'subjugation', 'stadium'):
+                elif options['task_type'] in ('recollection', 'subjugation', 'stadium', 'collaboration'):
                     # Unlinked compilation frames cannot inherit a floor.
                     scope, verified = {}, False
                 elif options['task_type'] != 'abyss' or page_scope(page, options['task_type']):
@@ -1366,7 +1424,7 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
                             Evidence(**{**asdict(p), 'method':'combat_set_button'})))
         finally:
             capture.release()
-    if options['task_type'] == 'subjugation':
+    if options['task_type'] in ('subjugation', 'collaboration'):
         inspected = {p['cid']: p for p in pages_report}
         # A selected page with an unfamiliar title may still hold common
         # conditions. The later CID filter isolates only explicit other plans.
@@ -1498,6 +1556,8 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
         team['global_requirements'] = list({r['text']: r for r in relevant_globals if not r['advisory']}.values())
         team['recommendations'] = list({r['text']: r for r in relevant_globals if r['advisory']}.values())
         team['manual_actions'] = list({r['text']: r for r in relevant_manual}.values())
+        if options['task_type'] == 'collaboration' and (errors or any(p.get('skipped') or p.get('truncated') for p in pages_report)):
+            team['manual_actions'].append(dict(text='来源未完整解析，不能确认全部要求'))
         parties.append(finalize(team))
     for party in list(parties):
         if not party.get('scope_verified'):
@@ -1531,7 +1591,7 @@ def acquire_strategies(options: dict, *, api=None, index=None, ocr=None, check=l
     options = dict(options)
     rules = rules or get_source_rules(options)
     exclude_sources = frozenset(exclude_sources)
-    if options.get('task_type') not in ('abyss', 'dungeon', 'event', 'revival', 'recollection', 'subjugation', 'stadium'):
+    if options.get('task_type') not in ('abyss', 'dungeon', 'event', 'revival', 'recollection', 'subjugation', 'stadium', 'collaboration'):
         raise ValueError('未知视频解析task_type')
     frame_limit = 600 if options.get('task_type') == 'stadium' else 300
     for key, default, upper in [('max_videos', 4, 30), ('max_frames_per_page', 50, frame_limit),

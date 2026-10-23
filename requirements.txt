@@ -9,3 +9,4 @@ tqdm==4.67.1
 rapidocr==3.9.2
 onnxruntime==1.30.0
 playwright==1.63.0
+UnityPy==1.25.4

@@ -58,7 +58,7 @@ class TaskBaseTests(TestCase):
                      'clear_campaign_first_time', 'revival_event_once', 'dungeon_first_clear',
                      'upgrade_all_characters', 'max_character_bonds', 'abyss_push',
                      'shop_buy', 'get_quest_reward', 'team_battle', 'dawn_labyrinth', 'dawn_labyrinth_first_clear',
-                     'recollection', 'recollection_first_clear', 'abyss_subjugation', 'battle_stadium'}
+                     'recollection', 'recollection_first_clear', 'abyss_subjugation', 'battle_stadium', 'collaboration_raid'}
         for name in set(registered_tasks()) - ocr_names:
             self.assertTrue(issubclass(find_taskclass(name), ImageTask), name)
 

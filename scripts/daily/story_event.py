@@ -1,4 +1,4 @@
-"""Compatibility command for the registered story_event task."""
+"""Unified activities; --only keeps the legacy story-event substeps."""
 import argparse
 import os
 from pathlib import Path

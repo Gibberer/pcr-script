@@ -9,7 +9,7 @@
 | `tasks/strategy_sources.py`、`strategy_video.py` | 公共来源搜索、公共头像准备、解析与缓存；任务适配器核对本期、首领与难度 |
 | `tasks/strategy_formation.py` | `StrategyFormation` 提供五人选择、实时审计、属性候选盘点、来源阵容与替补；`StrategyTarget` 传递目标，不导航到某个玩法 |
 | `tasks/party_preparation.py` | 候选排序和有界来源遍历、来源已知培养要求核验、结构化培养差距、五星培养和特别装备准备 |
-| `character_data.py` | 复用活动数据库中的完整衣装、技能与独立专武映射；只读缓存随数据库文件更新失效，不存账号装配状态 |
+| `character_data.py` | 复用共享静态数据库中的完整衣装、技能与独立专武映射；只读缓存随数据库文件更新失效，不存账号装配状态 |
 | `game_ui/character_equipment.py` | 完整衣装核验及只读专武页面；专武 1 等级与专武 2 强化阶段独立读取，未知布局不猜测 |
 | `game_ui/ordinary_equipment.py` | 人物页六个普通装备槽的只读核验；分别保留未开放、已开放与穿戴状态，装备名未知不用于物品匹配 |
 | `game_ui/character_search.py` | 编队与角色一览共用搜索输入、安卓输入条提交、搜索框复核和有界重试；页面仅传入各自坐标 |
@@ -35,7 +35,7 @@
 
 ## 数据库与画面如何配合
 
-活动取得的国服 `redive_cn.db` 已包含 `unit_profile`、`unit_skill_data`、`skill_data`、`unit_unique_equipment`、`unique_equipment_data` 及强化表。`character_data.py` 统一完整衣装、基础／进化技能和 `equip_slot=1/2` 的装备 ID／名称读取；沿用头像索引的可用角色 ID 范围（100100≤ID<200000），排除同名敌方单位。缺表、可用角色中的重复衣装或断开的装备映射保持未知，禁止创建空库作为成功缓存。
+共享更新器取得的国服 `redive_cn.db` 包含 `unit_profile`、`unit_skill_data`、`skill_data`、`unit_unique_equipment`、`unique_equipment_data`。`character_data.py` 统一完整衣装、基础／进化技能和 `equip_slot=1/2` 的装备 ID／名称读取；沿用头像索引的可用角色 ID 范围（100100≤ID<200000），排除同名敌方单位。缺表、可用角色中的重复衣装或断开的装备映射保持未知，禁止创建空库作为成功缓存。
 
 深域与深渊通过现有 `ensure_database()` 自动检查版本，角色资料最多复用 24 小时，独立于头像缓存期限。只有新鲜、完整的国服资料才用于提前拒绝“要求某件专武、该角色却无对应装备及进化技能定义”的来源，避免无效人物页往返。断网或旧资料继续作为候选知识，不据此断言装备未开放。数据库更新后查询缓存自动失效；跨服资料不作该判断。
 
