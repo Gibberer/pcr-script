@@ -16,11 +16,29 @@ class LunaTowerClean(ImageTask, TimeLimitTask):
             return LunaTowerClean, args
 
     def run(self):
+        self.set_progress(total_step=4)
+        adventure = MatchAction('tab_adventure', matched_actions=[ClickAction()],
+                                unmatch_actions=[ClickAction(template='btn_close'), ClickAction(pos=(50, 300))],
+                                timeout=15)
+        self.action_squential(adventure, SleepAction(1))
+        if adventure.is_timeout:
+            return dict(status='blocked', reason='未能确认冒险入口，跳过露娜塔扫荡')
+
+        # Schedule data is only a hint; the live entrance must be available.
+        entrance = MatchAction('btn_luna_tower_entrance', matched_actions=[ClickAction()],
+                               timeout=8, delay=0.2)
+        self.action_squential(entrance)
+        if entrance.is_timeout:
+            reason = '当前冒险页未识别到露娜塔入口，跳过回廊扫荡'
+            print(f'[露娜塔] {reason}')
+            return dict(status='unavailable', reason=reason)
+
+        tower = MatchAction('symbol_luna_tower', timeout=15, delay=0.2)
+        self.action_squential(tower)
+        if tower.is_timeout:
+            return dict(status='blocked', reason='点击入口后未能确认露娜塔页面，跳过扫荡')
+
         actions = [
-            MatchAction('tab_adventure', matched_actions=[ClickAction()], unmatch_actions=[ClickAction(template='btn_close'), ClickAction(pos=(50, 300))]),
-            SleepAction(1),
-            ClickAction(template="btn_luna_tower_entrance"),
-            MatchAction(template="symbol_luna_tower"),
             SleepAction(2),
             MatchAction(template='symbol_luna_tower_lock',matched_actions=[ThrowErrorAction("回廊未解锁")],timeout=5),
             ClickAction(pos=(815, 375)),
