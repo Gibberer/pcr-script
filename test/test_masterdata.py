@@ -244,3 +244,9 @@ class BundleExtractionTests(TestCase):
                 else:
                     with self.assertRaises(data.MasterDataError):
                         data.extract_database(b'synthetic')
+
+    def test_parser_failure_is_a_format_error_for_fallback(self):
+        import struct
+        with patch('UnityPy.load', side_effect=struct.error('truncated')):
+            with self.assertRaisesRegex(data.MasterDataError, 'error'):
+                data.extract_database(b'synthetic')

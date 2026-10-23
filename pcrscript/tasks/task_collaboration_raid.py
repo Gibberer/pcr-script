@@ -116,16 +116,19 @@ class CollaborationRaid(BaseTask):
         return field.home(s) or field.detail(s)
 
     def combat_pre_dialog(self, s):
-        if (s.find('获得的报酬将会直接增加到持有道具中', (250, 350, 800, 420))
-                and not field.confident(s, '取消', (250, 390, 480, 470))):
-            time.sleep(.5)
+        if s.find('获得的报酬将会直接增加到持有道具中', (250, 350, 800, 420)):
+            # The receipt closes with 取消 (more left) or a lone 确认; wait
+            # while its buttons fade in.
+            button = field.exchange_receipt_close(s)
+            if button is None:
+                time.sleep(.5)
+                return True
+            self.exchange_evidence('exchange_receipt', s)
+            self.ui.click(button)
             return True
         item_result = field.confident(s, '查看已获得道具', (300, 390, 680, 465))
         if item_result and field.confident(s, '报酬交换', (50, 0, 245, 65)):
-            self._exchange_receipt = str(self.ui.save('exchange_jackpot', s))
-            if self.state.get('pending_exchange'):
-                self.state['pending_exchange']['receipt'] = self._exchange_receipt
-                self.save()
+            self.exchange_evidence('exchange_jackpot', s)
             self.ui.click(item_result)
             return True
         if (field.confident(s, '当前的列表', (300, 15, 660, 65))
@@ -136,7 +139,12 @@ class CollaborationRaid(BaseTask):
             return True
         if (field.confident(s, r'已获得第\d+轮报酬列表中的全部报酬[。.]?', (280, 260, 700, 305))
                 and field.confident(s, '切换到下一个报酬列表[。.]?', (280, 300, 700, 335))):
-            self._exchange_receipt = str(self.ui.save('exchange_pool_complete', s))
+            self.exchange_evidence('exchange_pool_complete', s)
+            self.click(s, '确认', (370, 340, 590, 400))
+            return True
+        if (field.confident(s, '重置完毕', (300, 115, 660, 175))
+                and field.confident(s, '重置了报酬列表[。.]?', (300, 225, 660, 285))):
+            self.exchange_evidence('exchange_pool_reset', s)
             self.click(s, '确认', (370, 340, 590, 400))
             return True
         if (field.confident(s, r'获得了宝石[×xX]\d+', (300, 330, 700, 405))
@@ -154,6 +162,14 @@ class CollaborationRaid(BaseTask):
         self.ui.click(body)
         self.wait(lambda f: field.gem_reward(f) is None, '自动奖励展示结束', timeout=8)
         return True
+
+    def exchange_evidence(self, name, s):
+        # Pool completion and reset follow only a submitted exchange; the
+        # balance must still match before the pending record is released.
+        self._exchange_receipt = str(self.ui.save(name, s))
+        if self.state.get('pending_exchange'):
+            self.state['pending_exchange']['receipt'] = self._exchange_receipt
+            self.save()
 
     def combat_result_button(self, s):
         return field.confident(s, '前往联动讨伐|前往活动', (550, 420, 945, 525))
@@ -183,6 +199,13 @@ class CollaborationRaid(BaseTask):
                     and s.find('获得了以下报酬[。.]?|收取了以下道具', (250, 55, 730, 105), exact=True)):
                 self._claim_receipt = str(self.ui.save('recovered_mission_receipt', s))
                 self.click(s, '关闭', (300, 425, 660, 525))
+                continue
+            if self.skip_receipt(s):
+                # Closing a result spends nothing; reconciliation still
+                # requires the ticket balance to match the recorded plan.
+                self._sweep_receipts = getattr(self, '_sweep_receipts', [])
+                self._sweep_receipts.append(str(self.ui.save('recovered_sweep_receipt_'+str(len(self._sweep_receipts)), s)))
+                self.click(s, '关闭|确认|下一步', (250, 335, 945, 525))
                 continue
             if s.find('扫荡券确认|跳过确认|扫荡结果|收取报酬|交换结果', (250, 0, 750, 210)):
                 raise EventUIError('存在未归属或未核账的消费/领奖页面；保留现场')
@@ -226,9 +249,23 @@ class CollaborationRaid(BaseTask):
                 raise EventUIError('联动讨伐遇到未识别的页面或回执；保留现场')
         raise EventUIError('联动讨伐入口加载超时')
 
+    def open_missions(self, s):
+        # A tap during the home fade-in can be swallowed. Opening the list
+        # consumes nothing, so re-tap only while the event home is verified.
+        for _ in range(3):
+            self.click(s, '任务', (755, 0, 820, 65))
+            try:
+                return self.wait(field.missions, '联动任务列表', timeout=8)
+            except EventUIError:
+                s = self.capture()
+                if field.missions(s):
+                    return s
+                if not field.home(s):
+                    raise
+        raise EventUIError('联动任务列表未确认；未重复提交')
+
     def initialize(self, s):
-        self.click(s, '任务', (755, 0, 820, 65))
-        missions = self.wait(field.missions, '联动任务列表')
+        missions = self.open_missions(s)
         self.period = field.period(missions)
         if self.period is None:
             raise EventUIError('活动完整开放时间未知')
@@ -272,6 +309,8 @@ class CollaborationRaid(BaseTask):
             self.state.pop('pending_battle')
             self.save()
         if plan := self.state.get('pending_spend'):
+            if not plan.get('receipts') and getattr(self, '_sweep_receipts', None):
+                plan['receipts'] = list(self._sweep_receipts)
             if (plan.get('kind') != 'sweep' or type(plan.get('after')) is not int
                     or current != plan['after'] or not plan.get('receipts')):
                 raise EventUIError('上次未核对的扫荡消费仍未知；未重新提交')
@@ -301,6 +340,10 @@ class CollaborationRaid(BaseTask):
         if any(k.startswith('pending_') for k in self.state):
             raise EventUIError('有上次未核对的联动操作，未追加消费')
         return s
+
+    def skip_receipt(self, s):
+        from ..game_ui import abyss_subjugation as sweep_ui
+        return sweep_ui.sweep_receipt(s) or field.skip_result(s) is not None
 
     def balance(self, s):
         value = field.tickets(self.ui, s)
@@ -529,11 +572,10 @@ class CollaborationRaid(BaseTask):
         self.settle_sweep()
 
     def settle_sweep(self):
-        from ..game_ui import abyss_subjugation as sweep_ui
         plan = self.state['pending_spend']
         for _ in range(60):
             s = self.capture()
-            if sweep_ui.sweep_receipt(s):
+            if self.skip_receipt(s):
                 plan.setdefault('receipts', []).append(str(self.ui.save('sweep_receipt_'+str(len(plan.get('receipts', []))), s)))
                 self.save()
                 self.click(s, '关闭|确认|下一步', (250, 335, 945, 525))
@@ -562,9 +604,7 @@ class CollaborationRaid(BaseTask):
     def collect(self):
         if not self.options['claim_rewards']:
             return
-        s = self.enter()
-        self.click(s, '任务', (755, 0, 820, 65))
-        s = self.wait(field.missions, '联动任务列表')
+        s = self.open_missions(self.enter())
         button = field.confident(s, '全部收取', (490, 450, 700, 505))
         if not s.blue_button(button):
             self.report['missions'] = 'no_claimable_rewards'
@@ -642,13 +682,7 @@ class CollaborationRaid(BaseTask):
             s = self.capture()
             if self.combat_pre_dialog(s):
                 continue
-            if s.find('获得的报酬将会直接增加到持有道具中', (250, 350, 800, 420)):
-                plan['receipt'] = str(self.ui.save('exchange_receipt', s))
-                self.save()
-                s = self.wait(lambda f: field.confident(f, '取消', (250, 390, 480, 470)),
-                              '兑换回执关闭按钮', timeout=10)
-                self.click(s, '取消', (250, 390, 480, 470))
-            elif s.find('报酬确认|交换结果|一键交换完毕|获得报酬', (200, 0, 780, 250)):
+            if s.find('报酬确认|交换结果|一键交换完毕|获得报酬', (200, 0, 780, 250)):
                 plan['receipt'] = str(self.ui.save('exchange_receipt', s))
                 self.save()
                 self.click(s, '确认|确定|关闭', (250, 300, 730, 515))
@@ -688,9 +722,11 @@ class CollaborationRaid(BaseTask):
                     s = self.open_detail('高难')
             self.collect()
             self.exchange()
-            self.report['status'] = 'complete' if self.report['remaining_tickets'] == 0 else 'partial'
+            # A configured ticket budget is a deliberate stop, not an
+            # unreconciled state; it must not block later activity types.
+            self.report['status'] = 'complete'
             if self.report['remaining_tickets']:
-                self.report['pending'].append('已达到本次讨伐券消费上限，尚有券留待下次')
+                self.report['budget_limited'] = True
         except EventUIError as error:
             self.report['status'] = 'partial' if self.report['history'] or any(k.startswith('pending_') for k in self.state) else 'blocked'
             self.report['pending'].append(str(error))

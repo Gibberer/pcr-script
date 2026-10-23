@@ -211,6 +211,11 @@ class RecognitionTests(TestCase):
             choose_pages(dict(source, pages=source['pages']*3), dict(task_type='collaboration', max_pages_per_video=2))
 
 
+def fake_clock():
+    ticks = iter(range(0, 10**6, 2))
+    return Mock(monotonic=lambda: next(ticks), sleep=Mock(), time=Mock(return_value=0))
+
+
 class RaidFlowTests(TaskReplayMixin, TestCase):
     def test_automatic_gem_reward_dismisses_only_matching_amounts(self):
         reward = screen(('获得了宝石×450', 480, 360), ('x450', 518, 294), ('挑战', 745, 406))
@@ -291,6 +296,102 @@ class RaidFlowTests(TaskReplayMixin, TestCase):
         self.task = CollaborationRaid(robot)
         self.task.ui = replay_ui(self.folder.name)
         self.task.ui.number.side_effect = lambda s, roi: s.number(roi)
+
+    def skip_result_over_detail(self):
+        value = sweep_detail()
+        value.items += screen(('扫艺结果', 480, 42), ('跳过次数', 453, 92), ('5回', 558, 92),
+                              ('5只击破！', 480, 135), ('确认', 478, 478)).items
+        return value
+
+    def test_misread_skip_result_title_is_a_receipt_not_the_detail_page(self):
+        self.task.report.update(remaining_tickets=5, spent=0)
+        self.task.state['pending_spend'] = dict(kind='sweep', before=5, after=0, quantity=5)
+        self.frames([self.skip_result_over_detail(), home(0)])
+        self.task.settle_sweep()
+        self.assertEqual(field.skip_result(self.skip_result_over_detail()), 5)
+        self.assertEqual(self.clicks(), ['确认'])
+        self.assertEqual((self.task.report['spent'], self.task.report['remaining_tickets']), (5, 0))
+        self.assertNotIn('pending_spend', self.task.state)
+
+    def test_interrupted_skip_result_recovers_only_with_matching_balance(self):
+        self.frames([self.skip_result_over_detail(), home(0)])
+        self.assertTrue(field.home(self.task.enter()))
+        self.assertEqual(self.clicks(), ['确认'])
+        for balance, recovered in ((0, True), (5, False)):
+            self.task.state = dict(pending_spend=dict(kind='sweep', before=5, after=0, quantity=5))
+            if recovered:
+                self.task.reconcile_pending(home(balance), missions())
+                self.assertNotIn('pending_spend', self.task.state)
+                self.assertTrue(self.task.report['history'][-1]['recovered'])
+            else:
+                with self.assertRaisesRegex(EventUIError, '扫荡消费仍未知'):
+                    self.task.reconcile_pending(home(balance), missions())
+                self.assertIn('pending_spend', self.task.state)
+
+    def test_one_key_exchange_uses_displayed_cost_and_never_drips_single_batches(self):
+        def one_key(cost, blue=True):
+            return screen(('报酬交换', 140, 30), ('奖励券', 780, 444), ('350', 920, 444),
+                          ('当前的列表', 625, 304), ('一键交换', 830, 365), ('使用'+str(cost)+'张', 830, 398),
+                          ('1次交换', 610, 365), ('使用1张', 610, 398),
+                          blue=('1次交换',) + (('一键交换',) if blue else ()))
+        button, amount = field.exchange_action(one_key(350), 350)
+        self.assertEqual((button.text, amount), ('一键交换', 350))
+        self.assertEqual(field.exchange_action(one_key(100), 350)[1], 100)
+        for page in (one_key(400), one_key(350, blue=False)):
+            self.assertIsNone(field.exchange_action(page, 350))
+
+    def test_item_receipt_closes_with_cancel_or_lone_confirm(self):
+        text = '获得的报酬将会直接增加到持有道具中。'
+        fading = screen((text, 475, 385))
+        for close, position in (('取消', (365, 430)), ('确认', (480, 428))):
+            self.task.ui.click.reset_mock()
+            self.task.open_exchange = Mock(return_value=exchange(1))
+            self.frames([fading, screen((text, 475, 385), (close, *position)), exchange(0), home()])
+            self.task.exchange()
+            self.assertEqual(self.clicks(), ['1次交换', close, (30, 30)])
+            self.assertTrue(self.task.report['exchanges'][-1]['receipt'])
+
+    def test_pool_reset_after_exchange_settles_with_matching_balance(self):
+        self.task.open_exchange = Mock(return_value=exchange(1))
+        complete = screen(('已获得第1轮报酬列表中的全部报酬。', 480, 283),
+                          ('切换到下一个报酬列表。', 480, 318), ('确认', 480, 370))
+        reset = screen(('重置完毕', 480, 146), ('重置了报酬列表。', 475, 254), ('确认', 477, 370))
+        self.frames([complete, reset, exchange(0), home()])
+        self.task.exchange()
+        self.assertEqual(self.clicks(), ['1次交换', '确认', '确认', (30, 30)])
+        self.assertNotIn('pending_exchange', self.task.state)
+        self.assertEqual(self.task.report['remaining_reward_tickets'], 0)
+
+    def test_swallowed_mission_tap_is_retried_only_from_verified_home(self):
+        self.frames([home()]*3 + [missions()])
+        with patch('pcrscript.tasks.task_collaboration_raid.time', fake_clock()):
+            self.assertTrue(field.missions(self.task.open_missions(home())))
+        self.assertEqual(self.clicks(), ['任务', '任务'])
+        self.task.ui.click.reset_mock()
+        self.frames([screen(('未知', 480, 270))]*30)
+        with patch('pcrscript.tasks.task_collaboration_raid.time', fake_clock()):
+            with self.assertRaisesRegex(EventUIError, '联动任务列表'):
+                self.task.open_missions(home())
+        self.assertEqual(self.clicks(), ['任务'])
+
+    def test_ticket_budget_stop_is_complete_and_does_not_block_other_activities(self):
+        task = self.task
+        task.options['max_tickets'] = 3
+        task.enter = Mock(return_value=home(8))
+        task.initialize = Mock(return_value=home(8))
+        task.open_detail = Mock(return_value=sweep_detail())
+        task.collect, task.exchange = Mock(), Mock()
+
+        def sweep(_):
+            task.report['spent'] += 3
+            task.report['remaining_tickets'] -= 3
+        task.sweep = Mock(side_effect=sweep)
+        with patch.object(field, 'first_clear_free', return_value=False), \
+                patch.object(field, 'cleared', return_value=True):
+            report = task.run()
+        self.assertEqual((report['status'], report['remaining_tickets'], report['pending']), ('complete', 5, []))
+        self.assertTrue(report['budget_limited'])
+        task.sweep.assert_called_once()
 
     def test_invalid_budgets_fail_before_device(self):
         for value in (True, 0, -1, 1000):

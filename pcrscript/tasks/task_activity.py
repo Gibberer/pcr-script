@@ -44,8 +44,8 @@ class ActivityDaily(TimeLimitTask):
 
     @staticmethod
     def valid(event_news, args=None):
-        # Collaboration schedules are absent from some public DB editions.
-        # Its own live entrance, event identity and full period are authoritative.
+        # Closed types are skipped per schedule in run(); each handler still
+        # verifies its live entrance, event identity and full period.
         return ActivityDaily, args
 
     @classmethod

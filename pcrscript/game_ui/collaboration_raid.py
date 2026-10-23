@@ -104,6 +104,15 @@ def skip_confirmation(s):
                 and confident(s, '确认', (480, 340, 700, 405)))
 
 
+def skip_result(s):
+    """Return the defeat count; the animated title is often misread."""
+    defeated = confident(s, r'(\d+)只击破!?', (370, 100, 600, 170))
+    if (defeated and confident(s, '跳过次数', (370, 65, 530, 115))
+            and confident(s, '确认', (370, 450, 590, 510))):
+        return int(re.match(r'\d+', normalized(defeated.text))[0])
+    return None
+
+
 def cleared(ui, s):
     if not detail(s) or first_clear_free(s):
         return False
@@ -136,13 +145,22 @@ def exchange_balance(ui, s):
     return ui.number(local if isinstance(local, type(s)) else s, (855, 423, 945, 465))
 
 
+def exchange_receipt_close(s):
+    if not s.find('获得的报酬将会直接增加到持有道具中', (250, 350, 800, 420)):
+        return None
+    return confident(s, '取消', (250, 390, 480, 470)) or confident(s, '确认', (370, 395, 590, 465))
+
+
 def exchange_action(s, balance):
     if not exchange(s) or balance < 1:
         return None
     one = confident(s, '一键交换', (710, 325, 940, 390))
-    cost = confident(s, r'消耗\d+张', (710, 385, 940, 420))
-    if one and cost and s.blue_button(one) and int(re.search(r'\d+', cost.text)[0]) == balance:
-        return one, balance
+    if one:
+        # 便利设定 one-key exchange replaces the variable batch; never fall
+        # back to single exchanges. The cost may be capped by the pool.
+        cost = confident(s, r'(?:消耗|使用)\d+张', (710, 385, 940, 420))
+        amount = int(re.search(r'\d+', cost.text)[0]) if cost else 0
+        return (one, amount) if s.blue_button(one) and 1 <= amount <= balance else None
     variable = confident(s, r'\d+次交换', (735, 335, 940, 385))
     count = int(re.search(r'\d+', variable.text)[0]) if variable else 100
     for count, left, right in ((count, 735, 940), (1, 510, 715)):

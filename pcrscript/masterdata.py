@@ -134,14 +134,17 @@ def extract_database(bundle):
     # The CN bundle omits its engine version; this format was verified against
     # the matching client master, including SHA-256 of the extracted SQLite.
     UnityPy.config.FALLBACK_UNITY_VERSION = '6000.0.58f2'
-    environment = UnityPy.load(bundle)
     values = []
-    for obj in environment.objects:
-        if obj.type.name == 'TextAsset':
-            value = obj.read().m_Script
-            value = value.encode('utf-8', errors='surrogateescape') if isinstance(value, str) else bytes(value)
-            if value.startswith(b'SQLite format 3\0'):
-                values.append(value)
+    try:
+        for obj in UnityPy.load(bundle).objects:
+            if obj.type.name == 'TextAsset':
+                value = obj.read().m_Script
+                value = value.encode('utf-8', errors='surrogateescape') if isinstance(value, str) else bytes(value)
+                if value.startswith(b'SQLite format 3\0'):
+                    values.append(value)
+    except Exception as error:
+        # Parser failures are format errors; they must reach CDN and cache fallback.
+        raise MasterDataError('资源包无法解析：'+type(error).__name__) from error
     if len(values) != 1 or len(values[0]) > 700*1024**2:
         raise MasterDataError('资源包中没有唯一且有效的 SQLite 主库')
     return values[0]

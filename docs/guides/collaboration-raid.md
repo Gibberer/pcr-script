@@ -30,8 +30,8 @@ CollaborationRaid:
   battle_timeout: 240
 ```
 
-只处理已通关日常时设 `first_clear: false`；保留奖励券时设 `exchange: false`。`max_battles` 限制本次免费首通尝试，达到预算或不明确的页面会保留现场。角色特别装备只在 `auto_equip: true` 时安装现有可用装备，缺失时不购买。
+游戏「报酬交换 → 便利设定」选为一键交换时，任务使用该按钮及其显示的张数，不退回逐次兑换；一键交换确认窗口尚未适配，遇到时保留待核对记录并停止。只处理已通关日常时设 `first_clear: false`；保留奖励券时设 `exchange: false`。`max_battles` 限制本次免费首通尝试，达到预算或不明确的页面会保留现场。角色特别装备只在 `auto_equip: true` 时安装现有可用装备，缺失时不购买。
 
 多账号共用设备时，为每个账号设置不同的 `account_key`，隔离待核账记录；默认按设备区分。
 
-业务报告与截图位于运行记录的 `tasks/<序号>-collaboration_raid/`。`complete` 要求本次讨伐券用完且后续领奖兑换完成；达到消费上限、阵容或回执受阻会报告 `partial` / `blocked`。中断后的未核账消费不会重复提交，需先核对原回执与余额。当前实机验收范围见[工程待办](../pending-validation.md)，游戏页面与规则见[联动讨伐知识](../game-knowledge/collaboration-raid.md)。
+业务报告与截图位于运行记录的 `tasks/<序号>-collaboration_raid/`。`complete` 表示首通、跳过、领奖和兑换均已核账；因 `max_tickets` 留下的讨伐券以 `budget_limited` 标记，不阻止后续活动类型。阵容或回执受阻会报告 `partial` / `blocked`。中断后的未核账消费不会重复提交，需先核对原回执与余额。当前实机验收范围见[工程待办](../pending-validation.md)，游戏页面与规则见[联动讨伐知识](../game-knowledge/collaboration-raid.md)。
