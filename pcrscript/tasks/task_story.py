@@ -159,15 +159,42 @@ class GetQuestReward(BaseTask):
 
     def quest(self):
         return self.ui.wait(lambda s: s.find("任务", (45, 0, 150, 58), exact=True)
+                            and not s.find("收取报酬|收取完成|持有上限", (230, 15, 730, 170), exact=True)
                             and all(s.find(name, (300, 7, 800, 46), exact=True)
                                     for name in self.TABS), "任务页面")
+
+    @staticmethod
+    def claim_result(screen):
+        if screen.find("持有上限", (230, 15, 730, 170)):
+            return True
+        title = screen.find("收取报酬|收取完成", (230, 15, 730, 170), exact=True)
+        close = screen.find("关闭|确认", (350, 435, 605, 515), exact=True)
+        return bool(title and close and min(title.score, close.score) >= .95
+                    and not screen.find('正在进行数据连接|连接中|加载中'))
+
+    def wait_claim_result(self, name):
+        previous = None
+        def settled(screen):
+            nonlocal previous
+            if screen.find("持有上限", (230, 15, 730, 170)):
+                return True
+            if not self.claim_result(screen):
+                previous = None
+                return False
+            title = screen.find("收取报酬|收取完成", (230, 15, 730, 170), exact=True)
+            close = screen.find("关闭|确认", (350, 435, 605, 515), exact=True)
+            position = (*title.center, *close.center)
+            ready = previous is not None and all(abs(a-b) <= 2 for a,b in zip(position,previous))
+            previous = position
+            return ready
+        return self.ui.wait(settled, f"{name}任务领奖结果", timeout=25)
 
     def run(self):
         self.report_progress('进入任务页面')
         home = self.ui.wait(lambda s: s.find("任务", (790, 390, 890, 470), exact=True), "首页任务入口")
         self.ui.click(home.find("任务", (790, 390, 890, 470), exact=True))
         self.quest()
-        report = {"claimed_tabs": [], "empty_tabs": []}
+        report = {"status": "complete", "claimed_tabs": [], "empty_tabs": []}
         for index, name in enumerate(self.TABS):
             self.report_progress(f'核对{name}任务奖励', index, len(self.TABS))
             s = self.quest()
@@ -186,10 +213,12 @@ class GetQuestReward(BaseTask):
                     break
                 self.ui.save(f"quest_{name}_before_claim", s)
                 self.ui.click(button)
-                result = self.ui.wait(lambda s: s.find("收取报酬|收取完成|持有上限", (230, 15, 730, 170)),
-                                      f"{name}任务领奖结果", timeout=25)
+                # The heading appears before the close control during the
+                # scale/fade animation. Wait for both, without claiming again.
+                result = self.wait_claim_result(name)
                 if result.find("持有上限", (230, 15, 730, 170)):
                     raise EventUIError(f"{name}任务奖励遇到持有上限，未继续领取")
+                self.ui.save(f"quest_{name}_receipt", result)
                 close = result.find("关闭|确认", (350, 435, 605, 515), exact=True)
                 if close is None:
                     raise EventUIError(f"{name}任务奖励弹窗无法关闭")

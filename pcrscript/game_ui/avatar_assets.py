@@ -11,7 +11,6 @@ import sqlite3
 import time
 from uuid import uuid4
 
-import brotli
 import cv2 as cv
 import numpy as np
 import requests
@@ -20,8 +19,6 @@ from .avatars import AvatarIndex, face_crop
 from ..run_session import atomic_json
 
 ICON_SOURCE = 'https://redive.estertion.win/icon/unit/'
-DB_INFO = 'https://wthee.xyz/pcr/api/v1/db/info/v2'
-DB_SOURCE = 'https://wthee.xyz/db/redive_cn.db.br'
 ASSET_VERSION = 1
 
 
@@ -43,55 +40,14 @@ def identities(database: Path) -> dict[int, str]:
     return result
 
 
-def ensure_database(path: Path, *, http=requests, max_age_hours: float = 168,
+def ensure_database(path: Path, *, http=requests, max_age_hours: float = 6,
                     timeout: float = 20, check=lambda: None) -> dict:
-    """Download/validate a CN DB atomically; never overwrite a valid DB on failure."""
-    path = Path(path)
-    manifest = path.with_suffix('.avatars.json')
-    saved = read_json(manifest)
-    existing = False
-    try:
-        identities(path)
-        existing = True
-    except (OSError, ValueError, sqlite3.Error):
-        pass
-    if existing and 0 <= time.time()-saved.get('checked_at', 0) < max_age_hours*3600:
-        return dict(saved, cache_hit=True)
-    check()
-    temporary = path.with_name(path.name+'.'+uuid4().hex+'.tmp')
-    try:
-        response = http.post(DB_INFO, json={'regionCode': 'cn'}, timeout=timeout)
-        response.raise_for_status()
-        version = int(response.json()['data']['truthVersion'])
-        if not existing or saved.get('version') != version:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            decompressor = brotli.Decompressor()
-            compressed = expanded = 0
-            with http.get(DB_SOURCE, stream=True, timeout=timeout) as response:
-                response.raise_for_status()
-                with temporary.open('wb') as target:
-                    for chunk in response.iter_content(65536):
-                        check()
-                        compressed += len(chunk)
-                        decoded = decompressor.process(chunk)
-                        expanded += len(decoded)
-                        if compressed > 150*1024**2 or expanded > 700*1024**2:
-                            raise ValueError('角色数据库超出大小边界')
-                        target.write(decoded)
-            if not decompressor.is_finished():
-                raise ValueError('角色数据库下载不完整')
-            identities(temporary)
-            temporary.replace(path)
-        value = dict(source=DB_SOURCE, version=version, checked_at=time.time(), database=str(path), stale=False)
-        atomic_json(manifest, value)
-        return dict(value, cache_hit=False)
-    except (requests.RequestException, ValueError, KeyError, sqlite3.Error, brotli.error) as error:
-        if not existing:
-            raise RuntimeError('无法自动准备角色数据库：'+type(error).__name__) from error
-        return dict(saved, database=str(path), stale=True, cache_hit=True,
-                    warning='数据库更新失败，使用已有有效数据库：'+type(error).__name__)
-    finally:
-        temporary.unlink(missing_ok=True)
+    """Use the same project-maintained static source as task prerequisites."""
+    from ..masterdata import ensure_masterdata
+    result = ensure_masterdata(path, http=http, max_age_hours=max_age_hours,
+                               timeout=timeout, check=check)
+    identities(Path(path))
+    return result
 
 
 def ensure_avatar_index(options: dict | None = None, *, http=requests, check=lambda: None) -> tuple[AvatarIndex, dict]:

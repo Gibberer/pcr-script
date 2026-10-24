@@ -15,8 +15,8 @@ from ..game_ui.dawn_labyrinth import navigation_exit as maze_navigation_exit
 from ..game_ui.recollection import navigation_exit as recollection_navigation_exit
 
 
-@register("campaign_clean")
 class CampaignClean(TimeLimitTask):
+    name = 'story'
     config_section = 'StoryEvent'
     config_attribute = 'story_event_options'
 

@@ -108,9 +108,7 @@ Task: #配置执行任务,配置任务名称，如果需要传入参数在下面
     -
       - get_quest_reward #领取任务奖励（获取赠送的体力）
     -
-      - revival_event_once # 复刻情报筛选；每期完成后自动跳过
-    -
-      - campaign_clean  # 新版活动重复日：困难扫荡、剧情、任务、兑换（首通暂不执行）
+      - campaign_clean  # 活动日常：按 Activities.types 依次处理联动讨伐、复刻和剧情活动
       - True # 是否扫荡活动困难关卡
       - False # 是否将剩余体力花费在活动普通章节上
     -

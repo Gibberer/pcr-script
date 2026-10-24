@@ -86,13 +86,14 @@ class TaskIntegrationTests(TestCase):
                     'clear_campaign_first_time','clear_story','common_adventure','free_gacha','get_gift',
                     'get_quest_reward','luna_tower_clean','normal_gacha',
                     'princess_arena','quick_clean','research','revival_event_once','schedule','shop_buy','team_battle','tohomepage','dawn_labyrinth','dawn_labyrinth_first_clear',
-                    'recollection','recollection_first_clear','abyss_subjugation','battle_stadium'}
+                    'recollection','recollection_first_clear','abyss_subjugation','battle_stadium','collaboration_raid'}
         self.assertEqual(set(registered_tasks()), expected)
         for name in expected:
             self.assertTrue(issubclass(find_taskclass(name), BaseTask))
         self.assertIs(find_taskclass('caravan'), Caravan)
         self.assertIs(find_taskclass('get_gift'), GetGift)
-        self.assertIs(find_taskclass('campaign_clean'), CampaignClean)
+        from pcrscript.tasks import ActivityDaily
+        self.assertIs(find_taskclass('campaign_clean'), ActivityDaily)
         self.assertIs(find_taskclass('revival_event_once'), RevivalEventOnce)
         from pcrscript.tasks import DawnLabyrinth, DawnLabyrinthFirstClear
         self.assertIs(find_taskclass('dawn_labyrinth'), DawnLabyrinth)

@@ -116,3 +116,29 @@ class BilibiliBrowserSession:
                         'transport': 'browser', 'session_saved': True}
             finally:
                 browser.close()
+
+    def video_info(self, bvid: str) -> dict:
+        """Load the ordinary public page; stop on login or verification."""
+        if not re.fullmatch(r'BV[0-9A-Za-z]{10}', bvid):
+            raise ValueError('Invalid Bilibili video ID')
+        from playwright.sync_api import sync_playwright, TimeoutError as BrowserTimeout
+        self.directory.mkdir(parents=True, exist_ok=True)
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(channel=self.channel, headless=True,
+                                                 timeout=self.timeout*1000)
+            try:
+                context = browser.new_context(storage_state={'cookies': self.load().get('cookies', []), 'origins': []})
+                page = context.new_page()
+                page.set_default_timeout(self.timeout*1000)
+                page.goto('https://www.bilibili.com/video/'+bvid+'/', wait_until='domcontentloaded')
+                try:
+                    page.wait_for_function('window.__INITIAL_STATE__?.videoData?.bvid === '+json.dumps(bvid))
+                except BrowserTimeout:
+                    page.screenshot(path=str(self.directory/'video_verification_required.png'))
+                    self.save(context, page)
+                    raise BrowserVerificationRequired('公开视频详情未加载，可能需要人工验证；未自动解验证码') from None
+                data = page.evaluate('window.__INITIAL_STATE__.videoData')
+                self.save(context, page)
+                return {'code': 0, 'data': data}
+            finally:
+                browser.close()

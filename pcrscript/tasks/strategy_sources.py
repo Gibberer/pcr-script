@@ -38,6 +38,10 @@ class SourceRules:
 
 
 def get_source_rules(options):
+    if options.get('task_type') == 'collaboration':
+        from .collaboration_strategy import queries, source_rejection
+        return SourceRules('collaboration:3', queries, source_rejection, True,
+                           ('area', 'period_start', 'period_end'))
     if options.get('task_type') == 'stadium':
         from .stadium_strategy import queries, source_rejection, collection_candidate
         return SourceRules('stadium:2', queries, source_rejection, True,
@@ -63,7 +67,7 @@ def configured_queries(queries, options):
 
 def timed_switch_requirement(text):
     """Timed O/X orders are operations even after a fixed starting setting."""
-    return bool(re.search(r'(?<![A-Za-z0-9])(?:[0-5]\d{2}|[0-5]?\d[:：][0-5]\d)'
+    return bool(re.search(r'(?<![A-Za-z0-9])(?:[0-5]\d{2}|[0-5]?\d[:：][0-5]\d)(?!\d)'
                           r'[^\r\n,，;；。!?！？|｜]{0,40}(?:[OX]{5}|全SET)', text, re.I))
 
 
@@ -325,7 +329,7 @@ def discover_sources(options: dict, *, api=None, check=lambda: None, exclude_sou
     excluded = []
     high_abyss = kind == 'abyss' and effort == 'high'
     high_recollection = kind == 'recollection' and effort == 'high'
-    high_search = high_abyss or high_recollection
+    high_search = high_abyss or high_recollection or kind == 'collaboration'
     if high_abyss:
         target = re.compile(r'(?<!\d)'+re.escape(stage)+r'(?!\d)')
         # Search ranks restart for each query. Inspect exact-stage teasers first
@@ -336,7 +340,7 @@ def discover_sources(options: dict, *, api=None, check=lambda: None, exclude_sou
             -publication_time(pair[1]), pair[1]['search_rank']))
     else:
         items = sorted(found.items(), key=lambda pair: pair[1]['search_rank'])
-    metadata_limit = max(72, limit*8) if high_search else max(24, limit*4)
+    metadata_limit = max(72, limit*8) if high_abyss or high_recollection else max(24, limit*4)
     for bvid,item in items[:metadata_limit]:
         check()
         if not high_search and len(candidates) >= limit: break
@@ -389,8 +393,11 @@ def discover_sources(options: dict, *, api=None, check=lambda: None, exclude_sou
             errors.append(dict(stage='metadata',bvid=bvid,error=type(error).__name__+': '+str(error)[:240]))
     deferred = []
     if high_search:
-        candidates.sort(key=lambda item: (abyss_candidate_priority(item, stage, options.get('element'))
-                        if high_abyss else recollection_candidate_priority(item, area, stage)))
+        if kind == 'collaboration':
+            candidates.sort(key=lambda item: min((p.get('duration') or float('inf') for p in item['pages']), default=float('inf')))
+        else:
+            candidates.sort(key=lambda item: (abyss_candidate_priority(item, stage, options.get('element'))
+                            if high_abyss else recollection_candidate_priority(item, area, stage)))
         deferred = [dict(bvid=item['bvid'], title=item['title']) for item in candidates[limit:]]
         candidates = candidates[:limit]
     report = dict(status='complete' if candidates and not errors else 'partial' if candidates else 'blocked',

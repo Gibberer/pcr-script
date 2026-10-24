@@ -109,6 +109,8 @@ class EventNews:
     revival: Optional[Event] = None # 单独查询复刻，避免与同期新活动互相覆盖
     abyssSubjugation: Optional[Event] = None  # 深渊讨伐战，区别于常驻深域
     battleStadium: Optional[Event] = None  # 斗技场：包含结束后的报酬领取期
+    collaborationRaid: Optional[Event] = None  # 联动讨伐：mre_schedule
+    source: dict[str, Any] = field(default_factory=dict)  # 静态前置信息的版本、来源和缓存状态
 
 
 class TimeLimitTask(BaseTask):
