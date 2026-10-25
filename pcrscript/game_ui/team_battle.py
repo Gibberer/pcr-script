@@ -34,7 +34,7 @@ def map_bosses(screen: EventScreen) -> list[Boss]:
     if not map_ready(screen):
         raise EventUIError('团队战地图未确认')
     found = {}
-    for label in screen.all(r'第\d+轮', (35, 250, 940, 380)):
+    for label in screen.all(r'第\d+轮', (35, 220, 940, 380)):
         match = re.fullmatch(r'第(\d+)轮', normalized(label.text))
         if not match:
             continue

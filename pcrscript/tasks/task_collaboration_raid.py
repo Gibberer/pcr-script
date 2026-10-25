@@ -52,6 +52,9 @@ class CollaborationRaid(BaseTask):
         self.period = None
         self.state_path = None
         self.state = {}
+        account = self.options.get('account_key', getattr(self.driver, 'device_name', getattr(self.driver, 'index', 'default')))
+        cancellation_key = sha256(str((account, TITLE, 'exchange_cancellation')).encode()).hexdigest()[:24]
+        self.cancellation_path = Path(self.options.get('state_dir', 'cache/daily/collaboration_raid_state'))/(cancellation_key+'.json')
         self.sources = None
         self.excluded_sources = set()
         self.report = dict(status='running', battles=0, spent=0, history=[], audits=[], pending=[])
@@ -116,6 +119,17 @@ class CollaborationRaid(BaseTask):
         return field.home(s) or field.detail(s)
 
     def combat_pre_dialog(self, s):
+        if field.confident(s, '获得活动登录奖励', (300, 115, 660, 175)):
+            # The daily ticket receipt can cover an already rendered home.
+            # Wait for its body/button instead of navigating through the veil.
+            close = field.confident(s, '关闭', (370, 340, 590, 405))
+            if (close and field.confident(s, '已领取以下道具作为登录奖励[。.]?',
+                                          (300, 170, 680, 210))):
+                self.ui.save('daily_login_reward', s)
+                self.ui.click(close)
+            else:
+                time.sleep(.5)
+            return True
         if s.find('获得的报酬将会直接增加到持有道具中', (250, 350, 800, 420)):
             # The receipt closes with 取消 (more left) or a lone 确认; wait
             # while its buttons fade in.
@@ -153,14 +167,22 @@ class CollaborationRaid(BaseTask):
             local = self.ui.read_region(s, (450, 270, 575, 320))
             s.items = [item for item in s.items if not (450 <= item.center[0] <= 575
                        and 270 <= item.center[1] <= 320)] + local.items
-        body = field.gem_reward(s)
+        if (field.confident(s, r'获得了佐贺偶像是传奇联动纪念10次扭蛋券[×xX]\d+', (280, 335, 700, 425))
+                and field.collective_reward(s) is None):
+            for roi in ((300, 270, 375, 320), (495, 270, 570, 320), (670, 270, 765, 320)):
+                local = self.ui.read_region(s, roi, classify=False)
+                x1, y1, x2, y2 = roi
+                s.items = [item for item in s.items if not (x1 <= item.center[0] <= x2
+                           and y1 <= item.center[1] <= y2)] + local.items
+        body = field.gem_reward(s) or field.collective_reward(s)
         if body is None:
             return False
         rows = self.report.setdefault('automatic_rewards', [])
         rows.append(dict(text=body.text, evidence=str(self.ui.save('automatic_reward_'+str(len(rows)), s))))
         self.save()
         self.ui.click(body)
-        self.wait(lambda f: field.gem_reward(f) is None, '自动奖励展示结束', timeout=8)
+        self.wait(lambda f: field.gem_reward(f) is None and field.collective_reward(f) is None,
+                  '自动奖励展示结束', timeout=8)
         return True
 
     def exchange_evidence(self, name, s):
@@ -190,7 +212,25 @@ class CollaborationRaid(BaseTask):
         requested = False
         for _ in range(60):
             s = self.capture()
+            if field.confident(s, '一键交换确认', (300, 60, 660, 115)):
+                confirmation = field.exchange_confirmation(self.ui, s)
+                if confirmation is None:
+                    time.sleep(.5)
+                    continue
+                # A visible, unsubmitted confirmation may be cancelled safely.
+                # Its quantity and unchanged balance must match the saved plan
+                # before that plan is released during initialization.
+                self._cancelled_exchange_confirmation = dict(
+                    quantity=confirmation['quantity'], observed_at=time.time(),
+                    evidence=str(self.ui.save('exchange_cancelled_confirmation', s)))
+                atomic_json(self.cancellation_path, self._cancelled_exchange_confirmation)
+                self.click(s, '取消', (260, 400, 480, 465))
+                self.wait(field.exchange, '取消确认后返回兑换页')
+                self.ui.click((30, 30))
+                requested = True
+                continue
             if self.combat_pre_dialog(s):
+                requested = True
                 continue
             if field.skip_confirmation(s) and not self.state.get('pending_spend'):
                 self.click(s, '取消', (260, 340, 480, 405))
@@ -205,7 +245,7 @@ class CollaborationRaid(BaseTask):
                 # requires the ticket balance to match the recorded plan.
                 self._sweep_receipts = getattr(self, '_sweep_receipts', [])
                 self._sweep_receipts.append(str(self.ui.save('recovered_sweep_receipt_'+str(len(self._sweep_receipts)), s)))
-                self.click(s, '关闭|确认|下一步', (250, 335, 945, 525))
+                self.click(s, '关闭|确认|下一步|跳过完毕', (250, 335, 945, 525))
                 continue
             if s.find('扫荡券确认|跳过确认|扫荡结果|收取报酬|交换结果', (250, 0, 750, 210)):
                 raise EventUIError('存在未归属或未核账的消费/领奖页面；保留现场')
@@ -214,14 +254,19 @@ class CollaborationRaid(BaseTask):
             if field.unlock_dialog(s):
                 self.ui.save('difficulty_unlocked', s)
                 self.ui.click(field.unlock_dialog(s))
+                requested = True
             elif field.tutorial(s):
                 self.ui.click((779, 488))
+                requested = True
             elif field.navigation_exit(s):
                 self.ui.click(field.navigation_exit(s))
+                requested = True
             elif field.formation(s):
                 self.click(s, '取消', (590, 410, 790, 510))
+                requested = True
             elif field.confident(s, '报酬交换', (50, 0, 245, 65)):
                 self.ui.click((30, 30))
+                requested = True
             elif field.confident(s, '冒险', (40, 0, 165, 65)):
                 entry = field.confident(s, '联动讨伐', (260, 350, 460, 465))
                 if entry and not requested:
@@ -276,6 +321,12 @@ class CollaborationRaid(BaseTask):
         self.state = json.loads(self.state_path.read_text(encoding='utf-8')) if self.state_path.exists() else {}
         if not isinstance(self.state, dict):
             raise EventUIError('联动消费状态文件无效')
+        if self.cancellation_path.exists() and self.state.get('pending_exchange'):
+            cancelled = json.loads(self.cancellation_path.read_text(encoding='utf-8'))
+            created = self.state['pending_exchange'].get('created_at', self.state_path.stat().st_mtime)
+            if (isinstance(cancelled, dict) and type(cancelled.get('observed_at')) in (int, float)
+                    and type(created) in (int, float) and cancelled['observed_at'] >= created):
+                self._cancelled_exchange_confirmation = cancelled
         if self.state.get('pending_claim') and getattr(self, '_claim_receipt', None):
             self.state['pending_claim']['receipt'] = self._claim_receipt
         if self.state.get('pending_exchange') and getattr(self, '_exchange_receipt', None):
@@ -326,6 +377,21 @@ class CollaborationRaid(BaseTask):
             self.save()
         if plan := self.state.get('pending_exchange'):
             page = self.open_exchange()
+            cancelled = getattr(self, '_cancelled_exchange_confirmation', {})
+            if (cancelled.get('quantity') == plan.get('quantity') and not plan.get('receipt')
+                    and not plan.get('final_submitted')
+                    and type(plan.get('before')) is int and type(plan.get('after')) is int
+                    and plan['before']-plan['after'] == plan['quantity']
+                    and field.exchange_balance(self.ui, page) == plan.get('before')):
+                self.report['history'].append(dict(plan, outcome='cancelled_before_submission',
+                                                   confirmation=cancelled['evidence']))
+                self.state.pop('pending_exchange')
+                self.save()
+                atomic_json(self.cancellation_path, {})
+                if any(k.startswith('pending_') for k in self.state):
+                    raise EventUIError('有上次未核对的联动操作，未追加消费')
+                self.ui.click((30, 30))
+                return self.wait(field.home, '未提交兑换取消后返回活动')
             if plan.get('receipt') and field.exchange_balance(self.ui, page) != plan.get('after'):
                 page = self.wait(lambda f: field.exchange_balance(self.ui, f) == plan.get('after'),
                                  '兑换后余额刷新', timeout=10)
@@ -578,7 +644,7 @@ class CollaborationRaid(BaseTask):
             if self.skip_receipt(s):
                 plan.setdefault('receipts', []).append(str(self.ui.save('sweep_receipt_'+str(len(plan.get('receipts', []))), s)))
                 self.save()
-                self.click(s, '关闭|确认|下一步', (250, 335, 945, 525))
+                self.click(s, '关闭|确认|下一步|跳过完毕', (250, 335, 945, 525))
             elif field.detail(s):
                 self.click(s, '取消', (590, 440, 750, 500))
             elif field.home(s):
@@ -664,7 +730,7 @@ class CollaborationRaid(BaseTask):
                     raise EventUIError('等待兑换按钮时余额变化；未追加兑换')
                 action = field.exchange_action(s, before)
             button, amount = action
-            self.state['pending_exchange'] = dict(before=before, after=before-amount, quantity=amount,
+            self.state['pending_exchange'] = dict(before=before, after=before-amount, quantity=amount, created_at=time.time(),
                 before_evidence=str(self.ui.save('exchange_before', s)))
             self.save()
             self.check_deadline()
@@ -680,6 +746,19 @@ class CollaborationRaid(BaseTask):
         plan = self.state['pending_exchange']
         for _ in range(45):
             s = self.capture()
+            if field.confident(s, '一键交换确认', (300, 60, 660, 115)):
+                confirmation = field.exchange_confirmation(self.ui, s)
+                if confirmation is None:
+                    time.sleep(.5)
+                    continue
+                if (confirmation['quantity'] != plan['quantity'] or confirmation['resets'] != 0
+                        or plan.get('final_submitted')):
+                    raise EventUIError('一键兑换数量、奖池重置或提交状态不符；未确认兑换')
+                plan.update(final_submitted=True, confirmation=str(self.ui.save('exchange_confirmation', s)))
+                self.save()
+                self.check_deadline()
+                self.ui.click(confirmation['button'])
+                continue
             if self.combat_pre_dialog(s):
                 continue
             if s.find('报酬确认|交换结果|一键交换完毕|获得报酬', (200, 0, 780, 250)):

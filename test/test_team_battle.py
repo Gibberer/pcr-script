@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta, timezone
 import sqlite3
+from tempfile import TemporaryDirectory
 import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -9,6 +10,7 @@ import numpy as np
 from pcrscript.game_ui.screen import EventScreen, EventUI, EventUIError, TextBox
 from pcrscript.game_ui.team_battle import Boss, can_repeat, map_bosses, meets_reference, priority, recommendation_damage, recommendation_time, result_damage
 from pcrscript.news import _query_clan_battle
+from pcrscript.tasks.base import Event
 from pcrscript.tasks.task_team_battle import BossChanged, ORPHAN_EXTENSION, TaskDeadline, TeamBattle, validate_options
 
 
@@ -17,6 +19,119 @@ def box(text, x, y):
 
 
 class TeamBattleTests(unittest.TestCase):
+    def test_reward_refresh_discards_partially_read_boss_list(self):
+        image = np.full((540, 960, 3), 240, np.uint8)
+        def mapped(lap):
+            return EventScreen(image, [box('团队战', 105, 35), box('剩余挑战次数', 350, 406),
+                                       box('讨伐信息', 240, 450), box(f'第{lap}轮', 125, 278)])
+        task = TeamBattle.__new__(TeamBattle)
+        fresh = Boss(0, 2, 125, 42, 42, '首领')
+        task.ui = Mock()
+        task.map = Mock(return_value=mapped(2))
+        task.open_boss = Mock(side_effect=[BossChanged('行会报酬刷新'), (fresh, object())])
+        self.assertEqual(task.all_bosses(mapped(1)), [fresh])
+        self.assertEqual([c.args[0].lap for c in task.open_boss.call_args_list], [1, 2])
+        task.ui.expect_click.assert_called_once_with('取消', (560, 425, 755, 505), exact=True)
+
+    def test_defeated_target_notice_recovers_to_map_without_battle_clicks(self):
+        image = np.full((540, 960, 3), 240, np.uint8)
+        notice = EventScreen(image, [box('错误提示', 480, 147),
+                                    box('该怪物已被讨伐。', 480, 267), box('确认', 480, 372)])
+        listed = EventScreen(image, [box('推荐编组', 480, 42), box('高级', 622, 165)])
+        detail = EventScreen(image, [box('魔物详情', 105, 42)])
+        mapped = EventScreen(image, [box('团队战', 105, 35), box('剩余挑战次数', 350, 406),
+                                    box('讨伐信息', 240, 450)])
+        task = TeamBattle.__new__(TeamBattle)
+        task.ui = Mock()
+        task.ui.capture.side_effect = [listed, detail, mapped]
+        self.assertTrue(task.recover_defeated_boss(notice))
+        task.ui.click.assert_called_once_with(notice.items[2])
+        self.assertEqual([c.args[0] for c in task.ui.expect_click.call_args_list], ['关闭', '取消'])
+        task.ui.reset_mock()
+        task.ui.capture.side_effect = [notice, listed, detail, mapped, mapped]
+        task.check_deadline = Mock()
+        self.assertIs(task.enter(), mapped)
+        task.ui.click.assert_called_once_with(notice.items[2])
+        task.ui.reset_mock()
+        notice.items[1].text = '未知错误'
+        self.assertFalse(task.recover_defeated_boss(notice))
+        task.ui.click.assert_not_called()
+
+    def test_known_incomplete_real_formation_returns_without_starting_battle(self):
+        image = np.zeros((540, 960, 3), np.uint8)
+        missing = EventScreen(image, [box('队伍编组', 480, 42),
+                                     box('编组成员不足5名角色。', 740, 415), box('取消', 710, 453)])
+        task = TeamBattle.__new__(TeamBattle)
+        task.ui = Mock()
+        task.report = {'simulations': [{}]}
+        task.formation = Mock()
+        task.formation.occupied_slots.return_value = [0, 1, 2, 3]
+        task.map = Mock()
+        self.assertTrue(task.reject_incomplete_real_team(missing))
+        self.assertEqual([c.args[0] for c in task.ui.expect_click.call_args_list], ['取消', '取消'])
+        task.ui.click.assert_not_called()
+        task.map.assert_called_once()
+        task.ui.reset_mock()
+        task.formation.occupied_slots.return_value = list(range(5))
+        self.assertFalse(task.reject_incomplete_real_team(missing))
+        task.ui.expect_click.assert_not_called()
+        # The unformed slot can be red enough to pass the saturation heuristic.
+        missing.items.append(box('未编组', 96, 452))
+        self.assertTrue(task.reject_incomplete_real_team(missing))
+        task.ui.reset_mock()
+        task.formation.occupied_slots.return_value = [0, 1, 2, 3]
+        unknown = EventScreen(image, [box('队伍编组', 480, 42), box('未知错误', 740, 415)])
+        self.assertFalse(task.reject_incomplete_real_team(unknown))
+        task.ui.expect_click.assert_not_called()
+        task.formation.occupied_slots.return_value = []
+        empty = EventScreen(image, [box('队伍编组', 480, 42),
+                                   box('总战力', 440, 389), box('0', 578, 389)])
+        task.ui.number.return_value = 0
+        self.assertTrue(task.reject_incomplete_real_team(empty))
+
+    def test_restart_restores_same_boss_preference_only_within_device_event_and_day(self):
+        with TemporaryDirectory() as folder:
+            event = Event(100, 1_000_000, '团队战')
+            def task(device='synthetic', event=event, now=200_000):
+                value = TeamBattle.__new__(TeamBattle)
+                value.options = {'state_dir': folder}
+                value.driver = SimpleNamespace(device_name=device)
+                value.extension_target = None
+                with patch('pcrscript.tasks.task_team_battle.time.time', return_value=now):
+                    value.load_extension_target(event)
+                return value
+            first = task()
+            first.remember_extension_target(Boss(0, 1, 125, 42, 42, '首领甲'))
+            restored = task()
+            same = Boss(0, 2, 125, 42, 42, '首领甲')
+            older = Boss(1, 1, 290, 42, 42, '首领乙')
+            self.assertEqual(restored.extension_candidates([older, same]), [same, older])
+            self.assertIsNone(task(device='other').extension_target)
+            self.assertIsNone(task(event=Event(101, 1_000_000, '团队战')).extension_target)
+            self.assertIsNone(task(now=200_000+86400).extension_target)
+            restored.remember_extension_target()
+            self.assertIsNone(task().extension_target)
+            self.assertEqual(task().extension_candidates([same, older]), [older, same])
+
+    def test_map_includes_high_round_badges_but_not_stage_header(self):
+        items = [box('团队战', 105, 35), box('剩余挑战次数', 350, 406),
+                 box('讨伐信息', 240, 450), box('第1轮', 280, 60)]
+        items += [box('第1轮', x, y) for x, y in
+                  zip((125, 290, 480, 625, 840), (278, 339, 256, 347, 241))]
+        bosses = map_bosses(EventScreen(np.zeros((540, 960, 3), np.uint8), items))
+        self.assertEqual(sorted(b.lane for b in bosses), list(range(5)))
+
+    def test_challenge_count_never_treats_unknown_or_overflow_as_available(self):
+        task = TeamBattle.__new__(TeamBattle)
+        task.ui = Mock()
+        for value in (None, -1, 4, 10):
+            task.ui.number.return_value = value
+            with self.assertRaisesRegex(EventUIError, '次数无法确认'):
+                task.count(Mock(), (557, 394, 587, 414))
+        for value in (0, 1, 2, 3):
+            task.ui.number.return_value = value
+            self.assertEqual(task.count(Mock(), (557, 394, 587, 414)), value)
+
     def test_lanes_and_repeat_budget(self):
         self.assertEqual(validate_options({})['timeout'], 3600)
         items = [box('团队战', 105, 35), box('剩余挑战次数', 360, 400),
@@ -43,6 +158,8 @@ class TeamBattleTests(unittest.TestCase):
         self.assertEqual(recommendation_damage(screen, button.center[1]), 42_000_000)
         self.assertTrue(TeamBattle.recommendation_owned(screen, button))
         restricted = EventScreen(image, items+[box('限制实战使用', 310, 256)])
+        self.assertFalse(TeamBattle.recommendation_owned(restricted, button))
+        restricted.items[-1].text = '限制实战'
         self.assertFalse(TeamBattle.recommendation_owned(restricted, button))
         image[220:266, 380:424] = (180, 180, 180)
         self.assertFalse(TeamBattle.recommendation_owned(EventScreen(image, items), button))
@@ -279,6 +396,23 @@ class TeamBattleTests(unittest.TestCase):
         self.assertEqual(row['cp_after'], 2)
         self.assertEqual(task.battle.call_count, 2)
         self.assertEqual(task.battle.call_args_list[0].kwargs['reference_damage'], 30_000_000)
+        # A settled real result must survive a later counter OCR failure.
+        task.report = {'simulations': [], 'battles': [], 'attempts': 0}
+        task.battle.reset_mock(side_effect=True)
+        task.battle.side_effect = [
+            {'win': False, 'reference_met': True, 'actual_damage': 35_671_598},
+            {'win': False, 'reference_met': True, 'actual_damage': 34_000_000},
+        ]
+        saved_results = []
+        task.save_report.side_effect = lambda: saved_results.append(
+            task.report.get('in_flight', {}).get('result'))
+        task.counts.side_effect = EventUIError('团队战次数无法确认')
+        with self.assertRaisesRegex(EventUIError, '次数无法确认'):
+            task.try_boss(boss, 3, 0)
+        self.assertEqual(task.report['in_flight']['result']['actual_damage'], 34_000_000)
+        self.assertIn(task.report['in_flight']['result'], saved_results)
+        self.assertEqual(task.battle.call_count, 2)
+        self.assertEqual(task.report['battles'], [])
 
     def test_damage_target_missed_never_starts_real_attack(self):
         task = TeamBattle.__new__(TeamBattle)
@@ -523,6 +657,8 @@ class TeamBattleTests(unittest.TestCase):
         key = task.team(screen)
         self.assertEqual(task.teams[key]['labels'], (None,)*5)
         task.ui.read_region.assert_not_called()
+        screen.items.append(box('未编组', 96, 452))
+        self.assertIsNone(task.team(screen))
 
     def test_spent_member_match_uses_portraits_when_names_are_missing(self):
         task = TeamBattle.__new__(TeamBattle)

@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 from hashlib import sha256
+from datetime import datetime
+from pathlib import Path
 
 import cv2 as cv
 import numpy as np
@@ -11,6 +13,8 @@ from .options import validated_options
 from .event_formation import EventFormation
 from .registry import register
 from ..game_ui.avatars import feature
+from ..game_ui.avatar_assets import read_json
+from ..constants import SERVER_TIMEZONE
 from ..game_ui.screen import EventUI, EventUIError, normalized
 from ..game_ui.special_equipment import auto_equip_special
 from ..game_ui.team_battle import Boss, boss_detail, can_repeat, map_bosses, map_ready, meets_reference, parse_remaining_time, priority, recommendation_damage, recommendation_time, result_damage
@@ -36,7 +40,7 @@ ORPHAN_EXTENSION = '__visible_extension_team__'
 MAX_RECOMMENDATION_SWIPES = 120
 
 
-@register('team_battle', requires_home=True)
+@register('team_battle')
 class TeamBattle(TimeLimitTask):
     config_section = 'TeamBattle'
 
@@ -73,6 +77,34 @@ class TeamBattle(TimeLimitTask):
         self.tried_teams = set()
         self.spent = set()
         self.carry = None
+        self.hint_path = None
+        self.extension_target = None
+
+    def load_extension_target(self, event):
+        # This is only an ordering hint; never restore a simulated result or
+        # authorize an attack from disk. Scope it to the server's 05:00 day.
+        day = datetime.fromtimestamp(time.time()-5*3600, SERVER_TIMEZONE).date().isoformat()
+        account = self.options.get('account_key', self.driver.device_name)
+        key = sha256(f'{account}|{event.startTimestamp}|{event.endTimestamp}|{day}'.encode()).hexdigest()[:24]
+        self.hint_path = Path(self.options.get('state_dir', 'cache/daily/team_battle_state'))/(key+'.json')
+        hint = read_json(self.hint_path)
+        if (isinstance(hint, dict) and type(hint.get('lane')) is int and 0 <= hint['lane'] < 5
+                and type(hint.get('lap')) is int and hint['lap'] > 0):
+            self.extension_target = hint
+
+    def remember_extension_target(self, boss=None):
+        self.extension_target = (dict(lane=boss.lane, lap=boss.lap, name=boss.name)
+                                 if boss is not None else None)
+        path = getattr(self, 'hint_path', None)
+        if path is not None:
+            atomic_json(path, self.extension_target or {})
+
+    def extension_candidates(self, bosses, target=None):
+        target = target or getattr(self, 'extension_target', None) or {}
+        minimum = min(b.lap for b in bosses)
+        return sorted((b for b in bosses if b.full),
+                      key=lambda b: (b.lane == target.get('lane') and b.lap > target.get('lap', 0),
+                                     priority(b, minimum)), reverse=True)
 
     def save_report(self):
         atomic_json(self.ui.output/'report.json', self.report)
@@ -86,6 +118,8 @@ class TeamBattle(TimeLimitTask):
 
     def popup(self, screen) -> bool:
         """Dismiss only a visible modal button, including the two first-entry dialogs."""
+        if self.recover_defeated_boss(screen):
+            return True
         if screen.find('报酬确认', (300, 0, 655, 85), exact=True):
             button = screen.find('确认', (365, 440, 590, 520), exact=True)
             if button:
@@ -117,6 +151,26 @@ class TeamBattle(TimeLimitTask):
                 return True
         return False
 
+    def recover_defeated_boss(self, screen):
+        title = screen.find('错误提示', (300, 115, 660, 175), exact=True)
+        body = screen.find('该怪物已被讨伐[。.]?', (300, 235, 660, 295), exact=True)
+        confirm = screen.find('确认', (370, 340, 590, 405), exact=True)
+        if not (title and body and confirm and min(title.score, body.score, confirm.score) >= .95):
+            return False
+        self.ui.save('team_battle_boss_defeated', screen)
+        self.ui.click(confirm)
+        for _ in range(20):
+            current = self.ui.capture()
+            if self.map_clear(current):
+                return True
+            if self.recommendation_list(current):
+                self.ui.expect_click('关闭', (375, 445, 585, 510), exact=True)
+            elif current.find('魔物详情', (25, 15, 245, 78), exact=True):
+                self.ui.expect_click('取消', (560, 425, 755, 505), exact=True)
+            else:
+                time.sleep(.5)
+        raise EventUIError('首领已被讨伐提示关闭后未返回地图')
+
     def enter(self):
         for _ in range(50):
             self.check_deadline()
@@ -125,7 +179,13 @@ class TeamBattle(TimeLimitTask):
                 continue
             if self.map_clear(screen):
                 return screen
-            if screen.find('冒险', (30, 0, 175, 65), exact=True):
+            if self.recommendation_list(screen):
+                self.ui.expect_click('关闭', (375, 445, 585, 510), exact=True)
+            elif self.formation_ready(screen):
+                self.ui.expect_click('取消', (630, 425, 775, 500), exact=True)
+            elif screen.find('魔物详情', (25, 15, 245, 78), exact=True):
+                self.ui.expect_click('取消', (560, 425, 755, 505), exact=True)
+            elif screen.find('冒险', (30, 0, 175, 65), exact=True):
                 entry = screen.find('团队战', (790, 210, 950, 355), exact=True)
                 if not entry:
                     return None
@@ -149,12 +209,14 @@ class TeamBattle(TimeLimitTask):
 
     def count(self, screen, roi):
         value = self.ui.number(screen, roi)
-        if value is None or value < 0:
+        if value is None or not 0 <= value <= 3:
             raise EventUIError('团队战次数无法确认')
         return value
 
     def counts(self, screen):
-        return self.count(screen, (397, 391, 431, 424)), self.count(screen, (558, 393, 581, 421))
+        # Exclude the label edge and dotted underline from both numeric crops;
+        # they can turn a visible 0 or 1 into a low-confidence glyph.
+        return self.count(screen, (408, 396, 430, 415)), self.count(screen, (562, 396, 583, 415))
 
     def open_boss(self, boss: Boss):
         screen = self.map()
@@ -162,17 +224,26 @@ class TeamBattle(TimeLimitTask):
         if visible is None:
             raise BossChanged('目标首领已变化，停止使用旧模拟战结果')
         self.ui.click((visible.x, 270))
-        screen = self.ui.wait(lambda s: s.find('魔物详情', (25, 15, 245, 78), exact=True), '团队战魔物详情')
+        def refresh_after_popup(s):
+            if self.popup(s):
+                raise BossChanged('打开首领期间行会奖励或阶段刷新，重新读取地图')
+        screen = self.ui.wait(lambda s: s.find('魔物详情', (25, 15, 245, 78), exact=True),
+                              '团队战魔物详情', handle=refresh_after_popup)
         return boss_detail(screen, visible), screen
 
     def all_bosses(self, screen):
-        result = []
-        for boss in map_bosses(screen):
-            detail, _ = self.open_boss(boss)
-            result.append(detail)
-            self.ui.expect_click('取消', (560, 425, 755, 505), exact=True)
-            self.map()
-        return result
+        for _ in range(3):
+            result = []
+            try:
+                for boss in map_bosses(screen):
+                    detail, _ = self.open_boss(boss)
+                    result.append(detail)
+                    self.ui.expect_click('取消', (560, 425, 755, 505), exact=True)
+                    self.map()
+                return result
+            except BossChanged:
+                screen = self.map()
+        raise EventUIError('首领列表连续刷新，未能取得一致的地图状态')
 
     def wait_bosses(self, screen):
         bosses = self.all_bosses(screen)
@@ -208,7 +279,8 @@ class TeamBattle(TimeLimitTask):
     def team(self, screen):
         if not screen.find('队伍编组', (300, 0, 650, 70), exact=True):
             raise EventUIError('推荐队伍未进入编队页面')
-        if len(self.formation.occupied_slots(screen)) != 5:
+        if (screen.find('未编组', (35, 420, 590, 490), exact=True)
+                or len(self.formation.occupied_slots(screen)) != 5):
             return None
         # The in-game recommendation selects the members. The five observed
         # portraits bind that selection to simulation/real formation; OCR names
@@ -259,7 +331,7 @@ class TeamBattle(TimeLimitTask):
         center = button.center[1]-33
         if center-24 < 185 or center+24 > 421:
             return False
-        if screen.find('未持有|限制实战使用|已参加团队战', (175, center-50, 625, center+50)):
+        if screen.find('未持有|限制实战|已参加团队', (175, center-50, 625, center+50)):
             return False
         for x in (224, 312, 402, 491, 581):
             patch = cv.cvtColor(screen.image[center-24:center+24, x-22:x+22], cv.COLOR_BGR2HSV)
@@ -272,7 +344,7 @@ class TeamBattle(TimeLimitTask):
         center = button.center[1]-33
         roi = (175, center-35, 625, center+35)
         enlarged = self.ui.read_region(screen, roi)
-        return bool(enlarged.find('未持有|限制实战使用|已参加团队战', roi))
+        return bool(enlarged.find('未持有|限制实战|已参加团队', roi))
 
     @staticmethod
     def recommendation_list(screen):
@@ -474,6 +546,23 @@ class TeamBattle(TimeLimitTask):
                     and not screen.find('魔物详情', (25, 15, 245, 78), exact=True)
                     and not screen.find('确认使用延长时间', (300, 0, 650, 75), exact=True))
 
+    def reject_incomplete_real_team(self, screen):
+        occupied = len(self.formation.occupied_slots(screen))
+        blank = screen.find('未编组', (35, 420, 590, 490), exact=True)
+        missing = screen.find('编组成员不足5名角色[。.]?', (580, 395, 930, 435), exact=True)
+        empty = (occupied == 0 and screen.find('总战力', (390, 370, 485, 410), exact=True)
+                 and self.ui.number(screen, (565, 378, 588, 401)) == 0)
+        if not self.formation_ready(screen) or not (empty or ((blank or missing) and (occupied < 5 or blank))):
+            return False
+        self.ui.save('team_battle_incomplete_real_team_'+str(len(self.report['simulations'])), screen)
+        self.log('模拟队伍在实战编队缺员，未开战；跳过该队伍')
+        self.ui.expect_click('取消', (630, 425, 775, 500), exact=True)
+        self.ui.wait(lambda s: s.find('魔物详情', (25, 15, 245, 78), exact=True),
+                     '缺员编队返回首领详情')
+        self.ui.expect_click('取消', (560, 425, 755, 505), exact=True)
+        self.map()
+        return True
+
     def open_formation(self, *, use_extension: bool = False, returned_time: int | None = None):
         self.ui.expect_click('挑战', (755, 420, 920, 500), exact=True)
         screen = self.ui.wait(lambda s: self.formation_ready(s)
@@ -522,6 +611,8 @@ class TeamBattle(TimeLimitTask):
         started = False
         while time.monotonic() < deadline:
             screen = self.ui.capture()
+            if simulate and self.recover_defeated_boss(screen):
+                raise BossChanged('模拟目标已被讨伐，刷新地图并丢弃旧队伍结果')
             text = normalized(screen.text())
             if screen.find('团队战开始确认', (300, 0, 650, 75), exact=True):
                 if simulate or not use_extension or not screen.find('要使用返还时间进行团队战吗', (285, 65, 690, 115)):
@@ -695,6 +786,8 @@ class TeamBattle(TimeLimitTask):
                 time.sleep(.6)
                 current = self.ui.capture()
             else:
+                if wanted is None and self.reject_incomplete_real_team(current):
+                    continue
                 raise EventUIError('实战未保留模拟战的五人编队，停止开战')
             if wanted is None and self.used_member_marked(current):
                 raise EventUIError('实战编队包含已参加团队战的角色，停止开战')
@@ -708,8 +801,14 @@ class TeamBattle(TimeLimitTask):
                                             team_key=names, team=self.teams[names]['labels'], cp_before=cp_before)
             self.save_report()
             self.report_progress(f'团队战 · {boss.name} · {mode}实战')
+            if wanted is None:
+                self.remember_extension_target(boss)
             real = self.battle(False, names, use_extension=wanted is not None,
                                reference_damage=reference, boss_hp=boss.current_hp)
+            # Preserve the settled result even if the following small map
+            # counters cannot yet be read. Never replay that submitted attack.
+            self.report['in_flight']['result'] = real
+            self.save_report()
             after = self.map()
             cp_after, extension_after = self.counts(after)
             if wanted is None and cp_after != cp_before-1:
@@ -738,6 +837,8 @@ class TeamBattle(TimeLimitTask):
             if not self.event_valid(event):
                 self.report['status'] = 'unavailable'
                 return self.report
+            if isinstance(event, Event):
+                self.load_extension_target(event)
             screen = self.enter()
             if screen is None:
                 self.report['status'] = 'unavailable'
@@ -772,6 +873,8 @@ class TeamBattle(TimeLimitTask):
                 self.report['remaining_normal'] = cp
                 self.report['remaining_extension'] = extension
                 remaining_counts = (cp, extension)
+                if extension == 0:
+                    self.remember_extension_target()
                 if cp == 0 and extension == 0:
                     break
                 if self.report['attempts'] >= self.options['max_real_attacks']*2:
@@ -787,10 +890,7 @@ class TeamBattle(TimeLimitTask):
                 if cp == 0 and extension == 0:
                     break
                 if self.carry:
-                    candidates = sorted((b for b in bosses if b.full),
-                                        key=lambda b:(b.lane == self.carry['lane']
-                                                      and b.lap == self.carry['lap']+1,
-                                                      priority(b, min(v.lap for v in bosses))), reverse=True)
+                    candidates = self.extension_candidates(bosses, self.carry)
                     changed = False
                     for boss in candidates:
                         if extension == 0:
@@ -824,8 +924,7 @@ class TeamBattle(TimeLimitTask):
                         break
                     changed = False
                     selected = None
-                    for boss in sorted((b for b in bosses if b.full),
-                                       key=lambda b: priority(b, min(v.lap for v in bosses)), reverse=True):
+                    for boss in self.extension_candidates(bosses):
                         try:
                             selected = self.try_boss(boss, cp, extension, ORPHAN_EXTENSION)
                         except BossChanged:

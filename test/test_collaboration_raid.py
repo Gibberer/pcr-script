@@ -53,6 +53,12 @@ def exchange(balance=101):
                   ('1次交换', 610, 365), ('使用1张', 610, 398), blue=('100次交换', '1次交换'))
 
 
+def exchange_confirmation(quantity=350, resets=0):
+    return screen(('一键交换确认', 480, 88), (f'要批量兑换{quantity}张讨伐奖励券吗？', 480, 164),
+                  ('即将重置的BOX数', 375, 228), (str(resets), 613, 228),
+                  ('取消', 370, 434), ('交换', 590, 434), blue=('交换',))
+
+
 def difficulty_menu(selected='困难'):
     x, y = {'普通': (279, 229), '困难': (499, 229), '高难': (279, 300)}[selected]
     return screen(('难度变更', 480, 147), ('取消', 370, 372), ('确认', 590, 372),
@@ -217,9 +223,68 @@ def fake_clock():
 
 
 class RaidFlowTests(TaskReplayMixin, TestCase):
+    def test_collective_reward_requires_all_three_matching_icon_quantities(self):
+        reward = screen(('获得了佐贺偶像是传奇联动纪念10次扭蛋券×1', 480, 360),
+                        ('超级不得了呢☆×1', 480, 384), ('宝石×200', 480, 407),
+                        ('x1', 343, 294), ('x1', 538, 294), ('x200', 715, 294), ('挑战', 745, 406))
+        self.frames([reward, home()])
+        self.assertTrue(field.home(self.task.enter()))
+        self.assertEqual(self.clicks(), ['获得了佐贺偶像是传奇联动纪念10次扭蛋券×1'])
+        reward.items[5].text = 'x100'
+        self.assertIsNone(field.collective_reward(reward))
+
+    def test_one_key_exchange_checks_quantity_and_forbids_implicit_pool_reset(self):
+        self.task.state['pending_exchange'] = dict(before=350, after=0, quantity=350)
+        self.frames([exchange_confirmation(), screen(('交换结果', 480, 42), ('关闭', 480, 480)), exchange(0)])
+        self.task.settle_exchange()
+        self.assertEqual(self.clicks(), ['交换', '关闭'])
+        self.assertEqual(self.task.report['remaining_reward_tickets'], 0)
+        self.assertNotIn('pending_exchange', self.task.state)
+        for quantity, resets, submitted in ((349, 0, False), (350, 1, False), (350, 0, True)):
+            self.task.ui.click.reset_mock()
+            self.task.state['pending_exchange'] = dict(before=350, after=0, quantity=350, final_submitted=submitted)
+            self.frames([exchange_confirmation(quantity, resets)])
+            with self.assertRaisesRegex(EventUIError, '未确认兑换'):
+                self.task.settle_exchange()
+            self.assertEqual(self.clicks(), [])
+            self.assertIn('pending_exchange', self.task.state)
+
+    def test_visible_unsubmitted_exchange_can_cancel_and_reconcile_unchanged_balance(self):
+        self.frames([exchange_confirmation(), exchange(350), home(0)])
+        self.assertTrue(field.home(self.task.enter()))
+        self.assertEqual(self.clicks(), ['取消', (30, 30)])
+        self.task.state['pending_exchange'] = dict(before=350, after=0, quantity=350)
+        self.task.open_exchange = Mock(return_value=exchange(350))
+        self.frames([home(0)])
+        self.task.reconcile_pending(home(0), missions())
+        self.assertNotIn('pending_exchange', self.task.state)
+        self.assertEqual(self.task.report['history'][-1]['outcome'], 'cancelled_before_submission')
+
+    def test_daily_login_receipt_waits_for_body_and_close_over_home(self):
+        heading = ('获得活动登录奖励', 480, 147)
+        body = ('已领取以下道具作为登录奖励。', 480, 188)
+        partial = home()
+        partial.items += screen(heading).items
+        ready = home()
+        ready.items += screen(heading, body, ('讨伐券×5', 410, 237), ('关闭', 480, 372)).items
+        self.frames([partial, ready, home()])
+        with patch('pcrscript.tasks.task_collaboration_raid.time.sleep'):
+            self.assertTrue(field.home(self.task.enter()))
+        self.assertEqual(self.clicks(), ['关闭'])
+        self.task.ui.save.assert_called_with('daily_login_reward', ready)
+
+    def test_daily_login_close_requires_the_receipt_body(self):
+        incomplete = screen(('获得活动登录奖励', 480, 147), ('关闭', 480, 372))
+        with patch('pcrscript.tasks.task_collaboration_raid.time.sleep'):
+            self.assertTrue(self.task.combat_pre_dialog(incomplete))
+        self.assertEqual(self.clicks(), [])
+        unrelated = screen(('未知奖励', 480, 147), ('关闭', 480, 372))
+        self.assertFalse(self.task.combat_pre_dialog(unrelated))
+        self.assertEqual(self.clicks(), [])
+
     def test_automatic_gem_reward_dismisses_only_matching_amounts(self):
         reward = screen(('获得了宝石×450', 480, 360), ('x450', 518, 294), ('挑战', 745, 406))
-        self.frames([reward, home()])
+        self.frames([reward, screen(('冒险', 540, 525)), home()])
         self.assertTrue(field.home(self.task.enter()))
         self.assertEqual(self.clicks(), ['获得了宝石×450'])
         reward.items[1].text = 'x400'
@@ -232,6 +297,11 @@ class RaidFlowTests(TaskReplayMixin, TestCase):
         self.assertEqual(self.clicks(), ['关闭'])
         notice.items[1].text = '未知要求'
         self.assertIsNone(field.unlock_dialog(notice))
+        story = screen(('剧情解锁', 480, 147), ('Re:Start SAGA', 490, 260),
+                       ('已解锁。', 455, 280), ('关闭', 480, 372))
+        self.assertIsNotNone(field.unlock_dialog(story))
+        story.items[1].text = '另一活动'
+        self.assertIsNone(field.unlock_dialog(story))
 
     def test_difficulty_switch_confirms_only_after_radio_selection(self):
         hard = detail()
@@ -276,6 +346,17 @@ class RaidFlowTests(TaskReplayMixin, TestCase):
         self.assertNotIn('pending_spend', self.task.state)
         self.assertEqual(self.clicks(), ['使用5张', '确认', '关闭'])
 
+    def test_skip_complete_animation_button_only_settles_existing_spend(self):
+        self.task.report['remaining_tickets'] = 5
+        self.task.state['pending_spend'] = dict(kind='sweep', before=5, after=0, quantity=5)
+        result = screen(('扫荡结果', 480, 42), ('跳过完毕', 478, 478))
+        self.frames([result, home(0)])
+        self.task.settle_sweep()
+        self.assertEqual(self.clicks(), ['跳过完毕'])
+        self.assertEqual(self.task.report['spent'], 5)
+        self.assertEqual(self.task.report['remaining_tickets'], 0)
+        self.assertNotIn('pending_spend', self.task.state)
+
     def test_wrong_cost_never_confirms_and_uncertain_balance_never_replays(self):
         self.task.report['remaining_tickets'] = 5
         self.frames([confirmation(4)])
@@ -292,7 +373,7 @@ class RaidFlowTests(TaskReplayMixin, TestCase):
     def setUp(self):
         self.folder = TemporaryDirectory()
         self.addCleanup(self.folder.cleanup)
-        robot = Mock(driver=Mock(device_name='synthetic'), task_config=dict(CollaborationRaid=dict(output=self.folder.name)), _task_output=None)
+        robot = Mock(driver=Mock(device_name='synthetic'), task_config=dict(CollaborationRaid=dict(output=self.folder.name, state_dir=self.folder.name)), _task_output=None)
         self.task = CollaborationRaid(robot)
         self.task.ui = replay_ui(self.folder.name)
         self.task.ui.number.side_effect = lambda s, roi: s.number(roi)

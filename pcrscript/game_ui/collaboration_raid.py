@@ -151,6 +151,18 @@ def exchange_receipt_close(s):
     return confident(s, '取消', (250, 390, 480, 470)) or confident(s, '确认', (370, 395, 590, 465))
 
 
+def exchange_confirmation(ui, s):
+    if not confident(s, '一键交换确认', (300, 60, 660, 115)):
+        return None
+    cost = confident(s, r'要批量兑换\d+张讨伐奖励券吗[？?]', (300, 135, 670, 190))
+    label = confident(s, '即将重置的BOX数', (280, 205, 485, 245))
+    button = confident(s, '交换', (480, 400, 710, 465))
+    resets = ui.number(s, (590, 210, 635, 245)) if label else None
+    if not cost or resets is None or button is None or not s.blue_button(button):
+        return None
+    return dict(quantity=int(re.search(r'\d+', cost.text)[0]), resets=resets, button=button)
+
+
 def exchange_action(s, balance):
     if not exchange(s) or balance < 1:
         return None
@@ -199,6 +211,10 @@ def selected_difficulty(s, name):
 
 
 def unlock_dialog(s):
+    if (confident(s, '剧情解锁', (300, 120, 660, 170))
+            and confident(s, 'Re:StartSAGA', (415, 245, 700, 300))
+            and confident(s, '已解锁[。.]?', (415, 245, 700, 300))):
+        return confident(s, '关闭', (370, 340, 590, 400))
     for name in DIFFICULTIES:
         if (confident(s, name+'解锁', (300, 120, 660, 170))
                 and confident(s, name+'已解锁[。.]?', (300, 240, 660, 300))):
@@ -212,6 +228,20 @@ def gem_reward(s):
     if (body and icon and re.search(r'\d+', body.text)[0] == re.search(r'\d+', icon.text)[0]
             and confident(s, '挑战', (650, 360, 840, 425))):
         return body
+    return None
+
+
+def collective_reward(s):
+    bodies = [confident(s, pattern, (280, 335, 700, 425)) for pattern in (
+        r'获得了佐贺偶像是传奇联动纪念10次扭蛋券[×xX]\d+',
+        r'超级不得了呢☆[×xX]\d+', r'宝石[×xX]\d+')]
+    icons = [confident(s, r'[×xX]\d+', roi) for roi in (
+        (300, 270, 375, 320), (495, 270, 570, 320), (670, 270, 765, 320))]
+    if (all(bodies) and all(icons) and confident(s, '挑战', (650, 360, 840, 425))
+            and all(re.search(r'[×xX](\d+)$', normalized(body.text))[1]
+                    == re.search(r'[×xX](\d+)$', normalized(icon.text))[1]
+                    for body, icon in zip(bodies, icons))):
+        return bodies[0]
     return None
 
 
