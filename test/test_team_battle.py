@@ -19,6 +19,32 @@ def box(text, x, y):
 
 
 class TeamBattleTests(unittest.TestCase):
+    def test_boss_scan_reuses_each_fresh_map_and_detail_observation(self):
+        image = np.full((540, 960, 3), 240, np.uint8)
+        mapped = EventScreen(image, [box('团队战', 105, 35), box('剩余挑战次数', 350, 406),
+                                    box('讨伐信息', 240, 450), box('第2轮', 125, 278),
+                                    box('第2轮', 290, 339)])
+        def detail(name):
+            return EventScreen(image, [box('魔物详情', 105, 42), box(name, 330, 282),
+                                       box('100/100', 600, 303), box('取消', 657, 460)])
+        with TemporaryDirectory() as folder:
+            task = TeamBattle.__new__(TeamBattle)
+            task.ui = EventUI(None, folder)
+            task.ui.capture = Mock(side_effect=[detail('首领甲'), mapped, detail('首领乙'), mapped])
+            task.ui.click = Mock()
+            task.ui.expect_click = Mock(side_effect=AssertionError('不应重复读取已核实的详情'))
+            task.check_deadline = Mock()
+            bosses = task.all_bosses(mapped)
+            self.assertEqual([b.name for b in bosses], ['首领甲', '首领乙'])
+            self.assertEqual(task.ui.capture.call_count, 4)
+            self.assertEqual([getattr(c.args[0], 'text', c.args[0]) for c in task.ui.click.call_args_list],
+                             [(125, 270), '取消', (290, 270), '取消'])
+            # A separately requested pre-battle detail must still get a new map.
+            task.map = Mock(return_value=mapped)
+            task.ui.capture.side_effect = [detail('首领甲')]
+            task.open_boss(bosses[0])
+            task.map.assert_called_once()
+
     def test_reward_refresh_discards_partially_read_boss_list(self):
         image = np.full((540, 960, 3), 240, np.uint8)
         def mapped(lap):
@@ -28,7 +54,7 @@ class TeamBattleTests(unittest.TestCase):
         fresh = Boss(0, 2, 125, 42, 42, '首领')
         task.ui = Mock()
         task.map = Mock(return_value=mapped(2))
-        task.open_boss = Mock(side_effect=[BossChanged('行会报酬刷新'), (fresh, object())])
+        task.open_boss = Mock(side_effect=[BossChanged('行会报酬刷新'), (fresh, EventScreen(image, []))])
         self.assertEqual(task.all_bosses(mapped(1)), [fresh])
         self.assertEqual([c.args[0].lap for c in task.open_boss.call_args_list], [1, 2])
         task.ui.expect_click.assert_called_once_with('取消', (560, 425, 755, 505), exact=True)

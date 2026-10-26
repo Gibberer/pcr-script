@@ -218,8 +218,11 @@ class TeamBattle(TimeLimitTask):
         # they can turn a visible 0 or 1 into a low-confidence glyph.
         return self.count(screen, (408, 396, 430, 415)), self.count(screen, (562, 396, 583, 415))
 
-    def open_boss(self, boss: Boss):
-        screen = self.map()
+    def open_boss(self, boss: Boss, *, screen=None):
+        if screen is None:
+            screen = self.map()
+        elif not self.map_clear(screen):
+            raise EventUIError('首领扫描起始地图未确认')
         visible = next((b for b in map_bosses(screen) if b.lane == boss.lane and b.lap == boss.lap), None)
         if visible is None:
             raise BossChanged('目标首领已变化，停止使用旧模拟战结果')
@@ -236,10 +239,16 @@ class TeamBattle(TimeLimitTask):
             result = []
             try:
                 for boss in map_bosses(screen):
-                    detail, _ = self.open_boss(boss)
+                    detail, observed = self.open_boss(boss, screen=screen)
                     result.append(detail)
-                    self.ui.expect_click('取消', (560, 425, 755, 505), exact=True)
-                    self.map()
+                    cancel = observed.find('取消', (560, 425, 755, 505), exact=True)
+                    if cancel is not None and cancel.score >= .95:
+                        self.ui.click(cancel)
+                    else:
+                        self.ui.expect_click('取消', (560, 425, 755, 505), exact=True)
+                    # Reuse only the map just observed after this navigation;
+                    # later preparation still captures and verifies fresh HP.
+                    screen = self.map()
                 return result
             except BossChanged:
                 screen = self.map()

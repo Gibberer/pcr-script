@@ -157,10 +157,34 @@ def exchange_confirmation(ui, s):
     cost = confident(s, r'要批量兑换\d+张讨伐奖励券吗[？?]', (300, 135, 670, 190))
     label = confident(s, '即将重置的BOX数', (280, 205, 485, 245))
     button = confident(s, '交换', (480, 400, 710, 465))
-    resets = ui.number(s, (590, 210, 635, 245)) if label else None
+    resets = ui.number(s, (602, 216, 625, 240)) if label else None
     if not cost or resets is None or button is None or not s.blue_button(button):
         return None
     return dict(quantity=int(re.search(r'\d+', cost.text)[0]), resets=resets, button=button)
+
+
+EXCHANGE_MODE_POINTS = {'10次': (287, 161), '100次': (504, 161), '一键交换': (725, 161)}
+
+
+def exchange_settings(s):
+    return bool(confident(s, '便利设定', (300, 15, 660, 70))
+                and all(confident(s, label, roi) for label, roi in (
+                    ('10次', (305, 135, 375, 185)), ('100次', (525, 135, 600, 185)),
+                    ('一键交换', (750, 135, 850, 185)))))
+
+
+def exchange_mode(s):
+    if not exchange_settings(s):
+        return None
+    import cv2 as cv
+    import numpy as np
+    selected = []
+    for mode, (x, y) in EXCHANGE_MODE_POINTS.items():
+        patch = cv.cvtColor(s.image[y-7:y+8, x-7:x+8], cv.COLOR_BGR2HSV)
+        if float(np.mean((patch[:, :, 0] > 90) & (patch[:, :, 0] < 130)
+                         & (patch[:, :, 1] > 80) & (patch[:, :, 2] > 140))) > .5:
+            selected.append(mode)
+    return selected[0] if len(selected) == 1 else None
 
 
 def exchange_action(s, balance):

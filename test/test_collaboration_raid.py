@@ -50,13 +50,22 @@ def confirmation(cost=5):
 def exchange(balance=101):
     return screen(('报酬交换', 140, 30), ('奖励券', 780, 444), (str(balance), 920, 444),
                   ('当前的列表', 625, 304), ('100次交换', 830, 365), ('使用100张', 830, 398),
-                  ('1次交换', 610, 365), ('使用1张', 610, 398), blue=('100次交换', '1次交换'))
+                  ('1次交换', 610, 365), ('使用1张', 610, 398), ('便利设定', 791, 47),
+                  blue=('100次交换', '1次交换'))
 
 
 def exchange_confirmation(quantity=350, resets=0):
     return screen(('一键交换确认', 480, 88), (f'要批量兑换{quantity}张讨伐奖励券吗？', 480, 164),
                   ('即将重置的BOX数', 375, 228), (str(resets), 613, 228),
                   ('取消', 370, 434), ('交换', 590, 434), blue=('交换',))
+
+
+def exchange_settings(mode='一键交换'):
+    value = screen(('便利设定', 480, 42), ('10次', 336, 161), ('100次', 558, 161),
+                   ('一键交换', 791, 161), ('关闭', 478, 478))
+    x, y = field.EXCHANGE_MODE_POINTS[mode]
+    value.image[y-7:y+8, x-7:x+8] = (230, 155, 25)
+    return value
 
 
 def difficulty_menu(selected='困难'):
@@ -240,7 +249,7 @@ class RaidFlowTests(TaskReplayMixin, TestCase):
         self.assertEqual(self.clicks(), ['交换', '关闭'])
         self.assertEqual(self.task.report['remaining_reward_tickets'], 0)
         self.assertNotIn('pending_exchange', self.task.state)
-        for quantity, resets, submitted in ((349, 0, False), (350, 1, False), (350, 0, True)):
+        for quantity, resets, submitted in ((349, 0, False), (350, 1, True), (350, 0, True)):
             self.task.ui.click.reset_mock()
             self.task.state['pending_exchange'] = dict(before=350, after=0, quantity=350, final_submitted=submitted)
             self.frames([exchange_confirmation(quantity, resets)])
@@ -248,6 +257,38 @@ class RaidFlowTests(TaskReplayMixin, TestCase):
                 self.task.settle_exchange()
             self.assertEqual(self.clicks(), [])
             self.assertIn('pending_exchange', self.task.state)
+
+    def test_cross_pool_preview_cancels_and_switches_to_audited_batches(self):
+        self.task.state['pending_exchange'] = dict(before=350, after=0, quantity=350)
+        self.frames([exchange_confirmation(resets=1), exchange(350),
+                     exchange_settings(), exchange_settings('100次'), exchange(350)])
+        self.assertTrue(field.exchange(self.task.settle_exchange()))
+        self.assertEqual(self.clicks(), ['取消', '便利设定', (504, 161), '关闭'])
+        self.assertNotIn('pending_exchange', self.task.state)
+        self.assertEqual(self.task.state['exchange_mode_restore'], '一键交换')
+        self.assertEqual(self.task.report['history'][-1]['outcome'], 'cancelled_for_batch_exchange')
+        self.task.ui.click.reset_mock()
+        self.frames([exchange_settings('100次'), exchange_settings(), exchange(0), home(0)])
+        self.task.finish_exchange(exchange(0))
+        self.assertEqual(self.clicks(), ['便利设定', (725, 161), '关闭', (30, 30)])
+        self.assertNotIn('exchange_mode_restore', self.task.state)
+        self.assertEqual(self.task.report['exchange_mode_restored'], '一键交换')
+
+    def test_cross_pool_cancel_never_releases_plan_if_balance_changed(self):
+        self.task.state['pending_exchange'] = dict(before=350, after=0, quantity=350)
+        self.frames([exchange_confirmation(resets=1), exchange(349)])
+        with self.assertRaisesRegex(EventUIError, '取消跨池兑换后余额变化'):
+            self.task.settle_exchange()
+        self.assertEqual(self.clicks(), ['取消'])
+        self.assertIn('pending_exchange', self.task.state)
+
+    def test_exchange_mode_requires_one_visible_selected_radio(self):
+        self.assertEqual(field.exchange_mode(exchange_settings()), '一键交换')
+        value = exchange_settings()
+        value.image[154:169, 497:512] = (230, 155, 25)
+        self.assertIsNone(field.exchange_mode(value))
+        value.items[0].text = '未知设置'
+        self.assertFalse(field.exchange_settings(value))
 
     def test_visible_unsubmitted_exchange_can_cancel_and_reconcile_unchanged_balance(self):
         self.frames([exchange_confirmation(), exchange(350), home(0)])

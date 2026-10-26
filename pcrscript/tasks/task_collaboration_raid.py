@@ -193,6 +193,14 @@ class CollaborationRaid(BaseTask):
             self.state['pending_exchange']['receipt'] = self._exchange_receipt
             self.save()
 
+    def cancel_exchange_confirmation(self, s, confirmation):
+        self._cancelled_exchange_confirmation = dict(
+            quantity=confirmation['quantity'], observed_at=time.time(),
+            evidence=str(self.ui.save('exchange_cancelled_confirmation', s)))
+        atomic_json(self.cancellation_path, self._cancelled_exchange_confirmation)
+        self.click(s, '取消', (260, 400, 480, 465))
+        return self.wait(field.exchange, '取消确认后返回兑换页')
+
     def combat_result_button(self, s):
         return field.confident(s, '前往联动讨伐|前往活动', (550, 420, 945, 525))
 
@@ -215,17 +223,13 @@ class CollaborationRaid(BaseTask):
             if field.confident(s, '一键交换确认', (300, 60, 660, 115)):
                 confirmation = field.exchange_confirmation(self.ui, s)
                 if confirmation is None:
-                    time.sleep(.5)
-                    continue
+                    s = self.wait(lambda f: field.exchange_confirmation(self.ui, f) is not None,
+                                  '一键兑换确认数量与重置数', timeout=10)
+                    confirmation = field.exchange_confirmation(self.ui, s)
                 # A visible, unsubmitted confirmation may be cancelled safely.
                 # Its quantity and unchanged balance must match the saved plan
                 # before that plan is released during initialization.
-                self._cancelled_exchange_confirmation = dict(
-                    quantity=confirmation['quantity'], observed_at=time.time(),
-                    evidence=str(self.ui.save('exchange_cancelled_confirmation', s)))
-                atomic_json(self.cancellation_path, self._cancelled_exchange_confirmation)
-                self.click(s, '取消', (260, 400, 480, 465))
-                self.wait(field.exchange, '取消确认后返回兑换页')
+                self.cancel_exchange_confirmation(s, confirmation)
                 self.ui.click((30, 30))
                 requested = True
                 continue
@@ -263,6 +267,9 @@ class CollaborationRaid(BaseTask):
                 requested = True
             elif field.formation(s):
                 self.click(s, '取消', (590, 410, 790, 510))
+                requested = True
+            elif field.exchange_settings(s):
+                self.click(s, '关闭', (370, 445, 590, 515))
                 requested = True
             elif field.confident(s, '报酬交换', (50, 0, 245, 65)):
                 self.ui.click((30, 30))
@@ -719,8 +726,7 @@ class CollaborationRaid(BaseTask):
                 raise EventUIError('讨伐奖励券余额未知')
             if before == 0:
                 self.report['remaining_reward_tickets'] = 0
-                self.ui.click((30, 30))
-                self.wait(field.home, '兑换后返回活动')
+                self.finish_exchange(s)
                 return
             action = field.exchange_action(s, before)
             if action is None:
@@ -737,10 +743,40 @@ class CollaborationRaid(BaseTask):
             self.ui.click(button)
             s = self.settle_exchange()
             if field.exchange_balance(self.ui, s) == 0:
-                self.ui.click((30, 30))
-                self.wait(field.home, '兑换后返回活动')
+                self.finish_exchange(s)
                 return
         raise EventUIError('达到奖励券兑换批次上限；保留余额')
+
+    def set_exchange_mode(self, s, mode, *, remember=False):
+        if mode not in field.EXCHANGE_MODE_POINTS or not field.exchange(s):
+            raise EventUIError('兑换设定或起始页面未确认')
+        before = field.exchange_balance(self.ui, s)
+        if before is None:
+            raise EventUIError('切换兑换设定前奖励券余额未知')
+        self.click(s, '便利设定', (740, 0, 840, 70))
+        s = self.wait(lambda f: field.exchange_mode(f) is not None, '兑换设定与选中状态', timeout=10)
+        original = field.exchange_mode(s)
+        if remember and 'exchange_mode_restore' not in self.state:
+            self.state['exchange_mode_restore'] = original
+            self.save()
+        if original != mode:
+            self.ui.click(field.EXCHANGE_MODE_POINTS[mode])
+            s = self.wait(lambda f: field.exchange_mode(f) == mode, '兑换设定已切换', timeout=10)
+        self.ui.save('exchange_mode_'+mode, s)
+        self.click(s, '关闭', (370, 445, 590, 515))
+        s = self.wait(field.exchange, '兑换设定返回兑换页')
+        if field.exchange_balance(self.ui, s) != before:
+            raise EventUIError('切换兑换设定时奖励券余额变化，保留现场')
+        return s
+
+    def finish_exchange(self, s):
+        if mode := self.state.get('exchange_mode_restore'):
+            s = self.set_exchange_mode(s, mode)
+            self.state.pop('exchange_mode_restore')
+            self.report['exchange_mode_restored'] = mode
+            self.save()
+        self.ui.click((30, 30))
+        self.wait(field.home, '兑换后返回活动')
 
     def settle_exchange(self):
         plan = self.state['pending_exchange']
@@ -749,11 +785,22 @@ class CollaborationRaid(BaseTask):
             if field.confident(s, '一键交换确认', (300, 60, 660, 115)):
                 confirmation = field.exchange_confirmation(self.ui, s)
                 if confirmation is None:
-                    time.sleep(.5)
-                    continue
-                if (confirmation['quantity'] != plan['quantity'] or confirmation['resets'] != 0
-                        or plan.get('final_submitted')):
+                    s = self.wait(lambda f: field.exchange_confirmation(self.ui, f) is not None,
+                                  '一键兑换确认数量与重置数', timeout=10)
+                    confirmation = field.exchange_confirmation(self.ui, s)
+                if confirmation['quantity'] != plan['quantity'] or plan.get('final_submitted'):
                     raise EventUIError('一键兑换数量、奖池重置或提交状态不符；未确认兑换')
+                if confirmation['resets'] > 0:
+                    page = self.cancel_exchange_confirmation(s, confirmation)
+                    if field.exchange_balance(self.ui, page) != plan['before']:
+                        raise EventUIError('取消跨池兑换后余额变化；保留待核对计划')
+                    self.report['history'].append(dict(plan, outcome='cancelled_for_batch_exchange'))
+                    self.state.pop('pending_exchange')
+                    self.save()
+                    atomic_json(self.cancellation_path, {})
+                    if any(k.startswith('pending_') for k in self.state):
+                        raise EventUIError('有上次未核对的联动操作，未追加消费')
+                    return self.set_exchange_mode(page, '100次', remember=True)
                 plan.update(final_submitted=True, confirmation=str(self.ui.save('exchange_confirmation', s)))
                 self.save()
                 self.check_deadline()

@@ -50,6 +50,8 @@ GUI、每日命令和单项命令共用 `pcrscript/tasks/` 中的 Task 注册表
 
 单项异常向调用方抛出；每日列表记录错误并继续后续项。消费后不递归重放整任务；恢复必须先核对实际结果。旧任务中尚未有界的等待和缺少业务结果核验的场景见[待验证清单](pending-validation.md)。
 
+团队战逐个读取首领详情时，复用刚确认的地图和详情页取消按钮；每次返回仍采集新地图，不重复识别没有输入变化的同一页面。扫描观察只用于本轮读取，模拟和实战准备仍独立重新确认首领身份、轮次与血量，行会进度刷新时丢弃本轮扫描结果。
+
 ## 回归测试
 
 按功能定位 `test/test_<功能>.py`；跨入口调度见 `test_task_integration.py`，配置边界见 `test_task_options.py`，原子写入见 `test_persistence.py`。登录、设备启动、运行控制和 GUI 配置协议分别见 `test_home_login.py`、`test_device_adaptation.py`、`test_run_session.py`、`test_desktop.py`。
