@@ -48,10 +48,18 @@ def confirmation(cost=5):
 
 
 def exchange(balance=101):
+    batch = min(100, balance) if balance else 100
     return screen(('报酬交换', 140, 30), ('奖励券', 780, 444), (str(balance), 920, 444),
-                  ('当前的列表', 625, 304), ('100次交换', 830, 365), ('使用100张', 830, 398),
+                  ('当前的列表', 625, 304), (f'{batch}次交换', 830, 365), (f'使用{batch}张', 830, 398),
                   ('1次交换', 610, 365), ('使用1张', 610, 398), ('便利设定', 791, 47),
-                  blue=('100次交换', '1次交换'))
+                  blue=(f'{batch}次交换', '1次交换'))
+
+
+def pool_list(normal_y=215, target=0, normal=0):
+    return screen(('当前的列表', 480, 42), ('重置目标报酬', 320, 117),
+                  (f'剩余{target}/2', 655, 117), ('普通报酬', 302, normal_y),
+                  (f'剩余{normal}/498', 646, normal_y), ('0/1', 675, 165),
+                  ('0/1', 675, 234), ('重置', 478, 478), blue=('重置',))
 
 
 def exchange_confirmation(quantity=350, resets=0):
@@ -363,6 +371,26 @@ class RaidFlowTests(TaskReplayMixin, TestCase):
         self.assertEqual(self.task.report['remaining_reward_tickets'], 0)
         self.assertNotIn('pending_exchange', self.task.state)
 
+    def test_uncertain_batch_is_reread_without_single_exchange_fallback(self):
+        page = exchange(250)
+        page.find('100次交换', exact=True).score = .94
+        self.assertIsNone(field.exchange_action(page, 250))
+        self.task.ui.read_region.side_effect = lambda s, roi, **kw: exchange(250) if roi == (735, 335, 940, 420) else s
+        self.task.open_exchange = Mock(return_value=page)
+        self.task.options['max_exchange_batches'] = 1
+        self.frames([screen(('交换结果', 480, 42), ('关闭', 480, 480)), exchange(150)])
+        with self.assertRaisesRegex(EventUIError, '批次上限'):
+            self.task.exchange()
+        self.assertEqual(self.clicks(), ['100次交换', '关闭'])
+        self.assertEqual(self.task.report['exchanges'][0]['quantity'], 100)
+        self.task.ui.read_region.assert_any_call(page, (735, 335, 940, 420), classify=False)
+        self.task.ui.read_region.side_effect = None
+        self.task.ui.read_region.return_value = page
+        self.assertIsNone(field.exchange_action(page, 250, self.task.ui))
+        page.find('100次交换', (735, 335, 940, 385), exact=True).score = .999
+        page.find('使用100张', exact=True).text = '使用10张'
+        self.assertIsNone(field.exchange_action(page, 250, self.task.ui))
+
     def test_exchange_wrong_balance_retains_pending_and_never_repeats(self):
         self.task.open_exchange = Mock(return_value=exchange())
         self.frames([screen(('交换结果', 480, 42), ('关闭', 480, 480)), exchange(101)])
@@ -483,6 +511,31 @@ class RaidFlowTests(TaskReplayMixin, TestCase):
         self.assertEqual(self.clicks(), ['1次交换', '确认', '确认', (30, 30)])
         self.assertNotIn('pending_exchange', self.task.state)
         self.assertEqual(self.task.report['remaining_reward_tickets'], 0)
+
+    def test_pool_totals_follow_section_headings_before_reset(self):
+        for normal_y in (215, 282):
+            with self.subTest(normal_y=normal_y):
+                for target, normal in ((1, 0), (0, 1)):
+                    page = pool_list(normal_y, target, normal)
+                    self.assertFalse(field.exchange_pool_empty(page))
+                    self.assertFalse(self.task.combat_pre_dialog(page))
+                page = pool_list(normal_y)
+                self.assertTrue(field.exchange_pool_empty(page))
+                self.task.ui.click.reset_mock()
+                self.task.state['pending_exchange'] = dict(before=148, after=48, quantity=100,
+                                                          receipt='synthetic-receipt.png')
+                reset = screen(('重置完毕', 480, 146), ('重置了报酬列表。', 475, 254),
+                               ('确认', 477, 370))
+                self.frames([page, reset, exchange(48)])
+                self.task.settle_exchange()
+                self.assertEqual(self.clicks(), ['重置', '确认'])
+                self.assertEqual(self.task.report['exchanges'][-1]['after'], 48)
+                self.assertNotIn('pending_exchange', self.task.state)
+        self.task.ui.click.reset_mock()
+        page = pool_list(282)
+        page.find('普通报酬', exact=True).score = .94
+        self.assertFalse(self.task.combat_pre_dialog(page))
+        self.assertEqual(self.clicks(), [])
 
     def test_swallowed_mission_tap_is_retried_only_from_verified_home(self):
         self.frames([home()]*3 + [missions()])

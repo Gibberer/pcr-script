@@ -145,9 +145,7 @@ class CollaborationRaid(BaseTask):
             self.exchange_evidence('exchange_jackpot', s)
             self.ui.click(item_result)
             return True
-        if (field.confident(s, '当前的列表', (300, 15, 660, 65))
-                and field.confident(s, r'剩余0/\d+', (590, 95, 700, 140))
-                and field.confident(s, r'剩余0/\d+', (590, 195, 700, 235))):
+        if field.exchange_pool_empty(s):
             self.ui.save('exchange_pool_empty', s)
             self.click(s, '重置', (370, 445, 590, 510))
             return True
@@ -728,13 +726,13 @@ class CollaborationRaid(BaseTask):
                 self.report['remaining_reward_tickets'] = 0
                 self.finish_exchange(s)
                 return
-            action = field.exchange_action(s, before)
+            action = field.exchange_action(s, before, self.ui)
             if action is None:
-                s = self.wait(lambda f: field.exchange_action(f, before) is not None,
+                s = self.wait(lambda f: field.exchange_action(f, before, self.ui) is not None,
                               '奖励券兑换按钮与消费', timeout=10)
                 if field.exchange_balance(self.ui, s) != before:
                     raise EventUIError('等待兑换按钮时余额变化；未追加兑换')
-                action = field.exchange_action(s, before)
+                action = field.exchange_action(s, before, self.ui)
             button, amount = action
             self.state['pending_exchange'] = dict(before=before, after=before-amount, quantity=amount, created_at=time.time(),
                 before_evidence=str(self.ui.save('exchange_before', s)))

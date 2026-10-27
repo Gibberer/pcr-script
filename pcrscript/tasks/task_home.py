@@ -28,14 +28,18 @@ class TaskPageNavigation(Action):
         from ..game_ui.abyss_subjugation import navigation_exit as subjugation_exit
         from ..game_ui.event_layout import navigation_exit as story_exit
         from ..game_ui.battle_stadium import navigation_exit as stadium_exit
+        from ..game_ui.collaboration_raid import navigation_exit as collaboration_exit
         if self.ui is None:
             output = getattr(robot, '_task_output', None) or 'cache/daily/navigation'
             self.ui = EventUI(robot.driver, output)
         screen = self.ui.observe(screenshot)
-        target = maze_exit(screen) or recollection_exit(screen) or subjugation_exit(screen) or stadium_exit(screen) or story_exit(screen)
+        target = (maze_exit(screen) or recollection_exit(screen) or subjugation_exit(screen)
+                  or stadium_exit(screen) or story_exit(screen) or collaboration_exit(screen))
         if target is not None:
             self.ui.click(target)
             return
+        if screen.find('当前的列表', (300, 15, 660, 65), exact=True):
+            raise EventUIError('联动报酬列表未确认两类报酬均已抽空，不能自动返回首页')
         if screen.find(r'\d:\d{2}', (750, 0, 850, 55)) and screen.find('菜单', (840, 0, 960, 65), exact=True):
             raise EventUIError('存在未结算战斗，不能自动返回首页')
         start = screen.find('点击屏幕开始游戏', (260, 450, 710, 535), exact=True)

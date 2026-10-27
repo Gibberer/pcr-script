@@ -187,7 +187,23 @@ def exchange_mode(s):
     return selected[0] if len(selected) == 1 else None
 
 
-def exchange_action(s, balance):
+def exchange_pool_empty(s):
+    if not confident(s, '当前的列表', (300, 15, 660, 65)):
+        return False
+    headings = [confident(s, text, roi) for text, roi in (
+        ('重置目标报酬', (250, 95, 430, 140)), ('普通报酬', (250, 170, 430, 360)))]
+    if not all(headings):
+        return False
+    # More than one target reward pushes the ordinary-reward heading down.
+    # Match each section total on its own heading row, never an item count.
+    if not all(confident(s, r'剩余0/[1-9]\d*', (590, int(h.center[1])-15, 705, int(h.center[1])+15))
+               for h in headings):
+        return False
+    reset = confident(s, '重置', (370, 445, 590, 510))
+    return bool(reset and s.blue_button(reset))
+
+
+def exchange_action(s, balance, ui=None):
     if not exchange(s) or balance < 1:
         return None
     one = confident(s, '一键交换', (710, 325, 940, 390))
@@ -197,17 +213,29 @@ def exchange_action(s, balance):
         cost = confident(s, r'(?:消耗|使用)\d+张', (710, 385, 940, 420))
         amount = int(re.search(r'\d+', cost.text)[0]) if cost else 0
         return (one, amount) if s.blue_button(one) and 1 <= amount <= balance else None
-    variable = confident(s, r'\d+次交换', (735, 335, 940, 385))
-    count = int(re.search(r'\d+', variable.text)[0]) if variable else 100
-    for count, left, right in ((count, 735, 940), (1, 510, 715)):
-        button = confident(s, str(count)+'次交换', (left, 335, right, 385))
-        cost = confident(s, '使用'+str(count)+'张', (left, 385, right, 420))
-        if 1 <= count <= 100 and balance >= count and button and cost and s.blue_button(button):
+    def batch(page):
+        button = confident(page, r'\d+次交换', (735, 335, 940, 385))
+        count = int(re.search(r'\d+', button.text)[0]) if button else 0
+        cost = confident(page, '使用'+str(count)+'张', (735, 385, 940, 420))
+        if 1 <= count <= min(100, balance) and cost and s.blue_button(button):
             return button, count
+        return None
+    action = batch(s)
+    if action is not None:
+        return action
+    if ui is not None:
+        local = ui.read_region(s, (735, 335, 940, 420), classify=False)
+        if isinstance(local, type(s)):
+            return batch(local)
     return None
 
 
 def navigation_exit(s):
+    if exchange_pool_empty(s):
+        return confident(s, '重置', (370, 445, 590, 510))
+    if (confident(s, '重置完毕', (300, 115, 660, 175))
+            and confident(s, '重置了报酬列表[。.]?', (300, 225, 660, 285))):
+        return confident(s, '确认', (370, 340, 590, 400))
     if difficulty_menu(s):
         return confident(s, '取消', (260, 340, 480, 400))
     if detail(s) and not s.find('确认|关闭|扫荡券确认', exact=True):

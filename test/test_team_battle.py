@@ -11,7 +11,7 @@ from pcrscript.game_ui.screen import EventScreen, EventUI, EventUIError, TextBox
 from pcrscript.game_ui.team_battle import Boss, can_repeat, map_bosses, meets_reference, priority, recommendation_damage, recommendation_time, result_damage
 from pcrscript.news import _query_clan_battle
 from pcrscript.tasks.base import Event
-from pcrscript.tasks.task_team_battle import BossChanged, ORPHAN_EXTENSION, TaskDeadline, TeamBattle, validate_options
+from pcrscript.tasks.task_team_battle import BossChanged, ORPHAN_EXTENSION, REBUILD_EXTENSION, TaskDeadline, TeamBattle, validate_options
 
 
 def box(text, x, y):
@@ -168,8 +168,10 @@ class TeamBattleTests(unittest.TestCase):
         self.assertEqual([(b.lane, b.lap) for b in bosses], list(enumerate((2, 3, 4, 4, 5))))
         self.assertGreater(priority(Boss(0, 2, 125, 42, 42), 2),
                            priority(Boss(4, 5, 840, 42, 42), 2))
-        self.assertTrue(can_repeat(49))
-        self.assertFalse(can_repeat(48))
+        self.assertFalse(can_repeat(50))  # 30s left + 20s bonus; first kill took 60s.
+        self.assertFalse(can_repeat(58))
+        self.assertTrue(can_repeat(59))
+        self.assertTrue(can_repeat(90))
 
 
     def test_recommendation_time_and_empty_portrait(self):
@@ -228,7 +230,7 @@ class TeamBattleTests(unittest.TestCase):
         task.recommendation_rows = []
         with self.assertRaisesRegex(EventUIError, '进入角色页面'):
             task.recommendation()
-        task.ui.swipe.assert_called_once_with((120, 360), (120, 260), duration=250)
+        task.ui.swipe.assert_called_once_with((120, 395), (120, 210), duration=450)
         task.ui.expect_click.assert_called_once()
         self.assertEqual(task.tried, set())
 
@@ -244,14 +246,38 @@ class TeamBattleTests(unittest.TestCase):
         task.ui = Mock()
         task.ui.capture.return_value = before
         task.ui.wait.return_value = after
+        task.check_deadline = Mock()
         self.assertTrue(task.recommendation_at_end(before, up=True))
         with patch('pcrscript.tasks.task_team_battle.time.sleep'):
             self.assertFalse(task.scroll_recommendations(up=True))
-        task.ui.swipe.assert_called_once_with((120, 360), (120, 260), duration=250)
+        task.ui.swipe.assert_called_once_with((120, 395), (120, 210), duration=450)
+
+    def test_middle_list_swipe_failure_is_not_candidate_exhaustion(self):
+        def listed(top):
+            image = np.full((540,960,3), 220, np.uint8)
+            image[top:top+35,920:925] = (220,130,50)
+            return EventScreen(image, [box('推荐编组',480,42),box('高级',622,165)])
+        middle = listed(240)
+        task = TeamBattle.__new__(TeamBattle)
+        task.ui = Mock()
+        task.ui.capture.return_value = middle
+        task.ui.wait.return_value = middle
+        task.check_deadline = Mock()
+        with patch('pcrscript.tasks.task_team_battle.time.sleep'):
+            with self.assertRaisesRegex(EventUIError, '未按候选耗尽处理'):
+                task.scroll_recommendations(up=True)
+        self.assertEqual(task.ui.swipe.call_count, 2)
+        task.ui.swipe.reset_mock()
+        task.ui.wait.side_effect = [middle, listed(290)]
+        with patch('pcrscript.tasks.task_team_battle.time.sleep'):
+            self.assertTrue(task.scroll_recommendations(up=True))
+        self.assertEqual(task.ui.swipe.call_count, 2)
 
     def test_recommendation_updates_list_after_scanning_to_bottom(self):
         def listed(damage=None):
             image = np.full((540, 960, 3), 220, np.uint8)
+            top = 375 if damage is None else 194
+            image[top:top+35,920:925] = (220,130,50)
             items = [box('推荐编组', 480, 42), box('高级', 622, 165),
                      box('列表更新', 840, 476)]
             if damage is not None:
@@ -266,6 +292,9 @@ class TeamBattleTests(unittest.TestCase):
         updated = listed(70_000_000)
         formation = EventScreen(np.zeros((540, 960, 3), np.uint8),
                                 [box('队伍编组', 480, 42)])
+        modal_image = np.zeros((540, 960, 3), np.uint8)
+        modal_image[379:410, 346:381] = (230,155,25)
+        modal = EventScreen(modal_image, [box('确认使用延长时间',480,42), box('0:50',330,195)])
         state = {'screen': initial}
         task = TeamBattle.__new__(TeamBattle)
         task.ui = Mock()
@@ -277,10 +306,12 @@ class TeamBattleTests(unittest.TestCase):
         def expect_click(label, *args, **kwargs):
             if label == '列表更新':
                 state['screen'] = updated
+            elif label == '挑战' and args[0] == (590, 145, 700, 215):
+                state['screen'] = formation
         task.ui.expect_click.side_effect = expect_click
         def click(button):
-            if button.text == '使用':
-                state['screen'] = formation
+            if getattr(button, 'text', None) == '使用':
+                state['screen'] = modal
         task.ui.click.side_effect = click
         task.formation_ready = Mock(side_effect=lambda screen: screen is formation)
         task.ensure_recommendation_unsaved = Mock()
@@ -295,9 +326,13 @@ class TeamBattleTests(unittest.TestCase):
         task.tried_teams = set()
         task.spent = set()
         with patch('pcrscript.tasks.task_team_battle.time.sleep'):
-            self.assertEqual(task.recommendation(boss_hp=70_000_000), 'team-1')
-        self.assertEqual(task.ui.swipe.call_count, 4)
+            self.assertEqual(task.recommendation(boss_hp=70_000_000, use_extension=True,
+                                                returned_time=50), 'team-1')
+        task.ui.swipe.assert_not_called()
         task.ui.expect_click.assert_any_call('列表更新', (780, 445, 925, 510), exact=True)
+        task.ui.expect_click.assert_any_call('挑战', (590,145,700,215), exact=True)
+        task.ui.click.assert_any_call((363,393))
+        self.assertEqual(task.extension_time, 50)
 
     def test_formation_waits_for_detail_transition(self):
         image = np.zeros((540, 960, 3), np.uint8)
@@ -493,7 +528,7 @@ class TeamBattleTests(unittest.TestCase):
         task.team = Mock(return_value='team-1')
         task.equipped = Mock(return_value={'slots': []})
         task.battle = Mock(side_effect=[
-            {'win': True, 'elapsed_wall': 35, 'remaining': None},
+            {'win': True, 'elapsed_wall': 100, 'remaining': None},
             {'win': True, 'elapsed_wall': 36, 'remaining': None},
         ])
         task.save_report = Mock()
@@ -506,6 +541,129 @@ class TeamBattleTests(unittest.TestCase):
         self.assertEqual(row['cp_after'], 1)
         self.assertEqual(row['extension_after'], 0)
         self.assertEqual(task.open_formation.call_args_list[1].kwargs['returned_time'], 70)
+
+    def test_first_normal_rejects_bonus_inflated_return_before_spending(self):
+        task = TeamBattle.__new__(TeamBattle)
+        task.deadline = float('inf')
+        task.options = {'max_simulations': 2, 'battle_timeout': 220}
+        task.report = {'simulations': [], 'battles': [], 'attempts': 0}
+        task.teams = {key: {'labels': (), 'reference_damage': 70_000_000}
+                      for key in ('slow', 'fast')}
+        task.prepare_boss = Mock()
+        task.recommendation = Mock(side_effect=['slow', 'fast'])
+        task.equipped = Mock(return_value={'slots': []})
+        task.battle = Mock(side_effect=[
+            {'win': True, 'remaining': 50, 'elapsed_wall': 68},
+            {'win': True, 'remaining': 70, 'elapsed_wall': 48},
+            {'win': True, 'remaining': 70, 'elapsed_wall': 49},
+        ])
+        task.save_report = Mock()
+        task.open_formation = Mock(return_value=object())
+        task.team = Mock(return_value='fast')
+        task.used_member_marked = Mock(return_value=False)
+        task.ui = Mock()
+        task.map = Mock(return_value=object())
+        task.counts = Mock(return_value=(2, 1))
+        boss = Boss(0, 7, 125, 70_000_000, 70_000_000, '首领')
+        row = task.try_boss(boss, 3, 0)
+        self.assertEqual(row['team_key'], 'fast')
+        self.assertEqual([(c.args[0], c.args[1]) for c in task.battle.call_args_list],
+                         [(True, 'slow'), (True, 'fast'), (False, 'fast')])
+        self.assertEqual([c.args[1] for c in task.prepare_boss.call_args_list], [True, True, False])
+        task.open_formation.assert_called_once_with(use_extension=False, returned_time=None)
+        self.assertEqual(task.report['attempts'], 1)
+
+    def test_rebuilt_extension_retries_simulation_and_preserves_new_team_for_real(self):
+        task = TeamBattle.__new__(TeamBattle)
+        task.deadline = float('inf')
+        task.options = {'max_simulations': 2, 'battle_timeout': 220}
+        task.report = {'simulations': [], 'battles': [], 'attempts': 0}
+        task.teams = {key: {'labels': (), 'reference_damage': 70_000_000}
+                      for key in ('new-1', 'new-2')}
+        task.prepare_boss = Mock()
+        def recommendation(**kwargs):
+            task.extension_time = 50
+            return next(choices)
+        choices = iter(['new-1', 'new-2'])
+        task.recommendation = Mock(side_effect=recommendation)
+        task.equipped = Mock(return_value={'slots': []})
+        def formation(**kwargs):
+            task.extension_time = 50
+            return object()
+        task.open_formation = Mock(side_effect=formation)
+        task.team = Mock(return_value='new-2')
+        task.battle = Mock(side_effect=[
+            {'win': False, 'reference_met': False, 'actual_damage': 30_000_000},
+            {'win': True, 'remaining': None, 'elapsed_wall': 95},
+            {'win': True, 'remaining': None, 'elapsed_wall': 96},
+        ])
+        task.save_report = Mock()
+        task.ui = Mock()
+        task.map = Mock(return_value=object())
+        task.counts = Mock(return_value=(2, 0))
+        boss = Boss(0, 8, 125, 70_000_000, 70_000_000, '首领')
+        row = task.try_boss(boss, 2, 1, REBUILD_EXTENSION)
+        self.assertEqual(row['team_key'], 'new-2')
+        self.assertEqual((row['cp_before'], row['cp_after'], row['extension_after']), (2, 2, 0))
+        self.assertEqual([(c.args[0], c.args[1]) for c in task.battle.call_args_list],
+                         [(True, 'new-1'), (True, 'new-2'), (False, 'new-2')])
+        self.assertTrue(all(c.kwargs['preserve_team'] and c.kwargs['use_extension']
+                            for c in task.open_formation.call_args_list))
+        self.assertEqual([c.kwargs['returned_time'] for c in task.open_formation.call_args_list], [50])
+        self.assertEqual([c.kwargs['returned_time'] for c in task.recommendation.call_args_list], [None, 50])
+
+    def test_extension_checkbox_preserves_requested_team_and_validates_return_time(self):
+        for preserve in (False, True):
+            for checked in (False, True):
+                image = np.zeros((540, 960, 3), np.uint8)
+                if checked:
+                    image[379:410, 346:381] = (230, 155, 25)
+                modal = EventScreen(image, [box('确认使用延长时间',480,42), box('0:50',330,195)])
+                formation = EventScreen(image, [box('队伍编组',480,42)])
+                task = TeamBattle.__new__(TeamBattle)
+                task.ui = Mock()
+                task.ui.wait.side_effect = [modal, formation]
+                task.ui.capture.return_value = formation
+                with patch('pcrscript.tasks.task_team_battle.time.sleep'):
+                    self.assertIs(task.open_formation(use_extension=True, returned_time=50,
+                                                     preserve_team=preserve), formation)
+                self.assertEqual(task.ui.click.call_count, int(checked == preserve))
+                if checked == preserve:
+                    task.ui.click.assert_called_once_with((363,393))
+                self.assertEqual(task.extension_time, 50)
+
+    def test_enter_closes_only_identified_interrupted_simulation_result(self):
+        image = np.full((540, 960, 3), 240, np.uint8)
+        result = EventScreen(image, [box('RESULT',480,60),
+            box('模拟战的战斗结果不会显示在团队战成绩中。',480,455), box('下一步',805,490)])
+        mapped = EventScreen(image, [box('团队战',105,35), box('剩余挑战次数',350,406),
+                                    box('讨伐信息',240,450)])
+        task = TeamBattle.__new__(TeamBattle)
+        task.ui = Mock()
+        task.ui.capture.side_effect = [result, mapped]
+        task.check_deadline = Mock()
+        self.assertIs(task.enter(), mapped)
+        task.ui.click.assert_called_once_with(result.items[2])
+        panel = EventScreen(image, [box('特别装备设定',480,42),box('取消',147,480)])
+        task.ui.capture.side_effect = [panel, mapped]
+        task.ui.click.reset_mock()
+        self.assertIs(task.enter(), mapped)
+        task.ui.expect_click.assert_called_once_with('取消',(35,445,265,520),exact=True)
+        task.ui.click.assert_not_called()
+        result.items.pop(1)
+        task.ui.click.reset_mock()
+        task.ui.capture.side_effect = [result, mapped]
+        with patch('pcrscript.tasks.task_team_battle.time.sleep'):
+            self.assertIs(task.enter(), mapped)
+        task.ui.click.assert_not_called()
+
+    def test_extension_keeps_same_boss_priority_and_considers_known_residual_hp(self):
+        task = TeamBattle.__new__(TeamBattle)
+        task.extension_target = {'lane': 0, 'lap': 7}
+        residual = Boss(0, 8, 125, 40_000_000, 70_000_000, '首领甲')
+        full = Boss(1, 7, 290, 70_000_000, 70_000_000, '首领乙')
+        unknown = Boss(2, 7, 480)
+        self.assertEqual(task.extension_candidates([full, unknown, residual]), [residual, full])
 
     def test_deadline_returns_partial_report_without_starting_another_action(self):
         task = TeamBattle.__new__(TeamBattle)
@@ -639,11 +797,12 @@ class TeamBattleTests(unittest.TestCase):
         task.ui = Mock()
         task.ui.read_region.return_value = screen
         self.assertFalse(task.used_member_marked(screen))
-        marked = EventScreen(image, [box('已参加团队战', 95, 494)])
-        self.assertTrue(task.used_member_marked(marked))
-        # Tiny participation text missed by full-frame OCR still rejects.
-        task.ui.read_region.return_value = marked
-        self.assertTrue(task.used_member_marked(screen))
+        for text in ('已参加团队战', '限制实战使用'):
+            marked = EventScreen(image, [box(text, 95, 494)])
+            self.assertTrue(task.used_member_marked(marked))
+            # Tiny restriction text missed by full-frame OCR still rejects.
+            task.ui.read_region.return_value = marked
+            self.assertTrue(task.used_member_marked(screen))
 
     def test_five_portraits_identify_team_despite_missing_or_changed_ocr_names(self):
         from pcrscript.tasks.event_formation import EventFormation

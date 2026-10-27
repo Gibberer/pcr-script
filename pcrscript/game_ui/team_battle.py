@@ -68,8 +68,8 @@ def priority(boss: Boss, minimum_lap: int) -> tuple[int, int, int, int]:
 
 
 def can_repeat(sim_remaining: int, *, margin: int = 8) -> bool:
-    """The displayed returned time must cover a second similar kill."""
-    return 0 <= sim_remaining <= 90 and (90-sim_remaining) + margin <= sim_remaining
+    """Returned time includes a 20s bonus, capped at the 90s battle limit."""
+    return 0 <= sim_remaining <= 90 and (90+20-sim_remaining) + margin <= sim_remaining
 
 
 def parse_remaining_time(screen: EventScreen) -> int | None:

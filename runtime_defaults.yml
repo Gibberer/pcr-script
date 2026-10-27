@@ -75,6 +75,7 @@ RecollectionFirstClear:
   retry_failed_parties: false
   sources: {}
 TeamBattle:
+  rebuild_extension: false
   timeout: 3600
   battle_timeout: 220
   max_real_attacks: 3
