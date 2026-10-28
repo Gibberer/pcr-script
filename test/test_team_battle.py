@@ -579,6 +579,7 @@ class TeamBattleTests(unittest.TestCase):
             task.try_boss(boss, 3, 0)
         task.battle.assert_called_once()
         task.prepare_boss.assert_called_once_with(boss, True)
+        task.recommendation.assert_called_once_with(boss_hp=70_000_000, boss_full=True)
         # A full boss must still be killed even if a lower damage reference
         # was met. This used to bypass the double-kill requirement.
         task.report = {'simulations': [], 'battles': []}
@@ -1111,6 +1112,96 @@ class TeamBattleTests(unittest.TestCase):
                 self.assertEqual(task.tried_teams, {key})
                 reason = '参考伤害超过当前血量' if rejected[0] > 70_000_000 else '参考耗时不满足双刀预算'
                 self.assertEqual(task.report['candidate_rejections'], {reason: 1})
+
+    def test_full_boss_skips_damage_only_row_before_simulation(self):
+        from pcrscript.tasks.event_formation import EventFormation
+
+        def recommendation(damage, seconds, colour=(25, 80, 220)):
+            image = np.full((540, 960, 3), 240, np.uint8)
+            for x in (224, 312, 402, 491, 581):
+                image[220:268, x-22:x+22] = colour
+            image[270:280, 80:130] = (damage//1_000_000, seconds, 0)
+            return EventScreen(image, [box('推荐编组', 480, 42), box('高级', 622, 165),
+                                       box('使用', 712, 277), box('保存队伍', 855, 226),
+                                       box('参考伤害', 110, 251), box(str(damage), 120, 272),
+                                       box('讨伐时间', 86, 299),
+                                       box(f'{seconds//60}:{seconds%60:02d}', 151, 299)])
+
+        image = np.zeros((540, 960, 3), np.uint8)
+        for x, _ in EventFormation.slots:
+            image[415:505, x-48:x+48] = (20, 20, 170)
+        formation = EventScreen(image, [box('队伍编组', 480, 42)])
+        for full in (True, False):
+            with self.subTest(full=full):
+                damage_only = recommendation(30_000_000, 90)
+                kill = recommendation(70_000_000, 20)
+                state = {'screen': damage_only, 'used': []}
+                task = TeamBattle.__new__(TeamBattle)
+                task.ui = Mock()
+                task.ui.capture.side_effect = lambda: state['screen']
+                def wait(predicate, purpose, **kwargs):
+                    self.assertTrue(predicate(state['screen']), purpose)
+                    return state['screen']
+                def click(button):
+                    if button.text == '使用':
+                        state['used'].append(state['screen'])
+                        state['screen'] = formation
+                task.ui.wait.side_effect = wait
+                task.ui.click.side_effect = click
+                task.ui.swipe.side_effect = lambda *args, **kwargs: state.update(screen=kill)
+                task.ui.read_region.side_effect = read_region_fixture
+                task.formation = EventFormation.__new__(EventFormation)
+                task.report = {}
+                task.teams = {}
+                task.recommendation_rows = []
+                task.tried = set()
+                task.tried_teams = set()
+                task.spent = set()
+                task.check_deadline = Mock()
+                with patch('pcrscript.tasks.task_team_battle.time.sleep'):
+                    key = task.recommendation(boss_hp=70_000_000, boss_full=full)
+                self.assertEqual(task.teams[key]['reference_damage'], 70_000_000 if full else 30_000_000)
+                self.assertEqual(state['used'], [kill] if full else [damage_only])
+                self.assertEqual(task.report.get('candidate_rejections', {}),
+                                 {'满血首领参考伤害不足以击杀': 1} if full else {})
+
+                # A pale but complete row is checked on the formation page
+                # instead of being rejected from portrait colour alone.
+                pale = recommendation(70_000_000, 20, colour=(225, 225, 225))
+                state.update(screen=pale, used=[])
+                task.recommendation_rows = []
+                task.tried = set()
+                task.tried_teams = set()
+                task.teams = {}
+                task.report = {}
+                self.assertFalse(TeamBattle.recommendation_owned(pale, pale.find('使用')))
+                with patch('pcrscript.tasks.task_team_battle.time.sleep'):
+                    key = task.recommendation(boss_hp=70_000_000, boss_full=full)
+                self.assertIsNotNone(key)
+                self.assertEqual(state['used'], [pale])
+                self.assertEqual(task.report['gray_portrait_checks'], {'formation_checked': 1})
+                self.assertNotIn('candidate_rejections', task.report)
+
+    def test_spent_portrait_match_ignores_shared_frame_brightness(self):
+        from pcrscript.game_ui.avatars import feature
+        from pcrscript.tasks.task_team_battle import centered_feature
+        first = np.full((42, 62, 3), 235, np.uint8)
+        first[8:16, 10:22] = (120, 150, 200)
+        second = np.full((42, 62, 3), 235, np.uint8)
+        second[26:34, 40:52] = (120, 150, 200)
+        noisy = np.clip(first.astype(int)+np.random.default_rng(5).integers(-6, 7, first.shape),
+                        0, 255).astype(np.uint8)
+        # The legacy fixed-offset cosine alone confuses the two characters.
+        self.assertGreaterEqual(float(feature(first) @ feature(second)), .92)
+
+        def team(*crops):
+            return dict(labels=(None,)*len(crops), portraits=tuple(feature(c) for c in crops),
+                        centered=tuple(centered_feature(c) for c in crops))
+        task = TeamBattle.__new__(TeamBattle)
+        task.teams = {'old': team(first), 'other': team(second), 'same': team(noisy)}
+        task.spent = {'old'}
+        self.assertFalse(task.unavailable_team('other'))
+        self.assertTrue(task.unavailable_team('same'))
 
     def test_clan_battle_schedule_only_covers_five_days(self):
         cn = timezone(timedelta(hours=8))

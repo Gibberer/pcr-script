@@ -43,6 +43,19 @@ class TaskDeadline(EventUIError):
 ORPHAN_EXTENSION = '__visible_extension_team__'
 REBUILD_EXTENSION = '__rebuild_extension_team__'
 MAX_RECOMMENDATION_SWIPES = 120
+RECOMMENDATION_FACES = (224, 312, 402, 491, 581)
+
+
+def centered_feature(picture):
+    """Per-crop zero-mean portrait vector for cross-character comparisons.
+
+    feature() subtracts a fixed 128, so shared card frames and overall
+    brightness inflate the cosine between different characters. Removing
+    each crop's own mean leaves the face pattern.
+    """
+    result = cv.resize(picture, (24, 24), interpolation=cv.INTER_AREA).astype(np.float32).reshape(-1)
+    result -= result.mean()
+    return result/max(float(np.linalg.norm(result)), 1e-6)
 
 
 @register('team_battle')
@@ -320,22 +333,39 @@ class TeamBattle(TimeLimitTask):
         # are report annotations, never the identity or occupancy gate.
         labels = tuple(normalized(screen.text((x-48, 399, x+47, 426))) or None
                        for x, _ in self.formation.slots)
-        portraits = tuple(feature(screen.image[428:470, x-30:x+32]) for x, _ in self.formation.slots)
+        crops = [screen.image[428:470, x-30:x+32] for x, _ in self.formation.slots]
+        portraits = tuple(feature(crop) for crop in crops)
+        centered = tuple(centered_feature(crop) for crop in crops)
         for key, prior in self.teams.items():
             if all(float(a @ b) >= .92 for a, b in zip(portraits, prior['portraits'])):
                 prior['labels'] = tuple(old or new for old, new in zip(prior['labels'], labels))
+                prior.setdefault('centered', centered)
                 return key
         key = f'team-{1 + max((int(old[5:]) for old in self.teams if old.startswith("team-")
                                  and old[5:].isdigit()), default=0)}'
-        self.teams[key] = dict(labels=labels, portraits=portraits)
+        self.teams[key] = dict(labels=labels, portraits=portraits, centered=centered)
         return key
 
     def unavailable_team(self, key):
+        """Reject a team sharing a portrait with a team spent in this run.
+
+        Cross-character pairs must also match after removing each crop's
+        mean; the fixed-offset cosine alone can match similar card frames or
+        costumes of different characters. In-game participation marks remain
+        the authority for members spent by another process.
+        """
         chosen = self.teams[key]
-        return any(float(face @ old_face) >= .92
-                   for old_key in self.spent
-                   for face in chosen['portraits']
-                   for old_face in self.teams[old_key]['portraits'])
+        for old_key in self.spent:
+            old = self.teams[old_key]
+            for i, face in enumerate(chosen['portraits']):
+                for j, old_face in enumerate(old['portraits']):
+                    if float(face @ old_face) < .92:
+                        continue
+                    if 'centered' not in chosen or 'centered' not in old:
+                        return True
+                    if float(chosen['centered'][i] @ old['centered'][j]) >= .9:
+                        return True
+        return False
 
     def used_member_marked(self, screen):
         roi = (35, 465, 585, 515)
@@ -351,7 +381,7 @@ class TeamBattle(TimeLimitTask):
         if center-24 < 185 or center+24 > 421:
             return None
         faces = tuple(feature(screen.image[center-20:center+20, x-22:x+22])
-                      for x in (224, 312, 402, 491, 581))
+                      for x in RECOMMENDATION_FACES)
         for index, prior in enumerate(self.recommendation_rows):
             if all(float(a @ b) >= .92 for a, b in zip(faces, prior)):
                 return index
@@ -359,18 +389,29 @@ class TeamBattle(TimeLimitTask):
         return len(self.recommendation_rows)-1
 
     @staticmethod
-    def recommendation_owned(screen, button):
-        """A missing character is an empty gray portrait in the recommendation row."""
+    def recommendation_text_restricted(screen, button):
+        center = button.center[1]-33
+        return bool(screen.find('未持有|限制实战|已参加团队', (175, center-50, 625, center+50)))
+
+    @staticmethod
+    def recommendation_gray_slots(screen, button):
+        """Indexes of low-colour portraits; empty slots are gray, but so can
+        be white or silver characters inside a silver frame."""
         center = button.center[1]-33
         if center-24 < 185 or center+24 > 421:
-            return False
-        if screen.find('未持有|限制实战|已参加团队', (175, center-50, 625, center+50)):
-            return False
-        for x in (224, 312, 402, 491, 581):
+            return None
+        gray = []
+        for index, x in enumerate(RECOMMENDATION_FACES):
             patch = cv.cvtColor(screen.image[center-24:center+24, x-22:x+22], cv.COLOR_BGR2HSV)
             if float(np.mean((patch[:, :, 1] > 55) & (patch[:, :, 2] > 80))) < .15:
-                return False
-        return True
+                gray.append(index)
+        return gray
+
+    @classmethod
+    def recommendation_owned(cls, screen, button):
+        """A missing character is an empty gray portrait in the recommendation row."""
+        gray = cls.recommendation_gray_slots(screen, button)
+        return gray == [] and not cls.recommendation_text_restricted(screen, button)
 
     def recommendation_restricted(self, screen, button):
         # The portrait badges are too small for reliable full-frame OCR.
@@ -455,7 +496,8 @@ class TeamBattle(TimeLimitTask):
                 return False
         raise EventUIError('推荐列表滑动未生效且未确认到达边界，未按候选耗尽处理')
 
-    def recommendation(self, wanted=None, boss_hp=None, *, use_extension=False, returned_time=None):
+    def recommendation(self, wanted=None, boss_hp=None, *, use_extension=False, returned_time=None,
+                       boss_full=False):
         """Use advanced recommendations; a missing or occupied member rejects the row."""
         self.ui.expect_click('推荐编组', (770, 20, 925, 70), exact=True)
         screen = self.ui.wait(lambda s: s.find('推荐编组', (380, 15, 570, 70), exact=True), '团队战推荐编组')
@@ -493,12 +535,23 @@ class TeamBattle(TimeLimitTask):
                                                    current_hp=boss_hp, estimated_seconds=estimate)
                         self.tried.add(signature)
                         continue
+                    # A full-HP normal attack must kill within the double-kill
+                    # budget; a damage-only row would be simulated and then
+                    # always rejected by normal_simulation_ready.
+                    if boss_full and boss_hp is not None and reference < boss_hp:
+                        self.reject_recommendation('满血首领参考伤害不足以击杀', reference_damage=reference,
+                                                   current_hp=boss_hp, estimated_seconds=estimate)
+                        self.tried.add(signature)
+                        continue
                     if boss_hp is not None and reference == boss_hp and not can_repeat_clear_time(estimate):
                         self.reject_recommendation('参考耗时不满足双刀预算', reference_damage=reference,
                                                    current_hp=boss_hp, estimated_seconds=estimate)
                         self.tried.add(signature)
                         continue
-                    if not self.recommendation_owned(screen, button):
+                    gray = self.recommendation_gray_slots(screen, button)
+                    if gray is None:
+                        continue
+                    if self.recommendation_text_restricted(screen, button):
                         self.reject_recommendation('推荐缺员或角色受限', reference_damage=reference)
                         self.tried.add(signature)
                         continue
@@ -506,6 +559,16 @@ class TeamBattle(TimeLimitTask):
                         self.reject_recommendation('推荐局部核验缺员或角色受限', reference_damage=reference)
                         self.tried.add(signature)
                         continue
+                    if gray:
+                        # Colour alone is not proof of a missing member. The
+                        # formation page counts occupied slots and reads the
+                        # participation banner before any simulation starts.
+                        from ..run_session import emit
+                        emit('team_battle.recommendation', decision='verify_in_formation',
+                             reason='推荐头像低饱和度但无缺员文字', gray_slots=gray,
+                             reference_damage=reference)
+                        counts = self.report.setdefault('gray_portrait_checks', {})
+                        counts['formation_checked'] = counts.get('formation_checked', 0)+1
                     self.ensure_recommendation_unsaved(screen, button)
                     self.ui.click(button)
                     time.sleep(1.5)
@@ -787,7 +850,7 @@ class TeamBattle(TimeLimitTask):
             self.report_progress(f"团队战 · {boss.name} · 查找第 {len(self.report['simulations'])+1} 支模拟队伍")
             self.prepare_boss(boss, True)
             if wanted is None:
-                names = self.recommendation(boss_hp=boss.current_hp)
+                names = self.recommendation(boss_hp=boss.current_hp, boss_full=boss.full)
             elif rebuild_extension:
                 names = self.recommendation(boss_hp=boss.current_hp, use_extension=True,
                                             returned_time=available_time)
