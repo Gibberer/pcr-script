@@ -999,12 +999,15 @@ class TeamBattleTests(unittest.TestCase):
         task = TeamBattle.__new__(TeamBattle)
         face = np.array([1., 0.])
         other = np.array([0., 1.])
-        task.teams = {'old': {'labels': ('甲',), 'portraits': (face,)},
-                      'new': {'labels': (None,), 'portraits': (face,)},
-                      'costume': {'labels': ('甲',), 'portraits': (other,)}}
+        task.teams = {'old': {'labels': ('甲',), 'portraits': (face,), 'centered': (face,)},
+                      'new': {'labels': (None,), 'portraits': (face,), 'centered': (face,)},
+                      'costume': {'labels': ('甲',), 'portraits': (other,), 'centered': (other,)}}
         task.spent = {'old'}
         self.assertTrue(task.unavailable_team('new'))
         self.assertFalse(task.unavailable_team('costume'))
+        task.teams['new'].pop('centered')
+        with self.assertRaisesRegex(EventUIError, '身份特征不完整'):
+            task.unavailable_team('new')
 
     def test_recommendation_identity_survives_scroll_and_checkbox_changes(self):
         task = TeamBattle.__new__(TeamBattle)
@@ -1202,6 +1205,83 @@ class TeamBattleTests(unittest.TestCase):
         task.spent = {'old'}
         self.assertFalse(task.unavailable_team('other'))
         self.assertTrue(task.unavailable_team('same'))
+
+    def test_team_grouping_does_not_alias_bright_but_different_portraits(self):
+        from pcrscript.tasks.event_formation import EventFormation
+        from pcrscript.game_ui.avatars import feature
+        slots = EventFormation.slots
+        def formation(lower=False, shared=False, noise=False):
+            image = np.zeros((540, 960, 3), np.uint8)
+            for i, (x, _) in enumerate(slots):
+                image[415:494, x-38:x+38] = (30, 60, 200)
+                crop = np.full((42, 62, 3), 235, np.uint8)
+                if lower and not (shared and i == 0):
+                    crop[26:34, 40:52] = (120, 150, 200)
+                else:
+                    crop[8:16, 10:22] = (120, 150, 200)
+                if noise:
+                    crop = np.clip(crop.astype(int)+np.random.default_rng(i).integers(-3, 4, crop.shape),
+                                   0, 255).astype(np.uint8)
+                image[428:470, x-30:x+32] = crop
+            return EventScreen(image, [box('队伍编组', 480, 42)])
+        first, other = formation(), formation(lower=True)
+        x = slots[0][0]
+        self.assertGreaterEqual(float(feature(first.image[428:470,x-30:x+32]) @
+                                      feature(other.image[428:470,x-30:x+32])), .92)
+        task = TeamBattle.__new__(TeamBattle)
+        task.formation = EventFormation.__new__(EventFormation)
+        task.teams = {}
+        task.spent = set()
+        old = task.team(first)
+        self.assertEqual(task.team(formation(noise=True)), old)
+        task.spent.add(old)
+        new = task.team(other)
+        self.assertNotEqual(new, old)
+        self.assertFalse(task.unavailable_team(new))
+        self.assertTrue(task.unavailable_team(task.team(formation(lower=True, shared=True))))
+
+    def test_tried_bright_recommendation_does_not_hide_a_different_party(self):
+        from pcrscript.tasks.event_formation import EventFormation
+        def row(lower):
+            image = np.full((540, 960, 3), 240, np.uint8)
+            for x in (224, 312, 402, 491, 581):
+                crop = np.full((40, 44, 3), 235, np.uint8)
+                crop[26:34, 29:39] = (120,150,200) if lower else (235,235,235)
+                if not lower:
+                    crop[8:16, 5:15] = (120,150,200)
+                image[224:264, x-22:x+22] = crop
+            return EventScreen(image, [box('推荐编组',480,42), box('高级',622,165),
+                box('使用',712,277), box('保存队伍',855,226), box('参考伤害',110,251),
+                box('70000000',120,272), box('讨伐时间',86,299), box('0:20',151,299)])
+        old, listed = row(False), row(True)
+        image = np.zeros((540,960,3), np.uint8)
+        for x, _ in EventFormation.slots:
+            image[415:505,x-48:x+48] = (20,20,170)
+        formation = EventScreen(image, [box('队伍编组',480,42)])
+        state = {'screen': listed}
+        task = TeamBattle.__new__(TeamBattle)
+        task.formation = EventFormation.__new__(EventFormation)
+        task.teams, task.spent, task.tried_teams = {}, set(), set()
+        task.recommendation_rows = []
+        prior = task.recommendation_signature(old, old.find('使用'))
+        task.tried = {f'{prior}-70000000-20'}
+        task.report = {}
+        task.check_deadline = Mock()
+        task.ui = Mock()
+        task.ui.capture.side_effect = lambda: state['screen']
+        task.ui.read_region.side_effect = read_region_fixture
+        def click(button):
+            if button.text == '使用':
+                state['screen'] = formation
+        def wait(predicate, label, **kwargs):
+            self.assertTrue(predicate(state['screen']), label)
+            return state['screen']
+        task.ui.click.side_effect = click
+        task.ui.wait.side_effect = wait
+        with patch('pcrscript.tasks.task_team_battle.time.sleep'):
+            self.assertIsNotNone(task.recommendation(boss_hp=70_000_000, boss_full=True))
+        task.ui.swipe.assert_not_called()
+        self.assertEqual(len(task.recommendation_rows), 2)
 
     def test_clan_battle_schedule_only_covers_five_days(self):
         cn = timezone(timedelta(hours=8))

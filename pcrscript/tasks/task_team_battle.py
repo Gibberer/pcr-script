@@ -58,6 +58,24 @@ def centered_feature(picture):
     return result/max(float(np.linalg.norm(result)), 1e-6)
 
 
+def portrait_features(crops):
+    return dict(portraits=tuple(feature(crop) for crop in crops),
+                centered=tuple(centered_feature(crop) for crop in crops))
+
+
+def portrait_matches(face, centered, other_face, other_centered):
+    """One identity rule for grouping, tried rows, and spent-member checks."""
+    return float(face @ other_face) >= .92 and float(centered @ other_centered) >= .9
+
+
+def portrait_groups_match(first, second):
+    count = len(first['portraits'])
+    if not count or not count == len(second['portraits']) == len(first.get('centered', ())) == len(second.get('centered', ())):
+        return False
+    return all(portrait_matches(a, ac, b, bc) for a, ac, b, bc in
+               zip(first['portraits'], first['centered'], second['portraits'], second['centered']))
+
+
 @register('team_battle')
 class TeamBattle(TimeLimitTask):
     config_section = 'TeamBattle'
@@ -334,16 +352,14 @@ class TeamBattle(TimeLimitTask):
         labels = tuple(normalized(screen.text((x-48, 399, x+47, 426))) or None
                        for x, _ in self.formation.slots)
         crops = [screen.image[428:470, x-30:x+32] for x, _ in self.formation.slots]
-        portraits = tuple(feature(crop) for crop in crops)
-        centered = tuple(centered_feature(crop) for crop in crops)
+        observed = portrait_features(crops)
         for key, prior in self.teams.items():
-            if all(float(a @ b) >= .92 for a, b in zip(portraits, prior['portraits'])):
+            if portrait_groups_match(observed, prior):
                 prior['labels'] = tuple(old or new for old, new in zip(prior['labels'], labels))
-                prior.setdefault('centered', centered)
                 return key
         key = f'team-{1 + max((int(old[5:]) for old in self.teams if old.startswith("team-")
                                  and old[5:].isdigit()), default=0)}'
-        self.teams[key] = dict(labels=labels, portraits=portraits, centered=centered)
+        self.teams[key] = dict(labels=labels, **observed)
         return key
 
     def unavailable_team(self, key):
@@ -357,13 +373,11 @@ class TeamBattle(TimeLimitTask):
         chosen = self.teams[key]
         for old_key in self.spent:
             old = self.teams[old_key]
+            if any(len(row.get('centered', ())) != len(row['portraits']) for row in (chosen, old)):
+                raise EventUIError('参战头像身份特征不完整，停止沿用旧头像判断')
             for i, face in enumerate(chosen['portraits']):
                 for j, old_face in enumerate(old['portraits']):
-                    if float(face @ old_face) < .92:
-                        continue
-                    if 'centered' not in chosen or 'centered' not in old:
-                        return True
-                    if float(chosen['centered'][i] @ old['centered'][j]) >= .9:
+                    if portrait_matches(face, chosen['centered'][i], old_face, old['centered'][j]):
                         return True
         return False
 
@@ -380,10 +394,10 @@ class TeamBattle(TimeLimitTask):
         center = button.center[1]-33
         if center-24 < 185 or center+24 > 421:
             return None
-        faces = tuple(feature(screen.image[center-20:center+20, x-22:x+22])
-                      for x in RECOMMENDATION_FACES)
+        faces = portrait_features([screen.image[center-20:center+20, x-22:x+22]
+                                   for x in RECOMMENDATION_FACES])
         for index, prior in enumerate(self.recommendation_rows):
-            if all(float(a @ b) >= .92 for a, b in zip(faces, prior)):
+            if portrait_groups_match(faces, prior):
                 return index
         self.recommendation_rows.append(faces)
         return len(self.recommendation_rows)-1
