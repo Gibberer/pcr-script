@@ -190,10 +190,20 @@ def exchange_mode(s):
 def exchange_pool_empty(s):
     if not confident(s, '当前的列表', (300, 15, 660, 65)):
         return False
-    headings = [confident(s, text, roi) for text, roi in (
-        ('重置目标报酬', (250, 95, 430, 140)), ('普通报酬', (250, 170, 430, 360)))]
-    if not all(headings):
-        return False
+    target = confident(s, '重置目标报酬', (250, 95, 430, 140))
+    ordinary = confident(s, '普通报酬', (250, 170, 430, 360))
+    if target and ordinary:
+        headings = [target, ordinary]
+    else:
+        # From pool six onward the observed layout has only ordinary rewards.
+        # Require its heading at the very top and an explicit pool number;
+        # a missed target heading in the earlier two-section layout is unsafe.
+        ordinary = confident(s, '普通报酬', (250, 95, 430, 140))
+        pool = confident(s, r'第\d+次报酬交换的阵容', (300, 65, 660, 95))
+        if (not ordinary or not pool or int(re.search(r'\d+', pool.text)[0]) < 6
+                or s.find('目标报酬')):
+            return False
+        headings = [ordinary]
     # More than one target reward pushes the ordinary-reward heading down.
     # Match each section total on its own heading row, never an item count.
     if not all(confident(s, r'剩余0/[1-9]\d*', (590, int(h.center[1])-15, 705, int(h.center[1])+15))

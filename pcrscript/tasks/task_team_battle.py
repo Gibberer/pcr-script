@@ -17,15 +17,19 @@ from ..game_ui.avatar_assets import read_json
 from ..constants import SERVER_TIMEZONE
 from ..game_ui.screen import EventUI, EventUIError, normalized
 from ..game_ui.special_equipment import auto_equip_special, cancel_special_equipment
-from ..game_ui.team_battle import Boss, boss_detail, can_repeat, map_bosses, map_ready, meets_reference, parse_remaining_time, priority, recommendation_damage, recommendation_time, result_damage
+from ..game_ui.team_battle import Boss, boss_detail, can_repeat, can_repeat_clear_time, map_bosses, map_ready, meets_reference, normal_simulation_ready, parse_remaining_time, priority, recommendation_damage, recommendation_time, result_damage, validate_counter_transition
 from ..run_session import clock as time, atomic_json
 
 
 def validate_options(options: dict) -> dict:
-    return validated_options(options, 'TeamBattle',
+    result = validated_options(options, 'TeamBattle',
         integers=(('timeout', 3600, 7200), ('battle_timeout', 220, 600),
-                  ('max_real_attacks', 3, 3), ('max_simulations', 12, 40)),
+                  ('max_real_attacks', 3, 3)),
         flags=(('simulation_only', False), ('rebuild_extension', False)))
+    limit = result.setdefault('max_simulations', 0)
+    if type(limit) is not int or not 0 <= limit <= 400:
+        raise ValueError('TeamBattle.max_simulations必须是0到400的整数；0表示仅受运行时限约束')
+    return result
 
 
 class BossChanged(EventUIError):
@@ -116,6 +120,12 @@ class TeamBattle(TimeLimitTask):
     def check_deadline(self):
         if time.monotonic() >= self.deadline:
             raise TaskDeadline('团队战任务达到运行时限，剩余挑战待下次运行')
+
+    def reject_recommendation(self, reason, **details):
+        from ..run_session import emit
+        counts = self.report.setdefault('candidate_rejections', {})
+        counts[reason] = counts.get(reason, 0)+1
+        emit('team_battle.recommendation', decision='rejected', reason=reason, **details)
 
     def popup(self, screen) -> bool:
         """Dismiss only a visible modal button, including the two first-entry dialogs."""
@@ -242,7 +252,11 @@ class TeamBattle(TimeLimitTask):
                 raise BossChanged('打开首领期间行会奖励或阶段刷新，重新读取地图')
         screen = self.ui.wait(lambda s: s.find('魔物详情', (25, 15, 245, 78), exact=True),
                               '团队战魔物详情', handle=refresh_after_popup)
-        return boss_detail(screen, visible), screen
+        detail = boss_detail(screen, visible, self.ui)
+        from ..run_session import emit
+        emit('team_battle.boss', lane=detail.lane, lap=detail.lap,
+             current_hp=detail.current_hp, maximum_hp=detail.maximum_hp)
+        return detail, screen
 
     def all_bosses(self, screen):
         for _ in range(3):
@@ -462,8 +476,8 @@ class TeamBattle(TimeLimitTask):
                     signature = self.recommendation_signature(screen, button)
                     if signature is None:
                         continue
-                    estimate = recommendation_time(screen, button.center[1])
-                    reference = recommendation_damage(screen, button.center[1])
+                    estimate = recommendation_time(screen, button.center[1], self.ui)
+                    reference = recommendation_damage(screen, button.center[1], self.ui)
                     # A row at the bottom can show "使用" while its damage or time
                     # is clipped. Revisit it after a short scroll instead of
                     # recording it as a rejected recommendation.
@@ -474,15 +488,22 @@ class TeamBattle(TimeLimitTask):
                     signature = f'{signature}-{reference}-{estimate}'
                     if signature in self.tried and wanted is None:
                         continue
-                    if ((boss_hp is not None and reference > boss_hp)
-                            or (boss_hp is not None and reference == boss_hp
-                                and 2*estimate+8 > 110)):
+                    if boss_hp is not None and reference > boss_hp:
+                        self.reject_recommendation('参考伤害超过当前血量', reference_damage=reference,
+                                                   current_hp=boss_hp, estimated_seconds=estimate)
+                        self.tried.add(signature)
+                        continue
+                    if boss_hp is not None and reference == boss_hp and not can_repeat_clear_time(estimate):
+                        self.reject_recommendation('参考耗时不满足双刀预算', reference_damage=reference,
+                                                   current_hp=boss_hp, estimated_seconds=estimate)
                         self.tried.add(signature)
                         continue
                     if not self.recommendation_owned(screen, button):
+                        self.reject_recommendation('推荐缺员或角色受限', reference_damage=reference)
                         self.tried.add(signature)
                         continue
                     if self.recommendation_restricted(screen, button):
+                        self.reject_recommendation('推荐局部核验缺员或角色受限', reference_damage=reference)
                         self.tried.add(signature)
                         continue
                     self.ensure_recommendation_unsaved(screen, button)
@@ -523,10 +544,8 @@ class TeamBattle(TimeLimitTask):
                         self.tried.add(signature)
                         self.tried_teams.add(names)
                         return names
-                    from ..run_session import emit
                     evidence = str(self.ui.save(f'team_battle_rejected_{signature}', formation))
-                    emit('team_battle.recommendation', decision='rejected', reason=reason,
-                         team=names, evidence=evidence)
+                    self.reject_recommendation(reason, team=names, evidence=evidence)
                     self.log('推荐队伍跳过：'+reason)
                     self.tried.add(signature)
                     self.ui.expect_click('取消', (630, 425, 775, 500), exact=True)
@@ -679,7 +698,7 @@ class TeamBattle(TimeLimitTask):
                 if simulate and '模拟战的战斗结果' not in text:
                     time.sleep(.4)
                     continue
-                remaining = parse_remaining_time(screen)
+                remaining = parse_remaining_time(screen, self.ui) if not use_extension else None
                 if remaining is None and not use_extension:
                     time.sleep(.4)
                     continue
@@ -760,8 +779,11 @@ class TeamBattle(TimeLimitTask):
         if wanted is None or rebuild_extension:
             self.tried = set()
             self.tried_teams = set()
-        for _ in range(self.options['max_simulations']-len(self.report['simulations'])):
+        while True:
             self.check_deadline()
+            limit = self.options['max_simulations']
+            if limit and len(self.report['simulations']) >= limit:
+                raise TaskDeadline('达到程序设置的模拟搜索轮数上限；游戏模拟次数不限，剩余挑战可继续搜索')
             self.report_progress(f"团队战 · {boss.name} · 查找第 {len(self.report['simulations'])+1} 支模拟队伍")
             self.prepare_boss(boss, True)
             if wanted is None:
@@ -810,7 +832,9 @@ class TeamBattle(TimeLimitTask):
                 if wanted is not None and not rebuild_extension:
                     return None
                 continue
-            if wanted is None and simulation['win'] and boss.full and not can_repeat(simulation['remaining']):
+            if wanted is None and not normal_simulation_ready(boss, simulation):
+                self.reject_recommendation('满血首领模拟未通过双刀击杀校验', current_hp=boss.current_hp,
+                                           won=simulation.get('win'), returned_seconds=simulation.get('remaining'))
                 continue
             # The extension simulation runs with the verified in-game returned
             # time. Wall time also includes loading, cut-ins and OCR; it cannot
@@ -855,10 +879,8 @@ class TeamBattle(TimeLimitTask):
             self.save_report()
             after = self.map()
             cp_after, extension_after = self.counts(after)
-            if wanted is None and cp_after != cp_before-1:
-                raise EventUIError('普通挑战后 CP 变化与预期不符，停止后续实战')
-            if wanted is not None and (cp_after != cp_before or extension_after != extension_before-1):
-                raise EventUIError('额外挑战后次数变化与预期不符，停止后续实战')
+            validate_counter_transition((cp_before, extension_before), (cp_after, extension_after),
+                                        extension=wanted is not None, won=real['win'], returned=real.get('remaining'))
             row = dict(boss=boss.name, lane=boss.lane, lap=boss.lap,
                        team_key=names, team=self.teams[names]['labels'],
                        cp_before=cp_before, cp_after=cp_after, extension_after=extension_after,
@@ -870,7 +892,6 @@ class TeamBattle(TimeLimitTask):
             self.report.pop('in_flight', None)
             self.save_report()
             return row
-        return None
 
     def run(self, event: Event | None = None):
         try:
@@ -1014,7 +1035,9 @@ class TeamBattle(TimeLimitTask):
                         break
                     continue
                 if selected is None:
-                    self.report['pending'].append('当前首领均无可核验的五人高级推荐队伍或模拟战伤害未达参考目标')
+                    counts = self.report.get('candidate_rejections', {})
+                    detail = '；累计淘汰：'+ '、'.join(f'{k}{v}条' for k, v in sorted(counts.items())) if counts else ''
+                    self.report['pending'].append('当前首领均无可核验的五人高级推荐队伍或模拟战伤害未达参考目标'+detail)
                     break
                 self.report['normal_attacks'] += 1
                 if not selected['win']:

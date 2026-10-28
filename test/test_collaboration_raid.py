@@ -537,6 +537,34 @@ class RaidFlowTests(TaskReplayMixin, TestCase):
         self.assertFalse(self.task.combat_pre_dialog(page))
         self.assertEqual(self.clicks(), [])
 
+    def test_ordinary_only_pool_requires_explicit_late_pool_and_empty_total(self):
+        def page(pool=6, remaining=0, denominator=450, y=117):
+            return screen(('当前的列表', 480, 42),
+                          (f'第{pool}次报酬交换的阵容', 480, 77),
+                          ('普通报酬', 302, y), (f'剩余{remaining}/{denominator}', 646, y),
+                          ('0/1', 675, 166), ('重置', 478, 478), blue=('重置',))
+        for invalid in (page(pool=5), page(remaining=1), page(denominator=0), page(y=282)):
+            self.assertFalse(field.exchange_pool_empty(invalid))
+            self.assertIsNone(field.navigation_exit(invalid))
+        uncertain = page()
+        uncertain.items += screen(('重置目标报酬', 320, 117)).items
+        self.assertFalse(field.exchange_pool_empty(uncertain))
+        for pool in (6, 7):
+            with self.subTest(pool=pool):
+                empty = page(pool=pool)
+                self.assertTrue(field.exchange_pool_empty(empty))
+                self.assertEqual(field.navigation_exit(empty).text, '重置')
+                self.task.ui.click.reset_mock()
+                self.task.state['pending_exchange'] = dict(before=210, after=110, quantity=100,
+                                                          receipt='synthetic-receipt.png')
+                reset = screen(('重置完毕', 480, 146), ('重置了报酬列表。', 475, 254),
+                               ('确认', 477, 370))
+                self.frames([empty, reset, exchange(110)])
+                self.task.settle_exchange()
+                self.assertEqual(self.clicks(), ['重置', '确认'])
+                self.assertNotIn('pending_exchange', self.task.state)
+                self.assertEqual(self.task.report['exchanges'][-1]['after'], 110)
+
     def test_swallowed_mission_tap_is_retried_only_from_verified_home(self):
         self.frames([home()]*3 + [missions()])
         with patch('pcrscript.tasks.task_collaboration_raid.time', fake_clock()):

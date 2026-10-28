@@ -8,7 +8,7 @@ from unittest.mock import Mock, patch
 import numpy as np
 
 from pcrscript.game_ui.screen import EventScreen, EventUI, EventUIError, TextBox
-from pcrscript.game_ui.team_battle import Boss, can_repeat, map_bosses, meets_reference, priority, recommendation_damage, recommendation_time, result_damage
+from pcrscript.game_ui.team_battle import Boss, boss_detail, can_repeat, can_repeat_clear_time, map_bosses, meets_reference, parse_remaining_time, priority, recommendation_damage, recommendation_time, result_damage, validate_counter_transition
 from pcrscript.news import _query_clan_battle
 from pcrscript.tasks.base import Event
 from pcrscript.tasks.task_team_battle import BossChanged, ORPHAN_EXTENSION, REBUILD_EXTENSION, TaskDeadline, TeamBattle, validate_options
@@ -18,7 +18,91 @@ def box(text, x, y):
     return TextBox(text, 1.0, [[x-18, y-8], [x+18, y-8], [x+18, y+8], [x-18, y+8]])
 
 
+def read_region_fixture(screen, roi, **options):
+    # Numeric engine output only; banner reads remain separate observations.
+    return screen if options.get('classify') is False else EventScreen(screen.image, [])
+
+
 class TeamBattleTests(unittest.TestCase):
+    def test_three_double_kills_validate_every_counter_transition(self):
+        counts = (3, 0)
+        for normal_left in (2, 1, 0):
+            after = (normal_left, 1)
+            validate_counter_transition(counts, after, extension=False, won=True, returned=77)
+            with self.assertRaises(EventUIError):
+                validate_counter_transition(counts, (normal_left, 0), extension=False, won=True, returned=77)
+            counts = after
+            after = (normal_left, 0)
+            validate_counter_transition(counts, after, extension=True, won=True)
+            with self.assertRaises(EventUIError):
+                validate_counter_transition(counts, counts, extension=True, won=True)
+            counts = after
+        self.assertEqual(counts, (0, 0))
+    def test_repeat_rules_cover_entire_timer_range_and_reject_unknown_values(self):
+        # Independently model an elapsed battle and the game's capped bonus.
+        for spent in range(1, 91):
+            returned = min(90, 90-spent+20)
+            safe = spent+8 <= returned
+            self.assertEqual(can_repeat_clear_time(spent), safe)
+            self.assertEqual(can_repeat(returned), safe)
+        for value in (None, True, '59', -1, 91):
+            self.assertFalse(can_repeat(value))
+        self.assertEqual(validate_options({})['max_simulations'], 0)
+        for value in (-1, True, '0', 401):
+            with self.assertRaises(ValueError):
+                validate_options({'max_simulations': value})
+
+    def test_all_decision_numbers_use_upright_crop_and_keep_unknowns_unknown(self):
+        image = np.full((540, 960, 3), 240, np.uint8)
+        full = EventScreen(image, [box('讨伐时间', 86, 299), box('参考伤害', 110, 251),
+                                  box('0:20', 870, 453), box('0:20', 151, 299),
+                                  box('6000000', 120, 272)])
+        ui = Mock()
+        ui.read_region.return_value = EventScreen(image, [box('1:17', 870, 453)])
+        self.assertEqual(parse_remaining_time(full, ui), 77)
+        ui.read_region.assert_called_with(full, (825, 435, 925, 470), classify=False)
+        for text in ('1:31', '0:99'):
+            ui.read_region.return_value = EventScreen(image, [box(text, 870, 453)])
+            self.assertIsNone(parse_remaining_time(full, ui))
+        ui.read_region.return_value = EventScreen(image, [box('0:33', 151, 299)])
+        self.assertEqual(recommendation_time(full, 277, ui), 33)
+        ui.read_region.return_value = EventScreen(image, [box('90000000', 120, 272)])
+        self.assertEqual(recommendation_damage(full, 277, ui), 90_000_000)
+        ui.read_region.return_value = EventScreen(image, [])
+        self.assertIsNone(recommendation_time(full, 277, ui))
+        self.assertIsNone(recommendation_damage(full, 277, ui))
+
+    def test_boss_hp_uses_real_region_pipeline_with_numeric_direction_disabled(self):
+        image = np.full((540, 960, 3), 240, np.uint8)
+        broken = EventScreen(image, [box('魔物详情', 105, 42), box('测试首领', 330, 282),
+                                    box('00000006/00000006', 600, 315)])
+        with TemporaryDirectory() as folder:
+            ui = EventUI(None, folder)
+            def engine(patch_image, **options):
+                self.assertEqual(patch_image.shape[:2], (90, 645))
+                text = '00000006/00000006' if options['use_cls'] else '90000000/90000000'
+                return SimpleNamespace(txts=[text], scores=[.99],
+                                       boxes=[[[0, 0], [600, 0], [600, 87], [0, 87]]])
+            ui._ocr = Mock(side_effect=engine)
+            observed = boss_detail(broken, Boss(2, 11, 480), ui)
+            self.assertEqual(observed.current_hp, 90_000_000)
+            ui._ocr.assert_called_once()
+
+    def test_boss_hp_is_read_upright_before_candidate_comparison(self):
+        image = np.full((540, 960, 3), 240, np.uint8)
+        broken = EventScreen(image, [box('魔物详情', 105, 42), box('测试首领', 330, 282),
+                                    box('00000006/00000006', 600, 315)])
+        upright = EventScreen(image, [box('90000000/90000000', 600, 315)])
+        ui = Mock(read_region=Mock(return_value=upright))
+        observed = boss_detail(broken, Boss(2, 11, 480), ui)
+        self.assertEqual((observed.current_hp, observed.maximum_hp), (90000000, 90000000))
+        ui.read_region.assert_called_once_with(broken, (490, 300, 705, 330), classify=False)
+        with self.assertRaisesRegex(EventUIError, '方向或格式'):
+            boss_detail(broken, Boss(2, 11, 480))
+        ui.read_region.return_value = EventScreen(image, [])
+        with self.assertRaisesRegex(EventUIError, '无法识别'):
+            boss_detail(broken, Boss(2, 11, 480), ui)
+
     def test_boss_scan_reuses_each_fresh_map_and_detail_observation(self):
         image = np.full((540, 960, 3), 240, np.uint8)
         mapped = EventScreen(image, [box('团队战', 105, 35), box('剩余挑战次数', 350, 406),
@@ -30,6 +114,7 @@ class TeamBattleTests(unittest.TestCase):
         with TemporaryDirectory() as folder:
             task = TeamBattle.__new__(TeamBattle)
             task.ui = EventUI(None, folder)
+            task.ui.read_region = Mock(side_effect=lambda screen, roi, **kwargs: screen)
             task.ui.capture = Mock(side_effect=[detail('首领甲'), mapped, detail('首领乙'), mapped])
             task.ui.click = Mock()
             task.ui.expect_click = Mock(side_effect=AssertionError('不应重复读取已核实的详情'))
@@ -299,6 +384,7 @@ class TeamBattleTests(unittest.TestCase):
         task = TeamBattle.__new__(TeamBattle)
         task.ui = Mock()
         task.ui.capture.side_effect = lambda: state['screen']
+        task.ui.read_region.side_effect = read_region_fixture
         def wait(predicate, purpose, **kwargs):
             self.assertTrue(predicate(state['screen']), purpose)
             return state['screen']
@@ -451,7 +537,7 @@ class TeamBattleTests(unittest.TestCase):
         task.ui = Mock()
         task.map = Mock(return_value=object())
         task.counts = Mock(return_value=(2, 0))
-        boss = Boss(0, 7, 125, 70_000_000, 70_000_000, '首领')
+        boss = Boss(0, 7, 125, 70_000_000, 90_000_000, '首领')
         row = task.try_boss(boss, 3, 0)
         self.assertFalse(row['win'])
         self.assertEqual(row['cp_after'], 2)
@@ -489,9 +575,19 @@ class TeamBattleTests(unittest.TestCase):
                                           'actual_damage': 35_671_598})
         task.save_report = Mock()
         boss = Boss(0, 7, 125, 70_000_000, 70_000_000, '首领')
-        self.assertIsNone(task.try_boss(boss, 3, 0))
+        with self.assertRaisesRegex(TaskDeadline, '程序设置的模拟搜索轮数上限'):
+            task.try_boss(boss, 3, 0)
         task.battle.assert_called_once()
         task.prepare_boss.assert_called_once_with(boss, True)
+        # A full boss must still be killed even if a lower damage reference
+        # was met. This used to bypass the double-kill requirement.
+        task.report = {'simulations': [], 'battles': []}
+        task.battle.reset_mock()
+        task.battle.return_value = {'win': False, 'reference_met': True, 'actual_damage': 35_671_598}
+        with self.assertRaises(TaskDeadline):
+            task.try_boss(boss, 3, 0)
+        task.battle.assert_called_once()
+        self.assertEqual(task.report['candidate_rejections'], {'满血首领模拟未通过双刀击杀校验': 1})
 
     def test_simulation_only_stops_before_real_formation(self):
         self.assertTrue(validate_options({'simulation_only': True})['simulation_only'])
@@ -513,6 +609,59 @@ class TeamBattleTests(unittest.TestCase):
         task.battle.assert_called_once()
         task.open_formation.assert_not_called()
         self.assertEqual(len(task.report['simulations']), 1)
+
+    def test_free_search_continues_past_twelve_failures_before_any_real_attack(self):
+        task = TeamBattle.__new__(TeamBattle)
+        task.deadline = float('inf')
+        task.options = {'max_simulations': 0, 'battle_timeout': 220}
+        task.report = {'simulations': [], 'battles': [], 'attempts': 0}
+        names = [f'team-{i}' for i in range(1, 14)]
+        task.teams = {key: {'labels': (), 'reference_damage': 70_000_000} for key in names}
+        task.prepare_boss = Mock()
+        task.recommendation = Mock(side_effect=names)
+        task.equipped = Mock(return_value={'slots': []})
+        modes = []
+        def battle(simulate, *args, **kwargs):
+            modes.append(simulate)
+            if len(modes) <= 12:
+                self.assertTrue(simulate)
+                self.assertNotIn('in_flight', task.report)
+                return {'win': False, 'reference_met': False}
+            return {'win': True, 'remaining': 77}
+        task.battle = Mock(side_effect=battle)
+        task.save_report = Mock()
+        task.open_formation = Mock(return_value=object())
+        task.team = Mock(return_value='team-13')
+        task.used_member_marked = Mock(return_value=False)
+        task.ui = Mock()
+        task.map = Mock(return_value=object())
+        task.counts = Mock(return_value=(2, 1))
+        result = task.try_boss(Boss(0, 7, 125, 70_000_000, 70_000_000, '合成首领'), 3, 0)
+        self.assertTrue(result['win'])
+        self.assertEqual(modes, [True]*13+[False])
+        self.assertEqual(len(task.report['simulations']), 13)
+        self.assertEqual(task.report['attempts'], 1)
+        task.options['max_simulations'] = 1
+        task.report = {'simulations': [], 'battles': [], 'attempts': 0}
+        task.recommendation.side_effect = ['team-13']
+        task.battle.side_effect = [{'win': True, 'remaining': 77}, {'win': True, 'remaining': 77}]
+        task.counts.return_value = (2, 0)
+        with self.assertRaisesRegex(EventUIError, '次数变化与预期不符'):
+            task.try_boss(Boss(0, 7, 125, 70_000_000, 70_000_000, '合成首领'), 3, 0)
+        self.assertTrue(task.report['in_flight']['result']['win'])
+        self.assertEqual(task.report['battles'], [])
+        self.assertEqual(task.battle.call_args.args[0], False)
+
+    def test_free_simulation_search_still_obeys_execution_deadline(self):
+        task = TeamBattle.__new__(TeamBattle)
+        task.deadline = -1
+        task.options = {'max_simulations': 0}
+        task.recommendation = Mock()
+        task.battle = Mock()
+        with self.assertRaises(TaskDeadline):
+            task.try_boss(Boss(0, 7, 125, 100, 100, '合成首领'), 3, 0)
+        task.recommendation.assert_not_called()
+        task.battle.assert_not_called()
 
     def test_existing_extension_uses_game_selected_team_after_restart(self):
         task = TeamBattle.__new__(TeamBattle)
@@ -893,8 +1042,7 @@ class TeamBattleTests(unittest.TestCase):
         task.ui = Mock()
         task.ui.capture.return_value = listed
         task.ui.wait.side_effect = [listed, formation]
-        task.ui.read_region.side_effect = [EventScreen(image, []),
-                                           EventScreen(fire, [])]
+        task.ui.read_region.side_effect = read_region_fixture
         task.formation = EventFormation.__new__(EventFormation)
         task.teams = {}
         task.recommendation_rows = []
@@ -945,8 +1093,9 @@ class TeamBattleTests(unittest.TestCase):
                 task.ui.wait.side_effect = wait
                 task.ui.click.side_effect = click
                 task.ui.swipe.side_effect = lambda *args, **kwargs: state.update(screen=accepted)
-                task.ui.read_region.side_effect = lambda screen, roi: EventScreen(screen.image, [])
+                task.ui.read_region.side_effect = read_region_fixture
                 task.formation = EventFormation.__new__(EventFormation)
+                task.report = {}
                 task.teams = {}
                 task.recommendation_rows = []
                 task.tried = set()
@@ -960,6 +1109,8 @@ class TeamBattleTests(unittest.TestCase):
                 self.assertEqual(task.teams[key]['estimated_seconds'], 20)
                 self.assertEqual(task.ui.swipe.call_count, 1)
                 self.assertEqual(task.tried_teams, {key})
+                reason = '参考伤害超过当前血量' if rejected[0] > 70_000_000 else '参考耗时不满足双刀预算'
+                self.assertEqual(task.report['candidate_rejections'], {reason: 1})
 
     def test_clan_battle_schedule_only_covers_five_days(self):
         cn = timezone(timedelta(hours=8))

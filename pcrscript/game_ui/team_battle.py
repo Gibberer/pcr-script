@@ -22,6 +22,25 @@ class Boss:
 
 
 LANES = (125, 290, 480, 625, 840)
+NORMAL_SECONDS = 90
+RETURN_BONUS_SECONDS = 20
+REPEAT_MARGIN_SECONDS = 8
+
+
+def numeric_text(screen, pattern, roi, ui=None):
+    """Read one known upright field; never rescue a failed crop with old OCR."""
+    observed = ui.read_region(screen, roi, classify=False) if ui is not None else screen
+    item = observed.find(pattern, roi, exact=True)
+    return normalized(item.text) if item is not None and item.score >= .95 else None
+
+
+def seconds_field(screen, roi, ui=None):
+    text = numeric_text(screen, r'\d:\d{2}', roi, ui)
+    if text is None:
+        return None
+    minutes, seconds = map(int, text.split(':'))
+    value = minutes*60+seconds
+    return value if seconds < 60 and 0 <= value <= NORMAL_SECONDS else None
 
 
 def map_ready(screen: EventScreen) -> bool:
@@ -46,13 +65,20 @@ def map_bosses(screen: EventScreen) -> list[Boss]:
     return list(found.values())
 
 
-def boss_detail(screen: EventScreen, boss: Boss) -> Boss:
+def boss_detail(screen: EventScreen, boss: Boss, ui=None) -> Boss:
     if not screen.find('魔物详情', (25, 15, 245, 78), exact=True):
         raise EventUIError('团队战魔物详情未确认')
-    hp = screen.find(r'[\d,]+/[\d,]+', (490, 275, 705, 330), exact=True)
+    # Whole-frame direction classification can rotate this numeric line by
+    # 180 degrees (90000000 becomes 00000006). Read the fixed field upright,
+    # independent of the whole-frame OCR, before using HP to reject a team.
+    region = (490, 300, 705, 330)
+    hp = numeric_text(screen, r'[\d,]+/[\d,]+', region, ui)
     if hp is None:
         raise EventUIError('团队战首领血量无法识别')
-    current, maximum = (int(n.replace(',', '')) for n in normalized(hp.text).split('/'))
+    numbers = [n.replace(',', '') for n in hp.split('/')]
+    if any(len(n) > 1 and n.startswith('0') for n in numbers):
+        raise EventUIError('团队战首领血量数字方向或格式异常')
+    current, maximum = map(int, numbers)
     if not 0 < current <= maximum:
         raise EventUIError('团队战首领血量无效')
     name = normalized(screen.text((270, 260, 395, 305)))
@@ -67,40 +93,64 @@ def priority(boss: Boss, minimum_lap: int) -> tuple[int, int, int, int]:
     return (int(boss.full), int(next_visible), -boss.lap, -boss.lane)
 
 
-def can_repeat(sim_remaining: int, *, margin: int = 8) -> bool:
+def can_repeat_clear_time(clear_seconds: int, *, margin: int = REPEAT_MARGIN_SECONDS) -> bool:
+    if type(clear_seconds) is not int or not 1 <= clear_seconds <= NORMAL_SECONDS:
+        return False
+    if type(margin) is not int or margin < 0:
+        return False
+    returned = min(NORMAL_SECONDS, NORMAL_SECONDS+RETURN_BONUS_SECONDS-clear_seconds)
+    return clear_seconds+margin <= returned
+
+
+def can_repeat(sim_remaining: int, *, margin: int = REPEAT_MARGIN_SECONDS) -> bool:
     """Returned time includes a 20s bonus, capped at the 90s battle limit."""
-    return 0 <= sim_remaining <= 90 and (90+20-sim_remaining) + margin <= sim_remaining
+    return (type(sim_remaining) is int and 0 <= sim_remaining <= NORMAL_SECONDS
+            and can_repeat_clear_time(NORMAL_SECONDS+RETURN_BONUS_SECONDS-sim_remaining, margin=margin))
 
 
-def parse_remaining_time(screen: EventScreen) -> int | None:
-    value = screen.find(r'\d:\d{2}', (825, 435, 925, 470), exact=True)
-    if not value:
-        return None
-    match = re.fullmatch(r'(\d+):(\d{2})', normalized(value.text))
-    if not match or int(match[2]) >= 60:
-        return None
-    return int(match[1])*60+int(match[2])
+def normal_simulation_ready(boss: Boss, simulation: dict) -> bool:
+    """Full-HP double-kill policy cannot be bypassed by a damage-only target."""
+    if boss.full:
+        return simulation.get('win') is True and can_repeat(simulation.get('remaining'))
+    return simulation.get('win') is True or simulation.get('reference_met') is True
 
 
-def recommendation_time(screen: EventScreen, use_y: int) -> int | None:
+def validate_counter_transition(before, after, *, extension: bool, won: bool, returned=None):
+    """A settled result must agree with both counters before another attack."""
+    if any(type(n) is not int or not 0 <= n <= 3 for n in (*before, *after)):
+        raise EventUIError('团队战次数状态无效')
+    cp, extra = before
+    expected = ((cp, extra-1) if extension else
+                (cp-1, extra+int(won and type(returned) is int and returned > 0)))
+    if after != expected:
+        mode = '延长' if extension else '普通'
+        raise EventUIError(f'{mode}挑战后次数变化与预期不符：预期{expected}，实际{after}；停止后续实战')
+
+
+def parse_remaining_time(screen: EventScreen, ui=None) -> int | None:
+    return seconds_field(screen, (825, 435, 925, 470), ui)
+
+
+def recommendation_time(screen: EventScreen, use_y: int, ui=None) -> int | None:
     """Read the displayed estimated clear time for one visible recommendation."""
     label = screen.find('讨伐时间', (45, use_y+4, 125, use_y+42), exact=True)
-    value = screen.find(r'\d:\d{2}', (125, use_y+4, 180, use_y+42), exact=True)
-    if label is None or value is None:
+    if label is None:
         return None
-    match = re.fullmatch(r'(\d+):(\d{2})', normalized(value.text))
-    if match is None or int(match[2]) >= 60:
-        return None
-    return int(match[1])*60+int(match[2])
+    return seconds_field(screen, (125, use_y+4, 180, use_y+42), ui)
 
 
-def recommendation_damage(screen: EventScreen, use_y: int) -> int | None:
+def recommendation_damage(screen: EventScreen, use_y: int, ui=None) -> int | None:
     """Read the reference damage belonging to one recommendation row."""
     label = screen.find('参考伤害', (45, use_y-48, 185, use_y-15), exact=True)
-    value = screen.find(r'[\d,]+', (55, use_y-20, 190, use_y+12), exact=True)
-    if label is None or value is None or value.score < .95:
+    if label is None:
         return None
-    damage = int(normalized(value.text).replace(',', ''))
+    value = numeric_text(screen, r'[\d,]+', (55, use_y-20, 190, use_y+12), ui)
+    if value is None:
+        return None
+    digits = value.replace(',', '')
+    if len(digits) > 1 and digits.startswith('0'):
+        return None
+    damage = int(digits)
     return damage if damage > 0 else None
 
 
