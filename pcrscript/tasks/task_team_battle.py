@@ -22,6 +22,7 @@ from ..game_ui.avatars import feature
 from ..game_ui.avatar_assets import read_json
 from ..constants import SERVER_TIMEZONE
 from ..game_ui.screen import EventUI, EventUIError, normalized
+from ..game_ui.team_battle_filter import CAPACITY, HiddenFilter, hidden_screen
 from ..game_ui.special_equipment import auto_equip_special, cancel_special_equipment
 from ..game_ui.team_battle import Boss, boss_detail, can_repeat, can_repeat_clear_time, map_bosses, map_ready, meets_reference, normal_simulation_ready, parse_remaining_time, priority, recommendation_damage, recommendation_time, result_damage, validate_counter_transition
 from ..run_session import clock as time, atomic_json
@@ -124,6 +125,11 @@ class TeamBattle(TimeLimitTask):
         self.carry = None
         self.hint_path = None
         self.extension_target = None
+        account = self.options.get('account_key', self.driver.device_name)
+        key = sha256(str(account).encode()).hexdigest()[:24]
+        self.hidden_filter = HiddenFilter(self.ui,
+            Path(self.options.get('state_dir', 'cache/daily/team_battle_state'))/(key+'.hidden.json'),
+            self.check_deadline)
 
     def load_extension_target(self, event):
         # This is only an ordering hint; never restore a simulated result or
@@ -239,7 +245,9 @@ class TeamBattle(TimeLimitTask):
                     self.ui.save('team_battle_recovered_simulation_result', screen)
                     self.ui.click(button)
                 continue
-            if self.recommendation_list(screen):
+            if hidden_screen(screen):
+                self.ui.expect_click('取消', (265, 445, 475, 510), exact=True)
+            elif self.recommendation_list(screen):
                 self.ui.expect_click('关闭', (375, 445, 585, 510), exact=True)
             elif self.formation_ready(screen):
                 self.ui.expect_click('取消', (630, 425, 775, 500), exact=True)
@@ -521,6 +529,75 @@ class TeamBattle(TimeLimitTask):
 
     def recommendation(self, wanted=None, boss_hp=None, *, use_extension=False, returned_time=None,
                        boss_full=False):
+        try:
+            return self.filtered_recommendation(wanted, boss_hp, use_extension=use_extension,
+                                               returned_time=returned_time, boss_full=boss_full)
+        except Exception:
+            controller = getattr(self, 'hidden_filter', None)
+            if controller is not None and controller.journal():
+                screen = self.ui.capture()
+                if hidden_screen(screen):
+                    controller.close(False)
+                elif self.formation_ready(screen):
+                    self.ui.expect_click('取消', (630, 425, 775, 500), exact=True)
+                    self.ui.wait(self.recommendation_list, '异常后恢复隐藏筛选')
+                elif screen.find('魔物详情', (25, 15, 245, 78), exact=True):
+                    self.ui.expect_click('推荐编组', (770, 20, 925, 70), exact=True)
+                    self.ui.wait(self.recommendation_list, '异常后打开推荐列表')
+                if self.recommendation_list(self.ui.capture()):
+                    controller.restore()
+                    self.ui.expect_click('关闭', (375, 445, 585, 510), exact=True)
+            raise
+
+    def filtered_recommendation(self, wanted=None, boss_hp=None, *, use_extension=False, returned_time=None,
+                                boss_full=False):
+        """Search normally, then exclude restricted members before exhaustion."""
+        options = dict(use_extension=use_extension, returned_time=returned_time, boss_full=boss_full)
+        controller = getattr(self, 'hidden_filter', None)
+        if controller is None:
+            return self._recommendation(wanted, boss_hp, **options)
+        # Within a run the spent set makes the default search predictably
+        # wasteful. Across runs, spent normal attempts also trigger the visible
+        # badge scan; counters nominate a search, never a character identity.
+        need_filter = bool(self.spent or self.report.get('remaining_normal', 3) < 3)
+        if not need_filter:
+            chosen = self._recommendation(wanted, boss_hp, **options)
+            if chosen is not None:
+                return chosen
+        self.ui.expect_click('推荐编组', (770, 20, 925, 70), exact=True)
+        self.ui.wait(self.recommendation_list, '隐藏角色前推荐列表')
+        details = controller.apply()
+        self.report.setdefault('hidden_filters', []).append(details)
+        self.save_report()
+        self.ui.expect_click('关闭', (375, 445, 585, 510), exact=True)
+        chosen = None
+        try:
+            if details['added'] or need_filter:
+                chosen = self._recommendation(wanted, boss_hp, **options)
+            if chosen is not None:
+                self.ui.expect_click('取消', (630, 425, 775, 500), exact=True)
+                self.ui.wait(self.recommendation_list, '筛选后返回推荐列表')
+            else:
+                self.ui.expect_click('推荐编组', (770, 20, 925, 70), exact=True)
+                self.ui.wait(self.recommendation_list, '恢复筛选前推荐列表')
+            controller.restore()
+            details['restored'] = True
+            self.ui.expect_click('关闭', (375, 445, 585, 510), exact=True)
+            if chosen is not None:
+                screen = self.open_formation(use_extension=use_extension, returned_time=returned_time,
+                                              **({'preserve_team': True} if use_extension else {}))
+                if self.team(screen) != chosen:
+                    raise EventUIError('恢复隐藏筛选后五人队伍改变，停止开战')
+            elif details['capacity_limited']:
+                raise TaskDeadline(f'隐藏角色达到{CAPACITY}槽上限，筛选后未找到可用队伍；不能判定候选全部耗尽')
+            return chosen
+        finally:
+            # If interrupted on an unknown page, retain the durable journal;
+            # the next run restores it before any simulation or real attack.
+            self.save_report()
+
+    def _recommendation(self, wanted=None, boss_hp=None, *, use_extension=False, returned_time=None,
+                        boss_full=False):
         """Use advanced recommendations; a missing or occupied member rejects the row."""
         self.ui.expect_click('推荐编组', (770, 20, 925, 70), exact=True)
         screen = self.ui.wait(lambda s: s.find('推荐编组', (380, 15, 570, 70), exact=True), '团队战推荐编组')
@@ -855,7 +932,39 @@ class TeamBattle(TimeLimitTask):
         if (current.name, current.current_hp, current.maximum_hp) != (boss.name, boss.current_hp, boss.maximum_hp):
             self.ui.expect_click('取消', (560, 425, 755, 505), exact=True)
             raise BossChanged('首领身份或血量已变化，旧模拟战无效')
+        self.require_low_stage(screen)
         return self.mode(screen, simulate)
+
+    def require_low_stage(self, screen):
+        import re
+        roi = (30, 110, 180, 150)
+        stage = screen.find(r'第[1-9]\d*阶段|[A-Z]阶段|阶段[A-Z]', roi, exact=True)
+        if stage is None or stage.score < .95:
+            stage = self.ui.read_region(screen, roi, classify=False).find(
+                r'第[1-9]\d*阶段|[A-Z]阶段|阶段[A-Z]', roi, exact=True)
+        if stage is None or stage.score < .95:
+            raise TaskDeadline('首领阶段无法确认；仅支持A/B/C低难度，停止开战')
+        value = normalized(stage.text)
+        match = re.fullmatch(r'第(\d+)阶段', value)
+        number = int(match[1]) if match else ord(re.search('[A-Z]', value)[0])-ord('A')+1
+        if number > 3:
+            raise TaskDeadline(f'{value}超出A/B/C低难度范围，需人工出刀')
+
+    def restore_hidden_filter(self, screen):
+        controller = getattr(self, 'hidden_filter', None)
+        if controller is None or not controller.journal():
+            return screen
+        _, bosses = self.wait_bosses(screen)
+        if not bosses:
+            raise EventUIError('隐藏筛选待恢复但地图无可用首领，停止任务')
+        # Preference recovery is permitted even outside combat scope.
+        self.open_boss(bosses[0])
+        self.ui.expect_click('推荐编组', (770, 20, 925, 70), exact=True)
+        self.ui.wait(self.recommendation_list, '中断后恢复隐藏筛选')
+        controller.restore()
+        self.ui.expect_click('关闭', (375, 445, 585, 510), exact=True)
+        self.ui.expect_click('取消', (560, 425, 755, 505), exact=True)
+        return self.map()
 
     def try_boss(self, boss: Boss, cp_before: int, extension_before: int, wanted=None,
                  available_time: int | None = None, *, simulation_only: bool = False):
@@ -1002,6 +1111,7 @@ class TeamBattle(TimeLimitTask):
             if screen is None:
                 self.report['status'] = 'unavailable'
                 return self.report
+            screen = self.restore_hidden_filter(screen)
             if self.options['simulation_only']:
                 screen = self.map()
                 cp, extension = self.counts(screen)
