@@ -1,4 +1,10 @@
-"""Daily team battle with a proven simulation before every real attack."""
+"""Daily team battle with a proven simulation before every real attack.
+
+Scope: low-difficulty stages (A/B/C) where the roster far exceeds the boss,
+so one recommended team kills two bosses (normal kill, then extension).
+Higher stages (D onward) are out of scope; repeated failures are reported
+as a scope or recognition problem instead of searching the whole timeout.
+"""
 from __future__ import annotations
 
 from hashlib import sha256
@@ -29,6 +35,9 @@ def validate_options(options: dict) -> dict:
     limit = result.setdefault('max_simulations', 0)
     if type(limit) is not int or not 0 <= limit <= 400:
         raise ValueError('TeamBattle.max_simulations必须是0到400的整数；0表示仅受运行时限约束')
+    failures = result.setdefault('max_boss_failures', 3)
+    if type(failures) is not int or not 0 <= failures <= 100:
+        raise ValueError('TeamBattle.max_boss_failures必须是0到100的整数；0表示不限制')
     return result
 
 
@@ -549,11 +558,10 @@ class TeamBattle(TimeLimitTask):
                                                    current_hp=boss_hp, estimated_seconds=estimate)
                         self.tried.add(signature)
                         continue
-                    # A full-HP normal attack must kill within the double-kill
-                    # budget; a damage-only row would be simulated and then
-                    # always rejected by normal_simulation_ready.
-                    if boss_full and boss_hp is not None and reference < boss_hp:
-                        self.reject_recommendation('满血首领参考伤害不足以击杀', reference_damage=reference,
+                    # Normal attacks are kill-only: in the supported A/B/C
+                    # stages a killing row exists and earns the extension.
+                    if not use_extension and boss_hp is not None and reference < boss_hp:
+                        self.reject_recommendation('参考伤害不足以击杀', reference_damage=reference,
                                                    current_hp=boss_hp, estimated_seconds=estimate)
                         self.tried.add(signature)
                         continue
@@ -856,6 +864,7 @@ class TeamBattle(TimeLimitTask):
         if wanted is None or rebuild_extension:
             self.tried = set()
             self.tried_teams = set()
+        failures = 0
         while True:
             self.check_deadline()
             limit = self.options['max_simulations']
@@ -905,13 +914,21 @@ class TeamBattle(TimeLimitTask):
             self.save_report()
             if simulation_only:
                 return simulation
-            if not (simulation['win'] or simulation.get('reference_met')):
+            passed = (normal_simulation_ready(boss, simulation) if wanted is None
+                      else simulation['win'] or simulation.get('reference_met'))
+            if not passed:
                 if wanted is not None and not rebuild_extension:
                     return None
-                continue
-            if wanted is None and not normal_simulation_ready(boss, simulation):
-                self.reject_recommendation('满血首领模拟未通过双刀击杀校验', current_hp=boss.current_hp,
-                                           won=simulation.get('win'), returned_seconds=simulation.get('remaining'))
+                if wanted is None:
+                    self.reject_recommendation('模拟未通过击杀或双刀校验', current_hp=boss.current_hp,
+                                               won=simulation.get('win'), returned_seconds=simulation.get('remaining'))
+                failures += 1
+                cap = self.options.get('max_boss_failures', 3)
+                if cap and failures >= cap:
+                    self.reject_recommendation('超出低难度前提的连续模拟失败', current_hp=boss.current_hp,
+                                               failures=failures)
+                    self.log(f'{boss.name}连续{failures}队模拟未通过，超出A/B/C低难度前提；换其他首领')
+                    return None
                 continue
             # The extension simulation runs with the verified in-game returned
             # time. Wall time also includes loading, cut-ins and OCR; it cannot
@@ -1114,7 +1131,8 @@ class TeamBattle(TimeLimitTask):
                 if selected is None:
                     counts = self.report.get('candidate_rejections', {})
                     detail = '；累计淘汰：'+ '、'.join(f'{k}{v}条' for k, v in sorted(counts.items())) if counts else ''
-                    self.report['pending'].append('当前首领均无可核验的五人高级推荐队伍或模拟战伤害未达参考目标'+detail)
+                    self.report['pending'].append('当前首领均无可核验的击杀队伍；本任务只适用于阵容远超首领的A/B/C阶段，'
+                                                  '此时通常有解，请先排查识别或页面异常，D阶段起需人工出刀'+detail)
                     break
                 self.report['normal_attacks'] += 1
                 if not selected['win']:

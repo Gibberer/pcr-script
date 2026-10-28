@@ -109,10 +109,14 @@ def can_repeat(sim_remaining: int, *, margin: int = REPEAT_MARGIN_SECONDS) -> bo
 
 
 def normal_simulation_ready(boss: Boss, simulation: dict) -> bool:
-    """Full-HP double-kill policy cannot be bypassed by a damage-only target."""
-    if boss.full:
-        return simulation.get('win') is True and can_repeat(simulation.get('remaining'))
-    return simulation.get('win') is True or simulation.get('reference_met') is True
+    """Normal attacks must kill; a full-HP kill must also fit the double-kill budget.
+
+    The task only covers low stages (A/B/C) where such a team exists, so a
+    damage-only target is never accepted for a normal attack.
+    """
+    if simulation.get('win') is not True:
+        return False
+    return not boss.full or can_repeat(simulation.get('remaining'))
 
 
 def validate_counter_transition(before, after, *, extension: bool, won: bool, returned=None):

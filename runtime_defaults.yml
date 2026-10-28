@@ -80,6 +80,7 @@ TeamBattle:
   battle_timeout: 220
   max_real_attacks: 3
   max_simulations: 0  # 免费模拟不限轮数；仍受 timeout 运行时限约束
+  max_boss_failures: 3  # 仅适用A/B/C低难度：同一首领连续失败即换首领；0为不限
 CollaborationRaid:
   first_clear: true
   claim_rewards: true

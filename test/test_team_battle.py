@@ -514,52 +514,50 @@ class TeamBattleTests(unittest.TestCase):
                              [box('伤害合计', 85, 25), box('35671598×3.0', 155, 50)])
         self.assertEqual(result_damage(result), 35_671_598)
 
-    def test_damage_target_met_can_proceed_after_simulation(self):
+    def test_damage_only_simulation_never_starts_normal_attack(self):
+        # The task covers A/B/C stages only: normal attacks must kill even
+        # on a damaged boss, so a met damage target is not enough.
         task = TeamBattle.__new__(TeamBattle)
         task.deadline = float('inf')
         task.options = {'max_simulations': 1, 'battle_timeout': 220}
         task.report = {'simulations': [], 'battles': [], 'attempts': 0}
         task.teams = {'team-1': {'labels': (), 'reference_damage': 30_000_000,
                                  'estimated_seconds': 90}}
-        task.tried = set()
-        task.spent = set()
         task.prepare_boss = Mock()
         task.recommendation = Mock(return_value='team-1')
         task.equipped = Mock(return_value={'slots': []})
-        task.battle = Mock(side_effect=[
-            {'win': False, 'reference_met': True, 'actual_damage': 35_671_598},
-            {'win': False, 'reference_met': True, 'actual_damage': 34_000_000},
-        ])
+        task.battle = Mock(return_value={'win': False, 'reference_met': True, 'actual_damage': 35_671_598})
         task.save_report = Mock()
-        task.open_formation = Mock(return_value=object())
-        task.team = Mock(return_value='team-1')
-        task.used_member_marked = Mock(return_value=False)
-        task.ui = Mock()
-        task.map = Mock(return_value=object())
-        task.counts = Mock(return_value=(2, 0))
+        task.open_formation = Mock()
         boss = Boss(0, 7, 125, 70_000_000, 90_000_000, '首领')
-        row = task.try_boss(boss, 3, 0)
-        self.assertFalse(row['win'])
-        self.assertEqual(row['cp_after'], 2)
-        self.assertEqual(task.battle.call_count, 2)
-        self.assertEqual(task.battle.call_args_list[0].kwargs['reference_damage'], 30_000_000)
-        # A settled real result must survive a later counter OCR failure.
-        task.report = {'simulations': [], 'battles': [], 'attempts': 0}
-        task.battle.reset_mock(side_effect=True)
-        task.battle.side_effect = [
-            {'win': False, 'reference_met': True, 'actual_damage': 35_671_598},
-            {'win': False, 'reference_met': True, 'actual_damage': 34_000_000},
-        ]
-        saved_results = []
-        task.save_report.side_effect = lambda: saved_results.append(
-            task.report.get('in_flight', {}).get('result'))
-        task.counts.side_effect = EventUIError('团队战次数无法确认')
-        with self.assertRaisesRegex(EventUIError, '次数无法确认'):
+        with self.assertRaises(TaskDeadline):
             task.try_boss(boss, 3, 0)
-        self.assertEqual(task.report['in_flight']['result']['actual_damage'], 34_000_000)
-        self.assertIn(task.report['in_flight']['result'], saved_results)
-        self.assertEqual(task.battle.call_count, 2)
-        self.assertEqual(task.report['battles'], [])
+        task.battle.assert_called_once()
+        task.open_formation.assert_not_called()
+        self.assertEqual(task.report['candidate_rejections'], {'模拟未通过击杀或双刀校验': 1})
+
+    def test_repeated_failed_simulations_leave_boss_as_out_of_scope(self):
+        self.assertEqual(validate_options({})['max_boss_failures'], 3)
+        for value in (-1, 101, True, 1.5):
+            with self.assertRaises(ValueError):
+                validate_options({'max_boss_failures': value})
+        task = TeamBattle.__new__(TeamBattle)
+        task.deadline = float('inf')
+        task.options = {'max_simulations': 0, 'max_boss_failures': 3, 'battle_timeout': 220}
+        task.report = {'simulations': [], 'battles': [], 'attempts': 0}
+        names = [f'team-{i}' for i in range(1, 6)]
+        task.teams = {key: {'labels': (), 'reference_damage': 70_000_000} for key in names}
+        task.prepare_boss = Mock()
+        task.recommendation = Mock(side_effect=names)
+        task.equipped = Mock(return_value={'slots': []})
+        task.battle = Mock(return_value={'win': False, 'reference_met': False})
+        task.save_report = Mock()
+        task.open_formation = Mock()
+        task.log = Mock()
+        self.assertIsNone(task.try_boss(Boss(0, 7, 125, 70_000_000, 70_000_000, '合成首领'), 3, 0))
+        self.assertEqual(task.battle.call_count, 3)
+        task.open_formation.assert_not_called()
+        self.assertEqual(task.report['candidate_rejections']['超出低难度前提的连续模拟失败'], 1)
 
     def test_damage_target_missed_never_starts_real_attack(self):
         task = TeamBattle.__new__(TeamBattle)
@@ -588,7 +586,7 @@ class TeamBattleTests(unittest.TestCase):
         with self.assertRaises(TaskDeadline):
             task.try_boss(boss, 3, 0)
         task.battle.assert_called_once()
-        self.assertEqual(task.report['candidate_rejections'], {'满血首领模拟未通过双刀击杀校验': 1})
+        self.assertEqual(task.report['candidate_rejections'], {'模拟未通过击杀或双刀校验': 1})
 
     def test_simulation_only_stops_before_real_formation(self):
         self.assertTrue(validate_options({'simulation_only': True})['simulation_only'])
@@ -614,7 +612,7 @@ class TeamBattleTests(unittest.TestCase):
     def test_free_search_continues_past_twelve_failures_before_any_real_attack(self):
         task = TeamBattle.__new__(TeamBattle)
         task.deadline = float('inf')
-        task.options = {'max_simulations': 0, 'battle_timeout': 220}
+        task.options = {'max_simulations': 0, 'max_boss_failures': 0, 'battle_timeout': 220}
         task.report = {'simulations': [], 'battles': [], 'attempts': 0}
         names = [f'team-{i}' for i in range(1, 14)]
         task.teams = {key: {'labels': (), 'reference_damage': 70_000_000} for key in names}
@@ -1116,7 +1114,7 @@ class TeamBattleTests(unittest.TestCase):
                 reason = '参考伤害超过当前血量' if rejected[0] > 70_000_000 else '参考耗时不满足双刀预算'
                 self.assertEqual(task.report['candidate_rejections'], {reason: 1})
 
-    def test_full_boss_skips_damage_only_row_before_simulation(self):
+    def test_normal_attack_skips_damage_only_row_before_simulation(self):
         from pcrscript.tasks.event_formation import EventFormation
 
         def recommendation(damage, seconds, colour=(25, 80, 220)):
@@ -1163,10 +1161,10 @@ class TeamBattleTests(unittest.TestCase):
                 task.check_deadline = Mock()
                 with patch('pcrscript.tasks.task_team_battle.time.sleep'):
                     key = task.recommendation(boss_hp=70_000_000, boss_full=full)
-                self.assertEqual(task.teams[key]['reference_damage'], 70_000_000 if full else 30_000_000)
-                self.assertEqual(state['used'], [kill] if full else [damage_only])
-                self.assertEqual(task.report.get('candidate_rejections', {}),
-                                 {'满血首领参考伤害不足以击杀': 1} if full else {})
+                # Kill-only normal attacks: a damaged boss also skips the row.
+                self.assertEqual(task.teams[key]['reference_damage'], 70_000_000)
+                self.assertEqual(state['used'], [kill])
+                self.assertEqual(task.report.get('candidate_rejections', {}), {'参考伤害不足以击杀': 1})
 
                 # A pale but complete row is checked on the formation page
                 # instead of being rejected from portrait colour alone.
