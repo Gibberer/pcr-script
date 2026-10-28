@@ -260,6 +260,12 @@ class TeamBattle(TimeLimitTask):
                 self.ui.click(entry)
             elif screen.find('冒险', (475, 475, 595, 535), exact=True):
                 self.ui.click(screen.find('冒险', (475, 475, 595, 535), exact=True))
+            elif (screen.find('点击屏幕开始游戏', (260, 450, 710, 535), exact=True)
+                  and screen.find('主菜单', (0, 460, 200, 540), exact=True)):
+                # A standalone run can start on the title screen; login and
+                # its announcements are shared home navigation.
+                from .task_home import ToHomePage
+                ToHomePage(self.robot).run(timeout=180)
             else:
                 time.sleep(.6)
         raise EventUIError('团队战入口或首次弹窗无法确认')
@@ -564,37 +570,44 @@ class TeamBattle(TimeLimitTask):
             chosen = self._recommendation(wanted, boss_hp, **options)
             if chosen is not None:
                 return chosen
-        self.ui.expect_click('推荐编组', (770, 20, 925, 70), exact=True)
-        self.ui.wait(self.recommendation_list, '隐藏角色前推荐列表')
-        details = controller.apply()
-        self.report.setdefault('hidden_filters', []).append(details)
-        self.save_report()
-        self.ui.expect_click('关闭', (375, 445, 585, 510), exact=True)
-        chosen = None
-        try:
-            if details['added'] or need_filter:
-                chosen = self._recommendation(wanted, boss_hp, **options)
-            if chosen is not None:
-                self.ui.expect_click('取消', (630, 425, 775, 500), exact=True)
-                self.ui.wait(self.recommendation_list, '筛选后返回推荐列表')
-            else:
-                self.ui.expect_click('推荐编组', (770, 20, 925, 70), exact=True)
-                self.ui.wait(self.recommendation_list, '恢复筛选前推荐列表')
-            controller.restore()
-            details['restored'] = True
-            self.ui.expect_click('关闭', (375, 445, 585, 510), exact=True)
-            if chosen is not None:
-                screen = self.open_formation(use_extension=use_extension, returned_time=returned_time,
-                                              **({'preserve_team': True} if use_extension else {}))
-                if self.team(screen) != chosen:
-                    raise EventUIError('恢复隐藏筛选后五人队伍改变，停止开战')
-            elif details['capacity_limited']:
-                raise TaskDeadline(f'隐藏角色达到{CAPACITY}槽上限，筛选后未找到可用队伍；不能判定候选全部耗尽')
-            return chosen
-        finally:
-            # If interrupted on an unknown page, retain the durable journal;
-            # the next run restores it before any simulation or real attack.
+        # More restricted roles than slots: the first pass hides those met
+        # first in list order; a second pass from the end hides another set.
+        for from_end in (False, True):
+            self.ui.expect_click('推荐编组', (770, 20, 925, 70), exact=True)
+            self.ui.wait(self.recommendation_list, '隐藏角色前推荐列表')
+            details = controller.apply(from_end=from_end)
+            details['from_end'] = from_end
+            self.report.setdefault('hidden_filters', []).append(details)
             self.save_report()
+            self.ui.expect_click('关闭', (375, 445, 585, 510), exact=True)
+            chosen = None
+            try:
+                if details['added'] or need_filter:
+                    chosen = self._recommendation(wanted, boss_hp, **options)
+                if chosen is not None:
+                    self.ui.expect_click('取消', (630, 425, 775, 500), exact=True)
+                    self.ui.wait(self.recommendation_list, '筛选后返回推荐列表')
+                else:
+                    self.ui.expect_click('推荐编组', (770, 20, 925, 70), exact=True)
+                    self.ui.wait(self.recommendation_list, '恢复筛选前推荐列表')
+                controller.restore()
+                details['restored'] = True
+                self.ui.expect_click('关闭', (375, 445, 585, 510), exact=True)
+                if chosen is not None:
+                    screen = self.open_formation(use_extension=use_extension, returned_time=returned_time,
+                                                  **({'preserve_team': True} if use_extension else {}))
+                    if self.team(screen) != chosen:
+                        raise EventUIError('恢复隐藏筛选后五人队伍改变，停止开战')
+                    return chosen
+                if not details['capacity_limited']:
+                    return None
+                if from_end:
+                    raise TaskDeadline(f'受限角色超过隐藏角色{CAPACITY}槽，前后两组筛选均未找到可用队伍；'
+                                       '不能判定候选全部耗尽')
+            finally:
+                # If interrupted on an unknown page, retain the durable journal;
+                # the next run restores it before any simulation or real attack.
+                self.save_report()
 
     def _recommendation(self, wanted=None, boss_hp=None, *, use_extension=False, returned_time=None,
                         boss_full=False):
@@ -1021,10 +1034,12 @@ class TeamBattle(TimeLimitTask):
                                                    reference_damage=reference,
                                                    equipment=gear, **simulation))
             self.save_report()
-            if simulation_only:
-                return simulation
             passed = (normal_simulation_ready(boss, simulation) if wanted is None
                       else simulation['win'] or simulation.get('reference_met'))
+            if simulation_only and passed:
+                # Rehearsal: the passing team stands in for a real attack.
+                return dict(boss=boss.name, lane=boss.lane, lap=boss.lap, team_key=names,
+                            team=self.teams[names]['labels'], simulation=simulation, **simulation)
             if not passed:
                 if wanted is not None and not rebuild_extension:
                     return None
@@ -1096,6 +1111,45 @@ class TeamBattle(TimeLimitTask):
             self.save_report()
             return row
 
+    def rehearse(self):
+        """Free normal-attack chain: each passing team is treated as spent.
+
+        Boss HP never changes, so every round repeats the same kill and
+        double-kill budget with members distinct from earlier rounds. No real
+        formation is opened and no challenge count is used.
+        """
+        screen = self.map()
+        cp, extension = self.counts(screen)
+        self.report['remaining_normal'] = cp
+        self.report['remaining_extension'] = extension
+        self.report['rehearsal'] = []
+        _, bosses = self.wait_bosses(screen)
+        if not bosses:
+            self.report['pending'].append('未找到可模拟的首领与高级推荐队伍')
+        rounds = self.options['max_real_attacks']
+        minimum = min((boss.lap for boss in bosses), default=0)
+        ordered = sorted(bosses, key=lambda b: priority(b, minimum), reverse=True)
+        for index in range(rounds if bosses else 0):
+            selected = None
+            for boss in ordered:
+                if boss.full and boss.lap+1 > minimum+2:
+                    continue
+                self.report_progress(f'模拟预演第 {index+1}/{rounds} 刀 · {boss.name}', index, rounds)
+                selected = self.try_boss(boss, cp, extension, simulation_only=True)
+                if selected:
+                    break
+            if selected is None:
+                counts = self.report.get('candidate_rejections', {})
+                detail = '；累计淘汰：'+'、'.join(f'{k}{v}条' for k, v in sorted(counts.items())) if counts else ''
+                self.report['pending'].append(f'模拟预演第{index+1}刀未找到可击杀且满足双刀预算的新队伍'+detail)
+                break
+            self.spent.add(selected['team_key'])
+            self.report['rehearsal'].append(dict(
+                (key, selected.get(key)) for key in ('boss', 'lane', 'lap', 'team_key', 'team', 'remaining')))
+            self.save_report()
+        self.report['status'] = 'complete' if not self.report['pending'] else 'partial'
+        return self.report
+
     def run(self, event: Event | None = None):
         try:
             self.report_progress('检查团队战开放状态与地图')
@@ -1113,24 +1167,7 @@ class TeamBattle(TimeLimitTask):
                 return self.report
             screen = self.restore_hidden_filter(screen)
             if self.options['simulation_only']:
-                screen = self.map()
-                cp, extension = self.counts(screen)
-                self.report['remaining_normal'] = cp
-                self.report['remaining_extension'] = extension
-                _, bosses = self.wait_bosses(screen)
-                if bosses:
-                    minimum = min(boss.lap for boss in bosses)
-                    for boss in sorted(bosses, key=lambda b: priority(b, minimum), reverse=True):
-                        self.report_progress(f'模拟 {boss.name} · 核对推荐队伍')
-                        if boss.full and boss.lap+1 > minimum+2:
-                            continue
-                        self.try_boss(boss, cp, extension, simulation_only=True)
-                        if self.report['simulations']:
-                            break
-                if not self.report['simulations']:
-                    self.report['pending'].append('未找到可模拟的首领与高级推荐队伍')
-                self.report['status'] = 'complete' if self.report['simulations'] else 'partial'
-                return self.report
+                return self.rehearse()
             changed_retries = 0
             remaining_counts = None
             for _ in range(self.options['max_real_attacks']*2+3):

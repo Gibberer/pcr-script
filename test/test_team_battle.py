@@ -604,10 +604,45 @@ class TeamBattleTests(unittest.TestCase):
         task.save_report = Mock()
         task.open_formation = Mock()
         boss = Boss(0, 7, 125, 70_000_000, 70_000_000, '首领')
-        self.assertFalse(task.try_boss(boss, 3, 0, simulation_only=True)['win'])
-        task.battle.assert_called_once()
+        # A failed rehearsal simulation keeps searching like a real run.
+        with self.assertRaises(TaskDeadline):
+            task.try_boss(boss, 3, 0, simulation_only=True)
+        task.battle.return_value = {'win': True, 'remaining': 70}
+        task.options = {'max_simulations': 0}
+        row = task.try_boss(boss, 3, 0, simulation_only=True)
+        self.assertEqual(row['team_key'], 'team-1')
+        self.assertEqual(task.battle.call_count, 2)
         task.open_formation.assert_not_called()
-        self.assertEqual(len(task.report['simulations']), 1)
+        self.assertEqual(len(task.report['simulations']), 2)
+
+    def test_rehearsal_treats_each_passing_team_as_spent(self):
+        task = TeamBattle.__new__(TeamBattle)
+        task.options = {'max_real_attacks': 3}
+        task.report = {'simulations': [], 'battles': [], 'pending': []}
+        task.spent = set()
+        task.map = Mock(return_value=object())
+        task.counts = Mock(return_value=(0, 0))
+        boss = Boss(0, 7, 125, 70_000_000, 70_000_000, '首领')
+        task.wait_bosses = Mock(return_value=(object(), [boss]))
+        task.save_report = Mock()
+        task.report_progress = Mock()
+        spent_seen = []
+        def try_boss(target, cp, extension, *, simulation_only):
+            self.assertTrue(simulation_only)
+            spent_seen.append(set(task.spent))
+            key = f'team-{len(spent_seen)}'
+            return {'boss': target.name, 'lane': 0, 'lap': 7, 'team_key': key, 'team': (), 'remaining': 70}
+        task.try_boss = Mock(side_effect=try_boss)
+        report = task.rehearse()
+        self.assertEqual(report['status'], 'complete')
+        self.assertEqual(spent_seen, [set(), {'team-1'}, {'team-1', 'team-2'}])
+        self.assertEqual(len(report['rehearsal']), 3)
+        task.try_boss = Mock(return_value=None)
+        task.spent = set()
+        task.report = {'simulations': [], 'battles': [], 'pending': [], 'candidate_rejections': {'x': 1}}
+        report = task.rehearse()
+        self.assertEqual(report['status'], 'partial')
+        self.assertIn('模拟预演第1刀', report['pending'][0])
 
     def test_free_search_continues_past_twelve_failures_before_any_real_attack(self):
         task = TeamBattle.__new__(TeamBattle)
@@ -803,6 +838,22 @@ class TeamBattleTests(unittest.TestCase):
         task.ui.capture.side_effect = [result, mapped]
         with patch('pcrscript.tasks.task_team_battle.time.sleep'):
             self.assertIs(task.enter(), mapped)
+        task.ui.click.assert_not_called()
+
+    def test_enter_logs_in_from_title_screen_through_home_navigation(self):
+        image = np.full((540, 960, 3), 240, np.uint8)
+        title = EventScreen(image, [box('点击屏幕开始游戏',485,480), box('主菜单',70,505)])
+        mapped = EventScreen(image, [box('团队战',105,35), box('剩余挑战次数',350,406),
+                                    box('讨伐信息',240,450)])
+        task = TeamBattle.__new__(TeamBattle)
+        task.ui = Mock()
+        task.ui.capture.side_effect = [title, mapped]
+        task.check_deadline = Mock()
+        task.robot = Mock()
+        with patch('pcrscript.tasks.task_home.ToHomePage') as home:
+            self.assertIs(task.enter(), mapped)
+        home.assert_called_once_with(task.robot)
+        home.return_value.run.assert_called_once_with(timeout=180)
         task.ui.click.assert_not_called()
 
     def test_extension_keeps_same_boss_priority_and_considers_known_residual_hp(self):

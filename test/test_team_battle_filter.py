@@ -35,20 +35,33 @@ class FilterUI:
         self.page = 0
         self.modal = False
         self.inputs = []
+        self.yellow = set()
+        self.drop = 0
+        self.late = 0
+        self.frames = 0
 
-    def capture(self):
+    def capture(self, ocr=True):
         image = np.full((540,960,3), 245, np.uint8)
         if not self.modal:
             return EventScreen(image, [label('推荐编组', 480,42),label('高级',620,164)])
         items = [label('隐藏筛选',480,42),label('取消',370,479),label('显示更新',590,479)]
+        # Like the game's pulsing banner: with late=n it shows on one of n+1 frames.
+        pulse = self.frames % (self.late+1) == 0
+        self.frames += 1
         for index, (identity, restricted) in enumerate(self.pages[self.page]):
             x, y = 90+index*102, 176
             cv.rectangle(image, (x-45,y-44), (x+45,y+44), (0,0,0), 1)
             image[y-40:y+40,x-40:x+40] = face(identity,80,80)
-            if restricted:
+            # Observed game: selected cards keep the pulsing banner.
+            if restricted and pulse:
+                image[y+24:y+45,x-40:x+40] = 60
                 items.append(label('限制实战使用',x,y+35))
-            if identity in self.selected:
+            if identity in self.yellow:
+                # Orange or blonde hair stays inside the card border.
                 image[y-43:y-18,x+15:x+42] = (0,220,255)
+            if identity in self.selected:
+                # The tick's arm crosses the right border into the gap.
+                image[y-46:y-24,x+20:x+54] = (0,220,255)
         for index, (x,y) in enumerate(SLOTS):
             image[y-35:y+36,x-35:x+36] = 195
             if index < len(self.selected):
@@ -71,6 +84,9 @@ class FilterUI:
 
     def click(self, position):
         self.inputs.append(position)
+        if self.drop:
+            self.drop -= 1
+            return
         if position in SLOTS:
             self.selected.pop(SLOTS.index(position))
             return
@@ -93,6 +109,22 @@ class FilterUI:
 
 
 class HiddenFilterTests(unittest.TestCase):
+    def setUp(self):
+        sleep = patch('pcrscript.game_ui.team_battle_filter.time.sleep')
+        sleep.start()
+        self.addCleanup(sleep.stop)
+
+    def test_pulsing_banners_are_sampled_over_several_frames(self):
+        with TemporaryDirectory() as folder:
+            ui = FilterUI(original=[9])
+            # Banners are hidden on two of every three frames, including the
+            # first frame read after opening and after each scroll.
+            ui.late = 2
+            ui.frames = 1
+            controller = HiddenFilter(ui,Path(folder)/'filter.json')
+            self.assertEqual(controller.apply()['added'],2)
+            self.assertEqual(ui.applied,[9,1,3])
+
     def test_task_restores_filter_before_reopening_and_checking_selected_five(self):
         class TaskUI(FilterUI):
             def __init__(self, output, changed=False):
@@ -102,7 +134,7 @@ class HiddenFilterTests(unittest.TestCase):
                 self.changed = changed
                 self.challenge_preferences = None
 
-            def capture(self):
+            def capture(self, ocr=True):
                 if self.modal:
                     return super().capture()
                 image = np.full((540,960,3),240,np.uint8)
@@ -198,8 +230,37 @@ class HiddenFilterTests(unittest.TestCase):
             self.assertTrue(result['capacity_limited'])
             self.assertFalse(result['scanned_to_end'])
             self.assertEqual(result['added'],1)
+            self.assertEqual(ui.applied,original+[1])
             controller.restore()
             self.assertEqual(ui.applied,original)
+            # From the end, overflow hides the last restricted role instead.
+            result = controller.apply(from_end=True)
+            self.assertTrue(result['capacity_limited'])
+            self.assertEqual(ui.applied,original+[3])
+            controller.restore()
+            self.assertEqual(ui.applied,original)
+
+    def test_overflowing_restrictions_try_second_subset_before_stopping(self):
+        task = TeamBattle.__new__(TeamBattle)
+        task.ui = Mock()
+        task.spent = {'team-1'}
+        task.report = {}
+        task.save_report = Mock()
+        task.hidden_filter = Mock()
+        task.hidden_filter.apply.side_effect = lambda from_end=False: dict(
+            added=10, capacity_limited=True, scanned_to_end=False)
+        task._recommendation = Mock(side_effect=[None, 'team-2'])
+        task.open_formation = Mock(return_value=object())
+        task.team = Mock(return_value='team-2')
+        self.assertEqual(task.filtered_recommendation(boss_hp=70_000_000), 'team-2')
+        self.assertEqual([call.kwargs for call in task.hidden_filter.apply.call_args_list],
+                         [{'from_end': False}, {'from_end': True}])
+        self.assertEqual(task.hidden_filter.restore.call_count, 2)
+        task._recommendation = Mock(return_value=None)
+        task.hidden_filter.reset_mock()
+        with self.assertRaisesRegex(TaskDeadline,'前后两组筛选'):
+            task.filtered_recommendation(boss_hp=70_000_000)
+        self.assertEqual(task.hidden_filter.restore.call_count, 2)
 
     def test_interrupted_click_before_reply_is_recoverable_on_next_instance(self):
         with TemporaryDirectory() as folder:
@@ -240,6 +301,41 @@ class HiddenFilterTests(unittest.TestCase):
             controller.restore()
             self.assertEqual(ui.applied,[])
 
+    def test_yellow_corner_on_unselected_restricted_card_is_still_hidden(self):
+        # Orange or blonde hair occupies the tick corner; the banner decides.
+        with TemporaryDirectory() as folder:
+            ui = FilterUI()
+            ui.yellow = {1, 3}
+            controller = HiddenFilter(ui,Path(folder)/'filter.json')
+            self.assertEqual(controller.apply()['added'],2)
+            self.assertEqual(ui.applied,[1,3])
+
+    def test_dropped_taps_are_repeated_only_after_unchanged_frame(self):
+        with TemporaryDirectory() as folder, patch.object(FilterUI,'wait',autospec=True) as wait:
+            def single_frame(ui, predicate, description, timeout=None):
+                screen = ui.capture()
+                if not predicate(screen):
+                    raise EventUIError(description+'超时')
+                return screen
+            wait.side_effect = single_frame
+            ui = FilterUI(original=[9])
+            controller = HiddenFilter(ui,Path(folder)/'filter.json')
+            ui.drop = 1
+            self.assertEqual(controller.apply()['added'],2)
+            self.assertEqual(ui.applied,[9,1,3])
+            # Card 1 twice (dropped then accepted), card 3 once on the next page.
+            self.assertEqual(ui.inputs.count((90,176)),3)
+            ui.drop = 1
+            controller.restore()
+            self.assertEqual(ui.applied,[9])
+            self.assertFalse(controller.journal())
+            # Three dropped taps keep the journal for the next run.
+            controller.apply()
+            ui.drop = 3
+            with self.assertRaisesRegex(EventUIError,'移除临时隐藏角色'):
+                controller.restore()
+            self.assertTrue(controller.journal())
+
     def test_bad_journal_does_not_silently_skip_recovery(self):
         with TemporaryDirectory() as folder:
             path = Path(folder)/'filter.json'
@@ -251,8 +347,10 @@ class HiddenFilterTests(unittest.TestCase):
     def test_grid_detection_ignores_partial_cards_and_selection_gaps(self):
         ui = FilterUI([1])
         ui.modal = True
+        ui.yellow = {2}
         screen = ui.capture()
-        self.assertEqual(len(cards(screen)),2)
+        # As in the game, the tick breaks the selected card's border.
+        self.assertEqual(cards(screen),[(192,176)])
         self.assertTrue(checked(screen,90,176))
         self.assertFalse(checked(screen,192,176))
         x,y = SLOTS[2]
@@ -272,6 +370,10 @@ class HiddenFilterTests(unittest.TestCase):
             [label('限制实战使用',44,12,.99),label('限制实战使用',44,45,.7)])
         self.assertEqual(restricted_cards(provider,screen,[(90,176),(192,176)]),[(90,176)])
         provider.read_region.assert_called_once()
+        # One misread glyph still marks the card; the not-owned badge never does.
+        provider.read_region.return_value = EventScreen(np.zeros((66,88,3),np.uint8),
+            [label('限初实战使用',44,12,.93),label('未持有',44,45,.99)])
+        self.assertEqual(restricted_cards(provider,screen,[(90,176),(192,176)]),[(90,176)])
         packed, roi = provider.read_region.call_args.args
         self.assertEqual(roi,(0,0,88,66))
         np.testing.assert_array_equal(packed.image[:25],screen.image[198:223,46:134])

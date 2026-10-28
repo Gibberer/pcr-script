@@ -6,12 +6,16 @@ import cv2 as cv
 import numpy as np
 
 from .screen import EventScreen, EventUIError
-from ..run_session import atomic_json
+from ..run_session import atomic_json, clock as time
 
 
 SLOTS = tuple((x, y) for y in (225, 307) for x in (637, 717, 797, 877)) + ((637, 390), (717, 390))
 CAPACITY = len(SLOTS)
 TRACK = (560, 132, 569, 433)
+# About 0.55s per sample on the tested device; five cover one pulse.
+PULSE_SAMPLES = 5
+# Tolerate one misread glyph of the six; 「未持有」 cannot match.
+BANNER ='|'.join('限制实战使用'[:i]+'.'+'限制实战使用'[i+1:] for i in range(6))
 
 
 def hidden_screen(screen):
@@ -64,9 +68,10 @@ def cards(screen):
 
 
 def checked(screen, x, y):
-    patch = cv.cvtColor(screen.image[max(125, y-48):y-15, x+12:x+52], cv.COLOR_BGR2HSV)
-    return float(np.mean((patch[:, :, 0] >= 15) & (patch[:, :, 0] <= 40)
-                         & (patch[:, :, 1] > 110) & (patch[:, :, 2] > 160))) > .08
+    """The selection tick's upper arm crosses the card's right border into
+    the white column gap. Hair or costume colour never reaches that gap."""
+    patch = cv.cvtColor(screen.image[y-46:y-28, x+47:x+54], cv.COLOR_BGR2HSV)
+    return float(np.mean((patch[:, :, 2] < 200) | (patch[:, :, 1] > 60))) > .15
 
 
 def restricted_cards(ui, screen, positions):
@@ -82,9 +87,9 @@ def restricted_cards(ui, screen, positions):
     observed = ui.read_region(EventScreen(canvas, []), (0, 0, strip_width, len(canvas)), classify=False)
     result = []
     for index, (x, y) in enumerate(positions):
-        direct = screen.find('限制实战使用', (x-44,y+22,x+44,y+47), exact=True)
-        packed = observed.find('限制实战使用', (0,index*step,strip_width,index*step+strip_height), exact=True)
-        if any(item is not None and item.score >= .95 for item in (direct, packed)):
+        direct = screen.find(BANNER, (x-44,y+22,x+44,y+47), exact=True)
+        packed = observed.find(BANNER, (0,index*step,strip_width,index*step+strip_height), exact=True)
+        if any(item is not None and item.score >= .9 for item in (direct, packed)):
             result.append((x,y))
     return result
 
@@ -126,10 +131,62 @@ class HiddenFilter:
             raise EventUIError('隐藏筛选角色滚动条未识别')
         self.ui.swipe((245, 405 if direction > 0 else 235),
                       (245, 235 if direction > 0 else 405), duration=450)
-        return self.ui.wait(lambda s: hidden_screen(s)
-                            and (bounds := self.ui.scrollbar_bounds(s, TRACK)) is not None
-                            and direction*(bounds[0]-before[0]) > 0,
-                            '隐藏筛选角色列表滚动', timeout=8)
+        screen = self.ui.wait(lambda s: hidden_screen(s)
+                              and (bounds := self.ui.scrollbar_bounds(s, TRACK)) is not None
+                              and direction*(bounds[0]-before[0]) > 0,
+                              '隐藏筛选角色列表滚动', timeout=8)
+        # The list keeps gliding after the bar first moves; banners read on a
+        # moving frame are missed and those cards may scroll past unseen.
+        for _ in range(10):
+            moving = self.ui.scrollbar_bounds(screen, TRACK)
+            settled = self.ui.capture()
+            if hidden_screen(settled) and self.ui.scrollbar_bounds(settled, TRACK) == moving:
+                return settled
+            screen = settled
+        raise EventUIError('隐藏筛选角色列表滚动未停止')
+
+    def banners(self, screen):
+        """The banner pulses: absent, shown, then fading, about every two
+        seconds, and a fading banner is often unreadable. It also changes the
+        card edge, so card positions from one frame are neither complete nor
+        a stillness test. Sample one pulse of the still grid (same scrollbar)
+        and keep every card read with a banner in any sample."""
+        bar = self.ui.scrollbar_bounds(screen, TRACK)
+        frames, positions = [screen], cards(screen)
+        for _ in range(PULSE_SAMPLES):
+            time.sleep(.35)
+            frame = self.ui.capture(ocr=False)
+            if self.ui.scrollbar_bounds(frame, TRACK) != bar:
+                raise EventUIError('隐藏筛选角色网格在读取受限角色期间移动')
+            frames.append(frame)
+            positions += [(x, y) for x, y in cards(frame)
+                          if not any(abs(x-a) < 12 and abs(y-b) < 12 for a, b in positions)]
+        if not positions:
+            raise EventUIError('隐藏筛选角色网格未识别')
+        found = []
+        for frame in frames:
+            found += [p for p in restricted_cards(self.ui, frame, positions) if p not in found]
+        # The unchanged scrollbar keeps this OCR-free frame on the same page.
+        return frames[-1], sorted(found, key=lambda p: (p[1], p[0]))
+
+    def tap(self, position, done, unchanged, description):
+        """The grid can drop a tap during its update animation. Repeat only
+        after a fresh frame still shows the state from before the tap."""
+        def settled(check):
+            def observe(screen):
+                # Slots can be briefly non-contiguous while the grid animates.
+                try:
+                    return hidden_screen(screen) and check(screen)
+                except EventUIError:
+                    return False
+            return observe
+        for attempt in range(3):
+            self.ui.click(position)
+            try:
+                return self.ui.wait(settled(done), description, timeout=4)
+            except EventUIError:
+                if attempt == 2 or not settled(unchanged)(self.ui.capture()):
+                    raise
 
     def restore(self):
         state = self.journal()
@@ -141,10 +198,10 @@ class HiddenFilter:
         if not len(original) <= len(current) <= state['maximum'] or not same_selection(current[:len(original)], original):
             raise EventUIError('隐藏筛选已被外部修改，保留恢复记录并停止')
         while len(current) > len(original):
-            self.ui.click(SLOTS[len(current)-1])
             size = len(current)-1
-            screen = self.ui.wait(lambda s: hidden_screen(s) and len(selection(s)) == size,
-                                  '移除临时隐藏角色', timeout=8)
+            before = current
+            screen = self.tap(SLOTS[size], lambda s: len(selection(s)) == size,
+                              lambda s: same_selection(selection(s), before), '移除临时隐藏角色')
             current = selection(screen)
             if not same_selection(current[:len(original)], original):
                 raise EventUIError('恢复隐藏筛选时原角色发生变化')
@@ -155,7 +212,14 @@ class HiddenFilter:
         self.close(False)
         atomic_json(self.path, {})
 
-    def apply(self):
+    def apply(self, from_end=False):
+        """Hide restricted roles in list order; from_end walks upward from
+        the bottom, choosing a different subset when the slots overflow."""
+        step = -1 if from_end else 1
+        def at_start(bounds):
+            return bounds[1] >= TRACK[3]-5 if from_end else bounds[0] <= TRACK[1]+4
+        def at_end(bounds):
+            return bounds[0] <= TRACK[1]+4 if from_end else bounds[1] >= TRACK[3]-5
         if self.journal():
             raise EventUIError('隐藏筛选存在未恢复设置，须先恢复')
         screen = self.open()
@@ -170,17 +234,16 @@ class HiddenFilter:
                 bounds = self.ui.scrollbar_bounds(screen, TRACK)
                 if bounds is None:
                     raise EventUIError('隐藏筛选角色滚动条未识别')
-                if bounds[0] <= TRACK[1]+4:
+                if at_start(bounds):
                     break
-                screen = self.scroll(screen, -1)
+                screen = self.scroll(screen, -step)
             else:
-                raise EventUIError('隐藏筛选列表无法返回顶部')
+                raise EventUIError('隐藏筛选列表无法回到扫描起点')
             for _ in range(150):
                 self.check_deadline()
-                positions = cards(screen)
-                if not positions:
-                    raise EventUIError('隐藏筛选角色网格未识别')
-                for x, y in restricted_cards(self.ui, screen, positions):
+                # Selected cards keep the pulsing banner; the tick tells them apart.
+                screen, found = self.banners(screen)
+                for x, y in (found[::-1] if from_end else found):
                     self.check_deadline()
                     if checked(screen, x, y):
                         continue
@@ -190,10 +253,10 @@ class HiddenFilter:
                         break
                     state['maximum'] = len(current)+1
                     atomic_json(self.path, state)
-                    self.ui.click((x, y))
                     count = len(current)+1
-                    screen = self.ui.wait(lambda s: hidden_screen(s) and len(selection(s)) == count
-                                          and checked(s, x, y), '选中受限角色', timeout=8)
+                    screen = self.tap((x, y),
+                        lambda s: len(selection(s)) == count and checked(s, x, y),
+                        lambda s: same_selection(selection(s), current), '选中受限角色')
                     if not same_selection(selection(screen)[:len(current)], current):
                         raise EventUIError('隐藏筛选选中后原角色顺序变化')
                     result['added'] += 1
@@ -205,14 +268,14 @@ class HiddenFilter:
                 before = self.ui.scrollbar_bounds(screen, TRACK)
                 if before is None:
                     raise EventUIError('隐藏筛选角色滚动条未识别')
-                if before[1] >= TRACK[3]-5:
+                if at_end(before):
                     result['scanned_to_end'] = True
                     break
                 # Inter-column gutter avoids character long-press; overlap retains
                 # complete cards even when the previous bottom row was clipped.
-                screen = self.scroll(screen, 1)
+                screen = self.scroll(screen, step)
             else:
-                raise EventUIError('隐藏筛选超过扫描上限，未确认列表底部')
+                raise EventUIError('隐藏筛选超过扫描上限，未确认列表终点')
             expected = selection(screen)
             self.close(True)
             screen = self.open()
