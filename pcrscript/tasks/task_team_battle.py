@@ -22,7 +22,6 @@ from ..game_ui.avatars import feature
 from ..game_ui.avatar_assets import read_json
 from ..constants import SERVER_TIMEZONE
 from ..game_ui.screen import EventUI, EventUIError, normalized
-from ..game_ui.team_battle_filter import CAPACITY, HiddenFilter, hidden_screen
 from ..game_ui.special_equipment import auto_equip_special, cancel_special_equipment
 from ..game_ui.team_battle import Boss, boss_detail, can_repeat, can_repeat_clear_time, map_bosses, map_ready, meets_reference, normal_simulation_ready, parse_remaining_time, priority, recommendation_damage, recommendation_time, result_damage, validate_counter_transition
 from ..run_session import clock as time, atomic_json
@@ -125,11 +124,6 @@ class TeamBattle(TimeLimitTask):
         self.carry = None
         self.hint_path = None
         self.extension_target = None
-        account = self.options.get('account_key', self.driver.device_name)
-        key = sha256(str(account).encode()).hexdigest()[:24]
-        self.hidden_filter = HiddenFilter(self.ui,
-            Path(self.options.get('state_dir', 'cache/daily/team_battle_state'))/(key+'.hidden.json'),
-            self.check_deadline)
 
     def load_extension_target(self, event):
         # This is only an ordering hint; never restore a simulated result or
@@ -238,16 +232,15 @@ class TeamBattle(TimeLimitTask):
                 continue
             if self.map_clear(screen):
                 return screen
-            if (screen.find('模拟战的战斗结果', (300, 425, 690, 475))
-                    and screen.find('RESULT|WIN[!！]?', (275, 30, 685, 250), exact=True)):
-                button = screen.find('下一步', (690, 435, 935, 520), exact=True)
-                if button:
-                    self.ui.save('team_battle_recovered_simulation_result', screen)
-                    self.ui.click(button)
+            button = self.settled_result_next(screen)
+            if button is not None:
+                # A finished battle's count is already spent; leaving the
+                # result page never replays it. Reconcile on the map.
+                self.ui.save('team_battle_recovered_result', screen)
+                self.ui.click(button)
+                time.sleep(1)
                 continue
-            if hidden_screen(screen):
-                self.ui.expect_click('取消', (265, 445, 475, 510), exact=True)
-            elif self.recommendation_list(screen):
+            if self.recommendation_list(screen):
                 self.ui.expect_click('关闭', (375, 445, 585, 510), exact=True)
             elif self.formation_ready(screen):
                 self.ui.expect_click('取消', (630, 425, 775, 500), exact=True)
@@ -535,82 +528,6 @@ class TeamBattle(TimeLimitTask):
 
     def recommendation(self, wanted=None, boss_hp=None, *, use_extension=False, returned_time=None,
                        boss_full=False):
-        try:
-            return self.filtered_recommendation(wanted, boss_hp, use_extension=use_extension,
-                                               returned_time=returned_time, boss_full=boss_full)
-        except Exception:
-            controller = getattr(self, 'hidden_filter', None)
-            if controller is not None and controller.journal():
-                screen = self.ui.capture()
-                if hidden_screen(screen):
-                    controller.close(False)
-                elif self.formation_ready(screen):
-                    self.ui.expect_click('取消', (630, 425, 775, 500), exact=True)
-                    self.ui.wait(self.recommendation_list, '异常后恢复隐藏筛选')
-                elif screen.find('魔物详情', (25, 15, 245, 78), exact=True):
-                    self.ui.expect_click('推荐编组', (770, 20, 925, 70), exact=True)
-                    self.ui.wait(self.recommendation_list, '异常后打开推荐列表')
-                if self.recommendation_list(self.ui.capture()):
-                    controller.restore()
-                    self.ui.expect_click('关闭', (375, 445, 585, 510), exact=True)
-            raise
-
-    def filtered_recommendation(self, wanted=None, boss_hp=None, *, use_extension=False, returned_time=None,
-                                boss_full=False):
-        """Search normally, then exclude restricted members before exhaustion."""
-        options = dict(use_extension=use_extension, returned_time=returned_time, boss_full=boss_full)
-        controller = getattr(self, 'hidden_filter', None)
-        if controller is None:
-            return self._recommendation(wanted, boss_hp, **options)
-        # Within a run the spent set makes the default search predictably
-        # wasteful. Across runs, spent normal attempts also trigger the visible
-        # badge scan; counters nominate a search, never a character identity.
-        need_filter = bool(self.spent or self.report.get('remaining_normal', 3) < 3)
-        if not need_filter:
-            chosen = self._recommendation(wanted, boss_hp, **options)
-            if chosen is not None:
-                return chosen
-        # More restricted roles than slots: the first pass hides those met
-        # first in list order; a second pass from the end hides another set.
-        for from_end in (False, True):
-            self.ui.expect_click('推荐编组', (770, 20, 925, 70), exact=True)
-            self.ui.wait(self.recommendation_list, '隐藏角色前推荐列表')
-            details = controller.apply(from_end=from_end)
-            details['from_end'] = from_end
-            self.report.setdefault('hidden_filters', []).append(details)
-            self.save_report()
-            self.ui.expect_click('关闭', (375, 445, 585, 510), exact=True)
-            chosen = None
-            try:
-                if details['added'] or need_filter:
-                    chosen = self._recommendation(wanted, boss_hp, **options)
-                if chosen is not None:
-                    self.ui.expect_click('取消', (630, 425, 775, 500), exact=True)
-                    self.ui.wait(self.recommendation_list, '筛选后返回推荐列表')
-                else:
-                    self.ui.expect_click('推荐编组', (770, 20, 925, 70), exact=True)
-                    self.ui.wait(self.recommendation_list, '恢复筛选前推荐列表')
-                controller.restore()
-                details['restored'] = True
-                self.ui.expect_click('关闭', (375, 445, 585, 510), exact=True)
-                if chosen is not None:
-                    screen = self.open_formation(use_extension=use_extension, returned_time=returned_time,
-                                                  **({'preserve_team': True} if use_extension else {}))
-                    if self.team(screen) != chosen:
-                        raise EventUIError('恢复隐藏筛选后五人队伍改变，停止开战')
-                    return chosen
-                if not details['capacity_limited']:
-                    return None
-                if from_end:
-                    raise TaskDeadline(f'受限角色超过隐藏角色{CAPACITY}槽，前后两组筛选均未找到可用队伍；'
-                                       '不能判定候选全部耗尽')
-            finally:
-                # If interrupted on an unknown page, retain the durable journal;
-                # the next run restores it before any simulation or real attack.
-                self.save_report()
-
-    def _recommendation(self, wanted=None, boss_hp=None, *, use_extension=False, returned_time=None,
-                        boss_full=False):
         """Use advanced recommendations; a missing or occupied member rejects the row."""
         self.ui.expect_click('推荐编组', (770, 20, 925, 70), exact=True)
         screen = self.ui.wait(lambda s: s.find('推荐编组', (380, 15, 570, 70), exact=True), '团队战推荐编组')
@@ -922,12 +839,31 @@ class TeamBattle(TimeLimitTask):
             time.sleep(.4)
         raise EventUIError('团队战战斗结果超时；实战不得自动撤退')
 
+    @staticmethod
+    def settled_result_next(screen):
+        """「下一步」 of a settled battle result (real or simulated), never a
+        running battle, which shows its menu button."""
+        if screen.find('菜单', (840, 0, 960, 60), exact=True):
+            return None
+        if not (screen.find('RESULT|WIN[!！]?', (275, 30, 685, 250), exact=True)
+                and (screen.find('伤害比例', (330, 430, 545, 510))
+                     or screen.find('模拟战的战斗结果', (300, 425, 690, 475)))):
+            return None
+        return screen.find('下一步', (690, 435, 935, 520), exact=True)
+
     def map_after_battle(self):
         """Reward and returned-time dialogs may appear after the map first renders."""
         end = time.monotonic() + 35
         latest = None
         while time.monotonic() < end:
             screen = self.ui.capture()
+            button = self.settled_result_next(screen)
+            if button is not None:
+                # The game can drop the first 「下一步」 tap.
+                time.sleep(1)
+                if self.settled_result_next(self.ui.capture()) is not None:
+                    self.ui.click(button)
+                continue
             if self.popup(screen):
                 latest = None
                 continue
@@ -962,22 +898,6 @@ class TeamBattle(TimeLimitTask):
         number = int(match[1]) if match else ord(re.search('[A-Z]', value)[0])-ord('A')+1
         if number > 3:
             raise TaskDeadline(f'{value}超出A/B/C低难度范围，需人工出刀')
-
-    def restore_hidden_filter(self, screen):
-        controller = getattr(self, 'hidden_filter', None)
-        if controller is None or not controller.journal():
-            return screen
-        _, bosses = self.wait_bosses(screen)
-        if not bosses:
-            raise EventUIError('隐藏筛选待恢复但地图无可用首领，停止任务')
-        # Preference recovery is permitted even outside combat scope.
-        self.open_boss(bosses[0])
-        self.ui.expect_click('推荐编组', (770, 20, 925, 70), exact=True)
-        self.ui.wait(self.recommendation_list, '中断后恢复隐藏筛选')
-        controller.restore()
-        self.ui.expect_click('关闭', (375, 445, 585, 510), exact=True)
-        self.ui.expect_click('取消', (560, 425, 755, 505), exact=True)
-        return self.map()
 
     def try_boss(self, boss: Boss, cp_before: int, extension_before: int, wanted=None,
                  available_time: int | None = None, *, simulation_only: bool = False):
@@ -1165,7 +1085,6 @@ class TeamBattle(TimeLimitTask):
             if screen is None:
                 self.report['status'] = 'unavailable'
                 return self.report
-            screen = self.restore_hidden_filter(screen)
             if self.options['simulation_only']:
                 return self.rehearse()
             changed_retries = 0

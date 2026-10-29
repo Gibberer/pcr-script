@@ -840,6 +840,39 @@ class TeamBattleTests(unittest.TestCase):
             self.assertIs(task.enter(), mapped)
         task.ui.click.assert_not_called()
 
+    def test_stage_scope_blocks_high_and_unknown_before_mode_change(self):
+        task = TeamBattle.__new__(TeamBattle)
+        task.ui = Mock(read_region=Mock(side_effect=lambda s,*a,**k:s))
+        image = np.zeros((540,960,3),np.uint8)
+        for stage in ('第1阶段','第2阶段','第3阶段','A阶段','阶段C'):
+            task.require_low_stage(EventScreen(image,[box(stage,85,130)]))
+        for stage in ('第4阶段','第10阶段','D阶段','阶段E','未知'):
+            with self.assertRaises(TaskDeadline):
+                task.require_low_stage(EventScreen(image,[box(stage,85,130)]))
+
+    def test_settled_real_result_is_left_and_dropped_next_tap_repeated(self):
+        image = np.full((540, 960, 3), 240, np.uint8)
+        result = EventScreen(image, [box('WIN!',480,130), box('伤害比例',405,492), box('下一步',805,490)])
+        mapped = EventScreen(image, [box('团队战',105,35), box('剩余挑战次数',350,406),
+                                    box('讨伐信息',240,450), box('第14轮',290,338)])
+        running = EventScreen(image, [box('WIN!',480,130), box('伤害比例',405,492),
+                                     box('下一步',805,490), box('菜单',900,30)])
+        self.assertIsNone(TeamBattle.settled_result_next(running))
+        task = TeamBattle.__new__(TeamBattle)
+        task.ui = Mock()
+        task.check_deadline = Mock()
+        task.ui.capture.side_effect = [result, mapped]
+        with patch('pcrscript.tasks.task_team_battle.time.sleep'):
+            self.assertIs(task.enter(), mapped)
+        task.ui.click.assert_called_once_with(result.items[2])
+        # The first tap was dropped: the result is still shown, tap again.
+        task.ui.click.reset_mock()
+        task.ui.capture.side_effect = [result, result, mapped]
+        task.popup = Mock(return_value=False)
+        with patch('pcrscript.tasks.task_team_battle.time.sleep'):
+            self.assertIs(task.map_after_battle(), mapped)
+        task.ui.click.assert_called_once_with(result.items[2])
+
     def test_enter_logs_in_from_title_screen_through_home_navigation(self):
         image = np.full((540, 960, 3), 240, np.uint8)
         title = EventScreen(image, [box('点击屏幕开始游戏',485,480), box('主菜单',70,505)])
