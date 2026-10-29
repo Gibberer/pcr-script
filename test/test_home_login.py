@@ -57,6 +57,11 @@ class LoginStampTests(TestCase):
         state = {'page': start, 'seen': [], 'elapsed': 0}
         from dawn_labyrinth_fixtures import catalogue, guild, home as maze_home
         recognized = {'maze_catalogue': catalogue(), 'maze_guild': guild(), 'maze_home': maze_home()}
+        recognized.update(raid_pool=screen(('当前的列表',480,42), ('重置目标报酬',320,117),
+            ('剩余0/2',655,117), ('普通报酬',302,282), ('剩余0/498',646,282),
+            ('重置',478,478), blue=('重置',)),
+            raid_reset=screen(('重置完毕',480,146), ('重置了报酬列表。',475,254), ('确认',477,370)),
+            raid_exchange=screen(('报酬交换',140,30)))
         def monotonic():
             state['elapsed'] += 10 if start in ('loading', 'unknown') else 1
             return state['elapsed']
@@ -80,6 +85,12 @@ class LoginStampTests(TestCase):
             elif state['page'] == 'maze_guild' and (x,y) == (30,30):
                 state['page'] = 'maze_home'
             elif state['page'] == 'maze_home' and (x,y) == (90,500):
+                state['page'] = 'home'
+            elif state['page'] == 'raid_pool' and (x,y) == (478,478):
+                state['page'] = 'raid_reset'
+            elif state['page'] == 'raid_reset' and (x,y) == (477,370):
+                state['page'] = 'raid_exchange'
+            elif state['page'] == 'raid_exchange' and (x,y) == (90,500):
                 state['page'] = 'home'
             elif state['page'] == 'title' and not (x < 200 and y > 460):
                 state['page'] = 'home'
@@ -112,6 +123,22 @@ class LoginStampTests(TestCase):
                 seen = self._run_daily(start)
                 self.assertIn('maze_home', seen)
                 self.assertIn('home', seen)
+
+    def test_daily_recovers_empty_collaboration_pool_before_confirming_home(self):
+        seen = self._run_daily('raid_pool')
+        self.assertIn('raid_reset', seen)
+        self.assertIn('raid_exchange', seen)
+        self.assertIn('home', seen)
+        for totals in ((0, 1), (1, 0)):
+            observed = screen(('当前的列表',480,42), ('重置目标报酬',320,117),
+                (f'剩余{totals[0]}/2',655,117), ('普通报酬',302,282),
+                (f'剩余{totals[1]}/498',646,282), ('重置',478,478), blue=('重置',))
+            action = TaskPageNavigation(Mock())
+            action.ui = Mock(observe=Mock(return_value=observed))
+            with self.assertRaisesRegex(EventUIError, '两类报酬均已抽空'):
+                action.do(observed.image, Mock())
+            action.ui.click.assert_not_called()
+            action.fallback[0].bindTask.assert_not_called()
 
     def test_known_selector_uses_only_its_exit_and_battle_preserves_the_screen(self):
         from dawn_labyrinth_fixtures import guild

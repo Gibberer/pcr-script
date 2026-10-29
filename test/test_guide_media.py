@@ -95,6 +95,13 @@ class _RangeHttp:
 
 
 class GuideMediaTests(TestCase):
+    def test_small_stream_can_be_requested_without_restarting_large_streams(self):
+        with TemporaryDirectory() as folder, patch('pcrscript.extras.guide_media.video_info',
+                return_value=dict(width=640,height=360,duration=10)):
+            api = _Api()
+            fetch_video(api, 'BVsynthetic', {'cid': 1, 'duration': 10}, Path(folder), http=_Http(), preferred_quality=16)
+            self.assertEqual(api.qualities, [16])
+
     def test_explicit_refresh_replaces_valid_cached_media_only_after_download(self):
         with TemporaryDirectory() as folder, patch('pcrscript.extras.guide_media.video_info',
                 return_value=dict(width=1280,height=720,duration=10)):

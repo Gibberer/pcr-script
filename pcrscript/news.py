@@ -1,45 +1,11 @@
-import requests
-import brotli
 import sqlite3
 from contextlib import closing
 from datetime import datetime, timedelta
 import os
-from pathlib import Path
-from tempfile import TemporaryDirectory
-import yaml
 
 from pcrscript.constants import SERVER_TIMEZONE
 from pcrscript.tasks import EventNews, Event
 
-
-
-def _upgrade_db_file(config, db_dir, db_file):
-    response = requests.post("https://wthee.xyz/pcr/api/v1/db/info/v2", json={"regionCode":"cn"}, timeout=(10, 30))
-    response.raise_for_status()
-    remote_version = int(response.json()["data"]["truthVersion"])
-    target = Path(db_dir) / db_file
-    if (config.get("version", 0) >= remote_version
-            and target.is_file() and target.stat().st_size > 0):
-        return
-    # Keep the last usable database until the entire replacement is validated.
-    # Stage on the same filesystem so publication is a single atomic replace.
-    with TemporaryDirectory(prefix='.db-update-', dir=db_dir) as staging:
-        compressed_file = Path(staging) / 'database.br'
-        with requests.get("https://wthee.xyz/db/redive_cn.db.br", stream=True, timeout=(10, 60)) as r:
-            r.raise_for_status()
-            with compressed_file.open("wb") as f:
-                for chunk in r.iter_content(chunk_size=8192):
-                    f.write(chunk)
-        db = brotli.decompress(compressed_file.read_bytes())
-        if not db.startswith(b'SQLite format 3\0'):
-            raise ValueError('下载内容不是 SQLite 数据库')
-        candidate = Path(staging) / 'database.db'
-        candidate.write_bytes(db)
-        with closing(sqlite3.connect(candidate)) as conn:
-            if conn.execute('PRAGMA quick_check').fetchall() != [('ok',)]:
-                raise sqlite3.DatabaseError('下载的数据库完整性检查失败')
-        os.replace(candidate, target)
-        config["version"] = remote_version
 
 
 _time_format = "%Y/%m/%d %H:%M:%S"
@@ -54,7 +20,7 @@ def _query_event_duration(conn:sqlite3.Connection, table:str, desc:str=None, sel
         select = "start_time,end_time"
     if not condition:
         condition = f'ISO(end_time) > "{current_time}" and ISO(start_time) <= "{current_time}"'
-    cursor.execute(f'SELECT {select} FROM {table} WHERE {condition}')
+    cursor.execute(f'SELECT {select} FROM {table} WHERE {condition} ORDER BY ISO(start_time) DESC, ISO(end_time) DESC')
     result = cursor.fetchall()
     cursor.close()
     if result:
@@ -130,9 +96,10 @@ def _query_drop_hard_event(conn: sqlite3.Connection):
 def _query_secret_dungeon(conn: sqlite3.Connection):
     try:
         return _query_event_duration(conn, 'secret_dungeon_schedule', desc="特别地下城")
-    except Exception:
-        # 暂时找到的老版本数据库还没有特别地下城，实际脚本也不用这个内容暂时忽略
-        return None
+    except sqlite3.OperationalError as error:
+        if 'no such table' in str(error):
+            return None
+        raise
 
 
 def _query_clan_battle(conn: sqlite3.Connection):
@@ -203,6 +170,21 @@ def _query_battle_stadium(conn: sqlite3.Connection):
     return Event(_event_timestamp(start), _event_timestamp(close), '斗技场',
                  dict(schedule_id=event_id, battle_end=_event_timestamp(end)))
 
+
+def _query_collaboration_raid(conn: sqlite3.Connection):
+    now = datetime.now(SERVER_TIMEZONE).replace(tzinfo=None).isoformat(' ', 'seconds')
+    row = conn.execute(
+        'SELECT schedule_id,mre_id,event_type,boss_ticket_id,gacha_ticket_id,start_time,end_time '
+        'FROM mre_schedule WHERE ISO(start_time)<=? AND ISO(end_time)>? '
+        'ORDER BY ISO(start_time) DESC,schedule_id DESC LIMIT 1', (now, now)).fetchone()
+    if row is None:
+        return None
+    schedule, identity, kind, boss_ticket, reward_ticket, start, end = row
+    return Event(_event_timestamp(start), _event_timestamp(end), '联动讨伐',
+                 dict(schedule_id=schedule, mre_id=identity, event_type=kind,
+                      boss_ticket_id=boss_ticket, gacha_ticket_id=reward_ticket))
+
+
 def _build_event_news(cache_path, db_file):
     with closing(sqlite3.connect(os.path.join(cache_path, db_file))) as conn:
         conn.create_function('ISO', 1, _iso_datetime)
@@ -216,50 +198,18 @@ def _build_event_news(cache_path, db_file):
         clan_battle = _query_clan_battle(conn)
         abyss_subjugation = _query_abyss_subjugation(conn)
         battle_stadium = _query_battle_stadium(conn)
+        collaboration = _query_collaboration_raid(conn)
     return EventNews(freeGacha=free_gacha, hatsune=hatsune, tower=tower, dropItemNormal=drop_normal, 
                          dropItemHard=drop_hard, secretDungeon=secret_dungeon, revival=revival,
                          clanBattle=clan_battle, abyssSubjugation=abyss_subjugation,
-                         battleStadium=battle_stadium)
+                         battleStadium=battle_stadium, collaborationRaid=collaboration)
 
 def fetch_event_news() -> EventNews:
-    # 从redive.estertion.win抓国服信息
-    cache_path = "cache"
-    db_file = "redive_cn.db"
-    if not os.path.exists(cache_path):
-        os.makedirs(cache_path)
-    config_path = os.path.join(cache_path, "db_config.yml")
-    if os.path.exists(config_path):
-        with open(config_path, encoding="utf-8") as f:
-            config = yaml.load(f, Loader=yaml.FullLoader)
-    else:
-        config = {}
-    try:
-        print("make sure the db version is up to date.")
-        _upgrade_db_file(config, cache_path, db_file)
-        with open(config_path, "w", encoding="utf-8") as f:
-            yaml.dump(config, f)
-    except Exception:
-        print("fetch event news failed")
-    try:
-        return _build_event_news(cache_path, db_file)
-    except Exception as e:
-        print(f"parse db file failed, filter all event special task. Case: {e}")
-        print("try repair db table names and rebuild event info")
-        try_repair_db(cache_path, db_file)
-        return _build_event_news(cache_path, db_file)
-    
-
-def try_repair_db(cache_path, db_file):
-    meta_file = os.path.join("other", "redive_cn_meta.db")
-    target_file = os.path.join(cache_path, db_file)
-    repair_tools = os.path.join(cache_path, "db_repair_tools.exe")
-    if not os.path.exists(target_file) or not os.path.exists(meta_file):
-        return
-    if not os.path.exists(repair_tools):
-        response = requests.get("https://github.com/peterli110/pcr-hash-table-rename/releases/download/v1.3/pcr_hash_rename_tool_windows_amd64.exe", stream=True)
-        with response as r:
-            r.raise_for_status()
-            with open(repair_tools, "wb") as f:
-                for chunk in r.iter_content(chunk_size=8192):
-                    f.write(chunk)
-    os.system(f".\{repair_tools} -n {target_file} -r {meta_file} -g {target_file}")
+    """One shared static snapshot; updating never requires a game connection."""
+    from .masterdata import DATABASE, ensure_masterdata
+    source = ensure_masterdata()
+    if source.get('warning'):
+        print(source['warning'])
+    value = _build_event_news(DATABASE.parent, DATABASE.name)
+    value.source = source
+    return value

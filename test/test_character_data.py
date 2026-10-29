@@ -11,7 +11,6 @@ import sqlite3
 from pcrscript.character_data import character, equipment_requirement_issues
 from pcrscript.tasks.event_strategy import MemberRequirement, skill_names, costume_skills
 from pcrscript.tasks.party_preparation import catalogue_issues
-from pcrscript.game_ui.avatar_assets import DB_SOURCE
 
 
 class CharacterDataTests(TestCase):
@@ -52,7 +51,7 @@ class CharacterDataTests(TestCase):
             self.assertEqual([i['slot'] for i in equipment_requirement_issues([member], path,
                              verified_current=True)], [2])
             self.assertEqual(equipment_requirement_issues([member], path), [])
-            report = dict(source=DB_SOURCE,version=1,checked_at=100,stale=False)
+            report = dict(provider='game_cdn',version='202610231200',checked_at=100,stale=False)
             formation = SimpleNamespace(database=str(path),character_database=report)
             with patch('pcrscript.tasks.party_preparation.time.time', return_value=110):
                 self.assertEqual(len(catalogue_issues(formation,[member])),1)

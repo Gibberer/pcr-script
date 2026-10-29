@@ -35,7 +35,8 @@ public partial class MainWindow
         ["stories"] = "处理剧情", ["memoirs"] = "处理追忆", ["missions"] = "领取任务奖励", ["exchange"] = "兑换奖励",
         ["max_boss_attempts"] = "首领最大尝试次数", ["battle_timeout"] = "战斗超时（秒）", ["timeout"] = "任务超时（秒）",
         ["account_key"] = "账号记录标识", ["auto_dismantle"] = "满仓时按既有规则自动分解", ["free_slots"] = "释放装备空间（500～1000）",
-        ["max_gift_batches"] = "最大领取批数", ["max_rolls"] = "最大掷骰批数"
+        ["max_gift_batches"] = "最大领取批数", ["max_rolls"] = "最大掷骰批数",
+        ["rebuild_extension"] = "允许为已有延长刀重新选择推荐阵容"
     };
 
     private void BuildOptions(JsonObject options)

@@ -68,6 +68,25 @@ class ScheduleTests(TestCase):
                           for call in self.ui.click.call_args_list],
                          ['一键自动',(589,372),(480,480),'关闭'])
 
+    def test_home_entry_is_not_repeated_while_the_book_opens(self):
+        home = screen(('日程表',761,432))
+        opening = screen(('执行',761,432), ('正在进行数据连接',820,40))
+        report = self.run_frames([home,opening,opening,book(9)])
+        self.assertEqual(report['status'],'already_complete')
+        self.assertEqual([call.args[0].text for call in self.ui.click.call_args_list], ['日程表','关闭'])
+
+    def test_missing_home_entry_never_clicks_a_row_or_unconfirmed_position(self):
+        with self.assertRaisesRegex(EventUIError,'入口未确认'):
+            self.run_frames([screen(('执行',761,432))])
+        self.ui.click.assert_not_called()
+
+    def test_home_entry_waits_for_confident_text_before_its_only_click(self):
+        faded = screen(('日程表',761,432),score=.9)
+        home = screen(('日程表',761,432))
+        report = self.run_frames([faded,home,book(9)])
+        self.assertEqual(report['status'],'already_complete')
+        self.assertEqual([call.args[0].text for call in self.ui.click.call_args_list], ['日程表','关闭'])
+
     def test_unfinished_schedule_is_bounded_and_not_replayed(self):
         report = self.run_frames([book(8)])
         self.assertEqual((report['status'], report['completed'], report['total']), ('partial',8,9))

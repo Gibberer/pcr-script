@@ -10,6 +10,22 @@ from pcrscript.extras.bilibili_api import BilibiliApi
 
 
 class BrowserSessionTests(TestCase):
+    def test_video_metadata_uses_normal_browser_only_after_public_fallback_failed(self):
+        import requests
+        api = BilibiliApi()
+        api.browser = Mock()
+        api.browser.video_info.return_value = dict(code=0, data=dict(bvid='BV1234567890'))
+        error = requests.HTTPError(response=Mock(status_code=412))
+        api._get = Mock(side_effect=[error, Mock(text='<html>verification</html>')])
+        self.assertEqual(api.getVideoInfo(bvid='BV1234567890')['code'], 0)
+        api.browser.video_info.assert_called_once_with('BV1234567890')
+
+    def test_video_metadata_uses_standard_aid_parameter(self):
+        api = BilibiliApi()
+        api._get = Mock()
+        api.getVideoInfo(avid=123)
+        self.assertEqual(api._get.call_args.args[1], {'aid': 123})
+
     def test_search_uses_heading_not_shorter_thumbnail_statistics(self):
         url='https://www.bilibili.com/video/BV1234567890/'
         for links in ([dict(url=url,text='172\n0\n04:49'),

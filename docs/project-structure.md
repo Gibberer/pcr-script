@@ -7,6 +7,7 @@
 | `daily_task.py` | 完整每日任务兼容入口 |
 | `desktop/PcrDesktop/` | C# / WPF 图形控制台源码，发布为独立 EXE |
 | `pcrscript/runtime.py` | GUI 与兼容命令入口共用的配置、每日流程及任务执行逻辑 |
+| `pcrscript/masterdata.py`、`pcrscript/data/masterdata_schema.json` | 无设备依赖的静态资料更新与项目维护的字段映射，见[架构](masterdata.md) |
 | `runtime_defaults.yml` | GUI 与命令行共用的默认配置；无账号，预置日常任务列表 |
 | `pcrscript/desktop.py` | GUI 使用的版本化 JSON 配置、控制和运行入口 |
 | `.github/workflows/desktop.yml` | Windows GUI 构建、离线测试与产物上传；已合并版本标签创建 Release |
@@ -47,6 +48,7 @@ GUI 的 `PortableTools.cs` 管理固定版本工具的下载、SHA-256 校验与
 | [task_dungeon.py](../pcrscript/tasks/task_dungeon.py) | `dungeon_first_clear` |
 | [task_abyss.py](../pcrscript/tasks/task_abyss.py) | `abyss_push`（深域按需推进） |
 | [task_abyss_subjugation.py](../pcrscript/tasks/task_abyss_subjugation.py) | `abyss_subjugation`（深渊讨伐战每日首通与扫荡） |
+| [task_collaboration_raid.py](../pcrscript/tasks/task_collaboration_raid.py) | 联动讨伐类型处理器，`collaboration_raid` 为旧兼容入口 |
 | [task_recollection_first_clear.py](../pcrscript/tasks/task_recollection_first_clear.py) | `recollection_first_clear`（普通及霸首通） |
 | [task_recollection.py](../pcrscript/tasks/task_recollection.py) | `recollection`（普通报酬及已通关霸扫荡） |
 | [task_caravan.py](../pcrscript/tasks/task_caravan.py) | `caravan` |
@@ -61,7 +63,8 @@ GUI 的 `PortableTools.cs` 管理固定版本工具的下载、SHA-256 校验与
 | [task_routines.py](../pcrscript/tasks/task_routines.py) | `arena`、`princess_arena`、`research`、`schedule` |
 | [task_shop.py](../pcrscript/tasks/task_shop.py) | `shop_buy` |
 | [task_story.py](../pcrscript/tasks/task_story.py) | `clear_story`、`get_quest_reward` |
-| [task_story_event.py](../pcrscript/tasks/task_story_event.py) | `campaign_clean`、`clear_campaign_first_time` |
+| [task_activity.py](../pcrscript/tasks/task_activity.py) | `campaign_clean`，按活动类型分发 |
+| [task_story_event.py](../pcrscript/tasks/task_story_event.py) | 剧情类型处理器、`clear_campaign_first_time` |
 | [task_tower.py](../pcrscript/tasks/task_tower.py) | `luna_tower_clean`（回廊扫荡） |
 
 `task_combat.py` 包含可复用的 `TeamFormation`、`TeamFormationEx`、`Combat` 子任务，供其他任务通过 Python 调用，未注册为独立命令，不能直接填入配置任务列表。
@@ -88,3 +91,5 @@ GUI 的 `PortableTools.cs` 管理固定版本工具的下载、SHA-256 校验与
 | 迷宫页面与首通编队 | `game_ui/dawn_labyrinth.py`、`tasks/dawn_labyrinth_party.py` | [黎明界迷宫](guides/dawn-labyrinth.md) |
 
 `tasks/abyss_party.py` 只保留 `StrategyFormation` 的旧导入别名。公共能力在共享模块中维护，玩法任务负责自己的导航、目标、预算和结果核验。
+
+统一活动入口见 [task_activity.py](../pcrscript/tasks/task_activity.py)：`campaign_clean` 按类型调度剧情、复刻和联动处理器。

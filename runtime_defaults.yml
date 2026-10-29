@@ -6,6 +6,9 @@ Extra:
   adb_serial: ''
   adb_unicode_console_path: ''
   adb_unicode_console_index: 0
+Activities:
+  types: [collaboration_raid, revival, story]
+  options: {}
 StoryEvent:
   source_urls: []
   discover_sources: true
@@ -72,10 +75,26 @@ RecollectionFirstClear:
   retry_failed_parties: false
   sources: {}
 TeamBattle:
+  rebuild_extension: false
   timeout: 3600
   battle_timeout: 220
   max_real_attacks: 3
-  max_simulations: 12
+  max_simulations: 0  # 免费模拟不限轮数；仍受 timeout 运行时限约束
+  max_boss_failures: 3  # 仅适用A/B/C低难度：同一首领连续失败即换首领；0为不限
+CollaborationRaid:
+  first_clear: true
+  claim_rewards: true
+  exchange: true
+  discover_sources: true
+  source_urls: []
+  allow_local_trials: true
+  auto_equip: false
+  timeout: 5400
+  battle_timeout: 240
+  max_battles: 6
+  max_tickets: 99
+  max_exchange_batches: 200
+  sources: {}
 # 按需专项；可加入日常列表，满星且奖励全领后自动跳过战斗。
 BattleStadium:
   auto_equip: false
@@ -122,7 +141,6 @@ Task:
     - [adventure_daily]
     - [recollection]
     - [get_quest_reward]
-    - [revival_event_once]
     - [campaign_clean, true, false]
     - [abyss_subjugation]
     - [quick_clean, 2]

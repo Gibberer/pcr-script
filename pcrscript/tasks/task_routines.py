@@ -118,6 +118,13 @@ class Schedule(ImageTask):
         self.ui = EventUI(robot.driver, getattr(robot, '_task_output', None) or 'cache/daily/schedule')
 
     @staticmethod
+    def home_entry(screen):
+        if screen.find('正在进行数据连接|连接中|加载中'):
+            return None
+        entry = screen.find('日程表', (700, 390, 820, 470), exact=True)
+        return entry if entry is not None and entry.score >= .95 else None
+
+    @staticmethod
     def book(screen):
         if screen.find('正在进行数据连接|连接中|加载中'):
             return False
@@ -202,14 +209,16 @@ class Schedule(ImageTask):
 
     def run(self):
         self.warnings = set()
-        entry = MatchAction(template="symbol_schedule", unmatch_actions=[
-                ClickAction("icon_schedule"),
-                ClickAction("btn_cancel")
-            ], timeout=30)
-        self.action_squential(entry)
-        if entry.is_timeout:
-            raise EventUIError('未能进入日程表')
-        screen = self.ui.wait(self.book, '日程表页面')
+        try:
+            screen = self.ui.wait(lambda view: self.book(view) or self.home_entry(view),
+                                  '首页日程表入口', timeout=15)
+        except EventUIError as error:
+            raise EventUIError('首页日程表入口未确认，未点击') from error
+        if not self.book(screen):
+            # During the opening animation this same position can already
+            # contain a row's 执行 button. Submit the home entry only once.
+            self.ui.click(self.home_entry(screen))
+            screen = self.ui.wait(self.book, '日程表页面')
         screen = self.restore_counter(screen)
         before = self.completion(screen)
         if before is None:

@@ -129,7 +129,7 @@ class BilibiliApi:
         if bvid:
             params['bvid'] = bvid
         if avid:
-            params['avid'] = avid
+            params['aid'] = avid
         try:
             return self._get(VIDEO_INFO_API, params, sign=False).json()
         except requests.HTTPError as error:
@@ -138,9 +138,25 @@ class BilibiliApi:
         # The public page embeds the same metadata, without a login bootstrap.
         if not re.fullmatch(r'BV[0-9A-Za-z]{10}', bvid):
             raise ValueError('Invalid Bilibili video ID')
-        response = self._get(f'https://www.bilibili.com/video/{bvid}/', sign=False)
-        match = re.search(r'window\.__INITIAL_STATE__\s*=\s*', response.text)
+        try:
+            response = self._get(f'https://www.bilibili.com/video/{bvid}/', sign=False)
+        except requests.HTTPError as error:
+            if not self.browser or error.response is None or error.response.status_code not in (403, 412):
+                raise
+            response = None
+        match = re.search(r'window\.__INITIAL_STATE__\s*=\s*', response.text) if response is not None else None
         if not match:
+            if self.browser:
+                try:
+                    result = self.browser.video_info(bvid)
+                except Exception as error:
+                    from .bilibili_browser import BrowserVerificationRequired
+                    if isinstance(error, BrowserVerificationRequired):
+                        raise
+                    raise RuntimeError('浏览器视频详情未完成：'+type(error).__name__) from None
+                if result.get('code') != 0 or result.get('data', {}).get('bvid') != bvid:
+                    raise RuntimeError('浏览器公开视频标识不符')
+                return result
             raise RuntimeError('B站公开视频页面未包含视频信息；未尝试读取登录凭据')
         state, _ = json.JSONDecoder().raw_decode(response.text[match.end():])
         video = state.get('videoData')

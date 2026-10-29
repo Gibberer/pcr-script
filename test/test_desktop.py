@@ -130,8 +130,10 @@ class DesktopTests(unittest.TestCase):
         catalog = {item['name']: item for item in desktop.catalog()}
         for name in ('clear_story', 'dungeon_first_clear', 'upgrade_all_characters', 'max_character_bonds', 'abyss_push'):
             self.assertEqual(catalog[name]['category'], 'special')
-        for name in ('get_gift', 'revival_event_once', 'clear_campaign_first_time'):
+        for name in ('get_gift', 'clear_campaign_first_time'):
             self.assertEqual(catalog[name]['category'], 'daily')
+        for name in ('revival_event_once', 'collaboration_raid'):
+            self.assertEqual(catalog[name]['category'], 'compatibility')
         self.assertNotIn('dungeon_sources', catalog)
         self.assertNotIn('strategy_sources',catalog)
         self.assertTrue(catalog['abyss_push']['requires_device'])

@@ -20,7 +20,7 @@ BUILD_FIELDS = ('level', 'rank', 'stars', 'skill_level', 'equipment',
 
 
 def prepare_character_database(formation, options=None, *, check=lambda: None):
-    """Reuse the activity DB downloader, separately from the avatar cache age."""
+    """Reuse the static prerequisite provider, independently of avatar cache age."""
     from ..game_ui.avatar_assets import ensure_database
     options = options or {}
     formation.database = str(options.get('database', 'cache/redive_cn.db'))
@@ -34,11 +34,11 @@ def prepare_character_database(formation, options=None, *, check=lambda: None):
 
 def catalogue_issues(formation, members):
     from ..character_data import equipment_requirement_issues
-    from ..game_ui.avatar_assets import DB_SOURCE
     report = getattr(formation, 'character_database', {})
     current = (isinstance(report, dict) and not report.get('stale', True)
-        and report.get('source') == DB_SOURCE and type(report.get('version')) is int
-        and report['version'] > 0 and type(report.get('checked_at')) in (int, float)
+        and report.get('provider') == 'game_cdn' and isinstance(report.get('version'), str)
+        and report['version'].isdigit() and len(report['version']) == 12
+        and type(report.get('checked_at')) in (int, float)
         and 0 <= time.time()-report.get('checked_at', 0) < 86400)
     return equipment_requirement_issues(members, getattr(formation, 'database', 'cache/redive_cn.db'),
                                          verified_current=current)
