@@ -1215,6 +1215,7 @@ class TeamBattle(TimeLimitTask):
             self.report['status'] = 'complete' if not self.report['pending'] else 'partial'
             return self.report
         except TaskDeadline as error:
+            self.settle_on_map()
             if self.report.get('in_flight'):
                 self.report['status'] = 'error'
                 self.report['pending'].append('实战结果尚未与地图次数对账：'+str(error))
@@ -1226,6 +1227,19 @@ class TeamBattle(TimeLimitTask):
             self.report['status'] = 'error'
             self.report['pending'].append(str(error))
             self.ui.save('team_battle_error')
+            if isinstance(error, EventUIError):
+                self.settle_on_map()
             raise
         finally:
             self.save_report()
+
+    def settle_on_map(self):
+        """After the task stops itself, leave the game on the team-battle map
+        so later tasks start from a page home navigation knows. Uses its own
+        short budget; a running battle is never touched. User stops and
+        unsafe resumes are BaseExceptions and never reach here."""
+        self.deadline = time.monotonic()+90
+        try:
+            self.enter()
+        except Exception as error:
+            self.log('停止后未能回到团队战地图：'+str(error))

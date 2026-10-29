@@ -873,6 +873,29 @@ class TeamBattleTests(unittest.TestCase):
             self.assertIs(task.map_after_battle(), mapped)
         task.ui.click.assert_called_once_with(result.items[2])
 
+    def test_own_stop_returns_to_map_but_never_replays_or_hides_errors(self):
+        for error, raised in ((TaskDeadline('期限'), False), (EventUIError('识别'), True),
+                              (ValueError('程序'), True)):
+            with self.subTest(error=type(error).__name__):
+                task = TeamBattle.__new__(TeamBattle)
+                task.report = {'pending': [], 'status': 'running'}
+                task.ui = Mock()
+                task.save_report = Mock()
+                task.report_progress = Mock()
+                task.event_valid = Mock(return_value=True)
+                task.options = {'simulation_only': True}
+                task.enter = Mock(side_effect=[object(), EventUIError('仍未回到地图')])
+                task.rehearse = Mock(side_effect=error)
+                task.log = Mock()
+                if raised:
+                    with self.assertRaises(type(error)):
+                        task.run(object())
+                else:
+                    self.assertEqual(task.run(object())['status'], 'partial')
+                # Only the task's own UI/deadline stops navigate back; a
+                # failed return is logged without replacing the original error.
+                self.assertEqual(task.enter.call_count, 1 if isinstance(error, ValueError) else 2)
+
     def test_enter_logs_in_from_title_screen_through_home_navigation(self):
         image = np.full((540, 960, 3), 240, np.uint8)
         title = EventScreen(image, [box('点击屏幕开始游戏',485,480), box('主菜单',70,505)])
