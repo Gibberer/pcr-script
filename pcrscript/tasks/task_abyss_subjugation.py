@@ -590,7 +590,8 @@ class AbyssSubjugation(TimeLimitTask):
             # own stars and unique limit what cultivation may raise.
             source = {normalized(m.name): m for m in declared}
             members = [replace(m, stars=getattr(source.get(normalized(m.name)), 'stars', None),
-                               unique=getattr(source.get(normalized(m.name)), 'unique', None))
+                               unique=getattr(source.get(normalized(m.name)), 'unique', None),
+                               unique2=getattr(source.get(normalized(m.name)), 'unique2', None))
                        for m in members]
         if not self.options['on_demand_cultivation'] or self.options['preview_only'] or not members:
             return False
@@ -790,7 +791,10 @@ class AbyssSubjugation(TimeLimitTask):
             preview = field.stamina_preview(self.ui, detail)
             quantity = min(counts[difficulty], (self.options['max_stamina']-self.report['stamina_spent'])//unit_cost,
                            preview[0]//unit_cost)
-            if preview[0]//unit_cost < counts[difficulty] and quantity == preview[0]//unit_cost and self.collect_house_once():
+            if (preview[0]//unit_cost < counts[difficulty] and quantity == preview[0]//unit_cost
+                    and self.options['auto_collect_house_stamina'] and not self.house_checked):
+                # Any visit leaves this detail page, so reread it whether or not stamina arrived.
+                self.collect_house_once()
                 return self.outposts()
             if quantity <= 0:
                 raise SubjugationBlocked('前哨现有体力或本次体力上限不足')

@@ -136,6 +136,12 @@ def board_set(texts,row,others):
     return [c=='O' for c in normalized(first).upper().replace('0','O').replace('×','X').replace('〇','O')]
 
 
+def board_reference_cell(text):
+    """A bare column label or value records the author's account; a sentence can still require something."""
+    return bool(re.fullmatch(r'(?:Rank|R)?\d+[-－][0-6]|MP\d+|属性等级|属性技能|公主骑士(?:等级|技能)?|大师(?:点|等级|技能)?|'
+                             r'职能精通|职阶专精|全职业|特别装备|特装|粉装|突破|满装',normalized(text),re.I))
+
+
 def board_hint(texts):
     """Grid search is slow; only frames that read like a board or a SET list are worth it."""
     return any(re.fullmatch('[OX0○〇×]{5}',normalized(t.text).upper()) or normalized(t.text).upper() in ('RANK','备注','星级','职阶专精')

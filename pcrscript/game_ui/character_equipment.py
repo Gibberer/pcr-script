@@ -140,8 +140,11 @@ def fill_unique_slot(ui, name, page, record, save, *, buy_fragments=None):
     return record['status']
 
 
-def install_missing_unique(ui: EventUI, name: str, report: dict, save, home) -> str:
-    """Fill empty slots: slot 1 may buy fragments, slot 2 waits for the user; no orbs."""
+def install_missing_unique(ui: EventUI, name: str, report: dict, save, home, *, second=True) -> str:
+    """Fill empty slots: slot 1 may buy fragments, slot 2 waits for the user; no orbs.
+
+    A guide that forbids the second slot passes second=False, leaving it empty.
+    """
     def open_page():
         if open_character_memory(ui, name) is None:
             raise EventUIError('培养页面未确认角色衣装')
@@ -175,7 +178,7 @@ def install_missing_unique(ui: EventUI, name: str, report: dict, save, home) -> 
         if result != 'installed':
             return result
         page = ui.capture()
-    selector = second_unique_selector(page)
+    selector = second_unique_selector(page) if second else None
     if selector:
         ui.click(selector)
         time.sleep(1)

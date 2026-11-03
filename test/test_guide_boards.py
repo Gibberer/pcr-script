@@ -80,7 +80,7 @@ class BoardTests(TestCase):
 class BoardPartyTests(TestCase):
     """A board page yields boss trials through the production parser, and only those."""
 
-    def parse(self, roster_trials, instant=[True, True, False, True, True]):
+    def parse(self, roster_trials, instant=[True, True, False, True, True], extra=()):
         from pathlib import Path
         from tempfile import TemporaryDirectory
         from types import SimpleNamespace
@@ -102,7 +102,7 @@ class BoardPartyTests(TestCase):
                            max_frames_per_page=20)
             index = SimpleNamespace(names=team, matrix=np.ones((5, 1728), np.float32))
             with patch('pcrscript.tasks.strategy_video.read_text', return_value=[GuideText('OOXOO', 1, (0, 0, 80, 20)),
-                                                                                  GuideText('R38-5', 1, (0, 40, 80, 20))]), \
+                                                                                  GuideText('R38-5', 1, (0, 40, 80, 20)), *extra]), \
                  patch('pcrscript.tasks.strategy_video.combat_team', return_value=[]), \
                  patch('pcrscript.tasks.strategy_video.battle_rectangles', return_value=[]), \
                  patch('pcrscript.tasks.strategy_tables.guide_board_rows', return_value=[row]):
@@ -116,6 +116,15 @@ class BoardPartyTests(TestCase):
         self.assertEqual([m['instant']['value'] for m in party['members']], [True, True, False, True, True])
         self.assertEqual(party['global_requirements'], [])
         self.assertEqual(party['scope'], dict(kind='boss', boss='合成首领'))
+
+    def test_board_cells_are_dropped_but_a_stated_requirement_on_the_page_survives(self):
+        from pcrscript.tasks.strategy_tables import board_reference_cell
+        for cell in ('R38-5', 'Rank38-5', '属性等级', '属性技能', 'MP101', '突破'):
+            self.assertTrue(board_reference_cell(cell), cell)
+        for sentence in ('必须点满属性技能', '公主骑士等级需要100', 'R38-5以上才能打'):
+            self.assertFalse(board_reference_cell(sentence), sentence)
+        report, _ = self.parse(True, extra=[GuideText('必须点满属性技能', 1, (0, 80, 160, 20))])
+        self.assertEqual([r['text'] for r in report['parties'][0]['global_requirements']], ['必须点满属性技能'])
 
     def test_timed_axis_leaves_set_unread(self):
         report, _ = self.parse(True, instant=None)

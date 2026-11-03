@@ -781,10 +781,13 @@ class SubjugationTests(TestCase):
                     if isinstance(outcome, Exception):
                         raise outcome
                     return outcome
-                with patch('pcrscript.game_ui.guild_house.collect_produced_stamina', side_effect=collect) as house:
+                with patch('pcrscript.game_ui.guild_house.collect_produced_stamina', side_effect=collect) as house, \
+                     patch.object(task, 'normal_detail', wraps=task.normal_detail) as detail:
                     report = task.run(EVENT)
                 house.assert_called_once()
                 self.assertEqual(report['stamina_spent'], 100, report['pending'])
+                # The visit left the detail page, so the sweep must come from a fresh read.
+                self.assertGreaterEqual(detail.call_count, 2)
 
     def test_blue_challenge_without_enough_stamina_never_starts_battle(self):
         game = Game()

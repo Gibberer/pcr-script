@@ -4,6 +4,7 @@ from dataclasses import asdict
 from hashlib import sha256
 from pathlib import Path
 from contextlib import closing
+from uuid import uuid4
 import sqlite3
 import json
 import subprocess
@@ -801,6 +802,12 @@ class LunaTowerClimb(TowerTask):
         self.enter()
         return changed
 
+    def proof_token(self):
+        """Between runs other tasks can move special equipment, and portraits and vitals would not show it."""
+        if not hasattr(self,'_proof_token'):
+            self._proof_token=uuid4().hex
+        return self._proof_token
+
     def phase_battle(self, plan, *, simulate, expected=None):
         from .tower_guides import PhaseTrace, phase_progress, PHASE_GOAL_VERSION,carried_boss_hp
         if not simulate and (not expected or not expected.get('passed')):
@@ -860,7 +867,7 @@ class LunaTowerClimb(TowerTask):
             if passed and plan.get('candidate'):
                 plan['candidate']['simulated']=True
             if self._result in ('failed','win') and not any(n.startswith('slot:') for n in order):
-                proof=dict(passed=passed,order=order,vitals=vitals,target=before,
+                proof=dict(passed=passed,order=order,vitals=vitals,target=before,run_token=self.proof_token(),
                     before=evidence,at=time.time(),support_proof=plan.get('support_proof'),
                     result=self._result,hp_samples=record['hp_samples'],shadow_samples=record['shadow_samples'],
                     initial_boss_hp=initial_hp,
@@ -951,6 +958,7 @@ class LunaTowerClimb(TowerTask):
                     self.state['phase_trial']=dict(recent_trial,passed=True)
             proof=self.state.get('phase_trial',{})
             if (not self.options['simulation_only'] and proof.get('passed') and proof.get('target')==target
+                    and proof.get('run_token')==self.proof_token()
                     and proof.get('plan',{}).get('phase')==phase and 0<=time.time()-proof.get('at',0)<1800
                     and Path(proof.get('before','')).is_file()):
                 before=cv.imdecode(np.frombuffer(Path(proof['before']).read_bytes(),np.uint8),cv.IMREAD_COLOR)

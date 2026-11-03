@@ -24,7 +24,7 @@ from .strategy_document import Evidence, Fact, empty_member, finalize, export_do
 from .strategy_sources import BORROW_PART, MANUAL_PART, UNVERIFIED_SETTING, discover_sources, get_source_rules, timed_switch_requirement, unparsed_switch_requirement
 from .strategy_inputs import advisory_requirement, declared_region, preferred_sources, source_statements, video_metadata
 
-PARSER_VERSION = 151
+PARSER_VERSION = 152
 FRAME_OCR_VERSION = 1
 COMBAT_AUDIT_SECONDS = 20
 RECOLLECTION_UNSUPPORTED = re.compile(
@@ -926,7 +926,7 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
             if comment.get('images') and not options.get('roster_trials'):
                 raise ValueError(f'作者评论{comment.get("reply_id")}含未解析图片，不能确认攻略要求完整')
     from rapidocr import RapidOCR
-    from .strategy_tables import board_hint, guide_board_rows, universal_row
+    from .strategy_tables import board_hint, board_reference_cell, guide_board_rows, universal_row
     from ..game_ui.screen import normalized
     api = api or BilibiliApi(timeout=options.get('request_timeout', 20), browser_session=True)
     root = Path(options.get('parsed_dir', 'cache/game/strategies/parsed'))/source['bvid']
@@ -1611,8 +1611,8 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
             def applicable(row):
                 evidence = row.get('evidence', {})
                 action_boss = row.get('scope', {}).get('boss')
-                # A board's level and Rank columns record the author's account, not a requirement.
-                if evidence.get('cid') in board_cids and evidence.get('method') != 'unread_requirements':
+                # A board's level and Rank cells record the author's account, not a requirement.
+                if evidence.get('cid') in board_cids and board_reference_cell(row.get('text', '')):
                     return False
                 return ((not action_boss or action_boss == team['scope'].get('boss'))
                         and (evidence.get('cid') is None or evidence.get('cid') in cids

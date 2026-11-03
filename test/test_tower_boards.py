@@ -29,6 +29,15 @@ class ProvenOrderTests(TestCase):
         self.assertEqual([p['names'][0] for p in prefer_proven(plans, battles)][1:], ['甲', '子'])
 
 
+class ArticleGuideTests(TestCase):
+    def test_no_article_urls_means_no_network_at_all(self):
+        from pcrscript.tasks.tower_guides import load_guides
+        http = Mock()
+        self.assertEqual(load_guides(dict(guide_urls=[]), 780, Mock(), {}, http=http), [])
+        self.assertEqual(load_guides({}, 700, Mock(), {}, http=http), [])
+        http.get.assert_not_called()
+
+
 class SlotGapTests(TestCase):
     def formation(self, order):
         from pcrscript.tasks.task_tower import TowerFormation

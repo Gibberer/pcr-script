@@ -425,6 +425,7 @@ def recognize_icon(image, avatars, manifest):
 def load_guides(options,floor,avatars,manifest,*,check=lambda:None,http=requests):
     urls=options.get('guide_urls', ['https://gamewith.jp/pricone-re/article/show/523902'] if floor==780 else [])
     if not isinstance(urls,list) or len(urls)>8:raise ValueError('LunaTower.guide_urls必须为最多8个来源')
+    if not urls:return []
     root=Path(options.get('guide_cache','cache/game/strategies/tower_guides'));root.mkdir(parents=True,exist_ok=True)
     def fetch(url, image=False):
         host=urlparse(url).hostname

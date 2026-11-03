@@ -240,7 +240,8 @@ def cultivate_on_demand(ui, members, *, report, save, home, allow_amulets=False)
                 row['stars_after'] = 5
             home()
             if member.unique is not False:
-                row['unique'] = install_missing_unique(ui, member.name, report, save, home)
+                row['unique'] = install_missing_unique(ui, member.name, report, save, home,
+                                                       second=member.unique2 is not False)
         except EventUIError as error:
             row['error'] = str(error)
         save()

@@ -111,6 +111,17 @@ class InstallMissingUniqueTests(TestCase):
         buy.assert_not_called()
         self.assertIn('专武2素材不足', report['needs_user'][0])
 
+    def test_guide_forbidding_the_second_slot_leaves_it_empty(self):
+        ui = Mock()
+        ui.wait.side_effect = [installed_page()]
+        report = {}
+        with patch('pcrscript.game_ui.character_equipment.open_character_memory', return_value=object()), \
+             patch('pcrscript.game_ui.character_equipment.second_unique_selector', return_value=(320, 110)) as selector:
+            result = install_missing_unique(ui, '合成角色', report, Mock(), Mock(), second=False)
+        self.assertEqual(result, 'not_needed')
+        selector.assert_not_called()
+        ui.click.assert_not_called()
+
     def test_lit_frame_marks_the_other_material_as_ready(self):
         from pcrscript.game_ui.character_equipment import recipe_other_material_ready
         page = screen(('装备获取', 480, 42))
@@ -192,6 +203,12 @@ class CultivateOnDemandTests(TestCase):
     def test_guide_without_unique_keeps_it_uninstalled(self):
         _, _, _, install = self.run_with([member(unique=False)], 5)
         install.assert_not_called()
+
+    def test_guide_unique2_limit_reaches_the_installer(self):
+        _, _, _, install = self.run_with([MemberRequirement('合成角色', None, None, None, True, False, True, None)], 5)
+        self.assertIs(install.call_args.kwargs['second'], False)
+        _, _, _, install = self.run_with([member()], 5)
+        self.assertIs(install.call_args.kwargs['second'], True)
 
     def test_installed_unique_counts_but_missing_material_does_not(self):
         self.assertEqual(self.run_with([member()], 5, 'installed')[0], ['合成角色'])
