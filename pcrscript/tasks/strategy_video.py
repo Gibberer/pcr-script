@@ -925,7 +925,7 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
         for comment in source.get('author_comments', []):
             if comment.get('images') and not options.get('roster_trials'):
                 raise ValueError(f'作者评论{comment.get("reply_id")}含未解析图片，不能确认攻略要求完整')
-    from rapidocr import RapidOCR
+    from ..game_ui.screen import ocr_engine
     from .strategy_tables import board_hint, board_reference_cell, guide_board_rows, universal_row
     from ..game_ui.screen import normalized
     api = api or BilibiliApi(timeout=options.get('request_timeout', 20), browser_session=True)
@@ -960,8 +960,7 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
             return dict(cached, cache_hit=True)
     # Match the game's OCR worker limits. Default ONNX sessions can otherwise
     # spin a full thread pool for each engine throughout multi-page parsing.
-    ocr = ocr or RapidOCR(params={"EngineConfig.onnxruntime.intra_op_num_threads": 2,
-                                 "EngineConfig.onnxruntime.inter_op_num_threads": 1})
+    ocr = ocr or ocr_engine()
     from ..game_ui.equipment import EquipmentBadges
     badges = EquipmentBadges()
     names = sorted({str(n) for n in index.names if not str(n).startswith('unit:')}, key=len, reverse=True)

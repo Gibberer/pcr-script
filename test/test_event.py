@@ -158,10 +158,10 @@ class EventRecognitionTests(TestCase):
         self.assertIsNone(ui.number(frame(), (775, 395, 840, 436)))
 
     def test_real_ocr_reads_thin_one_and_isolated_zero(self):
-        from rapidocr import RapidOCR
+        from pcrscript.game_ui.screen import ocr_engine
         ui = EventUI.__new__(EventUI)
-        ui._ocr = RapidOCR(params={"EngineConfig.onnxruntime.intra_op_num_threads": 2,
-                                  "EngineConfig.onnxruntime.inter_op_num_threads": 1})
+        # The production engine configuration, so its thread limit is covered too.
+        ui._ocr = ocr_engine()
         for filename, expected in (("sweep_count_one.png", 1), ("exchange_zero.png", 0)):
             picture = cv.imread(str(FIXTURES/filename))
             h, w = picture.shape[:2]

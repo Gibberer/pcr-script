@@ -5,9 +5,8 @@ import re
 import cv2 as cv
 import numpy as np
 import requests
-from rapidocr import RapidOCR
 from ..game_ui.avatars import AvatarIndex,face_crop,feature
-from ..game_ui.screen import normalized
+from ..game_ui.screen import normalized, ocr_engine
 from ..run_session import atomic_json
 
 
@@ -194,7 +193,7 @@ def extract_tables(source,api,*,directory='cache/game/strategies/video_tables'):
     if saved.exists():
         value=json.loads(saved.read_text(encoding='utf-8'))
         if value.get('version')==5:return value
-    parties=[];ocr=RapidOCR();index=AvatarIndex()
+    parties=[];ocr=ocr_engine();index=AvatarIndex()
     if not index.names:return {'parties':[],'pending':['头像索引为空，不能猜测视频角色']}
     pages=sorted(source['pages'][:3],key=lambda p:int(re.match(r'(\d+)',p.get('part',''))[1]) if re.match(r'(\d+)',p.get('part','')) else 0)
     for page in pages:

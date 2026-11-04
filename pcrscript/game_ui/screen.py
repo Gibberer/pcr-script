@@ -14,6 +14,20 @@ import cv2 as cv
 import numpy as np
 
 
+# Benchmarked on saved 960x540 game frames beside a running LeiDian: 4 ONNX
+# threads take ~0.55 s per full frame versus ~0.98 s with 2, with identical
+# text and scores; 6 or more compete with the emulator and slow down again.
+# Engines run one at a time, so each keeps this bounded pool.
+OCR_THREADS = 4
+
+
+def ocr_engine():
+    """The one RapidOCR configuration shared by game capture and guide parsing."""
+    from rapidocr import RapidOCR
+    return RapidOCR(params={"EngineConfig.onnxruntime.intra_op_num_threads": OCR_THREADS,
+                            "EngineConfig.onnxruntime.inter_op_num_threads": 1})
+
+
 class EventUIError(RuntimeError):
     pass
 
@@ -183,11 +197,9 @@ class EventUI:
         if ocr:
             if self._ocr is None:
                 try:
-                    from rapidocr import RapidOCR
+                    self._ocr = ocr_engine()
                 except ImportError as error:
                     raise EventUIError("活动任务需要安装 requirements.txt 中的 OCR 依赖") from error
-                self._ocr = RapidOCR(params={"EngineConfig.onnxruntime.intra_op_num_threads": 2,
-                                              "EngineConfig.onnxruntime.inter_op_num_threads": 1})
             # RapidOCR remembers per-call mode flags. Restore detection after
             # a number-only recognition so the next frame still has boxes.
             result = self._ocr(img, use_det=True, use_cls=True, use_rec=True)

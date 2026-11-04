@@ -122,9 +122,8 @@ def board_plans(options, floor, index, *, api=None, ocr=None, check=lambda: None
     except (requests.RequestException, RuntimeError, ValueError, OSError, AttributeError) as error:
         return [], ['国服练度表搜索失败：'+str(error)[:200]]
     if ocr is None:
-        from rapidocr import RapidOCR
-        ocr = RapidOCR(params={"EngineConfig.onnxruntime.intra_op_num_threads": 2,
-                               "EngineConfig.onnxruntime.inter_op_num_threads": 1})
+        from ..game_ui.screen import ocr_engine
+        ocr = ocr_engine()
     for bvid in videos[:MAX_VIDEOS]:
         check()
         try:

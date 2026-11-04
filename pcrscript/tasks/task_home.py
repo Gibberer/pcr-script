@@ -93,9 +93,8 @@ class SkipLoginStamp(CanSkipMatchAction):
         if button is None:
             return
         if self._ocr is None:
-            from rapidocr import RapidOCR
-            self._ocr = RapidOCR(params={"EngineConfig.onnxruntime.intra_op_num_threads": 2,
-                                          "EngineConfig.onnxruntime.inter_op_num_threads": 1})
+            from ..game_ui.screen import ocr_engine
+            self._ocr = ocr_engine()
         image = cv.resize(screenshot, (960, 540), interpolation=cv.INTER_AREA)
         result = self._ocr(image)
         text = ''.join(result.txts or [])
