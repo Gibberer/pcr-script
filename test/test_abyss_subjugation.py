@@ -1290,8 +1290,9 @@ class SubjugationTests(TestCase):
                 raise EventUIError('合成攻略缺员')
             return seed, [m.name for m in seed.members]
         with patch('pcrscript.tasks.task_abyss_subjugation.guide_party', side_effect=audit):
-            result, _ = task.choose_normal_party('普通', Mock(), set())
+            result, _, declared = task.choose_normal_party('普通', Mock(), set())
         self.assertIs(result, second)
+        self.assertIs(declared, second.members)
         self.assertEqual(calls, [('first', False), ('second', False)])
         self.assertEqual(task.source_parties.call_count, 2)
 
@@ -1864,6 +1865,28 @@ class SubjugationTests(TestCase):
             self.assertIsNone(formation.portrait_order(wanted))
             formation.avatars.query.return_value = wanted[:3]+[normalized('合成其他角色'), None]
             self.assertIsNone(formation.portrait_order(wanted))
+
+    def test_near_tie_portrait_only_settles_members_picked_by_this_selection(self):
+        from pcrscript.tasks.subjugation_party import SubjugationFormation
+        formation = SubjugationFormation(Mock())
+        wanted = [normalized('合成角色'+str(i)) for i in range(5)]
+        formation.ui.capture.return_value = Mock(image=np.zeros((540, 960, 3), np.uint8))
+        formation.avatars = Mock()
+        formation.avatars.query.return_value = wanted[:4]+[None]
+        formation.avatars.expected_identity.side_effect = lambda crop, names: next(iter(names), None)
+        formation.avatars.assign_expected.return_value = None
+        with patch.object(formation, 'occupied_slots', return_value=formation.slots),              patch('pcrscript.tasks.strategy_formation.face_crop', return_value=None):
+            # A saved formation's unread slot is not filled from a near-tie.
+            self.assertIsNone(formation.portrait_order(wanted))
+            formation.avatars.expected_identity.assert_not_called()
+            formation.portrait_selected = {wanted[4]}
+            self.assertEqual(formation.portrait_order(wanted), wanted)
+            formation.avatars.expected_identity.assert_called_once_with(None, {wanted[4]})
+            # A new selection discards earlier picks before reading the live formation.
+            formation.ui.driver.supports_unicode_input = True
+            with patch.object(formation, 'prepare_search', return_value=False):
+                self.assertIsNone(formation.select_by_portrait(wanted))
+            self.assertEqual(formation.portrait_selected, set())
 
     def test_real_battle_reselection_of_portrait_trial_stays_on_portraits(self):
         task = self.task(Game())

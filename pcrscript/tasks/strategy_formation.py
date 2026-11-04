@@ -201,9 +201,12 @@ class StrategyFormation(EventFormation):
         crops=[face_crop(s.image,(x-48,self.slot_top,96,96)) for x,_ in self.slots]
         names=[normalized(n) if n is not None else None for n in self.avatars.query(crops)]
         wanted=set(map(normalized,expected))
+        # A near-tie may only settle a member this selection picked from its
+        # search card; a pre-existing slot could hold a look-alike.
+        picked=wanted&set(getattr(self,'portrait_selected',()))
         for i,name in enumerate(names):
-            if name is None and wanted:
-                found=self.avatars.expected_identity(crops[i],wanted)
+            if name is None and picked:
+                found=self.avatars.expected_identity(crops[i],picked)
                 names[i]=normalized(found) if found is not None else None
         # Slot crops can miss a portrait the search card matched exactly. One
         # gap is settled by elimination, only for a member picked that way.
@@ -232,6 +235,8 @@ class StrategyFormation(EventFormation):
         """Pick exact portrait matches without detail pages; None leaves the full audit in charge."""
         wanted=[normalized(n) for n in names]
         if not getattr(self.ui.driver,'supports_unicode_input',True) or len(set(wanted))!=5:return None
+        # Picks from an earlier selection do not vouch for the formation found now.
+        self.portrait_selected=set()
         current=self.portrait_order(wanted)
         if current is None or set(current)!=set(wanted):
             if not self.prepare_search():return None

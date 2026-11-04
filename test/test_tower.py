@@ -594,9 +594,11 @@ class TowerTests(TestCase):
         # an unknown badge, and failure remains unable to start combat.
         with patch.object(self.task,'enter'), \
              patch.object(self.task,'candidate',return_value=dict(candidate)) as reopen, \
-             patch('pcrscript.game_ui.character_equipment.inspect_unreleased_equipment',return_value='synthetic-proof') as inspect:
+             patch('pcrscript.game_ui.character_equipment.inspect_unreleased_equipment',return_value='synthetic-proof') as inspect,              patch('pcrscript.tasks.task_home.ToHomePage') as home:
             party=self.task.audit(candidate)
         inspect.assert_called_once_with(self.task.ui,self.names[4])
+        # The lookup is bracketed by the shared home navigator before the source reopens.
+        self.assertEqual(home.return_value.run.call_count,2)
         reopen.assert_called_once()
         self.assertIn(self.names[4],self.task.formation.unreleased)
         self.assertTrue(all(m.unique is False and m.unique2 is False for m in party.members))

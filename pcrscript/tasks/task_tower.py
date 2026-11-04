@@ -571,12 +571,17 @@ class LunaTowerClimb(TowerTask):
             # Missing badges are not proof that a weapon is absent. Reuse the
             # shared read-only character page, then reopen this exact source.
             from ..game_ui.character_equipment import inspect_unreleased_equipment
+            from .task_home import ToHomePage
             self.enter()
             confirmed = False
             for name in unknown:
                 self.report_progress('露娜塔 · 补查专武状态 · '+name)
                 self.equipment_checked.add(name)
+                # Each lookup can end on the character-strengthening page, which
+                # neither the next lookup nor the tower entry can leave.
+                ToHomePage(self.robot).run(timeout=60)
                 proof = inspect_unreleased_equipment(self.ui, name)
+                ToHomePage(self.robot).run(timeout=60)
                 if proof:
                     self.formation.unreleased[normalized(name)] = (time.time(), proof)
                     confirmed = True

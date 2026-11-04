@@ -579,7 +579,8 @@ class AbyssSubjugation(TimeLimitTask):
                 continue
             self.report.setdefault('outpost_parties', {})[difficulty] = dict(
                 party=party.name, source=party.source, assumptions=party.assumptions)
-            return party, order
+            # The audited party pins the current build; cultivation needs the guide's own declarations.
+            return party, order, seed.members
         raise SubjugationBlocked('没有核验通过的本期前哨攻略；未开战')
 
     def cultivate(self, party, declared=None):
@@ -677,7 +678,7 @@ class AbyssSubjugation(TimeLimitTask):
                         attempts=field.attempts(before), tickets_before=field.tickets(self.ui, before))
             reopen()
             self.report_progress('前哨'+difficulty+'首通 · 核验适用攻略队伍')
-            party, order = self.choose_normal_party(difficulty, reopen, failed)
+            party, order, declared = self.choose_normal_party(difficulty, reopen, failed)
             prior = len(self.report['history'])
             self.report_progress('前哨'+difficulty+' · 首通实战')
             result = self.battle(party, order, plan)
@@ -691,7 +692,7 @@ class AbyssSubjugation(TimeLimitTask):
             # Reconciliation must have confirmed unchanged attempts and tickets.
             if self.state.get('pending'):
                 raise SubjugationBlocked('前哨失败资源尚未核对；未追加试打')
-            if not self.cultivate(party):
+            if not self.cultivate(party, declared):
                 failed.add(party_fingerprint(party))
             failures['difficulties'][difficulty] = sorted(failed)
             self.report.setdefault('normal_trials', []).append(dict(difficulty=difficulty,
