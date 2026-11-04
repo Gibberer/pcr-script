@@ -56,6 +56,39 @@ class CaravanTests(TestCase):
             s.image[402:422,711:780]//=2
             self.assertFalse(disabled_roll(s))
 
+    def test_shifted_entry_recovered_by_local_read(self):
+        with TemporaryDirectory() as folder, patch('pcrscript.tasks.task_caravan.time.sleep'):
+            r=self.runner(folder)
+            # Full-frame OCR misread the shifted stylized label; the tab
+            # must not be clicked while the adventure page is already open.
+            adventure=screen(('冒险',90,27),('华丰品',230,446),('冒险',538,526))
+            r.ui.read_region=Mock(return_value=screen(('驾车游',232,446)))
+            r.ui.capture.side_effect=[adventure,board_screen(0),board_screen(0)]
+            self.assertEqual(r.run()['status'],'complete')
+            self.assertEqual(r.ui.click.call_args_list[0].args[0].text,'驾车游')
+            self.assertEqual(r.ui.click.call_count,1)
+
+    def test_unreadable_entry_fails_without_endless_tab_clicks(self):
+        with TemporaryDirectory() as folder, patch('pcrscript.tasks.task_caravan.time.sleep'):
+            r=self.runner(folder)
+            home=screen(('我的主页',80,526),('冒险',538,526))
+            r.ui.capture.side_effect=[home]*20
+            with self.assertRaisesRegex(EventUIError,'入口多次点击'):
+                r.run()
+            self.assertEqual(r.ui.click.call_count,8)
+
+    def test_turn_limit_skip_lock_falls_back_to_single_rolls(self):
+        with TemporaryDirectory() as folder, patch('pcrscript.tasks.task_caravan.time.sleep'):
+            r=self.runner(folder)
+            locked=board_screen(16)
+            locked.items+=screen(('由于已超过6回合，在到达下一个检查点之前无法跳过。',480,270)).items
+            r.ui.capture.side_effect=[board_screen(16),locked,board_screen(16),board_screen(15)]
+            with self.assertRaises(StopIteration):
+                r.run()
+            self.assertEqual([c.args[0] for c in r.ui.click.call_args_list],
+                             [(644,382),(874,372),(874,372)])
+            self.assertEqual((r.report['rolls'],r.report['skips']),(1,0))
+
     def test_board_recovers_missing_roll_label(self):
         s=screen(('驾车游',110,30),('经过回合',90,200),
                  ('同时掷3个',850,440),('食用料理',750,413))
@@ -254,6 +287,41 @@ class CaravanTests(TestCase):
             self.assertTrue(r.modal(s))
             self.assertEqual(r.ui.click.call_args.args[0].text,'确认')
             self.assertEqual(r.sale_before,12)
+
+    def forced_sale_page(self, count=11):
+        curry='本回合投掷的骰子点数必定为“8”。'
+        return screen(('持有的料理',480,40),('持有数已满。请选择要出售的料理。',480,85),(f'持有料理数{count}/10',480,110),
+                      ('若菜的节俭八分饱咖喱',150,172),(curry,260,200),('出售',395,282),
+                      ('若菜的节俭八分饱咖喱',585,172),(curry,690,200),('出售',829,282),
+                      ('一键出售',480,474))
+
+    def test_forced_full_sale_sells_one_duplicate_travel_food(self):
+        with TemporaryDirectory() as folder:
+            r=self.runner(folder)
+            self.assertTrue(r.modal(self.forced_sale_page(11)))
+            self.assertEqual(r.ui.click.call_args.args[0].text,'出售')
+            self.assertEqual(r.sale_before,11)
+            self.assertTrue(helpful_food('本回合投掷的骰子点数必定为“8”。'))
+
+    def test_sale_page_back_at_capacity_waits_without_selling(self):
+        with TemporaryDirectory() as folder, patch('pcrscript.tasks.task_caravan.time.sleep'):
+            r=self.runner(folder)
+            r.sale_before=11; r.sale_confirmed=True
+            self.assertTrue(r.modal(self.forced_sale_page(10)))
+            r.ui.click.assert_not_called()
+            self.assertIsNone(r.sale_before)
+            self.assertEqual(r.report['foods_sold'],1)
+
+    def test_forced_full_sale_keeps_last_copy_of_each_effect(self):
+        with TemporaryDirectory() as folder:
+            r=self.runner(folder)
+            r.ui.swipe=Mock()
+            page=self.forced_sale_page()
+            page.items=[i for i in page.items if i.text!='本回合投掷的骰子点数必定为“8”。' or i.box[0][0]<400]
+            page.items+=screen(('可跳过料理格子移动。',690,200)).items
+            self.assertTrue(r.modal(page))
+            r.ui.click.assert_not_called()
+            self.assertIsNone(r.sale_before)
 
     def test_old_sale_confirmation_cancelled(self):
         with TemporaryDirectory() as folder:

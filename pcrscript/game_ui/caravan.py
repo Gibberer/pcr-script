@@ -58,7 +58,7 @@ def helpful_food(text: str) -> bool:
                 or re.search('移动时可跳过里程格子', text)
                 or re.search('可跳过料理格子移动', text)
                 or re.search('下次投掷骰子时[，,]?会多走[1-9]个格子', text)
-                or re.search('点数必定为[“"「]?[56]', text))
+                or re.search('点数必定为[“"「]?[5-9]', text))
 
 
 def surplus_food(text: str) -> bool:

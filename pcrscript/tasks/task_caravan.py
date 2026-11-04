@@ -8,8 +8,14 @@ if TYPE_CHECKING:
     from pcrscript import Robot
 import re
 from ..run_session import atomic_json, clock as time, emit
-from ..game_ui.screen import EventUI, EventUIError
+from ..game_ui.screen import EventUI, EventUIError, normalized
 from ..game_ui.caravan import board, triple_mode, disabled_roll, progress, fastest_turn, helpful_food, surplus_food
+
+
+# Adventure-page side icons, left of the arena tiles (960 x 540).
+ENTRY_AREA = (0, 340, 470, 470)
+# Tooltips after tapping a locked section skip; the turn limit varies by season.
+SKIP_LOCKED = r'\d+回合内到达检查点后即可解锁|在到达下一个检查点之前无法跳过'
 
 
 @register("caravan")
@@ -39,6 +45,8 @@ class Caravan(BaseTask):
         self.sale_scrolls = 0
         self.empty_probe: float | None = None
         self.empty_confirmed = False
+        self.navigation = 0
+        self.sale_wait: float | None = None
 
     def save_report(self) -> None:
         atomic_json(self.ui.output / 'report.json', self.report)
@@ -90,7 +98,8 @@ class Caravan(BaseTask):
                 self.sale_confirmed = True
             return True
         if s.find('持有数已满.*请选择要出售的料理'):
-            match = re.search(r'料理持有数\s*(\d+)/10', s.text())
+            # Both label orders have been read on this page.
+            match = re.search(r'(?:料理持有数|持有料理数)\s*(\d+)/10', normalized(s.text()))
             if not match:
                 raise EventUIError('料理满仓数量无法确认')
             count = int(match[1])
@@ -102,14 +111,29 @@ class Caravan(BaseTask):
                 self.sale_confirmed = False
                 self.sale_scrolls = 0
             if count <= 10:
-                return self.click_text(s, '关闭|确认')
-            for button in s.all('^出售$', (35, 145, 930, 440)):
-                x, y = button.center
-                if surplus_food(s.text((int(x)-250, max(140, int(y)-130), int(x)+65, int(y)+10))):
-                    self.sale_before = count
-                    self.ui.save('food_surplus_before', s)
-                    self.ui.click(button)
+                # Back within capacity, the page shows the sale result and
+                # returns to the board by itself; never start another sale.
+                if self.click_text(s, '关闭|确认'):
                     return True
+                self.sale_wait = self.sale_wait or time.monotonic()
+                if time.monotonic()-self.sale_wait > 10:
+                    raise EventUIError('料理持有数已回到上限内，出售页未关闭')
+                time.sleep(.6)
+                return True
+            self.sale_wait = None
+            cards = [(button, normalized(s.text((int(button.center[0])-250, max(140, int(button.center[1])-130),
+                                                  int(button.center[0])+65, int(button.center[1])+10))))
+                     for button in s.all('^出售$', (35, 145, 930, 440))]
+            effects = [text for _, text in cards]
+            # Prefer food that does not help travel; otherwise give up one
+            # visible duplicate, which keeps every effect still in stock.
+            choice = (next((c for c in cards if surplus_food(c[1])), None)
+                      or next((c for c in cards if helpful_food(c[1]) and effects.count(c[1]) > 1), None))
+            if choice:
+                self.sale_before = count
+                self.ui.save('food_surplus_before', s)
+                self.ui.click(choice[0])
+                return True
             if self.sale_scrolls >= 8:
                 raise EventUIError('料理满仓，未找到可确认的不利赶路料理，未一键出售')
             self.sale_scrolls += 1
@@ -245,6 +269,7 @@ class Caravan(BaseTask):
                     last_progress = time.monotonic()
                     continue
                 if board(s):
+                    self.navigation = 0
                     if self.sale_before is not None:
                         food_count = s.find(r'\d+/10', (750, 317, 809, 350), exact=True)
                         if not self.sale_confirmed or food_count is None or int(food_count.text.split('/')[0]) != self.sale_before-1:
@@ -252,7 +277,7 @@ class Caravan(BaseTask):
                         self.report['foods_sold'] = self.report.get('foods_sold', 0)+1
                         self.sale_before = None
                         self.sale_confirmed = False
-                    if s.find('15回合内到达检查点后即可解锁'):
+                    if s.find(SKIP_LOCKED):
                         self.locked = True
                         self.probe = False
                         time.sleep(2)
@@ -281,6 +306,8 @@ class Caravan(BaseTask):
                             continue
                     if count is None or turn is None or distance is None:
                         raise EventUIError('骰子/回合/检查点距离无法确认')
+                    record = fastest_turn(s)
+                    needs_target = record is None or record > 15
                     if self.report['initial_dice'] is None:
                         self.report['initial_dice'] = count
                     self.report['remaining_dice'] = count
@@ -334,8 +361,6 @@ class Caravan(BaseTask):
                         last_progress = time.monotonic()
                         continue
                     food = s.find(r'[1-9]/10|10/10', (750, 317, 809, 350), exact=True)
-                    record = fastest_turn(s)
-                    needs_target = record is None or record > 15
                     if needs_target and food and self.food_checked != count:
                         self.food_checked = count
                         self.food_scrolls = 0
@@ -351,15 +376,23 @@ class Caravan(BaseTask):
                     self.ui.click((874, 372))
                     last_progress = time.monotonic()
                     continue
-                if not self.pending and s.find('驾车游', (65, 360, 195, 465)):
-                    self.ui.click(s.find('驾车游', (65, 360, 195, 465)))
-                    last_progress = time.monotonic()
-                    continue
-                if (not self.pending and not s.find('驾车游', (45, 0, 180, 65))
-                        and s.find('冒险', (475, 480, 605, 539), exact=True)):
-                    self.ui.click(s.find('冒险', (475, 480, 605, 539), exact=True))
-                    last_progress = time.monotonic()
-                    continue
+                if not self.pending and not s.find('驾车游', (45, 0, 180, 65)):
+                    on_adventure = s.find('冒险', (45, 0, 180, 65), exact=True)
+                    entry = s.find('驾车游', ENTRY_AREA, exact=True)
+                    if entry is None and on_adventure:
+                        # The entry shifts right as event icons are added, and
+                        # its stylized label is often misread at full scale.
+                        entry = self.ui.read_region(s, ENTRY_AREA).find('驾车游', ENTRY_AREA, exact=True)
+                    tab = None if on_adventure else s.find('冒险', (475, 480, 605, 539), exact=True)
+                    if entry or tab:
+                        # Navigation clicks alone must not keep an unrecognized
+                        # entry alive until the whole task timeout.
+                        self.navigation += 1
+                        if self.navigation > 8:
+                            raise EventUIError('驾车游入口多次点击后仍未进入地图')
+                        self.ui.click(entry or tab)
+                        last_progress = time.monotonic()
+                        continue
                 if time.monotonic() - last_progress > 40:
                     raise EventUIError('驾车游未知页面或无进展，保留现场')
                 time.sleep(.6)
