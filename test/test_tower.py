@@ -164,12 +164,23 @@ class TowerTests(TestCase):
         self.assertEqual(self.task.state['phase_battles'],[{'floor':10}])
 
     def test_recover_settled_partial_real_phase_without_another_battle(self):
-        pending=dict(floor=11,phase=2,outcome='failed',target=dict(floor=11,hp=[0,0,0,0,80]))
+        from pcrscript.tasks.tower_guides import prefer_proven
+        target=dict(floor=11,hp=[0,0,0,0,80])
+        pending=dict(floor=11,phase=2,outcome='failed',target=target,names=list('abcde'),
+                     before='cache/phase_real_before_0.png')
         self.task.state['pending_battle']=pending
         with patch.object(field,'target_signature',return_value=dict(floor=11,hp=[0,0,0,0,60])):
             self.task.recover_phase_result(tower(),pending)
         self.assertNotIn('pending_battle',self.task.state)
-        self.assertTrue(self.task.state['phase_battles'][0]['recovered'])
+        record=self.task.state['phase_battles'][0]
+        self.assertTrue(record['recovered'])
+        self.assertEqual((record['before'],record['simulate'],record['result']),(target,False,'failed'))
+        self.assertEqual(record['before_evidence'],'cache/phase_real_before_0.png')
+        plans=[dict(names=list('vwxyz')),dict(names=list('abcde'))]
+        self.assertEqual(prefer_proven(plans,self.task.state['phase_battles'])[0],plans[1])
+        # Ledgers saved by the earlier recovery shape must not stop later runs.
+        legacy=dict(pending,after=dict(floor=11,hp=[0,0,0,0,60]),recovered=True)
+        self.assertEqual(prefer_proven(plans,[legacy]),plans)
         self.task.ui.click.assert_not_called()
 
     def test_unknown_phase_outcome_stays_pending(self):

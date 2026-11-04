@@ -6,7 +6,7 @@ from hashlib import sha256
 import numpy as np
 import cv2 as cv
 from pcrscript.game_ui.avatars import AvatarIndex,face_crop
-from pcrscript.tasks.tower_guides import (parse_guides, PhaseTrace, declared_identity, phase_progress,
+from pcrscript.tasks.tower_guides import (parse_guides, PhaseTrace, boss_hp_floor, declared_identity, phase_progress,
     with_support_trials,with_tank_trials,with_shadow_followups,prefer_untried,remembered_trials,trial_key,recognize_icon,carried_boss_hp)
 from ui_fixtures import screen
 
@@ -181,6 +181,19 @@ class PhaseGuideTests(TestCase):
         self.assertFalse(trace.passed())
         for s in trace.samples[-3:]:s['hp']=800000000
         self.assertTrue(trace.passed())
+
+    def test_first_hud_reading_after_heal_is_bounded_by_map_bar(self):
+        healed=PhaseTrace('boss_damage',dict(floor=30,hp=[0,0,0,0,44]))
+        healed.samples=[dict(seconds=t,hp=h) for t,h in [(85,600000000),(2,545000000),(1,540000000)]]
+        self.assertFalse(healed.passed(settled=True))
+        self.assertFalse(healed.passed())
+        # A real settled knife from an 80px bar (HUD 865.6M -> 755.1M) still counts.
+        real=PhaseTrace('boss_damage',dict(floor=30,hp=[0,0,0,0,80]))
+        real.samples=[dict(seconds=t,hp=h) for t,h in [(88,865557900),(2,756000000),(1,755099843)]]
+        self.assertTrue(real.passed(settled=True))
+        for bar,hp in [(80,865557900),(70,748973103),(71,754763682),(62,647127763),(55,570577470),(91,1000000000)]:
+            self.assertLess(boss_hp_floor(dict(hp=[0,0,0,0,bar])),hp)
+        self.assertIsNone(boss_hp_floor(dict(hp=[0,0,0,0,0])))
 
     def test_final_two_readings_accept_partial_damage_after_full_battle(self):
         trace=PhaseTrace('boss_damage')

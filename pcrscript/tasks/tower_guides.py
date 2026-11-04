@@ -87,7 +87,8 @@ def prefer_proven(plans,battles):
     """Teams whose real knife lowered the boss go first; new guides only get what is left of the run."""
     best={}
     for battle in battles:
-        before,after=battle.get('before',{}).get('hp',[]),battle.get('after',{}).get('hp',[])
+        if not isinstance(battle.get('before'),dict) or not isinstance(battle.get('after'),dict):continue
+        before,after=battle['before'].get('hp',[]),battle['after'].get('hp',[])
         if (battle.get('simulate') is False and len(before)==5 and len(after)==5 and after[4]<before[4]):
             key=frozenset(battle.get('names',[]))
             best[key]=max(best.get(key,0),before[4]-after[4])
@@ -164,11 +165,23 @@ def carried_boss_hp(battles,target):
     return final[-1]['hp'] if final else None
 
 
+def boss_hp_floor(target):
+    """Lowest boss HP the map bar can stand for; a HUD read after a heal cannot exceed it.
+
+    Fitted on CN 960x540 real knives (bar 55-91px against settled HUD HP);
+    each fitted point sits 12-20M above this bound.
+    """
+    hp=(target or {}).get('hp',[])
+    if len(hp)!=5 or type(hp[4]) is not int or not 0<hp[4]<=91:return None
+    return max(0,int(((hp[4]-1)*11.98-97.1)*1000000))
+
+
 class PhaseTrace:
     """Use sustained HUD readings, never temporary damage before a boss heal."""
     def __init__(self, goal, target=None, *, initial_hp=None):
         self.goal=goal
         self.initial_hp=initial_hp
+        self.map_floor=boss_hp_floor(target)
         self.samples=[]
         self.shadow_samples=[]
         alive=[hp/91 for hp in (target or {}).get('hp',[91]*5)[:4] if hp>0]
@@ -215,7 +228,11 @@ class PhaseTrace:
             late=[s for s in self.shadow_samples if s['seconds']<=15]
             if late and self.shadow_gain(late[-1])>=self.shadow_goal>0:return True
         if not self.samples:return False
-        start=self.initial_hp if self.initial_hp is not None else self.samples[0]['hp']
+        start=self.initial_hp
+        if start is None:
+            # The first HUD frame may already follow a heal; the map bar bounds the real start.
+            start=self.samples[0]['hp']
+            if self.map_floor is not None:start=min(start,self.map_floor)
         if self.goal=='shadows':
             # The phase-one immunity cannot lose 1% to one-point chip hits.
             return sum(s['hp']<=start-10000000 for s in self.samples)>=3

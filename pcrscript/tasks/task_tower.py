@@ -695,7 +695,12 @@ class LunaTowerClimb(TowerTask):
             raise EventUIError('塔顶上刀结算或目标未知，保留待核账记录')
         after=field.target_signature(screen)
         progressed=phase_progress(pending['target'],after,pending['phase'])
-        self.state.setdefault('phase_battles',[]).append(dict(pending,after=after,recovered=True))
+        # Keep the ordinary ledger schema; the pending screenshot path is evidence, not a target.
+        self.state.setdefault('phase_battles',[]).append(dict(simulate=False,phase=pending['phase'],
+            names=pending.get('names',[]),outcome=pending['outcome'],result=pending['outcome'],
+            passed=progressed,before=pending['target'],after=after,hp_samples=[],shadow_samples=[],
+            initial_boss_hp=None,recovered=True,before_evidence=pending.get('before'),
+            result_evidence=pending.get('result')))
         self.state.pop('pending_battle')
         self.state.pop('phase_trial',None)
         self.save()

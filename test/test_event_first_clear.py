@@ -56,12 +56,15 @@ class FirstEntryTests(TestCase):
         members=[CharacterStatus(f'角色{i}',identity_verified=True,unique=None,unique2=None) for i in range(5)]
         b.formation=Mock(observed={m.name:m for m in members})
         party=SimpleNamespace(name='synthetic',source='https://example.com',members=members)
-        with patch('pcrscript.game_ui.character_equipment.inspect_unreleased_equipment',return_value=None) as inspect:
+        with patch('pcrscript.game_ui.character_equipment.inspect_unreleased_equipment',return_value=None) as inspect,                 patch('pcrscript.tasks.task_home.ToHomePage') as home:
             with self.assertRaisesRegex(EventUIError,'专武状态未确认'):
                 b.audit_source_trial(party,{},'特别',1)
         inspect.assert_called_once_with(b.ui,'角色0')
         b.formation.select.assert_not_called()
-        b.r.enter.assert_not_called()
+        # Leave the strengthening page through the shared navigator, then back to the event.
+        home.return_value.run.assert_called_once_with(timeout=60)
+        b.r.enter.assert_called_once_with()
+        b.r.quests.assert_not_called()
 
     def test_source_trial_audit_blocks_unknown_build_and_changed_lineup(self):
         from pcrscript.tasks.event_strategy import CharacterStatus

@@ -307,6 +307,10 @@ class EventBattles:
                     member.unique = member.unique2 = False
                     member.equipment_evidence = proof
                 else:
+                    # The inspection may stop on the character-strengthening page,
+                    # which the event home navigator cannot leave.
+                    ToHomePage(self.r.robot).run(timeout=60)
+                    self.r.enter()
                     raise EventUIError(member.name+'的专武状态未确认，跳过此来源队伍，未开战')
                 ToHomePage(self.r.robot).run(timeout=60)
             self.r.enter()
