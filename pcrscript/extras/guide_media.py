@@ -208,7 +208,9 @@ def fetch_video(api, bvid: str, page: dict, directory: Path, *, http=requests,
         phase_end = started + max_seconds * fraction
         for url in ([media[0].get('url')]+media[0].get('backup_url', []))[:3]:
             check()
-            if not url or time.monotonic() >= phase_end:
+            # Each attempt starts a separate process; one begun in the last
+            # moments of a phase cannot finish and only overruns the deadline.
+            if not url or phase_end-time.monotonic() < min(1, max_seconds*.1):
                 continue
             temporary = path.with_suffix('.'+uuid4().hex+'.part')
             try:
