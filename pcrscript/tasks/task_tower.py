@@ -211,6 +211,8 @@ class TowerTask(TimeLimitTask):
         event = fetch_event_news().tower
         if not cls.event_valid(event):
             return (), {}, dict(status='unavailable', reason='静态资料中没有当前露娜塔配置')
+        if type(event.extras.get('max_floor')) is not int:
+            return (), {}, dict(status='unavailable', reason=event.extras.get('reason', '当前露娜塔区域或最高层未知'))
         if cls.name == 'luna_tower_clean' and event.extras.get('cloister_quest_id') == 0:
             return (), {}, dict(status='unavailable', reason='当前露娜塔区域没有回廊，跳过回廊扫荡')
         return (), {}, None
@@ -917,7 +919,7 @@ class LunaTowerClimb(TowerTask):
 
     def climb_top(self, screen):
         """A settled partial defeat can complete a phase of the cumulative boss."""
-        from .tower_guides import load_guides,prefer_proven,with_support_trials,with_tank_trials,with_shadow_followups,prefer_untried,remembered_trials,trial_key,phase_progress,PHASE_GOAL_VERSION,IDENTITY_VERSION,PhaseTrace
+        from .tower_guides import load_guides,prefer_proven,with_support_trials,with_tank_trials,with_shadow_followups,prefer_untried,remembered_trials,trial_key,phase_progress,PHASE_GOAL_VERSION,IDENTITY_VERSION,PhaseTrace,top_phase
         floor=field.floor_number(screen)
         with closing(sqlite3.connect('cache/redive_cn.db')) as conn:
             costs=conn.execute('SELECT stamina,stamina_start FROM tower_quest_data WHERE floor_num=?',(floor,)).fetchall()
@@ -952,7 +954,7 @@ class LunaTowerClimb(TowerTask):
                 self.report['status']='complete'
                 return self.report
             target=field.target_signature(screen)
-            phase=1 if any(target['hp'][:4]) else (2 if target['hp'][4]>=46 else 3)
+            phase=top_phase(target)
             last=self.state.get('phase_battles',[])[-1:]
             spent_battles=self.state.get('phase_battles',[])[self.state.get('role_recovery_battle_count',0):]
             needs_recovery=any(b.get('result')=='failed' for b in spent_battles)

@@ -108,6 +108,22 @@ class BoardPlanTests(TestCase):
                 client.search.assert_called()
                 self.assertEqual(client.search.call_count, 2)  # Search is cached too.
 
+    def test_empty_read_is_retried_once_the_portrait_index_grows(self):
+        from types import SimpleNamespace
+        client = api('顶层(不是EX)半血后每日磨血')
+        with TemporaryDirectory() as folder:
+            options = dict(guide_cache=folder, media_dir=folder)
+            fetcher = Mock(return_value=(Path(folder)/'v.mp4', dict(duration=9)))
+            cold, warm = SimpleNamespace(names=NAMES[:4]), SimpleNamespace(names=NAMES)
+            with patch('pcrscript.tasks.tower_boards.read_board',
+                       side_effect=[[], [dict(names=NAMES, instant=None)]]) as reader:
+                self.assertEqual(board_plans(options, 780, cold, api=client, ocr=Mock(), media_fetcher=fetcher)[0], [])
+                board_plans(options, 780, cold, api=client, ocr=Mock(), media_fetcher=fetcher)
+                self.assertEqual(reader.call_count, 1)  # Same index: the empty read stands.
+                plans, _ = board_plans(options, 780, warm, api=client, ocr=Mock(), media_fetcher=fetcher)
+                self.assertEqual(reader.call_count, 2)
+                self.assertEqual(plans[0]['names'], NAMES)
+
     def test_source_failure_is_reported_without_blocking_other_candidates(self):
         client = Mock()
         client.search.side_effect = RuntimeError('站点验证')

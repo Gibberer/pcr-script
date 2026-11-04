@@ -165,15 +165,30 @@ def carried_boss_hp(battles,target):
     return final[-1]['hp'] if final else None
 
 
+def bar_hp(pixels):
+    """Boss HP a map bar of this length stands for.
+
+    Fitted on CN 960x540 real knives (bar 55-91px against settled HUD HP of a
+    1e9 boss); the bar's fill starts about 8px in, so 50% is near 49px.
+    """
+    return int((pixels*11.98-92.1)*1000000)
+
+
 def boss_hp_floor(target):
     """Lowest boss HP the map bar can stand for; a HUD read after a heal cannot exceed it.
 
-    Fitted on CN 960x540 real knives (bar 55-91px against settled HUD HP);
-    each fitted point sits 12-20M above this bound.
+    Each fitted point sits 12-20M above this bound.
     """
     hp=(target or {}).get('hp',[])
     if len(hp)!=5 or type(hp[4]) is not int or not 0<hp[4]<=91:return None
-    return max(0,int(((hp[4]-1)*11.98-97.1)*1000000))
+    return max(0,bar_hp(hp[4]-1)-5000000)
+
+
+def top_phase(target):
+    """1 while shadows live, then 2 or 3 at the boss's 50% mark read from the map bar."""
+    hp=target['hp']
+    if any(hp[:4]):return 1
+    return 3 if bar_hp(hp[4])<500000000 else 2
 
 
 class PhaseTrace:

@@ -195,6 +195,14 @@ class PhaseGuideTests(TestCase):
             self.assertLess(boss_hp_floor(dict(hp=[0,0,0,0,bar])),hp)
         self.assertIsNone(boss_hp_floor(dict(hp=[0,0,0,0,0])))
 
+    def test_top_phase_three_starts_at_the_bosss_half_hp(self):
+        from pcrscript.tasks.tower_guides import top_phase, bar_hp
+        self.assertEqual(top_phase(dict(hp=[16,23,13,34,91])),1)
+        # 55px is ~567M; 46-49px (~459-495M) is already below half.
+        self.assertEqual([top_phase(dict(hp=[0,0,0,0,b])) for b in (91,55,50,49,47,46,30)],[2,2,2,3,3,3,3])
+        for bar,hp in [(80,865557900),(62,647127763),(55,570577470),(91,1000000000)]:
+            self.assertLess(abs(bar_hp(bar)-hp),20000000)
+
     def test_final_two_readings_accept_partial_damage_after_full_battle(self):
         trace=PhaseTrace('boss_damage')
         trace.samples=[dict(seconds=t,hp=hp) for t,hp in

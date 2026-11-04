@@ -92,12 +92,13 @@ def _query_tower_event(conn: sqlite3.Connection):
         start, end, schedule, area = row
         details = conn.execute('SELECT max_floor_num,cloister_quest_id FROM tower_area_data '
                                'WHERE tower_area_id=?', (area,)).fetchone()
+        # A missing area row only leaves the tower unknown; the rest of the
+        # snapshot must still build. Tower tasks stop on the unknown maximum.
+        maximum, cloister = details if details is not None else (None, None)
+        extras = dict(schedule_id=schedule, area_id=area, max_floor=maximum, cloister_quest_id=cloister)
         if details is None:
-            raise ValueError('露娜塔当前区域定义缺失，不能判断回廊或最高层')
-        maximum, cloister = details
-        return Event(_event_timestamp(start), _event_timestamp(end), '露娜塔',
-                     dict(schedule_id=schedule, area_id=area, max_floor=maximum,
-                          cloister_quest_id=cloister))
+            extras['reason'] = '露娜塔当前区域定义缺失，不能判断回廊或最高层'
+        return Event(_event_timestamp(start), _event_timestamp(end), '露娜塔', extras)
     event = _query_event_duration(conn, 'tower_schedule',
                                   select='start_time,end_time,tower_schedule_id,max_tower_area_id',
                                   event_producer=produce)
@@ -105,8 +106,9 @@ def _query_tower_event(conn: sqlite3.Connection):
     # Preserve the source dates, but never schedule that workflow from them.
     if event and event.endTimestamp-event.startTimestamp > timedelta(days=366).total_seconds():
         event.extras['schedule_only'] = True
-        event.extras['reason'] = ('当前露娜塔区域没有回廊，跳过回廊扫荡' if not event.extras['cloister_quest_id']
-                                  else '长期静态配置；回廊须独立核对现场状态')
+        if event.extras['max_floor'] is not None:
+            event.extras['reason'] = ('当前露娜塔区域没有回廊，跳过回廊扫荡' if not event.extras['cloister_quest_id']
+                                      else '长期静态配置；回廊须独立核对现场状态')
     return event
 
 def _query_drop_normal_event(conn: sqlite3.Connection):

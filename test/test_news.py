@@ -182,6 +182,23 @@ class StoryScheduleTests(TestCase):
 
 
 class TowerScheduleTests(TestCase):
+    def test_missing_tower_area_leaves_the_rest_of_the_news_intact(self):
+        with closing(sqlite3.connect(':memory:')) as conn:
+            conn.create_function('ISO', 1, news._iso_datetime)
+            conn.execute('CREATE TABLE tower_schedule (start_time TEXT,end_time TEXT,tower_schedule_id INTEGER,max_tower_area_id INTEGER)')
+            conn.execute('CREATE TABLE tower_area_data (tower_area_id INTEGER,max_floor_num INTEGER,cloister_quest_id INTEGER)')
+            conn.execute("INSERT INTO tower_schedule VALUES('2025/10/1 11:00:00','2031/4/1 14:59:59',1,2)")
+            event = news._query_tower_event(conn)
+        self.assertIsNone(event.extras['max_floor'])
+        self.assertIsNone(event.extras['cloister_quest_id'])
+        self.assertIn('区域定义缺失', event.extras['reason'])
+        from pcrscript.tasks import EventNews, LunaTowerClean
+        with patch('pcrscript.news.fetch_event_news', return_value=EventNews(tower=event)):
+            for task in (LunaTowerClean,):
+                _, _, skipped = task.prepare({})
+                self.assertEqual(skipped['status'], 'unavailable')
+                self.assertIn('区域定义缺失', skipped['reason'])
+
     def test_multi_year_configuration_is_not_an_authorized_sweep_window(self):
         from pcrscript.tasks import EventNews, LunaTowerClean
         from pcrscript.runtime import modify_task_list, run_task_with_config

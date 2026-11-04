@@ -92,6 +92,11 @@ def read_board(path, duration, ocr, index, *, check=lambda: None, frames=8, read
     return [dict(names=r['names'], instant=r['instant']) for r in seen.values() if r['count'] >= 2]
 
 
+def index_size(index):
+    names = getattr(index, 'names', None)
+    return len(names) if isinstance(names, (list, tuple)) else None
+
+
 def plans_from_rows(rows, part, source):
     """A grind board fights the boss; a route board's rows may also chip the shadows."""
     goals = [(2, 'boss_damage'), (3, 'boss_damage')]
@@ -137,9 +142,16 @@ def board_plans(options, floor, index, *, api=None, ocr=None, check=lambda: None
                 try:
                     rows = json.loads(saved.read_text(encoding='utf-8'))
                 except (OSError, ValueError):
+                    rows = None
+                if rows == []:
+                    rows = None  # Saved before the index was recorded; read it once more.
+                elif isinstance(rows, dict):
+                    # An empty read holds only for the portrait index it was made with.
+                    rows = [] if rows.get('index') == index_size(index) is not None else None
+                if not isinstance(rows, list):
                     path, media = media_fetcher(api, bvid, page, Path(options.get('media_dir', 'cache/game/strategies/media')), check=check)
                     rows = read_board(path, page.get('duration') or media['duration'], ocr, index, check=check)
-                    atomic_json(saved, rows)
+                    atomic_json(saved, rows if rows else dict(rows=[], index=index_size(index)))
                 source = 'https://www.bilibili.com/video/'+bvid+'/'
                 for plan in plans_from_rows(rows, page.get('part', ''), source):
                     key = (plan['phase'], tuple(sorted(plan['instant'].items())))
