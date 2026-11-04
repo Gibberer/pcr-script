@@ -581,6 +581,16 @@ class TowerTests(TestCase):
         self.assertEqual(field.battle_result(failure),'failed')
         self.assertEqual(self.task.combat_result_button(failure).text,'前往露娜之塔')
 
+    def test_star_restore_returns_home_before_reentering_the_tower(self):
+        plan=dict(stars={self.names[4]:5})
+        calls=[]
+        self.task.report['star_changes']=[dict(name=self.names[4],before=4,target=5,cost=0)]
+        with patch.object(field,'reduced_star_badge',return_value=True),              patch('pcrscript.game_ui.character_stars.restore_unlocked_five',
+                   side_effect=lambda *a,**k: calls.append('restore') or True),              patch('pcrscript.tasks.task_home.ToHomePage') as home,              patch.object(self.task,'enter',side_effect=lambda: calls.append('enter')):
+            home.return_value.run.side_effect=lambda **k: calls.append('home')
+            self.assertTrue(self.task.repair_temporary_stars(plan,tower(),self.names))
+        self.assertEqual(calls,['restore','home','enter'])
+
     def test_uncertain_weapon_badge_uses_readonly_proof_and_reopens_source(self):
         actual=[CharacterStatus(n,level=300,rank=30,stars=5,skill_level=300,
                                unique=False,unique2=False,identity_verified=True) for n in self.names]

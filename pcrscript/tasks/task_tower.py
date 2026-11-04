@@ -806,9 +806,12 @@ class LunaTowerClimb(TowerTask):
                 or not field.reduced_star_badge(formation,4)):
             return False
         from ..game_ui.character_stars import restore_unlocked_five
+        from .task_home import ToHomePage
         changed=restore_unlocked_five(self.ui,name,self.report,self.save)
         if changed:
             self.note_profile_change(name,self.report['star_changes'][-1])
+        # The star page ends on character strengthening, which the tower's own exits cannot leave.
+        ToHomePage(self.robot).run(timeout=60)
         self.enter()
         return changed
 

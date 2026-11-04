@@ -80,7 +80,7 @@ class BoardTests(TestCase):
 class BoardPartyTests(TestCase):
     """A board page yields boss trials through the production parser, and only those."""
 
-    def parse(self, roster_trials, instant=[True, True, False, True, True], extra=()):
+    def parse(self, roster_trials, instant=[True, True, False, True, True], extra=(), rows=None):
         from pathlib import Path
         from tempfile import TemporaryDirectory
         from types import SimpleNamespace
@@ -105,7 +105,8 @@ class BoardPartyTests(TestCase):
                                                                                   GuideText('R38-5', 1, (0, 40, 80, 20)), *extra]), \
                  patch('pcrscript.tasks.strategy_video.combat_team', return_value=[]), \
                  patch('pcrscript.tasks.strategy_video.battle_rectangles', return_value=[]), \
-                 patch('pcrscript.tasks.strategy_tables.guide_board_rows', return_value=[row]):
+                 patch('pcrscript.tasks.strategy_tables.guide_board_rows',
+                       **(dict(side_effect=rows(row)) if rows else dict(return_value=[row]))):
                 return parse_video_source(source, options, index, api=Mock(), ocr=Mock(),
                                           media_fetcher=lambda *a, **k: (path, dict(duration=9))), team
 
@@ -125,6 +126,18 @@ class BoardPartyTests(TestCase):
             self.assertFalse(board_reference_cell(sentence), sentence)
         report, _ = self.parse(True, extra=[GuideText('必须点满属性技能', 1, (0, 80, 160, 20))])
         self.assertEqual([r['text'] for r in report['parties'][0]['global_requirements']], ['必须点满属性技能'])
+
+    def test_boards_sharing_labels_and_set_text_are_each_read(self):
+        def rows(first):
+            other = first['names'][::-1]
+            second = dict(first, names=other, members=[dict(m, name=n) for m, n in zip(first['members'], other)])
+            calls = iter(range(100))
+            # Same headers and SET text on every frame. The roster switches after three reads;
+            # label-keyed throttling then skipped the second board's confirming read.
+            return lambda *a, **k: [first if next(calls) < 3 else second]
+        report, team = self.parse(True, rows=rows)
+        rosters = {tuple(m['name'] for m in p['members']) for p in report['parties']}
+        self.assertEqual(rosters, {tuple(team), tuple(team[::-1])})
 
     def test_timed_axis_leaves_set_unread(self):
         report, _ = self.parse(True, instant=None)

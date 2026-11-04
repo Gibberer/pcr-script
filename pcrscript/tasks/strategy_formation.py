@@ -260,10 +260,12 @@ class StrategyFormation(EventFormation):
                     identities=self.avatars.query(crops)
                     # One unclear portrait only costs that member's detail page.
                     for r,i,c in zip(rects,identities,crops):
-                        closest,score=self.avatars.best(c)
-                        closest=normalized(closest)
-                        # A clear read of another costume needs no detail page to rule it out.
-                        if not hits and score>=.92 and closest!=name and closest.split('(')[0]==name.split('(')[0]:
+                        # Only a separated read of another costume (query() keeps a
+                        # margin over every other name) may skip the detail page;
+                        # a near tie between costumes still needs it.
+                        closest=normalized(i) if i is not None else None
+                        if (not hits and closest is not None and closest!=name
+                                and closest.split('(')[0]==name.split('(')[0]):
                             continue
                         if self.search_identity_candidate(s,r,i,name):
                             actual=self.inspect((r[0]+r[2]//2,r[1]+r[3]//2),rectangle=r,expected_name=name,verify_skills=False)

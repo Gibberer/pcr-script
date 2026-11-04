@@ -1831,20 +1831,20 @@ class SubjugationTests(TestCase):
 
     def test_clear_read_of_another_costume_rules_out_the_card_without_a_detail_page(self):
         from pcrscript.tasks.subjugation_party import SubjugationFormation
-        formation = SubjugationFormation(Mock())
-        formation.ui.driver.supports_unicode_input = True
+        from pcrscript.tasks.event_strategy import CharacterStatus
         names = ['合成(甲)', '合成二', '合成三', '合成四', '合成五']
-        formation.avatars = Mock(query=Mock(return_value=[None]), expected_identity=Mock(return_value=None),
-                                 best=Mock(return_value=('合成(乙)', .97)))
-        formation.inspect = Mock()
-        with patch.object(formation, 'portrait_order', return_value=None), \
-             patch.object(formation, 'prepare_search', return_value=True), \
-             patch.object(formation, 'search_rectangles', return_value=[(0, 0, 96, 96)]), \
-             patch('pcrscript.tasks.strategy_formation.search_character', return_value=Mock(image=np.zeros((540, 960, 3), np.uint8), text=Mock(return_value='合成'))), \
-             patch('pcrscript.tasks.strategy_formation.face_crop', return_value=None):
-            self.assertIsNone(formation.select_by_portrait(names))
-        formation.inspect.assert_not_called()
-        self.assertIn('合成(甲)', formation.unowned)
+        # query() separates the other costume clearly, or returns None for a near tie.
+        for identity, inspected in (('合成(乙)', False), (None, True)):
+            with self.subTest(identity=identity):
+                formation = SubjugationFormation(Mock())
+                formation.ui.driver.supports_unicode_input = True
+                formation.avatars = Mock(query=Mock(return_value=[identity]), expected_identity=Mock(return_value=None),
+                                         best=Mock(return_value=('合成(乙)', .94)))
+                formation.inspect = Mock(return_value=CharacterStatus('合成(乙)', identity_verified=True))
+                with patch.object(formation, 'portrait_order', return_value=None),                      patch.object(formation, 'prepare_search', return_value=True),                      patch.object(formation, 'search_rectangles', return_value=[(0, 0, 96, 96)]),                      patch('pcrscript.tasks.strategy_formation.search_character', return_value=Mock(image=np.zeros((540, 960, 3), np.uint8), text=Mock(return_value='合成'))),                      patch('pcrscript.tasks.strategy_formation.face_crop', return_value=None):
+                    self.assertIsNone(formation.select_by_portrait(names))
+                self.assertEqual(formation.inspect.called, inspected)
+                self.assertIn('合成(甲)', formation.unowned)
 
     def test_single_slot_portrait_gap_is_filled_only_for_a_member_picked_by_search(self):
         from pcrscript.tasks.subjugation_party import SubjugationFormation

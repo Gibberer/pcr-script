@@ -1091,6 +1091,7 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
         last_caption = frozenset()
         confirmation_rows = set()
         board_reads = {}
+        board_thinned = False
         stadium_detail_rows = set()
         stadium_combat_probes = set()
         # A formation page can recalibrate a recording whose game viewport
@@ -1367,16 +1368,21 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
                         and not combat_scene and board_hint(texts)):
                     # A static board lists several teams per frame. Its cells nominate
                     # rosters only; the account's free simulation still decides.
-                    # Corner animations defeat the static-frame digest, so its SET text
-                    # decides whether this board has had enough frames for every row to repeat.
-                    board_key = frozenset(normalized(t.text) for t in texts if board_hint([t]))
+                    # Corner animations defeat the static-frame digest. Boards in one part
+                    # can share every label and SET text, so repetition is keyed on the
+                    # rosters actually read; a changed board is always parsed.
+                    boards = guide_board_rows(frame, texts, index)
+                    board_key = (frozenset(normalized(t.text) for t in texts if board_hint([t])),
+                                 frozenset(tuple(board['names']) for board in boards))
                     board_reads[board_key] = board_reads.get(board_key, 0)+1
                     if board_reads[board_key] > 4:
                         continue
-                    if board_reads[board_key] == 4:
+                    if board_reads[board_key] == 4 and not board_thinned:
+                        # Thin the rest of the part once; later boards keep this sampling rate.
+                        board_thinned = True
                         position = seconds_list.index(seconds)+1
                         seconds_list[position:] = seconds_list[position::6]
-                    for board in guide_board_rows(frame, texts, index):
+                    for board in boards:
                         board_cids.add(page['cid'])
                         key = json.dumps([scope, board['names']], ensure_ascii=False, sort_keys=True)
                         team = teams.setdefault(key, dict(task_type=options['task_type'], source=source['url'], scope=scope,
