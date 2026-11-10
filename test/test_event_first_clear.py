@@ -469,6 +469,36 @@ class ScenarioSupportTests(TestCase):
         self.assertIn('专武状态未确认',b.r.report['battles'][0]['unready']['reason'])
         self.assertTrue(any('无可用' in reason for reason in b.r.report['pending']))
 
+    def test_lost_roster_is_not_refought_under_another_source_name(self):
+        from pcrscript.tasks.event_strategy import EventParty, MemberRequirement
+        from pcrscript.tasks.event_battle import BattleResult
+        b = EventBattles.__new__(EventBattles)
+        b.ui = Mock()
+        b.r = SimpleNamespace(options=dict(require_source_settings=True),
+            report=dict(battles=[],pending=[]), check_deadline=Mock(), report_progress=Mock(), log=Mock())
+        b.r.home = Mock(return_value=frame(('合成活动',400,200)))
+        b.r.quests = Mock(return_value=frame(('剧本模式',825,230),('特别',825,302),('特别战斗+',825,371)))
+        b.open_boss_detail = Mock(return_value=frame(('特别战斗/模式1',260,45)))
+        members = lambda: [MemberRequirement(n, None, None, None, None, None) for n in ('合成甲','合成乙')]
+        first = EventParty('来源一','https://example.com/1',members(),build_basis='local_trial')
+        second = EventParty('来源二','https://example.com/2',list(reversed(members())),build_basis='local_trial')
+        b.source_pools = {('合成活动','special',1):[first, second]}
+        b.formation = Mock()
+        b.formation.select.return_value = (True,dict(order=['合成甲','合成乙']))
+        b.audit_source_trial = Mock()
+        b.can_search_more = Mock(return_value=False)
+        b.combat = Mock()
+        b.combat.run.return_value = BattleResult('failed', '战斗失败')
+        with patch('pcrscript.news.fetch_event_news',return_value=SimpleNamespace(hatsune=SimpleNamespace(name='合成活动'))), \
+                patch('pcrscript.tasks.portrait_selection.portrait_trial',return_value=None), \
+                patch('pcrscript.tasks.event_battle.next_boss_party',side_effect=[first,second,None]), \
+                patch('pcrscript.tasks.event_battle.boss_cleared',side_effect=lambda s,row: row.text=='剧本模式'), \
+                patch('pcrscript.tasks.event_battle.boss_locked',side_effect=lambda s,row: row.text=='特别战斗+'):
+            b.bosses()
+        b.combat.run.assert_called_once()
+        skipped = [row for row in b.r.report['battles'] if row.get('party') == '来源二']
+        self.assertIn('未重复开战', skipped[0]['unready']['reason'])
+
     def test_source_retries_share_budget_and_exclude_unusable_sources(self):
         b = EventBattles.__new__(EventBattles)
         b.r = SimpleNamespace(options=dict(sources=dict(max_videos=3)), report={}, check_deadline=Mock())

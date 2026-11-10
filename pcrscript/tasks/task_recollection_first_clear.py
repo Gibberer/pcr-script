@@ -257,6 +257,17 @@ class RecollectionFirstClear(RecollectionTask):
             self.ui.output = output
 
     def _battle(self, area, floor, party):
+        roster = sorted(normalized(m.name) for m in party.members)
+        if not self.options['retry_failed_parties'] and any(
+                isinstance(row, dict) and row.get('scope') == dict(area=area, floor=floor)
+                and sorted(map(normalized, row.get('members', []))) == roster
+                for row in self.state.get('portrait_failed', [])):
+            # The China-server cost of a lost attempt is unconfirmed, and the
+            # portrait trial recorded no build that could prove a change.
+            self.report.setdefault('audits', []).append(dict(area=area, floor=floor, party=party.name,
+                source=party.source, ready=False, formation=dict(unready=[])))
+            return dict(outcome='blocked', progressed=False,
+                        reason='同组成员已在该层头像试打失败，失败代价未确认，未重复开战')
         s = self.select_floor(area, floor)
         if s is None or field.clear_status(s) is not False:
             raise RecollectionBlocked('开战前不能证明目标层尚未通关')

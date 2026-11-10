@@ -450,6 +450,10 @@ class EventBattles:
         unlock_attempts = 0
         for difficulty, label in (("scenario", "剧本模式"), ("special", "特别"), ("special_plus", "特别战斗\\+")):
             attempts = defaultdict(int)
+            # Rosters that lost at this boss and mode in this run. Builds do not
+            # change mid-run, so the same members under another source name
+            # would only spend another attempt.
+            lost = set()
             total = 0
             previous = None
             while total < self.r.options.get("max_boss_attempts", 10):
@@ -531,6 +535,13 @@ class EventBattles:
                         self.r.report["pending"].append(f"{difficulty} 模式{mode} 无可用达标队伍；见来源与编队核验报告")
                         self.r.home()
                         break
+                if party and (mode, frozenset(normalized(m.name) for m in party.members)) in lost:
+                    attempts[(mode, party.name)] = party.max_attempts
+                    self.r.report['battles'].append(dict(boss=difficulty, mode=mode, party=party.name,
+                        source=party.source, build_basis=party.build_basis,
+                        unready=dict(reason='同组成员本次已在该首领与模式失败，未重复开战')))
+                    self.r.home()
+                    continue
                 state = normalized(detail.text((40, 65, 930, 440)))
                 if previous == (mode, party.name if party else None, state) and total > 0 and party:
                     attempts[(mode, party.name)] = party.max_attempts
@@ -578,6 +589,8 @@ class EventBattles:
                     **vars(result)})
                 if result.outcome in ("retreated", "failed", "blocked") and party:
                     attempts[(mode, party.name)] = party.max_attempts
+                if result.outcome in ("retreated", "failed") and party:
+                    lost.add((mode, frozenset(normalized(m.name) for m in party.members)))
                 previous = (mode, party.name if party else None, state) if result.outcome == "settled" else None
                 self.r.home()
             else:

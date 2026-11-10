@@ -174,6 +174,28 @@ class EventRecognitionTests(TestCase):
         formation.select_by_portrait.return_value = None
         self.assertIsNone(portrait_trial(formation, party()))
 
+    def test_recollection_portrait_loss_is_not_retried_while_its_cost_is_unconfirmed(self):
+        from pcrscript.tasks.event_strategy import EventParty
+        from pcrscript.tasks.task_recollection_first_clear import RecollectionFirstClear
+        task = object.__new__(RecollectionFirstClear)
+        task.report = {}
+        task.state = dict(portrait_failed=[dict(scope=dict(area='合成领域', floor=3), members=['合成乙', '合成甲'])])
+        task.select_floor = Mock(side_effect=RuntimeError('reached the floor'))
+        party = EventParty('另一来源', 'https://example.com/other',
+                           [MemberRequirement(n, None, None, None, None, None) for n in ('合成甲', '合成乙')])
+        task.options = dict(retry_failed_parties=False)
+        result = task._battle('合成领域', 3, party)
+        self.assertEqual(result['outcome'], 'blocked')
+        self.assertIn('失败代价未确认', result['reason'])
+        self.assertFalse(task.report['audits'][-1]['ready'])
+        task.select_floor.assert_not_called()
+        # Another floor, or an explicit retry option, is not gated.
+        with self.assertRaisesRegex(RuntimeError, 'reached the floor'):
+            task._battle('合成领域', 4, party)
+        task.options = dict(retry_failed_parties=True)
+        with self.assertRaisesRegex(RuntimeError, 'reached the floor'):
+            task._battle('合成领域', 3, party)
+
     def test_portrait_failures_and_audited_failures_both_gate_the_shortcut(self):
         from pcrscript.tasks.task_recollection_first_clear import RecollectionFirstClear
         from pcrscript.tasks.task_collaboration_raid import CollaborationRaid
