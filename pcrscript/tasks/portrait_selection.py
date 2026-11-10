@@ -15,8 +15,11 @@ PORTRAIT_ASSUMPTION = '攻略未声明培养要求；头像确认成员后以实
 def declares_build(party):
     """Any source build field (default empty equipment aside) needs the full audit."""
     from .party_preparation import BUILD_FIELDS
-    if getattr(party, 'declared_build', None):
-        return True
+    declared = getattr(party, 'declared_build', None)
+    if isinstance(declared, dict) and declared:
+        # Account-trial seeds fill member fields with placeholder 1s and keep
+        # only evidenced source values here, keyed per member.
+        return any(bool(values) for values in declared.values())
     return any(getattr(member, key, None) is not None and (key != 'equipment' or getattr(member, key))
                for member in party.members for key in BUILD_FIELDS)
 

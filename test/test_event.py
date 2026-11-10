@@ -162,8 +162,14 @@ class EventRecognitionTests(TestCase):
         self.assertEqual(audit['order'], ['合成乙', '合成甲'])
         self.assertEqual(audit['build_basis'], 'portrait_trial')
         self.assertEqual(audit['assumptions'][0], '来源假设')
+        # Event account-trial seeds: placeholder 1s with an empty per-member map.
+        seed = EventParty('合成-trial', 'https://example.com/s',
+                          [MemberRequirement(n, 1, 1, 1, None, None, True, 1) for n in ('合成甲', '合成乙')],
+                          build_basis='local_trial', declared_build={'合成甲': {}, '合成乙': {}})
+        self.assertIsNotNone(portrait_trial(formation, seed))
         formation.select_by_portrait.reset_mock()
-        for blocked in (party(rank=20), party(declared={'合成甲': {'rank': 20}})):
+        seed.declared_build['合成乙'] = {'rank': 20}
+        for blocked in (party(rank=20), party(declared={'合成甲': {'rank': 20}}), seed):
             self.assertIsNone(portrait_trial(formation, blocked))
         self.assertIsNone(portrait_trial(formation, party(), failed=[['合成乙', '合成甲']]))
         formation.unowned = {'合成乙'}
