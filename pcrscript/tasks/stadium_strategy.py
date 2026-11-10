@@ -104,7 +104,10 @@ def parties_for_round(report, number, *, allow_local_trials=False):
 
 
 class StadiumFormation(RecollectionFormation):
-    """Stadium uses five formation slots and requires known live equipment."""
+    """Stadium uses five formation slots and requires known live equipment.
+
+    A loss costs nothing, so an undeclared build may be picked by portraits
+    and judged by the live stars (see BattleStadium.battle)."""
     # Stadium fights are forced auto from zero TP and sources rarely state
     # skill levels. A verified public avatar proves the outfit; the skill
     # page opens only when it cannot, or when the source declares a level.

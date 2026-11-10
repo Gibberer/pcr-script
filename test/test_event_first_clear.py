@@ -460,6 +460,7 @@ class ScenarioSupportTests(TestCase):
         b.can_search_more = Mock(return_value=False)
         b.combat = Mock()
         with patch('pcrscript.news.fetch_event_news',return_value=SimpleNamespace(hatsune=SimpleNamespace(name='合成活动'))), \
+                patch('pcrscript.tasks.portrait_selection.portrait_trial',return_value=None), \
                 patch('pcrscript.tasks.event_battle.next_boss_party',side_effect=[party,None]), \
                 patch('pcrscript.tasks.event_battle.boss_cleared',side_effect=lambda s,row: row.text=='剧本模式'), \
                 patch('pcrscript.tasks.event_battle.boss_locked',side_effect=lambda s,row: row.text=='特别战斗+'):

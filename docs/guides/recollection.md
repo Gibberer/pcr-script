@@ -67,7 +67,7 @@ Recollection:
 
 可用 `auto_equip_priorities: {armor: magic_defense, accessory: hp}` 显式设置防具优先魔法防御、饰品优先生命值；需要同时开启 `auto_equip`。类别为 `weapon`、`armor`、`accessory`，属性为 `rarity`、`skill`、`physical_attack`、`magic_attack`、`physical_defense`、`magic_defense`、`hp`、`physical_critical`、`magic_critical`、`physical_penetration` 或 `magic_penetration`。省略的类别沿用游戏设置。程序核对选中状态及返回页的属性回显后才预览装备；未知选项或回显冲突取消并停止。这只调整现有装备的分配，不训练装备，也不保证某套优先级能通关。
 
-开启 `allow_local_trials` 时，直接从战斗开始的视频可通过首领全名、等级、生命上限和计时，与程序刚读取的当前层详情对应。必须保留两侧画面证据并取得至少两帧完整五人及固定 SET/AUTO；其他层或冲突范围不会归入当前层。该候选保留账号试打标记，培养与装备仍逐人核验。
+开启 `allow_local_trials` 时，直接从战斗开始的视频可通过首领全名、等级、生命上限和计时，与程序刚读取的当前层详情对应。必须保留两侧画面证据并取得至少两帧完整五人及固定 SET/AUTO；其他层或冲突范围不会归入当前层。该候选保留账号试打标记；来源未声明培养时按头像选入、不读取培养，同组成员在该层失败过后改为逐人核验培养与装备，以便判断之后是否值得重试。
 
 ## 结果与恢复
 

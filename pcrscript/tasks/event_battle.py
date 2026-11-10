@@ -543,15 +543,21 @@ class EventBattles:
                 if difficulty == 'scenario':
                     party, selection = self.scenario_support()
                 elif party:
-                    ready, selection = self.formation.select(party)
+                    from .portrait_selection import portrait_trial
+                    # An undeclared build is not read; the battle judges it.
+                    selection = portrait_trial(self.formation, party)
+                    ready = selection is not None
+                    if not ready:
+                        ready, selection = self.formation.select(party)
                     if not ready:
                         attempts[(mode, party.name)] = party.max_attempts
                         self.r.report["battles"].append({"boss": difficulty, "mode": mode, "party": party.name,
                             "build_basis": party.build_basis, "assumptions": party.assumptions, "unready": selection})
                         self.r.home()
                         continue
-                    if party.build_basis == 'local_trial' and (self.r.options.get('require_source_settings', False)
-                                                               or getattr(party,'declared_build',{})):
+                    if (party.build_basis == 'local_trial' and selection.get('build_basis') != 'portrait_trial'
+                            and (self.r.options.get('require_source_settings', False)
+                                 or getattr(party,'declared_build',{}))):
                         try:
                             self.audit_source_trial(party, selection, label, mode)
                         except EventUIError as error:
