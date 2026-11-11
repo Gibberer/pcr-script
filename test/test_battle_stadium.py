@@ -15,7 +15,7 @@ from pcrscript.constants import SERVER_TIMEZONE as CN
 from pcrscript.game_ui import battle_stadium as field
 from pcrscript.game_ui.guide_vision import GuideText, formation_team
 from pcrscript.tasks.strategy_document import missing_fields
-from pcrscript.game_ui.screen import EventUI
+from pcrscript.game_ui.screen import EventUI, EventUIError
 from pcrscript.tasks import BattleStadium, Event
 from pcrscript.tasks.stadium_strategy import round_scope, source_rejection, parties_for_round, collection_candidate
 from pcrscript.tasks.strategy_video import observed_scope, parse_video_source
@@ -541,6 +541,34 @@ class StadiumRecognitionTests(TestCase):
         self.assertTrue(EventUI.scrollbar(ui, before, field.REWARD_TRACK, 1,
                         content_distance=150, content_roi=(40, 65, 900, 408)))
         ui.driver.swipe.assert_not_called()
+
+    def test_received_row_tolerates_six_nine_fraction_misread_only(self):
+        s = screen(('★获得任务', 480, 42), ('斗技场累计获得9个★吧', 330, 94),
+                   ('已完成', 84, 126), ('6/6', 280, 126),
+                   ('斗技场累计获得12个★吧', 330, 222), ('已完成', 84, 254), ('11/11', 280, 254),
+                   ('取消', 360, 475), ('全部收取', 590, 475))
+        self.assertEqual([r['target'] for r in field.reward_rows(s)], [9])
+        self.assertTrue(field.reward_rows(s)[0]['received'])
+
+    def test_bounce_at_resting_end_is_the_list_end(self):
+        # Live 960x540: the thumb rests at 396 on a track ending at 400, and
+        # a further swipe only bounces back to the same rows.
+        page = reward_page((42, 45, 48), received=True)
+        ui = Mock(width=960, height=540)
+        ui.driver.supports_scrollbar_fallback = True
+        ui.scrollbar_bounds.return_value = (341, 396)
+        ui.capture.return_value = page
+        ticks = iter(range(0, 10**6, 2))
+        fast = patch.multiple('pcrscript.game_ui.screen.time', sleep=Mock(),
+                              monotonic=lambda: next(ticks))
+        with fast:
+            self.assertFalse(EventUI.scrollbar(ui, page, field.REWARD_TRACK, 1, content_distance=150,
+                                               content_roi=(40, 65, 900, 408)))
+        # Far from the end, an unchanged list still stops as unconfirmed.
+        ui.scrollbar_bounds.return_value = (200, 255)
+        with fast, self.assertRaises(EventUIError):
+            EventUI.scrollbar(ui, page, field.REWARD_TRACK, 1, content_distance=150,
+                              content_roi=(40, 65, 900, 408))
 
     def test_disabled_reward_is_not_received_and_partial_last_row_is_ignored(self):
         rows = field.reward_rows(reward_page())

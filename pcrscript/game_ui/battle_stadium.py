@@ -424,8 +424,12 @@ def reward_rows(s):
         target = int(re.search(r'\d+', item.text)[0])
         _, y = item.center
         state = s.find('收取|已收取|领取完毕', (765, y+25, 905, min(408, y+90)), exact=True)
+        # The fraction confirms the row's own 已完成 label. Small digits read
+        # 9 as 6 here (live "累计获得9个" with "6/6"), so compare 6/9-folded.
+        fold = lambda text: normalized(text).translate(str.maketrans('9', '6'))
+        fraction = s.find(r'\d+/\d+', (235, y+10, 305, min(408, y+70)), exact=True)
         completed = (s.find('已完成', (40, y+10, 160, min(408, y+70)), exact=True)
-                     and s.find(f'{target}/{target}', (235, y+10, 305, min(408, y+70)), exact=True))
+                     and fraction and fold(fraction.text) == fold(f'{target}/{target}'))
         if state or completed:
             received = bool(completed) or normalized(state.text) in ('已收取', '领取完毕')
             result.append(dict(target=target, received=received,

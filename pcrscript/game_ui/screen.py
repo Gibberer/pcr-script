@@ -372,8 +372,15 @@ class EventUI:
             # A newly opened detail can render before its scroll view accepts
             # input. Retry once only when both position and content stayed put.
             latest = self.capture()
-            if (self.scrollbar_bounds(latest, roi) == bounds
-                    and normalized(latest.text(body_roi)) == before_text):
+            settled = self.scrollbar_bounds(latest, roi)
+            unchanged = normalized(latest.text(body_roi)) == before_text
+            # A resting thumb can stop a few pixels short of the track end.
+            # Two swipes that only bounced back from there prove the end.
+            if (unchanged and settled is not None and abs(settled[0]-bounds[0]) <= 3
+                    and abs(settled[1]-bounds[1]) <= 3
+                    and (direction > 0 and bounds[1] >= y2-6 or direction < 0 and bounds[0] <= y1+6)):
+                return False
+            if settled == bounds and unchanged:
                 self.swipe(start, end, duration=500)
                 if changed(3):
                     return True
