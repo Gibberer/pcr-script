@@ -126,6 +126,99 @@ class EventRecognitionTests(TestCase):
         s.image[414:465, 740:947] = cv.imread(str(FIXTURES/"missions_crop.png"))
         self.assertFalse(s.blue_button(s.items[0]))
 
+    def test_identity_recheck_uses_slot_portraits_before_detail_pages(self):
+        formation = EventFormation(Mock())
+        names = ['合成甲', '合成乙']
+        with patch.object(formation, 'portrait_order', return_value=list(reversed(names))) as order, \
+             patch.object(formation, 'inspect') as inspect:
+            current = formation.inspect_current(full=False, expected_names=names)
+        self.assertEqual([c.name for c in current], list(reversed(names)))
+        self.assertTrue(all(c.identity_verified for c in current))
+        inspect.assert_not_called()
+        # A restored roster may not be settled from this selection's picks.
+        self.assertFalse(order.call_args.kwargs['use_picks'])
+        # An unclear slot falls back to reading each occupied detail page.
+        with patch.object(formation, 'portrait_order', return_value=None), \
+             patch.object(formation, 'occupied_slots', return_value=formation.slots[:2]), \
+             patch.object(formation, 'inspect', side_effect=[CharacterStatus(n, identity_verified=True) for n in names]) as inspect:
+            current = formation.inspect_current(full=False, expected_names=names)
+        self.assertEqual(inspect.call_count, 2)
+        # Full build audits never take the portrait shortcut.
+        with patch.object(formation, 'portrait_order') as order, \
+             patch.object(formation, 'occupied_slots', return_value=[]):
+            formation.inspect_current(full=True, expected_names=names)
+        order.assert_not_called()
+
+    def test_portrait_trial_only_for_undeclared_found_unfailed_rosters(self):
+        from pcrscript.tasks.event_strategy import EventParty
+        from pcrscript.tasks.portrait_selection import portrait_trial
+        def party(declared=None, rank=None):
+            members = [MemberRequirement(n, None, rank, None, None, None, skill_level=None)
+                       for n in ('合成甲', '合成乙')]
+            return EventParty('合成', 'https://example.com/s', members, build_basis='local_trial',
+                              assumptions=['来源假设'], declared_build=declared or {})
+        formation = SimpleNamespace(unowned=set(), select_by_portrait=Mock(return_value=['合成乙', '合成甲']))
+        audit = portrait_trial(formation, party())
+        self.assertEqual(audit['order'], ['合成乙', '合成甲'])
+        self.assertEqual(audit['build_basis'], 'portrait_trial')
+        self.assertEqual(audit['assumptions'][0], '来源假设')
+        # Event account-trial seeds: placeholder 1s with an empty per-member map.
+        seed = EventParty('合成-trial', 'https://example.com/s',
+                          [MemberRequirement(n, 1, 1, 1, None, None, True, 1) for n in ('合成甲', '合成乙')],
+                          build_basis='local_trial', declared_build={'合成甲': {}, '合成乙': {}})
+        self.assertIsNotNone(portrait_trial(formation, seed))
+        formation.select_by_portrait.reset_mock()
+        seed.declared_build['合成乙'] = {'rank': 20}
+        for blocked in (party(rank=20), party(declared={'合成甲': {'rank': 20}}), seed):
+            self.assertIsNone(portrait_trial(formation, blocked))
+        self.assertIsNone(portrait_trial(formation, party(), failed=[['合成乙', '合成甲']]))
+        formation.unowned = {'合成乙'}
+        self.assertIsNone(portrait_trial(formation, party()))
+        formation.select_by_portrait.assert_not_called()
+        # An unclear portrait leaves the full audit in charge.
+        formation.unowned = set()
+        formation.select_by_portrait.return_value = None
+        self.assertIsNone(portrait_trial(formation, party()))
+
+    def test_recollection_portrait_loss_is_not_retried_while_its_cost_is_unconfirmed(self):
+        from pcrscript.tasks.event_strategy import EventParty
+        from pcrscript.tasks.task_recollection_first_clear import RecollectionFirstClear
+        task = object.__new__(RecollectionFirstClear)
+        task.report = {}
+        task.state = dict(portrait_failed=[dict(scope=dict(area='合成领域', floor=3), members=['合成乙', '合成甲'])])
+        task.select_floor = Mock(side_effect=RuntimeError('reached the floor'))
+        party = EventParty('另一来源', 'https://example.com/other',
+                           [MemberRequirement(n, None, None, None, None, None) for n in ('合成甲', '合成乙')])
+        task.options = dict(retry_failed_parties=False)
+        result = task._battle('合成领域', 3, party)
+        self.assertEqual(result['outcome'], 'blocked')
+        self.assertIn('失败代价未确认', result['reason'])
+        self.assertFalse(task.report['audits'][-1]['ready'])
+        task.select_floor.assert_not_called()
+        # Another floor, or an explicit retry option, is not gated.
+        with self.assertRaisesRegex(RuntimeError, 'reached the floor'):
+            task._battle('合成领域', 4, party)
+        task.options = dict(retry_failed_parties=True)
+        with self.assertRaisesRegex(RuntimeError, 'reached the floor'):
+            task._battle('合成领域', 3, party)
+
+    def test_portrait_failures_and_audited_failures_both_gate_the_shortcut(self):
+        from pcrscript.tasks.task_recollection_first_clear import RecollectionFirstClear
+        from pcrscript.tasks.task_collaboration_raid import CollaborationRaid
+        context = lambda scope: dict(target=dict(scope=scope), members=[dict(name='合成甲'), dict(name='合成乙')])
+        task = object.__new__(RecollectionFirstClear)
+        task.state = dict(failed_trials=[dict(context=context(dict(area='合成领域', floor=3)))],
+                          portrait_failed=[dict(scope=dict(area='合成领域', floor=3), members=['合成丙']),
+                                           dict(scope=dict(area='合成领域', floor=4), members=['合成丁'])])
+        self.assertEqual(task.failed_rosters('合成领域', 3), [['合成甲', '合成乙'], ['合成丙']])
+        from pcrscript.tasks import task_collaboration_raid as raid
+        raid_task = object.__new__(CollaborationRaid)
+        scope = dict(area=raid.TITLE, floor=raid.DIFFICULTIES.index('困难')+1)
+        raid_task.state = dict(failed_trials=[dict(context=context(scope))],
+                               portrait_failed=[dict(scope=scope, members=['合成丙'])])
+        self.assertEqual(raid_task.failed_rosters('困难'), [['合成甲', '合成乙'], ['合成丙']])
+        self.assertEqual(raid_task.failed_rosters('普通'), [])
+
     def test_unknown_number_is_not_zero(self):
         self.assertIsNone(frame().number((800, 420, 950, 470)))
 
@@ -142,6 +235,21 @@ class EventRecognitionTests(TestCase):
             ui._ocr = Mock(side_effect=recognize)
             self.assertEqual(ui.number(frame(), (820, 365, 930, 410)), value)
             self.assertFalse(ui._ocr.call_args.kwargs['use_cls'])
+
+    def test_full_frame_six_nine_is_rechecked_upright(self):
+        ui = EventUI.__new__(EventUI)
+        roi = (230, 372, 265, 396)
+        # Full frame read the upright 9 as a classified 6.
+        ui._ocr = Mock(return_value=SimpleNamespace(txts=["9"], scores=[.99]))
+        self.assertEqual(ui.number(frame(("6", 247, 384)), roi), 9)
+        self.assertFalse(ui._ocr.call_args.kwargs['use_cls'])
+        # A crop that truncates a wide balance is not a 6/9 correction.
+        ui._ocr = Mock(return_value=SimpleNamespace(txts=["3668"], scores=[.99]))
+        self.assertEqual(ui.number(frame(("198668", 455, 395)), (400, 370, 510, 415)), 198668)
+        # Digits without 6/9 keep the full-frame read and skip the crop.
+        ui._ocr = Mock()
+        self.assertEqual(ui.number(frame(("3", 247, 384)), roi), 3)
+        ui._ocr.assert_not_called()
 
     def test_low_confidence_digit_detection_retries_recognition_without_lowering_threshold(self):
         ui = EventUI.__new__(EventUI)

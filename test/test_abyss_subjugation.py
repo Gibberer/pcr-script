@@ -1757,8 +1757,8 @@ class SubjugationTests(TestCase):
              patch.object(formation, 'prepare_search', return_value=True), \
              patch.object(formation, 'search_rectangles', side_effect=[[(0, 0, 96, 96), card], [card], [card]]), \
              patch.object(formation, 'select_card') as select, \
-             patch('pcrscript.tasks.strategy_formation.search_character', return_value=Mock(image=np.zeros((540, 960, 3), np.uint8), text=Mock(return_value=''))), \
-             patch('pcrscript.tasks.strategy_formation.face_crop', return_value=None):
+             patch('pcrscript.tasks.portrait_selection.search_character', return_value=Mock(image=np.zeros((540, 960, 3), np.uint8), text=Mock(return_value=''))), \
+             patch('pcrscript.tasks.portrait_selection.face_crop', return_value=None):
             self.assertIsNone(formation.select_by_portrait(names))
         self.assertEqual(select.call_count, 2)
         formation.inspect.assert_called_once()
@@ -1841,7 +1841,7 @@ class SubjugationTests(TestCase):
                 formation.avatars = Mock(query=Mock(return_value=[identity]), expected_identity=Mock(return_value=None),
                                          best=Mock(return_value=('合成(乙)', .94)))
                 formation.inspect = Mock(return_value=CharacterStatus('合成(乙)', identity_verified=True))
-                with patch.object(formation, 'portrait_order', return_value=None),                      patch.object(formation, 'prepare_search', return_value=True),                      patch.object(formation, 'search_rectangles', return_value=[(0, 0, 96, 96)]),                      patch('pcrscript.tasks.strategy_formation.search_character', return_value=Mock(image=np.zeros((540, 960, 3), np.uint8), text=Mock(return_value='合成'))),                      patch('pcrscript.tasks.strategy_formation.face_crop', return_value=None):
+                with patch.object(formation, 'portrait_order', return_value=None),                      patch.object(formation, 'prepare_search', return_value=True),                      patch.object(formation, 'search_rectangles', return_value=[(0, 0, 96, 96)]),                      patch('pcrscript.tasks.portrait_selection.search_character', return_value=Mock(image=np.zeros((540, 960, 3), np.uint8), text=Mock(return_value='合成'))),                      patch('pcrscript.tasks.portrait_selection.face_crop', return_value=None):
                     self.assertIsNone(formation.select_by_portrait(names))
                 self.assertEqual(formation.inspect.called, inspected)
                 self.assertIn('合成(甲)', formation.unowned)
@@ -1856,7 +1856,7 @@ class SubjugationTests(TestCase):
         formation.avatars.expected_identity.return_value = None
         formation.avatars.assign_expected.return_value = None
         with patch.object(formation, 'occupied_slots', return_value=formation.slots), \
-             patch('pcrscript.tasks.strategy_formation.face_crop', return_value=None):
+             patch('pcrscript.tasks.portrait_selection.face_crop', return_value=None):
             self.assertIsNone(formation.portrait_order(wanted))
             formation.portrait_selected = set(wanted)
             self.assertEqual(formation.portrait_order(wanted), wanted)
@@ -1875,7 +1875,7 @@ class SubjugationTests(TestCase):
         formation.avatars.query.return_value = wanted[:4]+[None]
         formation.avatars.expected_identity.side_effect = lambda crop, names: next(iter(names), None)
         formation.avatars.assign_expected.return_value = None
-        with patch.object(formation, 'occupied_slots', return_value=formation.slots),              patch('pcrscript.tasks.strategy_formation.face_crop', return_value=None):
+        with patch.object(formation, 'occupied_slots', return_value=formation.slots),              patch('pcrscript.tasks.portrait_selection.face_crop', return_value=None):
             # A saved formation's unread slot is not filled from a near-tie.
             self.assertIsNone(formation.portrait_order(wanted))
             formation.avatars.expected_identity.assert_not_called()

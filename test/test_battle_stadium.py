@@ -15,7 +15,7 @@ from pcrscript.constants import SERVER_TIMEZONE as CN
 from pcrscript.game_ui import battle_stadium as field
 from pcrscript.game_ui.guide_vision import GuideText, formation_team
 from pcrscript.tasks.strategy_document import missing_fields
-from pcrscript.game_ui.screen import EventUI
+from pcrscript.game_ui.screen import EventUI, EventUIError
 from pcrscript.tasks import BattleStadium, Event
 from pcrscript.tasks.stadium_strategy import round_scope, source_rejection, parties_for_round, collection_candidate
 from pcrscript.tasks.strategy_video import observed_scope, parse_video_source
@@ -542,6 +542,34 @@ class StadiumRecognitionTests(TestCase):
                         content_distance=150, content_roi=(40, 65, 900, 408)))
         ui.driver.swipe.assert_not_called()
 
+    def test_received_row_tolerates_six_nine_fraction_misread_only(self):
+        s = screen(('★获得任务', 480, 42), ('斗技场累计获得9个★吧', 330, 94),
+                   ('已完成', 84, 126), ('6/6', 280, 126),
+                   ('斗技场累计获得12个★吧', 330, 222), ('已完成', 84, 254), ('11/11', 280, 254),
+                   ('取消', 360, 475), ('全部收取', 590, 475))
+        self.assertEqual([r['target'] for r in field.reward_rows(s)], [9])
+        self.assertTrue(field.reward_rows(s)[0]['received'])
+
+    def test_bounce_at_resting_end_is_the_list_end(self):
+        # Live 960x540: the thumb rests at 396 on a track ending at 400, and
+        # a further swipe only bounces back to the same rows.
+        page = reward_page((42, 45, 48), received=True)
+        ui = Mock(width=960, height=540)
+        ui.driver.supports_scrollbar_fallback = True
+        ui.scrollbar_bounds.return_value = (341, 396)
+        ui.capture.return_value = page
+        ticks = iter(range(0, 10**6, 2))
+        fast = patch.multiple('pcrscript.game_ui.screen.time', sleep=Mock(),
+                              monotonic=lambda: next(ticks))
+        with fast:
+            self.assertFalse(EventUI.scrollbar(ui, page, field.REWARD_TRACK, 1, content_distance=150,
+                                               content_roi=(40, 65, 900, 408)))
+        # Far from the end, an unchanged list still stops as unconfirmed.
+        ui.scrollbar_bounds.return_value = (200, 255)
+        with fast, self.assertRaises(EventUIError):
+            EventUI.scrollbar(ui, page, field.REWARD_TRACK, 1, content_distance=150,
+                              content_roi=(40, 65, 900, 408))
+
     def test_disabled_reward_is_not_received_and_partial_last_row_is_ignored(self):
         rows = field.reward_rows(reward_page())
         self.assertEqual(len(rows), 3)
@@ -733,6 +761,30 @@ class StadiumRecognitionTests(TestCase):
 
 
 class StadiumRosterTests(TestCase):
+    def test_search_card_crop_matches_slot_crop_of_same_card(self):
+        """Live 960x540 stadium search cards have their frame at y=243 and the
+        slots at y=406: both crops must frame a face the same way."""
+        import cv2 as cv
+        from tempfile import TemporaryDirectory
+        from pcrscript.game_ui.avatars import AvatarIndex, face_crop
+        from pcrscript.tasks.stadium_strategy import StadiumFormation
+        rng = np.random.default_rng(7)
+        card = cv.resize(rng.integers(0, 255, (12, 12, 3), dtype=np.uint8), (96, 96),
+                         interpolation=cv.INTER_LINEAR)
+        card[:3] = card[:, :3] = (60, 60, 230)  # saturated frame
+        page = np.full((540, 960, 3), 235, np.uint8)
+        page[243:339, 62:158] = card
+        page[406:502, StadiumFormation.slots[0][0]-48:StadiumFormation.slots[0][0]+48] = card
+        formation = StadiumFormation.__new__(StadiumFormation)
+        rects = formation.search_rectangles(page)
+        self.assertEqual(rects[0][:2], (60, StadiumFormation.search_top))
+        with TemporaryDirectory() as directory:
+            index = AvatarIndex(directory)
+            x = StadiumFormation.slots[0][0]
+            index.add('合成角色', face_crop(page, (x-48, StadiumFormation.slot_top, 96, 96)), persist=False)
+            index.add('干扰', rng.integers(0, 255, (50, 64, 3), dtype=np.uint8), persist=False)
+            self.assertEqual(index.expected_identity(face_crop(page, rects[0]), ['合成角色']), '合成角色')
+
     def test_scan_excludes_enemy_strip_and_preserves_task_readiness_policy(self):
         from pcrscript.tasks.stadium_strategy import StadiumFormation
         roster = StadiumFormation.__new__(StadiumFormation)
@@ -935,6 +987,40 @@ class StadiumReplayTests(TaskReplayMixin, TestCase):
         self.assertEqual(self.task.collect.call_count,2)
         self.assertIn('回合2尚未满星',result['pending'][0])
 
+    def test_rewards_are_claimed_on_entry_and_full_stars_not_after_every_win(self):
+        boards = [home(stars=3*i, unlocked=3, total=3, round_stars=tuple([3]*i+[0]*(3-i))) for i in range(4)]
+        party = SimpleNamespace(source='https://example.com/verified')
+        self.frames([boards[0]])
+        self.task.collect = Mock(return_value=True)
+        self.task.enter = Mock(side_effect=lambda: boards[self.task.report['battles']])
+        rounds = []
+        for number in (1, 2, 3):
+            rounds += [(boards[number-1], field.Round(number, 0, (195, 340))),
+                       (boards[number], field.Round(number, 3, (195, 340)))]
+        self.task.find_round = Mock(side_effect=rounds)
+        self.task.acquire = Mock(return_value=[party])
+        def battle(row, candidate):
+            self.task.report['battles'] += 1
+            return True
+        self.task.battle = Mock(side_effect=battle)
+        result = self.task.run(self.event)
+        self.assertEqual(result['status'], 'complete')
+        self.assertEqual(result['battles'], 3)
+        self.assertEqual(self.task.collect.call_count, 2)
+
+    def test_avatar_index_loads_once_so_verified_faces_survive_rounds(self):
+        party, _ = self.synthetic_party_boundary()
+        self.task.formation.select.return_value = (False, dict(unready=[]))
+        self.task.select_party = Mock(return_value=(False, dict(unready=[])))
+        self.task.enter = Mock()
+        self.task.open_detail = Mock(return_value=detail())
+        self.task.click = Mock()
+        self.task.wait = Mock(return_value=formation())
+        from pcrscript.game_ui import avatar_assets
+        for _ in range(2):
+            self.assertFalse(self.task.battle(field.Round(1, 0, (195, 340)), party))
+        self.assertEqual(avatar_assets.ensure_avatar_index.call_count, 1)
+
     def test_full_stars_and_received_rewards_skip_battles_and_cache_still_needs_live_proof(self):
         h = home(stars=9, unlocked=3, total=3, round_stars=(3, 3, 3))
         self.frames([h, h, h, reward_page(received=True), h, h])
@@ -1085,6 +1171,8 @@ class StadiumReplayTests(TaskReplayMixin, TestCase):
                     skill_level=100, unique=False, unique2=False, equipment=None)
                     for name in names}
         self.task.formation = Mock()
+        # The full audit path; portrait trials have their own tests.
+        self.task.portrait_eligible = Mock(return_value=False)
         self.task.formation.select.return_value = (True, dict(order=names, observed=observed))
         self.task.formation.inspect_current.return_value = [SimpleNamespace(name=n, identity_verified=True) for n in names]
         gear = dict(order=names, slots=[[False]*3 for _ in names], unknown=0,
@@ -1111,6 +1199,59 @@ class StadiumReplayTests(TaskReplayMixin, TestCase):
         self.assertEqual(self.clicks().count('战斗开始'), 1)
         self.assertNotIn('pending_battle', self.task.state)
         self.assertEqual(self.task.report['history'][0]['stars_after'], 3)
+
+    def test_undeclared_build_is_picked_by_portraits_without_detail_pages(self):
+        from pcrscript.tasks.event_strategy import EventParty, MemberRequirement
+        _, _ = self.synthetic_party_boundary()
+        names = ['合成角色0', '合成角色1']
+        party = EventParty('合成', 'https://example.com/synthetic',
+                           [MemberRequirement(n, None, None, None, None, None, skill_level=None) for n in names],
+                           build_basis='local_trial')
+        del self.task.portrait_eligible
+        self.task.formation.unowned = set()
+        self.task.formation.select_by_portrait.return_value = names
+        self.task.formation.portrait_order.return_value = names
+        won = home(stars=3, unlocked=2, round_stars=(3, 0, 0))
+        self.frames([home(), detail(), formation(), formation(), battle_result(), won, won])
+        self.assertTrue(self.task.battle(field.Round(1, 0, (195, 340)), party))
+        self.task.formation.select.assert_not_called()
+        self.task.formation.inspect_current.assert_not_called()
+        self.task.formation.portrait_order.assert_called_once_with(names)
+        self.assertEqual(self.task.report['audits'][0]['details']['build_basis'], 'portrait_trial')
+        self.assertEqual([m['name'] for m in self.task.report['history'][0]['context']['build']], names)
+
+    def test_portrait_trial_only_for_undeclared_unfailed_found_rosters(self):
+        from pcrscript.tasks.event_strategy import EventParty, MemberRequirement
+        def party(**build):
+            return EventParty('合成', 'https://example.com/s', [
+                MemberRequirement(n, None, None, None, None, None, skill_level=None, **build)
+                for n in ('合成甲', '合成乙')])
+        self.task.formation = SimpleNamespace(unowned=set())
+        row = field.Round(1, 0, (195, 340))
+        self.assertTrue(self.task.portrait_eligible(row, party()))
+        self.assertFalse(self.task.portrait_eligible(row, party(unique_level=1)))
+        self.task.formation.unowned = {'合成乙'}
+        self.assertFalse(self.task.portrait_eligible(row, party()))
+        self.task.formation.unowned = set()
+        self.task.state['failed'] = [dict(round=1, build=[dict(name='合成乙'), dict(name='合成甲')])]
+        self.assertFalse(self.task.portrait_eligible(row, party()))
+        self.assertTrue(self.task.portrait_eligible(field.Round(2, 0, (477, 340)), party()))
+
+    def test_portrait_order_reads_only_occupied_slots_of_a_short_roster(self):
+        from pcrscript.tasks.stadium_strategy import StadiumFormation
+        formation = StadiumFormation(Mock())
+        formation.ui.capture.return_value = Mock(image=np.zeros((540, 960, 3), np.uint8))
+        formation.avatars = Mock()
+        wanted = ['合成甲', '合成乙']
+        formation.avatars.query.return_value = wanted
+        with patch.object(formation, 'occupied_slots', return_value=formation.slots[:2]):
+            self.assertEqual(formation.portrait_order(wanted), wanted)
+            self.assertEqual(len(formation.avatars.query.call_args.args[0]), 2)
+            # A third member or an extra filled slot is not this roster.
+            self.assertIsNone(formation.portrait_order(wanted+['合成丙']))
+        formation.avatars.query.return_value = ['合成甲', '合成甲']
+        with patch.object(formation, 'occupied_slots', return_value=formation.slots[:2]):
+            self.assertIsNone(formation.portrait_order(wanted))
 
     def test_unknown_special_equipment_never_reaches_start(self):
         party, gear = self.synthetic_party_boundary()

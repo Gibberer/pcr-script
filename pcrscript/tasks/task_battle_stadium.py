@@ -292,6 +292,19 @@ class BattleStadium(TimeLimitTask):
         self.ui.click(current.position)
         return self.wait(lambda s: field.detail(s) and field.round_number(s, self.ui) == row.number, '目标回合详情')
 
+    def portrait_eligible(self, row, party):
+        """Stadium losses cost nothing, so an undeclared build is judged by
+        live stars. Declared requirements, members this run could not find,
+        and rosters that already lost this round take the full audit."""
+        from .portrait_selection import declares_build
+        names = frozenset(normalized(m.name) for m in party.members)
+        if declares_build(party) or names & set(getattr(self.formation, 'unowned', ())):
+            return False
+        return not any(isinstance(old, dict) and old.get('round') == row.number
+                       and frozenset(normalized(m['name']) for m in old.get('build', [])
+                                     if isinstance(m, dict) and isinstance(m.get('name'), str)) == names
+                       for old in self.state.get('failed', []))
+
     def select_party(self, row, party):
         ready, audit = self.formation.select(party)
         if ready or any('未在搜索结果中确认该版本的角色' in reason
@@ -395,10 +408,23 @@ class BattleStadium(TimeLimitTask):
         self.report.setdefault('goals', {})[str(row.number)] = goals
         self.click(s, '挑战', (740, 410, 925, 505))
         self.wait(field.formation, '斗技场队伍编组')
-        from ..game_ui.avatar_assets import ensure_avatar_index
-        self.formation.avatars, _ = ensure_avatar_index(self.options['sources'].get('avatars'), check=self.check)
-        self.report_progress(f'斗技场 · 核验回合{row.number}出战成员及装备')
-        ready, audit = self.select_party(row, party)
+        if not getattr(self, '_avatars_loaded', False):
+            # Load once per run. Faces proven by both ordinary skills during an
+            # earlier round stay in memory, so the same card is not sent back
+            # to the skill page every round; unknown faces still are.
+            from ..game_ui.avatar_assets import ensure_avatar_index
+            self.formation.avatars, _ = ensure_avatar_index(self.options['sources'].get('avatars'), check=self.check)
+            self._avatars_loaded = True
+        audit = None
+        if self.portrait_eligible(row, party):
+            from .portrait_selection import portrait_trial
+            self.report_progress(f'斗技场 · 按头像选入回合{row.number}队伍')
+            audit = portrait_trial(self.formation, party)
+            ready = audit is not None
+        if audit is None:
+            self.report_progress(f'斗技场 · 核验回合{row.number}出战成员及装备')
+            ready, audit = self.select_party(row, party)
+        portrait = audit.get('build_basis') == 'portrait_trial'
         self.report['audits'].append(dict(round=row.number, source=party.source, ready=ready, details=audit))
         self.save()
         if not ready:
@@ -417,7 +443,10 @@ class BattleStadium(TimeLimitTask):
             self.save()
             if special.get('unknown'):
                 raise EventUIError('特别装备分配后的状态未知，未开战')
-        build = sorted((build_key(a) for a in audit.get('observed', {}).values()), key=lambda a: str(a['name']))
+        # A portrait trial read no build: record names only. A later attempt
+        # with the same members takes the full audit (portrait_eligible).
+        members = [dict(name=n) for n in audit['order']] if portrait else audit.get('observed', {}).values()
+        build = sorted((build_key(a) for a in members), key=lambda a: str(a['name']))
         context = dict(round=row.number, build=build, special=special)
         signature = sha256(json.dumps([row.number, build], sort_keys=True).encode()).hexdigest()
         from ..game_ui.special_equipment import same_loadout
@@ -429,8 +458,15 @@ class BattleStadium(TimeLimitTask):
             self.enter()
             return False
         s = self.capture()
-        current = self.formation.inspect_current(full=False, expected_names=audit['order'], verify_skills=False)
-        if not field.formation(s) or [normalized(a.name) for a in current] != audit['order'] or not all(a.identity_verified for a in current):
+        if portrait:
+            # The same slot portraits as the selection, without detail pages.
+            current = self.formation.portrait_order(audit['order'])
+            consistent = current == audit['order']
+        else:
+            current = self.formation.inspect_current(full=False, expected_names=audit['order'], verify_skills=False)
+            consistent = ([normalized(a.name) for a in current] == audit['order']
+                          and all(a.identity_verified for a in current))
+        if not field.formation(s) or not consistent:
             raise EventUIError('开战前成员或页面不一致')
         button = s.find('战斗开始', (770, 410, 930, 500), exact=True)
         if not s.blue_button(button):
@@ -526,8 +562,12 @@ class BattleStadium(TimeLimitTask):
             collected_stars = None
             while self.report['battles'] < self.options['max_battles']:
                 p = self.progress(self.enter())
-                # New claims require new stars; skip rescanning an unchanged list.
-                if p['stars'] != collected_stars:
+                # Rewards never gate a battle. Claim once on entry and again at
+                # full stars or when no round remains, instead of rescanning
+                # the whole list after every win; a timeout leaves new claims
+                # for the next run's entry pass.
+                if collected_stars is None or (p['stars'] != collected_stars
+                                               and p['stars'] == p['maximum_stars']):
                     collected = self.collect()
                     collected_stars = self.report['progress']['stars']
                     p = self.report['progress']
@@ -540,6 +580,8 @@ class BattleStadium(TimeLimitTask):
                     raise EventUIError('挑战期已结束，星级奖励尚未全部达成')
                 _, row = self.find_round(exclude_rounds=blocked_rounds)
                 if row is None:
+                    if p['stars'] != collected_stars:
+                        self.collect()
                     if blocked_rounds:
                         raise EventUIError('已解锁回合没有可核验的新方案，保留未满星回合：'
                                            + ','.join(map(str,sorted(blocked_rounds))))

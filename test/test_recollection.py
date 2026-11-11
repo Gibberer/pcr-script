@@ -1292,6 +1292,12 @@ class RecollectionTests(TestCase):
 
 
 class RecognitionAndStrategyTests(TestCase):
+    def setUp(self):
+        # These cover the full audit path; portrait trials have their own tests.
+        portrait=patch('pcrscript.tasks.portrait_selection.portrait_trial',return_value=None)
+        portrait.start()
+        self.addCleanup(portrait.stop)
+
     def test_native_sweep_summary_requires_all_confident_fields(self):
         summary=screen(('扫荡结果',480,42),('扫荡次数1次',480,91),
                        ('1只击破！',480,136),('确认',480,480))

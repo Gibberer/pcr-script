@@ -450,6 +450,10 @@ class EventBattles:
         unlock_attempts = 0
         for difficulty, label in (("scenario", "剧本模式"), ("special", "特别"), ("special_plus", "特别战斗\\+")):
             attempts = defaultdict(int)
+            # Rosters that lost at this boss and mode in this run. Builds do not
+            # change mid-run, so the same members under another source name
+            # would only spend another attempt.
+            lost = set()
             total = 0
             previous = None
             while total < self.r.options.get("max_boss_attempts", 10):
@@ -531,6 +535,13 @@ class EventBattles:
                         self.r.report["pending"].append(f"{difficulty} 模式{mode} 无可用达标队伍；见来源与编队核验报告")
                         self.r.home()
                         break
+                if party and (mode, frozenset(normalized(m.name) for m in party.members)) in lost:
+                    attempts[(mode, party.name)] = party.max_attempts
+                    self.r.report['battles'].append(dict(boss=difficulty, mode=mode, party=party.name,
+                        source=party.source, build_basis=party.build_basis,
+                        unready=dict(reason='同组成员本次已在该首领与模式失败，未重复开战')))
+                    self.r.home()
+                    continue
                 state = normalized(detail.text((40, 65, 930, 440)))
                 if previous == (mode, party.name if party else None, state) and total > 0 and party:
                     attempts[(mode, party.name)] = party.max_attempts
@@ -543,15 +554,21 @@ class EventBattles:
                 if difficulty == 'scenario':
                     party, selection = self.scenario_support()
                 elif party:
-                    ready, selection = self.formation.select(party)
+                    from .portrait_selection import portrait_trial
+                    # An undeclared build is not read; the battle judges it.
+                    selection = portrait_trial(self.formation, party)
+                    ready = selection is not None
+                    if not ready:
+                        ready, selection = self.formation.select(party)
                     if not ready:
                         attempts[(mode, party.name)] = party.max_attempts
                         self.r.report["battles"].append({"boss": difficulty, "mode": mode, "party": party.name,
                             "build_basis": party.build_basis, "assumptions": party.assumptions, "unready": selection})
                         self.r.home()
                         continue
-                    if party.build_basis == 'local_trial' and (self.r.options.get('require_source_settings', False)
-                                                               or getattr(party,'declared_build',{})):
+                    if (party.build_basis == 'local_trial' and selection.get('build_basis') != 'portrait_trial'
+                            and (self.r.options.get('require_source_settings', False)
+                                 or getattr(party,'declared_build',{}))):
                         try:
                             self.audit_source_trial(party, selection, label, mode)
                         except EventUIError as error:
@@ -572,6 +589,8 @@ class EventBattles:
                     **vars(result)})
                 if result.outcome in ("retreated", "failed", "blocked") and party:
                     attempts[(mode, party.name)] = party.max_attempts
+                if result.outcome in ("retreated", "failed") and party:
+                    lost.add((mode, frozenset(normalized(m.name) for m in party.members)))
                 previous = (mode, party.name if party else None, state) if result.outcome == "settled" else None
                 self.r.home()
             else:

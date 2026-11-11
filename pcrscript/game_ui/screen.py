@@ -36,6 +36,12 @@ def normalized(text):
     return re.sub(r"\s+", "", unicodedata.normalize("NFKC", text)).replace("−", "-")
 
 
+def _rotated_digits(seen, upright):
+    """True when two equal-length readings differ only by 6/9 swaps."""
+    return len(seen) == len(upright) and all(
+        a == b or {a, b} == {'6', '9'} for a, b in zip(seen, upright))
+
+
 @dataclass
 class TextBox:
     text: str
@@ -235,10 +241,20 @@ class EventUI:
 
     def number(self, screen, roi):
         value = screen.number(roi)
-        if value is not None:
-            return value
-        # Full-frame detection sometimes omits an isolated 0. Retry only the
-        # known numeric field at higher resolution, never treat missing as zero.
+        if value is None:
+            # Full-frame detection sometimes omits an isolated 0. Retry only the
+            # known numeric field at higher resolution, never treat missing as zero.
+            return self._number_patch(screen, roi)
+        if set(str(value)) & {'6', '9'}:
+            # Full-frame classification can confidently rotate a small 9 into 6
+            # (and back). Take the upright-only read only as a 6/9 correction:
+            # a tight crop may truncate a wide number into a different value.
+            upright = self._number_patch(screen, roi)
+            if upright is not None and _rotated_digits(str(value), str(upright)):
+                return upright
+        return value
+
+    def _number_patch(self, screen, roi):
         x1, y1, x2, y2 = roi
         # A thin "1" can disappear at 4x and be read reliably at 3x. Require
         # high confidence for either scale; an uncertain field must stay unknown.
@@ -356,8 +372,15 @@ class EventUI:
             # A newly opened detail can render before its scroll view accepts
             # input. Retry once only when both position and content stayed put.
             latest = self.capture()
-            if (self.scrollbar_bounds(latest, roi) == bounds
-                    and normalized(latest.text(body_roi)) == before_text):
+            settled = self.scrollbar_bounds(latest, roi)
+            unchanged = normalized(latest.text(body_roi)) == before_text
+            # A resting thumb can stop a few pixels short of the track end.
+            # Two swipes that only bounced back from there prove the end.
+            if (unchanged and settled is not None and abs(settled[0]-bounds[0]) <= 3
+                    and abs(settled[1]-bounds[1]) <= 3
+                    and (direction > 0 and bounds[1] >= y2-6 or direction < 0 and bounds[0] <= y1+6)):
+                return False
+            if settled == bounds and unchanged:
                 self.swipe(start, end, duration=500)
                 if changed(3):
                     return True

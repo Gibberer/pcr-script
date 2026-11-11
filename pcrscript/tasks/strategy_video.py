@@ -18,7 +18,7 @@ from ..extras.bilibili_api import BilibiliApi
 from ..extras.guide_media import fetch_video
 from ..game_ui.avatar_assets import ensure_avatar_index, read_json
 from ..game_ui.screen import normalized
-from ..run_session import atomic_json
+from ..run_session import atomic_json, offline_work
 from ..game_ui.guide_vision import GuideText, combat_team, formation_team, wide_special_equipment_team, combat_set, combat_auto, combat_auto_labels, combat_boss_labels, battle_rectangles, match_portrait, read_text, requirement_cells, labeled_fields, formation_fields, stadium_formation_viewport, viewport_error, viewport_frame
 from .strategy_document import Evidence, Fact, empty_member, finalize, export_document
 from .strategy_sources import BORROW_PART, MANUAL_PART, UNVERIFIED_SETTING, discover_sources, get_source_rules, timed_switch_requirement, unparsed_switch_requirement
@@ -1661,9 +1661,17 @@ def parse_video_source(source: dict, options: dict, index, *, api=None, ocr=None
     return report
 
 
-def acquire_strategies(options: dict, *, api=None, index=None, ocr=None, check=lambda: None,
-                       accept=None, exclude_sources=(), rules=None) -> dict:
-    """The shared GUI/CLI task path from public sources to evidence-backed files."""
+def acquire_strategies(options: dict, **kwargs) -> dict:
+    """The shared GUI/CLI task path from public sources to evidence-backed files.
+
+    Download and parsing never touch the device; the run watchdog expects
+    per-frame checkpoints instead of driver calls during this work."""
+    with offline_work():
+        return _acquire_strategies(options, **kwargs)
+
+
+def _acquire_strategies(options: dict, *, api=None, index=None, ocr=None, check=lambda: None,
+                        accept=None, exclude_sources=(), rules=None) -> dict:
     options = dict(options)
     rules = rules or get_source_rules(options)
     exclude_sources = frozenset(exclude_sources)

@@ -459,6 +459,15 @@ class CollaborationRaid(BaseTask):
         preferred = self.state.get('preferred_roster')
         return sorted(parties, key=lambda p: [m.name for m in p.members] != preferred)
 
+    def failed_rosters(self, difficulty):
+        scope = dict(area=TITLE, floor=DIFFICULTIES.index(difficulty)+1)
+        rows = [[m['name'] for m in row['context'].get('members', []) if isinstance(m, dict) and 'name' in m]
+                for row in self.state.get('failed_trials', [])
+                if isinstance(row.get('context'), dict) and row['context'].get('target', {}).get('scope') == scope]
+        rows += [row['members'] for row in self.state.get('portrait_failed', [])
+                 if isinstance(row, dict) and row.get('scope') == scope]
+        return rows
+
     def select_party(self, difficulty, party):
         from ..game_ui.avatar_assets import ensure_avatar_index
         from .party_preparation import prepare_character_database, numeric_equipment_unknown, read_numeric_equipment
@@ -466,6 +475,13 @@ class CollaborationRaid(BaseTask):
         from ..game_ui.character_equipment import inspect_unreleased_equipment
         self.formation.avatars, _ = ensure_avatar_index(self.options['sources'].get('avatars'), check=self.check_deadline)
         prepare_character_database(self.formation, self.options['sources'].get('avatars'), check=self.check_deadline)
+        from .portrait_selection import portrait_trial
+        # Free first clears are judged by the battle; undeclared builds skip detail pages.
+        audit = portrait_trial(self.formation, party, failed=self.failed_rosters(difficulty))
+        if audit is not None:
+            self.report['audits'].append(dict(difficulty=difficulty, source=party.source, ready=True, details=audit))
+            self.save()
+            return True, audit
         ready, audit = self.formation.select(party)
         unknown = [m.name for m in party.members
                    if (a := self.formation.observed.get(normalized(m.name))) and a.identity_verified
@@ -593,6 +609,11 @@ class CollaborationRaid(BaseTask):
             self.report['history'].append(record)
             if not cleared and context is not None and record.get('settings_verified'):
                 self.state.setdefault('failed_trials', []).append(dict(context=context, evidence=record['evidence']))
+            elif not cleared and audit.get('build_basis') == 'portrait_trial':
+                # No build was read; these members next take the full audit.
+                rows = self.state.setdefault('portrait_failed', [])
+                rows.append(dict(scope=scope, members=sorted(audit['order'])))
+                del rows[:-32]
             self.save()
             if cleared:
                 self.state['preferred_roster'] = signature['members']

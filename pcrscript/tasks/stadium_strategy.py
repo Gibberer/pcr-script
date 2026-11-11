@@ -104,7 +104,10 @@ def parties_for_round(report, number, *, allow_local_trials=False):
 
 
 class StadiumFormation(RecollectionFormation):
-    """Stadium uses five formation slots and requires known live equipment."""
+    """Stadium uses five formation slots and requires known live equipment.
+
+    A loss costs nothing, so an undeclared build may be picked by portraits
+    and judged by the live stars (see BattleStadium.battle)."""
     # Stadium fights are forced auto from zero TP and sources rarely state
     # skill levels. A verified public avatar proves the outfit; the skill
     # page opens only when it cannot, or when the source declares a level.
@@ -121,7 +124,10 @@ class StadiumFormation(RecollectionFormation):
     search_reset = (691, 205)
     search_field = (480, 206)
     search_reveal = ((580, 210), (580, 355))
-    search_top = 247
+    # One pixel above the card frame, the same convention as slot_top. At
+    # 247 the face crop slid ~5px and every search card fell below the
+    # avatar threshold, sending each costume to its detail page.
+    search_top = 242
     # The opponent strip leaves less than two full card rows visible. Keep
     # overlap so a 140px drag cannot skip an entire unseen row.
     # The right gutter is the scrollbar, which can reveal search instead of

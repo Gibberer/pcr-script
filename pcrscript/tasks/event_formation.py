@@ -17,6 +17,7 @@ from ..game_ui.screen import EventUIError, normalized
 from ..game_ui.avatars import AvatarIndex, card_rectangles, search_card_rectangles, face_crop, feature
 from ..game_ui.equipment import EquipmentBadges
 from ..game_ui.character_search import search_character_candidates as search_character, search_text_confirmed, search_input_confirmation, search_reset_confirmed
+from .portrait_selection import PortraitSelection
 
 
 def count_stars(image: Screenshot) -> int | None:
@@ -34,7 +35,7 @@ def skill_title_pattern(title: str) -> str:
     return re.escape(normalized(title)).replace('♪', '[♪♫]?')
 
 
-class EventFormation:
+class EventFormation(PortraitSelection):
     requires_declared_build = True
     infer_costume_from_skills = False
     detail_close_pattern = '确认'
@@ -272,6 +273,12 @@ class EventFormation:
 
     def inspect_current(self, full: bool = True, expected_names: Sequence[str] = (), *, verify_skills: bool = True) -> list[CharacterStatus]:
         """Inspect occupied slots; callers still validate the required roster."""
+        if not full and expected_names:
+            # An identity-only recheck: unambiguous slot portraits suffice.
+            # Any unclear slot falls back to the detail pages below.
+            order = self.portrait_order(expected_names, use_picks=False)
+            if order is not None and set(order) == set(map(normalized, expected_names)):
+                return [CharacterStatus(name, identity_verified=True) for name in order]
         results = []
         for pos in self.occupied_slots(self.ui.capture(ocr=False)):
             rect = (pos[0]-48, self.slot_top, 96, 96)

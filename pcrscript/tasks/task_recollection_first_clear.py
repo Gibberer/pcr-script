@@ -116,7 +116,21 @@ class RecollectionFirstClear(RecollectionTask):
             raise RecollectionBlocked('结算页缺少对应首通记录，保留现场并停止')
         self.ui.click(self.combat_result_button(screen))
 
+    def failed_rosters(self, area, floor):
+        scope = dict(area=area, floor=floor)
+        state = getattr(self, 'state', {})
+        rows = [[m['name'] for m in row['context'].get('members', []) if isinstance(m, dict) and 'name' in m]
+                for row in state.get('failed_trials', [])
+                if isinstance(row.get('context'), dict) and row['context'].get('target', {}).get('scope') == scope]
+        rows += [row['members'] for row in state.get('portrait_failed', [])
+                 if isinstance(row, dict) and row.get('scope') == scope]
+        return rows
+
     def select_party(self, area, floor, party):
+        from .portrait_selection import portrait_trial
+        details = portrait_trial(self.formation, party, failed=self.failed_rosters(area, floor))
+        if details is not None:
+            return True, details
         ready, details = self.formation.select(party)
         if ready:
             return ready, details
@@ -243,6 +257,17 @@ class RecollectionFirstClear(RecollectionTask):
             self.ui.output = output
 
     def _battle(self, area, floor, party):
+        roster = sorted(normalized(m.name) for m in party.members)
+        if not self.options['retry_failed_parties'] and any(
+                isinstance(row, dict) and row.get('scope') == dict(area=area, floor=floor)
+                and sorted(map(normalized, row.get('members', []))) == roster
+                for row in self.state.get('portrait_failed', [])):
+            # The China-server cost of a lost attempt is unconfirmed, and the
+            # portrait trial recorded no build that could prove a change.
+            self.report.setdefault('audits', []).append(dict(area=area, floor=floor, party=party.name,
+                source=party.source, ready=False, formation=dict(unready=[])))
+            return dict(outcome='blocked', progressed=False,
+                        reason='同组成员已在该层头像试打失败，失败代价未确认，未重复开战')
         s = self.select_floor(area, floor)
         if s is None or field.clear_status(s) is not False:
             raise RecollectionBlocked('开战前不能证明目标层尚未通关')
@@ -314,6 +339,13 @@ class RecollectionFirstClear(RecollectionTask):
             raise RecollectionBlocked('战后挑战次数与首通结果不一致，未追加挑战')
         self.state.pop('pending_battle')
         remember_failure(self.state, record)
+        if (details.get('build_basis') == 'portrait_trial' and clear is False
+                and result.outcome in ('failed', 'retreated', 'settled')):
+            # No build was read, so the next try with these members takes the
+            # full audit, whose context then gates further retries.
+            rows = self.state.setdefault('portrait_failed', [])
+            rows.append(dict(scope=dict(area=area, floor=floor), members=sorted(details['order'])))
+            del rows[:-32]
         self.report['history'].append(record)
         self.save()
         return record
