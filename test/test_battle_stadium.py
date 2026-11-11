@@ -733,6 +733,30 @@ class StadiumRecognitionTests(TestCase):
 
 
 class StadiumRosterTests(TestCase):
+    def test_search_card_crop_matches_slot_crop_of_same_card(self):
+        """Live 960x540 stadium search cards have their frame at y=243 and the
+        slots at y=406: both crops must frame a face the same way."""
+        import cv2 as cv
+        from tempfile import TemporaryDirectory
+        from pcrscript.game_ui.avatars import AvatarIndex, face_crop
+        from pcrscript.tasks.stadium_strategy import StadiumFormation
+        rng = np.random.default_rng(7)
+        card = cv.resize(rng.integers(0, 255, (12, 12, 3), dtype=np.uint8), (96, 96),
+                         interpolation=cv.INTER_LINEAR)
+        card[:3] = card[:, :3] = (60, 60, 230)  # saturated frame
+        page = np.full((540, 960, 3), 235, np.uint8)
+        page[243:339, 62:158] = card
+        page[406:502, StadiumFormation.slots[0][0]-48:StadiumFormation.slots[0][0]+48] = card
+        formation = StadiumFormation.__new__(StadiumFormation)
+        rects = formation.search_rectangles(page)
+        self.assertEqual(rects[0][:2], (60, StadiumFormation.search_top))
+        with TemporaryDirectory() as directory:
+            index = AvatarIndex(directory)
+            x = StadiumFormation.slots[0][0]
+            index.add('合成角色', face_crop(page, (x-48, StadiumFormation.slot_top, 96, 96)), persist=False)
+            index.add('干扰', rng.integers(0, 255, (50, 64, 3), dtype=np.uint8), persist=False)
+            self.assertEqual(index.expected_identity(face_crop(page, rects[0]), ['合成角色']), '合成角色')
+
     def test_scan_excludes_enemy_strip_and_preserves_task_readiness_policy(self):
         from pcrscript.tasks.stadium_strategy import StadiumFormation
         roster = StadiumFormation.__new__(StadiumFormation)

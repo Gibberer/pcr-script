@@ -244,6 +244,38 @@ with RunSession('child', sys.argv[1]) as run:
                 self.assertIn('test_watchdog', data['owner_stack'])
                 self.assertIsNone(data['frame_time'])
 
+    def test_offline_work_with_checkpoints_is_not_a_stall(self):
+        from pcrscript.run_session import checkpoint, offline_work
+        with tempfile.TemporaryDirectory() as root:
+            with RunSession('test', root, stall_seconds=.3) as run:
+                with offline_work():
+                    # Longer than stall_seconds without a driver call, as when
+                    # a source video is parsed frame by frame.
+                    deadline = time.monotonic()+1.5
+                    while time.monotonic() < deadline:
+                        checkpoint()
+                        time.sleep(.05)
+                self.assertEqual(list(run.path.glob('incident-*')), [])
+                # Leaving offline work restarts the driver timer.
+                self.assertLess(time.monotonic()-run.last_activity, .5)
+
+    def test_offline_work_without_checkpoints_is_still_reported(self):
+        from pcrscript.run_session import offline_work
+        with tempfile.TemporaryDirectory() as root:
+            with RunSession('test', root, stall_seconds=.05) as run:
+                with offline_work():
+                    deadline = time.monotonic()+3
+                    while not list(run.path.glob('incident-*/details.json')) and time.monotonic()<deadline:
+                        time.sleep(.05)
+                details = next(run.path.glob('incident-*/details.json'), None)
+                self.assertIsNotNone(details)
+                self.assertIn('offline work', json.loads(details.read_text())['reason'])
+
+    def test_offline_work_outside_a_run_is_inert(self):
+        from pcrscript.run_session import offline_work
+        with offline_work():
+            pass
+
 
 if __name__ == '__main__':
     unittest.main()

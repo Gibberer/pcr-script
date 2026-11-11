@@ -124,7 +124,10 @@ class StadiumFormation(RecollectionFormation):
     search_reset = (691, 205)
     search_field = (480, 206)
     search_reveal = ((580, 210), (580, 355))
-    search_top = 247
+    # One pixel above the card frame, the same convention as slot_top. At
+    # 247 the face crop slid ~5px and every search card fell below the
+    # avatar threshold, sending each costume to its detail page.
+    search_top = 242
     # The opponent strip leaves less than two full card rows visible. Keep
     # overlap so a 140px drag cannot skip an entire unseen row.
     # The right gutter is the scrollbar, which can reveal search instead of

@@ -95,6 +95,29 @@ def checkpoint():
         _current.checkpoint()
 
 
+@contextlib.contextmanager
+def offline_work():
+    """Long work with no driver boundary, such as source download and parsing.
+
+    The stall watchdog then expects cooperative checkpoints instead of driver
+    calls or step changes; going stall_seconds without one is still reported.
+    """
+    run = _current
+    if run is None or threading.get_ident() != run.owner:
+        yield
+        return
+    with run.lock:
+        run.offline += 1
+        run.last_checkpoint = _time.monotonic()
+    try:
+        yield
+    finally:
+        with run.lock:
+            run.offline -= 1
+            # Driver and step timers restart once the device is used again.
+            run.last_activity = run.step_since = _time.monotonic()
+
+
 class ResumeUnsafe(BaseException):
     """Must escape legacy catch-and-continue handlers before any stale click."""
 
@@ -147,6 +170,8 @@ class RunSession:
         self.step = None
         self.progress = {'task': None, 'action': None}
         self.step_since = _time.monotonic()
+        self.offline = 0
+        self.last_checkpoint = _time.monotonic()
         self.lock = threading.RLock()
         self.stop = threading.Event()
         self.owner = threading.get_ident()
@@ -222,6 +247,7 @@ class RunSession:
             return {}
 
     def checkpoint(self):
+        self.last_checkpoint = _time.monotonic()
         command = self.command()
         if command.get('action') == 'stop' and command.get('id') != self.command_id:
             self.command_id = command['id']
@@ -247,7 +273,7 @@ class RunSession:
             self.step_since += duration
             self.command_id = command.get('id')
             self.state = 'running'
-            self.last_activity = _time.monotonic()
+            self.last_activity = self.last_checkpoint = _time.monotonic()
             self.event('resumed')
             self.status()
         return True
@@ -265,11 +291,17 @@ class RunSession:
                     with self.lock:
                         self.snapshot_directory = directory
                         self.snapshot_id = command['id']
-                stalled = self.state == 'running' and (
-                    _time.monotonic() - self.last_activity > self.stall_seconds or
-                    self.step is not None and _time.monotonic() - self.step_since > 300)
+                now = _time.monotonic()
+                if self.offline:
+                    stalled = self.state == 'running' and now - self.last_checkpoint > self.stall_seconds
+                    reason = 'suspected stall: offline work made no checkpoint; inspect stack'
+                else:
+                    stalled = self.state == 'running' and (
+                        now - self.last_activity > self.stall_seconds or
+                        self.step is not None and now - self.step_since > 300)
+                    reason = 'suspected stall: no driver completion or same step for 300s; inspect stack'
                 if stalled and not warned:
-                    self.incident('suspected stall: no driver completion or same step for 300s; inspect stack')
+                    self.incident(reason)
                 warned = stalled
                 self.status()
             except Exception as error:
