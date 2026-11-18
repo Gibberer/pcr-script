@@ -4,7 +4,7 @@ opencv_python==4.11.0.86
 pywin32==310
 PyYAML==6.0.2
 Requests==2.32.4
-urllib3==2.7.0
+urllib3==2.8.0
 tqdm==4.67.1
 rapidocr==3.9.2
 onnxruntime==1.30.0
