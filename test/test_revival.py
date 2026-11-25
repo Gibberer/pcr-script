@@ -240,6 +240,29 @@ class RevivalTests(unittest.TestCase):
             flow.sweep_hard()
         self.assertEqual(ui.clicks[-1], '取消')
 
+    def test_unknown_boss_result_stops_instead_of_continuing(self):
+        flow, ui = self.exchange_runner([])
+        flow.r.report = {'pending': [], 'battles': []}
+        flow.r.report_progress = Mock()
+        flow.clear_quests = Mock()
+        flow.boss_detail = Mock(return_value=frame())
+        flow.ui.number = Mock(return_value=1)
+        flow.home = Mock()
+        flow.hard_trial_from_detail = Mock()
+        flow.sweep_hard = Mock()
+        flow.special_complete = Mock(return_value=False)
+        flow.special_open = False
+        flow.hub = Mock()
+        flow.rewards = Mock()
+        def submitted(label, difficulty):
+            flow.r.report['pending_boss'] = {'boss': difficulty}
+            raise EventUIError('战斗结果无法确认')
+        flow.sourced_boss = Mock(side_effect=submitted)
+        with self.assertRaisesRegex(EventUIError, '战斗结果'):
+            flow.run()
+        flow.sourced_boss.assert_called_once()
+        flow.rewards.assert_not_called()
+
     def test_normal_stamina_short_still_claims_rewards(self):
         from pcrscript.tasks.revival_map import StaminaShort
         flow, ui = self.exchange_runner([])

@@ -498,6 +498,8 @@ class RevivalMap:
             try:
                 self.sourced_boss(label, difficulty)
             except EventUIError as error:
+                if self.r.report.get('pending_boss'):
+                    raise  # Ticket spent, result unknown: keep the scene.
                 from pcrscript.run_session import failure
                 failure(error)
                 self.r.report['pending'].append(str(error))
@@ -867,11 +869,15 @@ class RevivalMap:
                 self.home()
                 continue
             attempts[(mode, party.name)] = attempts.get((mode, party.name), 0)+1
+            # Journal the ticket until the result is recorded: an error in
+            # between leaves the spend unknown and must stop the chain.
+            self.r.report['pending_boss'] = {'boss': difficulty, 'mode': mode, 'party': party.name}
             result = EventCombat(self.r).run(party, selection['order'])
             battles += 1
             self.r.report['battles'].append({'boss': difficulty, 'mode': mode, 'party': party.name,
                 'source': party.source, 'build_basis': party.build_basis,
                 'assumptions': party.assumptions, **vars(result)})
+            self.r.report.pop('pending_boss')
             if result.outcome != 'settled':
                 self.r.report['pending'].append(label+'未成功：'+result.reason)
                 if result.outcome == 'blocked':
