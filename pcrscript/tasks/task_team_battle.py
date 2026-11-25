@@ -293,7 +293,7 @@ class TeamBattle(TimeLimitTask):
         visible = next((b for b in map_bosses(screen) if b.lane == boss.lane and b.lap == boss.lap), None)
         if visible is None:
             raise BossChanged('目标首领已变化，停止使用旧模拟战结果')
-        self.ui.click((visible.x, 270))
+        self.ui.click((visible.x, visible.y))
         def refresh_after_popup(s):
             if self.popup(s):
                 raise BossChanged('打开首领期间行会奖励或阶段刷新，重新读取地图')
@@ -878,9 +878,9 @@ class TeamBattle(TimeLimitTask):
 
     def prepare_boss(self, boss: Boss, simulate: bool):
         current, screen = self.open_boss(boss)
-        if (current.name, current.current_hp, current.maximum_hp) != (boss.name, boss.current_hp, boss.maximum_hp):
+        if (current.current_hp, current.maximum_hp) != (boss.current_hp, boss.maximum_hp):
             self.ui.expect_click('取消', (560, 425, 755, 505), exact=True)
-            raise BossChanged('首领身份或血量已变化，旧模拟战无效')
+            raise BossChanged('首领血量已变化，旧模拟战无效')
         self.require_low_stage(screen)
         return self.mode(screen, simulate)
 

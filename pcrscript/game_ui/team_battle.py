@@ -1,7 +1,7 @@
 """Visible state and conservative planning for the five-lane team battle map."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import re
 
 from .screen import EventScreen, EventUIError, normalized
@@ -15,6 +15,9 @@ class Boss:
     current_hp: int | None = None
     maximum_hp: int | None = None
     name: str = ''
+    # Click point on the boss sprite. Badge height follows the sprite, so
+    # the target is derived from the observed "第N轮" badge.
+    y: int = field(default=270, compare=False)
 
     @property
     def full(self) -> bool:
@@ -22,6 +25,8 @@ class Boss:
 
 
 LANES = (125, 290, 480, 625, 840)
+# Observed working clicks lay 68px above to 14px below the badge in every lane.
+CLICK_ABOVE_BADGE = 40
 NORMAL_SECONDS = 90
 RETURN_BONUS_SECONDS = 20
 REPEAT_MARGIN_SECONDS = 8
@@ -53,7 +58,9 @@ def map_bosses(screen: EventScreen) -> list[Boss]:
     if not map_ready(screen):
         raise EventUIError('团队战地图未确认')
     found = {}
-    for label in screen.all(r'第\d+轮', (35, 220, 940, 380)):
+    # Badge height follows each boss sprite; the tall middle boss puts its
+    # badge near y=214, while the stage header stays above y=80.
+    for label in screen.all(r'第\d+轮', (35, 190, 940, 380)):
         match = re.fullmatch(r'第(\d+)轮', normalized(label.text))
         if not match:
             continue
@@ -61,7 +68,7 @@ def map_bosses(screen: EventScreen) -> list[Boss]:
         lane = min(range(5), key=lambda i: abs(x-LANES[i]))
         if abs(x-LANES[lane]) > 65 or lane in found:
             raise EventUIError('团队战首领位置不明确')
-        found[lane] = Boss(lane, int(match[1]), LANES[lane])
+        found[lane] = Boss(lane, int(match[1]), LANES[lane], y=int(label.center[1])-CLICK_ABOVE_BADGE)
     return list(found.values())
 
 
@@ -81,10 +88,14 @@ def boss_detail(screen: EventScreen, boss: Boss, ui=None) -> Boss:
     current, maximum = map(int, numbers)
     if not 0 < current <= maximum:
         raise EventUIError('团队战首领血量无效')
-    name = normalized(screen.text((270, 260, 395, 305)))
-    if not name:
-        raise EventUIError('团队战首领身份无法识别')
-    return Boss(boss.lane, boss.lap, boss.x, current, maximum, name)
+    # Names change every season and are display-only: lane, lap and HP
+    # identify the boss. Read the title line left of the weakness badge (a
+    # long name can merge with "等级.100" into one box) and fall back to the
+    # lane label instead of blocking on an unread name.
+    line = sorted(screen.all('.*', (270, 260, 560, 300)), key=lambda item: item.center[0])
+    name = re.sub(r'等级.*$', '', normalized(''.join(item.text for item in line)))
+    name = name or f'{boss.lane+1}号首领'
+    return Boss(boss.lane, boss.lap, boss.x, current, maximum, name, boss.y)
 
 
 def priority(boss: Boss, minimum_lap: int) -> tuple[int, int, int, int]:

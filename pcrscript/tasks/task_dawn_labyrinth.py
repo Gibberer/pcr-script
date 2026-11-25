@@ -350,6 +350,13 @@ class DawnLabyrinth(BaseTask):
         screen = self.wait(maze.guild_selection, '迷宫公会选择')
         button = screen.find(maze.SWEEP, (870, 0, 955, 100), exact=True)
         if not button:
+            # Whole-frame OCR intermittently drops this small white label
+            # beside the difficulty icon; reread the fixed button region.
+            button = self.ui.read_region(screen, (870, 0, 955, 100)).find(
+                maze.SWEEP, (870, 0, 955, 100), exact=True)
+            if button is not None and button.score < .95:
+                button = None
+        if not button:
             raise SweepBlocked('未识别到迷宫跳过入口，请先确认已完成首通')
         self.ui.click(button)
         screen = self.wait(lambda s: maze.locked_notice(s) or maze.sweep_confirmation(s)

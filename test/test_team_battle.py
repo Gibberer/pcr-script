@@ -103,6 +103,21 @@ class TeamBattleTests(unittest.TestCase):
         with self.assertRaisesRegex(EventUIError, '无法识别'):
             boss_detail(broken, Boss(2, 11, 480), ui)
 
+    def test_boss_name_survives_merged_or_split_level_text(self):
+        image = np.full((540, 960, 3), 240, np.uint8)
+        upright = EventScreen(image, [box('42000000/42000000', 600, 315)])
+        ui = Mock(read_region=Mock(return_value=upright))
+        lines = ([box('测试长名首领夫人等级.100', 407, 277)],
+                 [box('测试长名首领夫人', 360, 277), box('等级100', 470, 277)])
+        for line in lines:
+            screen = EventScreen(image, [box('魔物详情', 105, 42), *line, box('弱点', 590, 279),
+                                         box('42000000/42000000', 600, 315)])
+            self.assertEqual(boss_detail(screen, Boss(2, 11, 480), ui).name, '测试长名首领夫人')
+        # Names change each season; an unread name never blocks the boss.
+        screen = EventScreen(image, [box('魔物详情', 105, 42), box('42000000/42000000', 600, 315)])
+        observed = boss_detail(screen, Boss(2, 11, 480), ui)
+        self.assertEqual((observed.name, observed.maximum_hp), ('3号首领', 42_000_000))
+
     def test_boss_scan_reuses_each_fresh_map_and_detail_observation(self):
         image = np.full((540, 960, 3), 240, np.uint8)
         mapped = EventScreen(image, [box('团队战', 105, 35), box('剩余挑战次数', 350, 406),
@@ -123,7 +138,7 @@ class TeamBattleTests(unittest.TestCase):
             self.assertEqual([b.name for b in bosses], ['首领甲', '首领乙'])
             self.assertEqual(task.ui.capture.call_count, 4)
             self.assertEqual([getattr(c.args[0], 'text', c.args[0]) for c in task.ui.click.call_args_list],
-                             [(125, 270), '取消', (290, 270), '取消'])
+                             [(125, 238), '取消', (290, 299), '取消'])
             # A separately requested pre-battle detail must still get a new map.
             task.map = Mock(return_value=mapped)
             task.ui.capture.side_effect = [detail('首领甲')]
@@ -231,6 +246,10 @@ class TeamBattleTests(unittest.TestCase):
                   zip((125, 290, 480, 625, 840), (278, 339, 256, 347, 241))]
         bosses = map_bosses(EventScreen(np.zeros((540, 960, 3), np.uint8), items))
         self.assertEqual(sorted(b.lane for b in bosses), list(range(5)))
+        # A tall middle boss raises its badge above the side lanes.
+        items[-3] = box('第6轮', 482, 214)
+        bosses = map_bosses(EventScreen(np.zeros((540, 960, 3), np.uint8), items))
+        self.assertIn((2, 6), [(b.lane, b.lap) for b in bosses])
 
     def test_challenge_count_never_treats_unknown_or_overflow_as_available(self):
         task = TeamBattle.__new__(TeamBattle)

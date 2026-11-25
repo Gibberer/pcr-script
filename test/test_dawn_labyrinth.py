@@ -152,6 +152,14 @@ class LabyrinthRecognitionTests(TestCase):
         value = catalogue(1, 1)
         value.items = [item for item in value.items if item.center != (353, 432)]
         self.assertIsNone(maze.catalogue_preview(ui, value))
+        # A label dropped by whole-frame OCR is reread from its fixed bar only.
+        value = catalogue(2, 1)
+        value.items = [item for item in value.items if item.text != '通行证']
+        ui.read_region = Mock(return_value=screen(('通行证', 90, 431)))
+        self.assertEqual(maze.catalogue_preview(ui, value), (2, 1))
+        ui.read_region.assert_called_once_with(value, (40, 405, 170, 450), classify=False)
+        ui.read_region.return_value = screen()
+        self.assertIsNone(maze.catalogue_preview(ui, value))
 
     def test_bulk_confirmation_requires_matching_cost_row_and_total(self):
         ui = Mock(number=lambda value, roi: value.number(roi))
@@ -254,6 +262,18 @@ class LabyrinthTaskTests(TaskReplayMixin, TestCase):
         self.assertEqual((report['status'], report['spent'], report['missions']['batches']), ('complete', 1, 1))
         self.assertLess(self.clicks().index('确认'), self.clicks().index('任务'))
         self.assertEqual(report['remaining_passes'], 0)
+
+    def test_missed_sweep_label_is_reread_from_its_fixed_button_region(self):
+        missed = guild()
+        missed.items = [item for item in missed.items if item.text != '跳过']
+        self.task.ui.read_region = Mock(return_value=screen(('跳过', 913, 66)))
+        self.frames([home(1), missed, preview(1, 0), result(), mission_home(badge=False)])
+        report = self.task.run()
+        self.assertEqual((report['status'], report['spent']), ('complete', 1), report)
+        self.task.ui.read_region.assert_called_once_with(missed, (870, 0, 955, 100))
+        self.task.ui.read_region.return_value = screen()
+        self.frames([missed])
+        self.assertRaisesRegex(Exception, '跳过入口', self.task.open_sweep, home(1))
 
     def test_budget_limit_still_claims_missions_after_the_verified_sweep(self):
         self.task.options['max_passes'] = 1

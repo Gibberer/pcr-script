@@ -106,8 +106,14 @@ def catalogue_selected(screen: EventScreen, guild) -> bool:
 
 
 def catalogue_preview(ui, screen: EventScreen) -> tuple[int, int] | None:
-    if not sweep_catalogue(screen) or not screen.find('通行证', (40, 405, 170, 450), exact=True):
+    if not sweep_catalogue(screen):
         return None
+    label_roi = (40, 405, 170, 450)
+    if not screen.find('通行证', label_roi, exact=True):
+        # Whole-frame OCR can drop this white label on its blue bar.
+        label = ui.read_region(screen, label_roi, classify=False).find('通行证', label_roi, exact=True)
+        if not label or label.score < .95:
+            return None
     # The orange arrow starts immediately after the right-aligned balance.
     # Including it makes an isolated 1 look like a second digit to crop OCR.
     before = ui.number(screen, (220, 411, 254, 452))
