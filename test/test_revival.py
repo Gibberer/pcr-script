@@ -192,6 +192,35 @@ class RevivalTests(unittest.TestCase):
         self.assertEqual(ui.clicks, ['困难', (380, 325), (25, 275), (25, 275), (940, 275), (940, 275), (940, 275)])
         flow.home.assert_called_once()
 
+    def test_partial_hard_sweep_reports_stamina_short_after_recording(self):
+        from pcrscript.tasks.revival_map import StaminaShort
+        def detail(n, left=0):
+            return frame((f'一日店长的轨迹1-{n}',300,52),('剩余挑战次数',820,413),(f'{left}/3',880,413),('取消',667,455))
+        flow, ui = self.sweep_flow([detail(1, 3)])
+        flow.scan_pages = Mock(return_value=[(None, {(1, 1): SimpleNamespace(center=(380, 380))})])
+        flow.r.report = {'pending': []}
+        def partial(s, stage):
+            flow.short_sweep = f'困难 {stage} 体力只够扫荡 1/3 次'
+            return 1
+        flow.sweep_stage = partial
+        with self.assertRaisesRegex(StaminaShort, '1/3'):
+            flow.sweep_hard()
+        self.assertEqual(flow.r.report['hard_sweeps'], {'1-1': 1})
+        self.assertIsNone(flow.short_sweep)
+        self.assertEqual(ui.clicks[-1], '取消')
+
+    def test_normal_stamina_short_still_claims_rewards(self):
+        from pcrscript.tasks.revival_map import StaminaShort
+        flow, ui = self.exchange_runner([])
+        flow.r.report = {'pending': []}
+        flow.r.report_progress = Mock()
+        flow.clear_quests = Mock(side_effect=StaminaShort('复刻推进体力不足'))
+        flow.home = Mock()
+        flow.rewards = Mock(return_value='rewarded')
+        self.assertEqual(flow.run(), 'rewarded')
+        self.assertIn('普通关卡', flow.r.report['pending'][0])
+        flow.clear_quests.assert_called_once_with('普通')
+
     def test_visible_special_row_marks_very_hard_cleared(self):
         flow, ui = self.exchange_runner([frame(('特别',740,157))])
         self.assertFalse(flow.special_complete())

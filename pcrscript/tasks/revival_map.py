@@ -322,6 +322,12 @@ class RevivalMap:
             count = self.sweep_stage(s, stage)
             if count:
                 swept[stage] = count
+            if count and self.short_sweep:
+                # MAX was capped by stamina: this stage still has attempts.
+                short, self.short_sweep = self.short_sweep, None
+                self.record_sweeps(swept)
+                self.ui.expect_click('取消', (550, 420, 755, 525), exact=True)
+                raise StaminaShort(short)
             self.ui.click((940, 275))  # Next stage; closes the detail after the last.
             s = self.ui.wait(lambda f: event_layout(f) == 'map' or (
                 f.find('剩余挑战次数') and self.detail_stage(f) != (chapter, number)), '下一困难关卡')
@@ -329,10 +335,17 @@ class RevivalMap:
                 break
         else:
             raise EventUIError('困难扫荡达到步骤上限')
-        if swept:
-            self.r.report['hard_sweeps'] = swept
-            self.r.log('困难扫荡 ' + '、'.join(f'{k} × {v}' for k, v in swept.items()))
+        self.record_sweeps(swept)
         return self.home()
+
+    def record_sweeps(self, swept):
+        if not swept:
+            return
+        total = self.r.report.setdefault('hard_sweeps', {})
+        for stage, count in swept.items():
+            total[stage] = total.get(stage, 0)+count
+        self.r.log('困难扫荡 ' + '、'.join(f'{k} × {v}' for k, v in swept.items()))
+        swept.clear()
 
     def detail_stage(self, s):
         title = s.find(r'\d{1,2}-\d{1,2}', (40, 25, 560, 80))
@@ -342,6 +355,7 @@ class RevivalMap:
         return int(m[1]), int(m[2])
 
     REMAINING = (845, 400, 935, 428)
+    short_sweep = None
 
     def sweep_stage(self, s, stage):
         """Sweep one opened hard-stage detail; returns the sweep count."""
@@ -395,6 +409,8 @@ class RevivalMap:
                     time.sleep(.5)  # Counter refreshes a moment after receipts.
                     continue
                 self.ui.save(f'hard_sweep_done_{stage}', f)
+                self.short_sweep = (f'困难 {stage} 体力只够扫荡 {quantity}/{left} 次'
+                                    if quantity < left else None)
                 return quantity
             elif confirmed:
                 button_ = f.find('跳过完毕|跳过|确认|确定|关闭|OK|下一步', (200, 300, 950, 535), exact=True)
@@ -409,7 +425,14 @@ class RevivalMap:
 
     def run(self):
         self.r.report_progress('复刻地图 · 普通关卡')
-        self.clear_quests('普通')
+        try:
+            self.clear_quests('普通')
+        except StaminaShort as error:
+            # Stories, missions and exchange cost no stamina; keep them.
+            self.r.report['pending'].append(str(error)+'；普通关卡及之后的困难、高难、特别留待体力恢复后接续')
+            self.home()
+            self.r.report_progress('复刻地图 · 领取奖励')
+            return self.rewards()
         normal = self.boss_detail('普通')
         count = self.ui.number(normal, (891, 28, 926, 56))
         if count is None:
