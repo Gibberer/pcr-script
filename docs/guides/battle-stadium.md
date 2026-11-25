@@ -6,7 +6,7 @@
 ./.venv/Scripts/python.exe -X utf8 scripts/daily/task.py battle_stadium --config daily_config.yml
 ```
 
-每次运行先从游戏读取实际星数与报酬状态：满星且全部领取时直接返回 `already_complete`，不进入任何回合；满星但仍有报酬时只领奖。活动情报包含挑战期及之后的领奖期，领奖期只领取已有报酬。默认不在完整日常列表中，需要自动接续时可添加 `[battle_stadium]`。挑战不消耗体力或次数；任务不培养角色、安装或强化专武、购买资源、回复次数或重置进度。
+每次运行先从游戏读取实际星数与报酬状态：满星且全部领取时直接返回 `already_complete`，不进入任何回合；满星但仍有报酬时只领奖。活动情报包含挑战期及之后的领奖期，领奖期只领取已有报酬。冒险页稳定显示其他圆形入口却连续三帧没有斗技场时：挑战期已结束则返回 `unavailable` 并在 `warnings` 中说明未领报酬无法核对，挑战期内则返回 `partial`。默认不在完整日常列表中，需要自动接续时可添加 `[battle_stadium]`。挑战不消耗体力或次数；任务不培养角色、安装或强化专武、购买资源、回复次数或重置进度。
 
 ## 配置
 
@@ -21,12 +21,12 @@ GUI 与 CLI 共用根目录 `runtime_defaults.yml` 的 `BattleStadium` 段：
 | `discover_sources` | `true` | 自动搜索本期攻略 |
 | `source_urls` | `[]` | 本任务优先视频链接 |
 | `allow_local_trials` | `true` | 来源出战成员明确但培养不完整时，核验当前账号后有限试打 |
-| `auto_equip` / `auto_equip_priorities` | `false` / `{}` | 核验队伍后按游戏自动设定重新分配现有特别装备，可指定优先属性 |
+| `auto_equip_priorities` | `{}` | 自动分配特别装备时的优先属性 |
 | `account_key` | `default` | 账号恢复隔离键，切换账号需使用不同键 |
 | `sources` | `{}` | 共用视频解析及公共头像选项，如 `max_videos`、`max_frames_per_page`、`search_queries` |
 | `sources.refresh_media` | `false` | 重新取得视频并解析，排查完成后关闭 |
 
-`auto_equip_priorities` 例如 `{armor: hp, accessory: hp}`，支持值与[追忆战指南](recollection.md)相同。它只重新分配已有装备，无变化时取消预览，不能代替来源指定装备的核验。
+每次开战前总是核验队伍后按游戏自动设定重新分配现有特别装备，不是可关闭的选项（旧配置里的 `auto_equip` 会被忽略）。`auto_equip_priorities` 例如 `{armor: hp, accessory: hp}`，支持值与[追忆战指南](recollection.md)相同。它只重新分配已有装备，无变化时取消预览，不能代替来源指定装备的核验。
 
 ## 攻略来源
 

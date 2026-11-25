@@ -29,6 +29,29 @@ class CharacterUpgradeTests(TestCase):
         task.bulk = Mock(side_effect=observed)
         return task
 
+    def test_equipment_return_notice_is_acknowledged_before_selection_page(self):
+        notice = screen(20)
+        notice.items += [TextBox('返还装备强化道具',1,[[400,35],[560,35],[560,55],[400,55]]),
+                         TextBox('精炼结晶',1,[[350,120],[420,120],[420,140],[350,140]]),
+                         TextBox('确认',1,[[450,468],[510,468],[510,488],[450,488]])]
+        with tempfile.TemporaryDirectory() as root:
+            robot = Mock()
+            robot.driver.get_screen_size.return_value = (960,540)
+            task = UpgradeAllCharacters(robot, {'output':root})
+            task.ui = Mock()
+            frames = iter([notice, screen(0)])
+            def wait(predicate, description, timeout=None, handle=None):
+                for s in frames:
+                    if predicate(s):
+                        return s
+                    handle(s)
+                raise EventUIError(description)
+            task.ui.wait.side_effect = wait
+            self.assertEqual(selected_count(task.bulk()), 0)
+            task.ui.click.assert_called_once()
+            self.assertEqual(task.ui.click.call_args.args[0].text, '确认')
+            self.assertEqual(len(task.report['returned_items']), 1)
+
     def test_unknown_count_is_not_zero(self):
         self.assertIsNone(selected_count(screen()))
         self.assertEqual(selected_count(screen(0)), 0)

@@ -54,13 +54,15 @@ class StadiumScheduleTests(TestCase):
 
     def test_invalid_configuration_precedes_network_or_device(self):
         for option in ({'max_battles': True}, {'max_attempts_per_round': 6}, {'allow_local_trials': 1},
-                       {'sources': []}, {'sources': {'refresh_media': 'true'}}, {'account_key': ''}, {'auto_equip': 1},
-                       {'auto_equip_priorities': {'armor': 'unknown'}},
-                       {'auto_equip_priorities': {'armor': 'hp'}}):
+                       {'sources': []}, {'sources': {'refresh_media': 'true'}}, {'account_key': ''},
+                       {'auto_equip_priorities': {'armor': 'unknown'}}):
             with self.subTest(option=option), patch('pcrscript.news.fetch_event_news') as fetch:
                 with self.assertRaises(ValueError):
                     BattleStadium.prepare({'BattleStadium': option})
                 fetch.assert_not_called()
+        # Special equipment is always assigned; priorities need no switch.
+        self.assertEqual(validate_options({'auto_equip_priorities': {'armor': 'hp'}})['auto_equip_priorities'], {'armor': 'hp'})
+        self.assertNotIn('auto_equip', validate_options({}))
         original = {}
         self.assertEqual(validate_options(original)['max_battles'], 36)
         self.assertEqual(original, {})
@@ -949,7 +951,7 @@ class StadiumReplayTests(TaskReplayMixin, TestCase):
 
     def test_changed_allocation_priorities_reinspect_cached_verified_party_once(self):
         self.task.event=self.event
-        self.task.options.update(auto_equip=True,auto_equip_priorities={'armor':'magic_defense'})
+        self.task.options.update(auto_equip_priorities={'armor':'magic_defense'})
         party=SimpleNamespace(source='https://example.com/verified',members=[SimpleNamespace(name='合成角色甲')])
         old=dict(round=1,build=[dict(name='合成角色甲')],special={'priorities':{'armor':'hp'}})
         self.task.state['failed']=[old]
@@ -1094,6 +1096,34 @@ class StadiumReplayTests(TaskReplayMixin, TestCase):
         with self.assertRaisesRegex(Exception, '星级未知'):
             self.task.find_round()
 
+    def adventure_without_stadium(self):
+        page = screen(('冒险', 95, 28), ('主线关卡', 548, 204), ('剧情活动', 410, 438), ('冒险', 532, 515))
+        self.task.ui.read_region.return_value = screen(('复刻', 322, 438), ('剧情活动', 410, 438))
+        self.frames([page])
+
+    def test_settled_adventure_without_entry_stops_quickly(self):
+        self.adventure_without_stadium()
+        with self.assertRaisesRegex(EventUIError, '未见斗技场入口'):
+            self.task.enter()
+        self.assertEqual(self.task.ui.capture.call_count, 3)
+        self.task.ui.click.assert_not_called()
+
+    def test_entry_absent_after_challenge_period_is_unavailable(self):
+        self.adventure_without_stadium()
+        with patch('pcrscript.tasks.task_battle_stadium.time.time',
+                   return_value=self.event.extras['battle_end']+3600):
+            report = self.task.run(self.event)
+        self.assertEqual(report['status'], 'unavailable')
+        self.assertEqual(report['pending'], [])
+        self.assertTrue(report['warnings'])
+        self.task.ui.click.assert_not_called()
+
+    def test_entry_absent_during_challenge_period_stays_partial(self):
+        self.adventure_without_stadium()
+        report = self.task.run(self.event)
+        self.assertEqual(report['status'], 'partial')
+        self.assertIn('冒险页未见斗技场入口', report['pending'])
+
     def test_enter_closes_interrupted_readonly_character_dialog_before_navigation(self):
         dialog=screen(('角色详情',480,42),('确认',480,480),('★变更',850,480))
         self.frames([dialog,formation(),detail(),home()])
@@ -1183,6 +1213,10 @@ class StadiumReplayTests(TaskReplayMixin, TestCase):
         special = patch('pcrscript.game_ui.special_equipment.inspect_special_equipment', return_value=gear)
         special.start()
         self.addCleanup(special.stop)
+        # Every battle assigns existing gear; by default the loadout is unchanged.
+        equip = patch('pcrscript.game_ui.special_equipment.auto_equip_special', return_value=gear)
+        equip.start()
+        self.addCleanup(equip.stop)
         return SimpleNamespace(source='https://example.com/synthetic'), gear
 
     def test_start_is_journaled_before_input_and_success_uses_live_stars(self):
@@ -1303,7 +1337,6 @@ class StadiumReplayTests(TaskReplayMixin, TestCase):
         committed = deepcopy(gear)
         committed['slots'][0][0] = True
         committed['items'][0][0] = [80]*192
-        self.task.options['auto_equip'] = True
         won = home(stars=3, unlocked=2, round_stars=(3, 0, 0))
         self.frames([failed, detail(), formation(), formation(), battle_result(), won, won])
         with patch('pcrscript.game_ui.special_equipment.auto_equip_special', return_value=committed) as equip:
@@ -1316,7 +1349,6 @@ class StadiumReplayTests(TaskReplayMixin, TestCase):
 
     def test_auto_special_never_starts_with_unknown_slots_or_changed_members(self):
         party, gear = self.synthetic_party_boundary()
-        self.task.options['auto_equip'] = True
         unknown = dict(gear, unknown=1)
         self.frames([home(), detail(), formation()])
         with patch('pcrscript.game_ui.special_equipment.auto_equip_special', return_value=unknown):

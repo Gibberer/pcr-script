@@ -19,7 +19,7 @@ def validate_options(options):
         integers=(('timeout', 7200, 14400), ('battle_timeout', 180, 600),
                   ('max_battles', 36, 100), ('max_attempts_per_round', 2, 5)),
         flags=(('claim_rewards', True), ('discover_sources', True),
-               ('allow_local_trials', True), ('auto_equip', False)))
+               ('allow_local_trials', True)))
     value['source_urls'] = validate_urls(value.get('source_urls', []))
     if not isinstance(value.setdefault('sources', {}), dict):
         raise ValueError('BattleStadium.sources必须为对象')
@@ -27,8 +27,6 @@ def validate_options(options):
         raise ValueError('BattleStadium.sources.refresh_media必须为布尔值')
     from ..game_ui.special_equipment import validate_auto_priorities
     value['auto_equip_priorities'] = validate_auto_priorities(value.get('auto_equip_priorities', {}))
-    if value['auto_equip_priorities'] and not value['auto_equip']:
-        raise ValueError('auto_equip_priorities需要开启auto_equip')
     key = value.setdefault('account_key', 'default')
     if not isinstance(key, str) or not key.strip():
         raise ValueError('BattleStadium.account_key必须是非空字符串')
@@ -40,6 +38,15 @@ def build_key(member):
     # source declares one, so they cannot identify a repeated build.
     return {k: member.get(k) for k in ('name', 'level', 'rank', 'stars', 'unique', 'unique2',
                                          'unique_level', 'unique2_stars', 'equipment')}
+
+
+# Label row under the Adventure menu's circular entries (960x540).
+ENTRY_LABELS = (0, 380, 465, 460)
+ABSENT_FRAMES = 3
+
+
+class StadiumEntryAbsent(EventUIError):
+    """The settled Adventure menu shows other circular entries but no stadium."""
 
 
 @register('battle_stadium')
@@ -113,6 +120,7 @@ class BattleStadium(TimeLimitTask):
         return True
 
     def enter(self):
+        absent = 0
         for _ in range(60):
             s = self.capture()
             if field.home(s):
@@ -132,9 +140,15 @@ class BattleStadium(TimeLimitTask):
                 entry = s.find('斗技场', (100, 350, 450, 470), exact=True)
                 if not entry:
                     # The circular entry's decorative lettering is often
-                    # missed by full-frame OCR. Re-read its observed region.
-                    crop = self.ui.read_region(s, (260, 380, 358, 455))
+                    # missed by full-frame OCR. Re-read the entry label row.
+                    crop = self.ui.read_region(s, ENTRY_LABELS)
                     entry = crop.find('斗技场', exact=True)
+                    # Cards fade in, so one frame is not proof. Count only
+                    # frames where the menu and other circular labels drew.
+                    if not entry and s.find('主线关卡') and crop.find('.+'):
+                        absent += 1
+                        if absent >= ABSENT_FRAMES:
+                            raise StadiumEntryAbsent('冒险页未见斗技场入口')
                 if entry:
                     self.ui.click(entry)
                 else:
@@ -366,7 +380,7 @@ class BattleStadium(TimeLimitTask):
             if not tried(party):
                 return True
             priorities = self.options['auto_equip_priorities']
-            if not self.options['auto_equip'] or not priorities:
+            if not priorities:
                 return False
             previous = [old.get('special', {}).get('priorities')
                         for old in self.state.get('failed', []) if isinstance(old, dict)
@@ -435,14 +449,15 @@ class BattleStadium(TimeLimitTask):
         audit['special_equipment'] = special
         if special.get('unknown'):
             raise EventUIError('特别装备状态未知，未开战')
-        if self.options['auto_equip']:
-            audit['special_equipment_before'] = special
-            self.report_progress(f'斗技场 · 回合{row.number}分配现有特别装备')
-            special = auto_equip_special(self.ui, audit['order'], priorities=self.options['auto_equip_priorities'])
-            audit['special_equipment'] = special
-            self.save()
-            if special.get('unknown'):
-                raise EventUIError('特别装备分配后的状态未知，未开战')
+        # Special equipment is always assigned by the game's automatic
+        # loadout before a battle; it is not a user option.
+        audit['special_equipment_before'] = special
+        self.report_progress(f'斗技场 · 回合{row.number}分配现有特别装备')
+        special = auto_equip_special(self.ui, audit['order'], priorities=self.options['auto_equip_priorities'])
+        audit['special_equipment'] = special
+        self.save()
+        if special.get('unknown'):
+            raise EventUIError('特别装备分配后的状态未知，未开战')
         # A portrait trial read no build: record names only. A later attempt
         # with the same members takes the full audit (portrait_eligible).
         members = [dict(name=n) for n in audit['order']] if portrait else audit.get('observed', {}).values()
@@ -626,6 +641,18 @@ class BattleStadium(TimeLimitTask):
         except RunCancelled:
             self.report['status'] = 'cancelled'
             raise
+        except StadiumEntryAbsent as error:
+            self.ui.save('entry_absent')
+            if self.event and time.time() >= self.event.extras['battle_end']:
+                # Observed 2026-11-14: the entry leaves Adventure once the
+                # challenge period ends, so there is nothing left to drive.
+                self.report['status'] = 'unavailable'
+                self.report.setdefault('warnings', []).append(
+                    '挑战期已结束，冒险页已无斗技场入口；未领取的报酬无法从此核对')
+            else:
+                self.report['status'] = 'partial'
+                self.report['pending'].append(str(error))
+            return self.report
         except EventUIError as error:
             self.report['status'] = 'partial'
             self.report['pending'].append(str(error))

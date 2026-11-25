@@ -18,7 +18,6 @@ LunaTower:
   battle_timeout: 240
   preview_only: false
   simulation_only: false
-  auto_equip: false
   free_recovery: true
   video_guides: true
   top_attacks_per_run: 1
@@ -87,7 +86,6 @@ RecollectionFirstClear:
   source_urls: []
   discover_sources: true
   allow_local_trials: false
-  auto_equip: false
   auto_equip_priorities: {}
   retry_failed_parties: false
   sources: {}
@@ -105,7 +103,6 @@ CollaborationRaid:
   discover_sources: true
   source_urls: []
   allow_local_trials: true
-  auto_equip: false
   timeout: 5400
   battle_timeout: 240
   max_battles: 6
@@ -114,7 +111,6 @@ CollaborationRaid:
   sources: {}
 # 按需专项；可加入日常列表，满星且奖励全领后自动跳过战斗。
 BattleStadium:
-  auto_equip: false
   auto_equip_priorities: {}
   account_key: default
   timeout: 7200
@@ -142,7 +138,6 @@ AbyssSubjugation:
   max_normal_trials: 6
   max_simulations: 30
   max_source_batches: 3
-  auto_equip_special: true
   allow_five_star_upgrade: false
   allow_divine_amulets: false
   on_demand_cultivation: true
@@ -182,7 +177,6 @@ Dungeon:
   allow_local_trials: false
   preflight: true
   audit_only: false
-  auto_equip: false
   review_on_unexpected: true
 
 # 默认日常运行 upgrade_all_characters：全员拉满等级、技能、普通装备和品级

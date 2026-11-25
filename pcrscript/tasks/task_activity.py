@@ -38,6 +38,12 @@ def handler_config(config, kind, options):
     return result
 
 
+def unsettled(child) -> bool:
+    """A battle, spend, claim or exchange journal awaits reconciliation."""
+    state = getattr(child, 'state', None)
+    return isinstance(state, dict) and any(str(k).startswith('pending_') and v for k, v in state.items())
+
+
 @register('campaign_clean', requires_home=True)
 class ActivityDaily(TimeLimitTask):
     config_section = 'Activities'
@@ -72,6 +78,9 @@ class ActivityDaily(TimeLimitTask):
         root = Path(self.task_options().get('output', 'cache/daily/activities'))
         report = dict(status='running', activities=[], pending=[])
         previous_executed = False
+        # Types are independent: one type's failure only stops the rest when
+        # it leaves an unsettled battle/spend journal behind.
+        deferred_error = None
         try:
             news = None
             if only == 'all':
@@ -111,20 +120,35 @@ class ActivityDaily(TimeLimitTask):
                         result = child.run(event)
                     else:
                         result = child.run()
+                except RunCancelled:
+                    raise
                 except Exception as error:
                     report['activities'].append(dict(type=kind, status='error', pending=[str(error)]))
-                    raise
+                    report['pending'].append(kind+'：'+str(error))
+                    atomic_json(root/'report.json', report)
+                    if unsettled(child):
+                        raise
+                    deferred_error = deferred_error or error
+                    previous_executed = True  # Return home before the next type.
+                    continue
                 status = result.get('status', 'finished')
                 report['activities'].append(dict(type=kind, status=status, report=result))
                 atomic_json(root/'report.json', report)
                 if status not in ('complete', 'already_complete', 'unavailable'):
-                    report['status'] = 'partial'
                     report['pending'].extend(kind+'：'+str(reason) for reason in result.get('pending', []))
-                    report['pending'].append('本类型未核验完成，保留现场；其余类型留待接续')
-                    return report
+                    if unsettled(child):
+                        report['status'] = 'partial'
+                        report['pending'].append('本类型有未核账记录，保留现场；其余类型留待接续')
+                        return report
                 previous_executed = True
-            report['status'] = 'complete' if any(a['status'] in ('complete', 'already_complete')
-                                               for a in report['activities']) else 'unavailable'
+            if deferred_error is not None:
+                raise deferred_error
+            statuses = [a['status'] for a in report['activities']]
+            if any(s not in ('complete', 'already_complete', 'unavailable') for s in statuses):
+                report['status'] = 'partial'
+            else:
+                report['status'] = 'complete' if any(s in ('complete', 'already_complete')
+                                                   for s in statuses) else 'unavailable'
             return report
         except RunCancelled:
             report['status'] = 'cancelled'

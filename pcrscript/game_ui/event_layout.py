@@ -31,6 +31,10 @@ def map_dialogue(screen):
     """Observed map dialogue: pink nameplate above a wide white speech panel."""
     if screen.find('菜单|跳过|全文显示', (680, 0, 960, 380)):
         return False
+    # Modal lists (e.g. 活动剧情一览) share the pink/white palette but carry a
+    # close button; a speech panel never does (2026-11-14).
+    if screen.find('关闭', (350, 445, 615, 515), exact=True):
+        return False
     plate = cv.cvtColor(screen.image[394:413, 200:355], cv.COLOR_BGR2HSV)
     panel = cv.cvtColor(screen.image[450:495, 220:740], cv.COLOR_BGR2HSV)
     pink = (plate[:, :, 0] >= 140) & (plate[:, :, 0] <= 179) & (plate[:, :, 1] > 45)

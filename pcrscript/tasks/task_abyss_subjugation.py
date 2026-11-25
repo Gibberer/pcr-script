@@ -55,7 +55,7 @@ def validate_options(options):
                   ('max_source_batches', 3, 10)),
         flags=(('preview_only', False), ('first_clear', True), ('allow_local_trials', True),
                ('auto_collect_house_stamina', True), ('discover_sources', True),
-               ('auto_equip_special', True), ('allow_five_star_upgrade', False),
+               ('allow_five_star_upgrade', False),
                ('allow_divine_amulets', False), ('on_demand_cultivation', True)))
     if 'avatars' in value and not isinstance(value['avatars'], dict):
         raise ValueError('AbyssSubjugation.avatars必须是配置对象')
@@ -470,8 +470,7 @@ class AbyssSubjugation(TimeLimitTask):
 
     def prepare_party(self, party, order, *, expected=None):
         self.report_progress('战前准备 · 特别装备分配与五人复核')
-        result = prepare_special(self.formation, party, order,
-                                 auto=self.options['auto_equip_special'], expected=expected)
+        result = prepare_special(self.formation, party, order, auto=True, expected=expected)
         self.report.setdefault('party_preparations', []).append(result)
         self.save()
         return result

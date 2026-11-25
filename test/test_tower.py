@@ -377,43 +377,20 @@ class TowerTests(TestCase):
         with self.assertRaisesRegex(EventUIError,'模拟／实战'):
             self.task.verify_members(formation(),self.names,simulate=False)
 
-    def test_unknown_build_blocks_even_with_known_portraits(self):
-        actual=[CharacterStatus(n,level=300,rank=30,stars=5,skill_level=300,
-                               unique=False,unique2=False,identity_verified=True) for n in self.names]
-        actual[2].unique2=None
-        self.task.formation.inspect_current=Mock(return_value=actual)
-        with self.assertRaisesRegex(EventUIError,'独立专武未核实'):
-            self.task.audit(dict(names=self.names,floor=11,source='合成来源',mode='立即发动'))
-
-    def test_unknown_public_names_require_live_skill_identity_before_battle(self):
-        self.task.formation.avatars.query.return_value=[None]*5
-        self.frames([tower(),recommendations(),recommendations(),recommendations(),preview(),preview(),formation()])
-        candidate=self.task.candidate(11,set())
-        self.assertEqual(candidate['names'],[None]*5)
-        actual=[CharacterStatus(n,level=300,rank=30,stars=5,skill_level=300,
-                               unique=False,unique2=False,identity_verified=True) for n in self.names]
-        self.task.formation.inspect_current=Mock(return_value=actual)
-        party=self.task.audit(candidate)
-        self.assertEqual(candidate['names'],self.names)
-        self.assertEqual([m.name for m in party.members],self.names)
-        self.assertTrue(all(m.instant for m in party.members))
-
-    def test_default_simulation_then_real_never_opens_attribute_or_equipment_pages(self):
+    def test_simulation_equips_special_gear_then_real_reuses_it_without_detail_pages(self):
         event=Event(0,10**12,'合成塔',dict(max_floor=11,schedule_id=1,cloister_quest_id=0))
         self.robot._event_news=EventNews(tower=event)
-        self.task.options.update(target_floor=11,max_floors=1,auto_equip=False)
+        self.task.options.update(target_floor=11,max_floors=1)
         self.task.enter=Mock(return_value=tower())
         faces=field.formation_faces(formation())
         candidate=dict(names=[None]*5,floor=11,source='游戏内11层通关队伍',mode='立即发动',
                        key='合成',formation_portraits=faces)
         self.task.candidate=Mock(side_effect=[dict(candidate),dict(candidate)])
         self.task.battle=Mock(side_effect=[True,tower(clear=True)])
-        self.task.audit=Mock(side_effect=AssertionError('must not inspect builds'))
+        self.task.equip_special=Mock()
         self.task.formation.inspect_current=Mock(side_effect=AssertionError('must not open details'))
         connection=Mock();connection.execute.return_value.fetchall.return_value=[(0,0)]
         with patch('pcrscript.game_ui.avatar_assets.ensure_avatar_index',return_value=(self.task.formation.avatars,{})), \
-             patch('pcrscript.tasks.task_tower.prepare_character_database',side_effect=AssertionError('no build preparation')), \
-             patch('pcrscript.tasks.task_tower.prepare_special',side_effect=AssertionError('no equipment inspection')), \
              patch('pcrscript.tasks.task_tower.sqlite3.connect',return_value=connection):
             result=self.task.run()
         self.assertEqual(result['status'],'complete')
@@ -421,7 +398,9 @@ class TowerTests(TestCase):
         simulated,real=[c.args[0] for c in self.task.battle.call_args_list]
         self.assertEqual(simulated['combat_order'],real['combat_order'])
         self.assertEqual(self.task.battle.call_args_list[0].args[1].allow_deaths,4)
-        self.task.audit.assert_not_called()
+        # Equipped once before the free simulation; the real battle keeps it.
+        self.task.equip_special.assert_called_once()
+        self.assertEqual(self.task.equip_special.call_args.args[1],simulated['combat_order'])
         self.task.formation.inspect_current.assert_not_called()
 
     def test_similar_frames_do_not_merge_different_characters(self):
@@ -572,6 +551,36 @@ class TowerTests(TestCase):
         self.assertEqual(path.read_text(encoding='utf-8'),'{incomplete')
         self.task.ui.click.assert_not_called()
 
+    def test_top_phase_simulation_always_equips_special_gear(self):
+        # Not a setting: a legacy key cannot turn equipment off.
+        self.assertNotIn('auto_equip',validate_options({}))
+        self.task.ui.wait=Mock(return_value='formation')
+        with patch('pcrscript.tasks.task_tower.field.formation_faces',return_value=[]),              patch('pcrscript.game_ui.special_equipment.auto_equip_special',return_value={'applied':True}) as equip:
+            self.task.state['phase_trial']={'passed':True}
+            self.assertEqual(self.task.phase_equipment('screen',self.names,{},simulate=True),'formation')
+            equip.assert_called_once()
+            self.assertEqual(equip.call_args.kwargs['priorities']['weapon'],'rarity')
+            # Another party's gear change invalidates any earlier proof.
+            self.assertNotIn('phase_trial',self.task.state)
+            # Real battles reuse the simulated loadout; supports are not ours.
+            self.task.phase_equipment('screen',self.names,{},simulate=False)
+            self.task.phase_equipment('screen',self.names,{'support':'合成甲'},simulate=True)
+            equip.assert_called_once()
+
+    def test_failed_simulation_is_remembered_across_days_until_conditions_change(self):
+        import time
+        now=time.time()
+        policy=self.task.gear_policy()
+        geared=dict(at=now-3*86400,equipment_mode=True,gear_policy=policy,profile_generation=0)
+        self.assertTrue(self.task.remembered(geared))
+        # A week later, or after a build change or a different gear policy, retry.
+        self.assertFalse(self.task.remembered(dict(geared,at=now-8*86400)))
+        self.assertFalse(self.task.remembered(dict(geared,profile_generation=1)))
+        self.assertFalse(self.task.remembered(dict(geared,gear_policy={'weapon':'skill'})))
+        # Failures without special equipment only block for a few minutes.
+        self.assertFalse(self.task.remembered(dict(at=now-3600,profile_generation=0)))
+        self.assertTrue(self.task.remembered(dict(at=now-60,profile_generation=0)))
+
     def test_invalid_budget_and_flag_rejected(self):
         for options in [dict(max_floors=True),dict(max_candidates=0),dict(target_floor=-1),dict(simulation_only=1)]:
             with self.subTest(options=options),self.assertRaises(ValueError):validate_options(options)
@@ -591,25 +600,3 @@ class TowerTests(TestCase):
             self.assertTrue(self.task.repair_temporary_stars(plan,tower(),self.names))
         self.assertEqual(calls,['restore','home','enter'])
 
-    def test_uncertain_weapon_badge_uses_readonly_proof_and_reopens_source(self):
-        actual=[CharacterStatus(n,level=300,rank=30,stars=5,skill_level=300,
-                               unique=False,unique2=False,identity_verified=True) for n in self.names]
-        actual[4].unique=actual[4].unique2=None
-        confirmed=[CharacterStatus(n,level=300,rank=30,stars=5,skill_level=300,
-                                  unique=False,unique2=False,identity_verified=True) for n in self.names]
-        self.task.formation.inspect_current=Mock(side_effect=[actual,confirmed])
-        candidate=dict(names=list(self.names),floor=11,source='合成来源',mode='立即发动',key='合成',vitals=[])
-        # These boundaries are exercised separately by navigation and source
-        # replay tests; here verify that only the explicit slot proof resolves
-        # an unknown badge, and failure remains unable to start combat.
-        with patch.object(self.task,'enter'), \
-             patch.object(self.task,'candidate',return_value=dict(candidate)) as reopen, \
-             patch('pcrscript.game_ui.character_equipment.inspect_unreleased_equipment',return_value='synthetic-proof') as inspect,              patch('pcrscript.tasks.task_home.ToHomePage') as home:
-            party=self.task.audit(candidate)
-        inspect.assert_called_once_with(self.task.ui,self.names[4])
-        # The lookup is bracketed by the shared home navigator before the source reopens.
-        self.assertEqual(home.return_value.run.call_count,2)
-        reopen.assert_called_once()
-        self.assertIn(self.names[4],self.task.formation.unreleased)
-        self.assertTrue(all(m.unique is False and m.unique2 is False for m in party.members))
-        self.task.ui.click.assert_not_called()

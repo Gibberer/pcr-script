@@ -53,7 +53,10 @@ def collect_produced_stamina(ui: EventUI, page) -> dict:
     after_screen = ui.wait(lambda s: s.find('全部收取', (820, 415, 955, 475), exact=True),
                            '公会之家领取后状态')
     if not produced:
-        raise EventUIError('公会之家领取回执没有可确认的体力')
+        # Observed 2026-11-14: a receipt with only other furniture products
+        # (sweep tickets, EXP potions). No stamina was produced; not a fault.
+        ui.save('guild_house_after_collect', after_screen)
+        return dict(before=before, after=visible_stamina(after_screen), empty=True, other_items=True)
     after = visible_stamina(after_screen)
     ui.save('guild_house_after_collect', after_screen)
     if after is None or after <= before:

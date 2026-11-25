@@ -146,8 +146,11 @@ class ActivityTests(TestCase):
         self.assertEqual(report['database']['version'], 'synthetic')
 
     def test_pending_child_stops_other_types_without_navigation(self):
+        def unsettled(child):
+            child.state = dict(pending_claim=dict(before='synthetic.png'))
+            return dict(status='partial', pending=['receipt unknown'])
         with patch('pcrscript.news.fetch_event_news', return_value=EventNews()), \
-             patch.object(CollaborationRaid, 'run', return_value=dict(status='partial', pending=['receipt unknown'])), \
+             patch.object(CollaborationRaid, 'run', autospec=True, side_effect=unsettled), \
              patch.object(CampaignClean, 'run') as story, \
              patch('pcrscript.tasks.task_home.ToHomePage.run') as home:
             report = ActivityDaily(self.robot(dict(Activities=dict(types=['collaboration_raid', 'story'])))).run()
@@ -155,6 +158,32 @@ class ActivityTests(TestCase):
         self.assertIn('receipt unknown', report['pending'][0])
         story.assert_not_called()
         home.assert_not_called()
+
+    def test_settled_partial_child_does_not_block_later_types(self):
+        calls = []
+        with patch('pcrscript.news.fetch_event_news', return_value=EventNews()), \
+             patch.object(CollaborationRaid, 'run', side_effect=lambda: calls.append('raid') or dict(status='partial', pending=['no source'])), \
+             patch.object(CampaignClean, 'run', side_effect=lambda *a, **kw: calls.append('story') or dict(status='complete')), \
+             patch('pcrscript.tasks.task_home.ToHomePage.run', side_effect=lambda **kw: calls.append('home')):
+            report = ActivityDaily(self.robot(dict(Activities=dict(types=['collaboration_raid', 'story'])))).run()
+        self.assertEqual(calls, ['raid', 'home', 'story'])
+        self.assertEqual(report['status'], 'partial')
+        self.assertIn('no source', report['pending'][0])
+
+    def test_entry_error_returns_home_runs_later_types_then_reports_error(self):
+        from pcrscript.game_ui.screen import EventUIError
+        calls = []
+        def broken(*args, **kwargs):
+            calls.append('raid')
+            raise EventUIError('synthetic entry not confirmed')
+        with patch('pcrscript.news.fetch_event_news', return_value=EventNews()), \
+             patch.object(CollaborationRaid, 'run', side_effect=broken), \
+             patch.object(CampaignClean, 'run', side_effect=lambda *a, **kw: calls.append('story') or dict(status='complete')), \
+             patch('pcrscript.tasks.task_home.ToHomePage.run', side_effect=lambda **kw: calls.append('home')):
+            task = ActivityDaily(self.robot(dict(Activities=dict(types=['collaboration_raid', 'story']))))
+            with self.assertRaisesRegex(EventUIError, 'synthetic entry'):
+                task.run()
+        self.assertEqual(calls, ['raid', 'home', 'story'])
 
     def test_legacy_story_substep_does_not_dispatch_other_types(self):
         with patch.object(CampaignClean, 'run', return_value=dict(status='complete')) as story, \

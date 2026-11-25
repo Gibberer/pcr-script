@@ -62,7 +62,6 @@ RecollectionFirstClear: # 按需运行 recollection_first_clear，不加入普�
   battle_timeout: 220
   discover_sources: true
   allow_local_trials: false
-  auto_equip: false
   source_urls: []
   sources: {}
 TeamBattle:
@@ -79,7 +78,6 @@ AbyssSubjugation:
   max_normal_trials: 6
   max_simulations: 30
   max_source_batches: 3
-  auto_equip_special: true
   allow_five_star_upgrade: false
   allow_divine_amulets: false
   timeout: 7200
@@ -145,7 +143,6 @@ Dungeon:
   allow_local_trials: false # 需明确授权才按账号现状试打
   preflight: true
   audit_only: false
-  auto_equip: false
   review_on_unexpected: true
 
 # 默认日常运行 upgrade_all_characters：全员拉满等级、技能、普通装备和品级

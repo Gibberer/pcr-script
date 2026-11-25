@@ -28,7 +28,7 @@ def validate_options(options, *, first_clear=False):
     else:
         defaults += [('max_sweeps', 9, 99)]
     flags = ((('discover_sources', True), ('allow_local_trials', False),
-              ('auto_equip', False), ('retry_failed_parties', False)) if first_clear else
+              ('retry_failed_parties', False)) if first_clear else
              (('claim_rewards', True), ('sweep_dominion', True), ('preview_only', False)))
     value = validated_options(options, section, integers=defaults, flags=flags)
     areas = value.setdefault('areas', list(field.AREAS) if first_clear else ['kaiser', 'zen', 'miroku'])
@@ -46,8 +46,6 @@ def validate_options(options, *, first_clear=False):
         from .role_mastery_preparation import validate_mastery_preparation
         value['mastery_preparation'] = validate_mastery_preparation(value.setdefault('mastery_preparation', {}))
         value['auto_equip_priorities'] = validate_auto_priorities(value.setdefault('auto_equip_priorities', {}))
-        if value['auto_equip_priorities'] and not value['auto_equip']:
-            raise ValueError(section+'.auto_equip_priorities需要开启auto_equip')
         validate_urls(value.setdefault('source_urls', []))
         if not isinstance(value.setdefault('sources', {}), dict):
             raise ValueError(section+'.sources必须为配置对象')

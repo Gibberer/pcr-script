@@ -290,16 +290,16 @@ class RecollectionFirstClear(RecollectionTask):
         self.save()
         if special.get('unknown'):
             raise RecollectionBlocked('特别装备槽位状态未知，未开战')
-        if self.options['auto_equip']:
-            details['special_equipment_before'] = special
-            self.report_progress('追忆战首通 · 分配现有特别装备')
-            priorities = self.options['auto_equip_priorities']
-            special = (auto_equip_special(self.ui, details['order'], priorities=priorities)
-                       if priorities else auto_equip_special(self.ui, details['order']))
-            details['special_equipment'] = special
-            self.save()
-            if special.get('unknown'):
-                raise RecollectionBlocked('特别装备分配后的槽位状态未知，未开战')
+        # Always assign existing special equipment; not a user option.
+        details['special_equipment_before'] = special
+        self.report_progress('追忆战首通 · 分配现有特别装备')
+        priorities = self.options['auto_equip_priorities']
+        special = (auto_equip_special(self.ui, details['order'], priorities=priorities)
+                   if priorities else auto_equip_special(self.ui, details['order']))
+        details['special_equipment'] = special
+        self.save()
+        if special.get('unknown'):
+            raise RecollectionBlocked('特别装备分配后的槽位状态未知，未开战')
         context = trial_context(signature, party, details,
                                 self.capture().number((505,375,590,402)),
                                 mastery=self.report.get('mastery_preparation', {}).get('nodes') or None)

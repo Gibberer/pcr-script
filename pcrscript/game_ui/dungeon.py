@@ -18,7 +18,7 @@ def equipped_special_slots(screen: EventScreen) -> int:
 
 
 def auto_equip_party(ui: EventUI, label: str = 'party') -> dict:
-    """Opt-in assignment of existing EX items to an already verified party."""
+    """Assign existing EX items to an already verified party (always, before battle)."""
     ui.wait(lambda s:s.find('队伍编组',(300,0,650,70)), '已核验编队')
     ui.click((613,451))
     page = lambda s:(s.find('特别装备设定',(250,0,710,80),exact=True)

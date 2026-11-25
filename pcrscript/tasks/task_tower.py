@@ -1,6 +1,5 @@
 """Revised CN tower: current-floor recommendations, simulation, real progress."""
 from __future__ import annotations
-from dataclasses import asdict
 from hashlib import sha256
 from pathlib import Path
 from contextlib import closing
@@ -17,12 +16,17 @@ from .registry import register
 from .strategy_formation import StrategyFormation
 from .event_strategy import EventParty, MemberRequirement
 from .event_battle import EventCombat
-from .party_preparation import prepare_character_database, prepare_special
 from ..game_ui import tower as field
 from ..game_ui.avatars import face_crop
 from ..game_ui.character_search import search_character_candidates
 from ..game_ui.screen import EventUI, EventUIError, normalized
 from ..run_session import atomic_json, checkpoint, clock as time, RunCancelled, ResumeUnsafe
+
+
+# A failed free simulation against the same visible enemy state stays a
+# failure while the five, their gear policy and recorded builds are unchanged:
+# the boss heals back to the same HP every day, so retrying only wastes time.
+FAILURE_MEMORY_SECONDS = 7*24*3600
 
 
 class NoTowerCandidate(EventUIError):
@@ -33,7 +37,7 @@ def validate_options(options):
     value = validated_options(options, 'LunaTower',
         integers=(('timeout', 3600, 14400), ('battle_timeout', 240, 600),
                   ('max_floors', 10, 100), ('max_candidates', 20, 100), ('max_pages', 12, 100)),
-        flags=(('preview_only', False), ('simulation_only', False), ('auto_equip', False),
+        flags=(('preview_only', False), ('simulation_only', False),
                ('support_trials',True),('prefer_support',False),('tank_trials',True),('free_recovery',True),
                ('video_guides',True)))
     attacks = value.setdefault('top_attacks_per_run', 1)
@@ -231,7 +235,6 @@ class TowerTask(TimeLimitTask):
         self.ui.capture=contextual_capture
         self.formation = TowerFormation(self.ui)
         self.formation.unreleased = {}
-        self.equipment_checked = set()
         self.combat = EventCombat(self)
         self.state, self.state_path = {}, None
         self.state_writable = True
@@ -472,8 +475,7 @@ class LunaTowerClimb(TowerTask):
                 for failed in (self.state.get('retreated',[])+self.state.get('failed_parties',[])
                                +self.state.get('failed_phase_parties',[])):
                     if (failed.get('floor')!=floor or failed.get('target')!=getattr(self,'_recommendation_target',None)
-                            or failed.get('profile_generation',0)!=self.state.get('profile_generation',0)
-                            or not 0<=time.time()-failed.get('at',0)<900):continue
+                            or not self.remembered(failed)):continue
                     prior=cv.imread(str(failed.get('before','')))
                     if prior is not None and field.matches_formation(type(s)(prior,[]),row.portraits,self.formation.avatars):
                         rejected=True;break
@@ -564,51 +566,6 @@ class LunaTowerClimb(TowerTask):
         if screen.find('无法战斗|限制实战|未持有', (30, 350, 930, 525)):
             raise EventUIError('编队角色不可用，未开战')
 
-    def audit(self, candidate):
-        self.report_progress(f"露娜塔 · {candidate['floor']}层 · 核对五人培养与装备")
-        actual = self.formation.inspect_current(full=True, expected_names=[n for n in candidate['names'] if n])
-        unknown = [a.name for a in actual if a.identity_verified and a.unique is None
-                   and a.unique2 is None and a.name not in self.equipment_checked]
-        if unknown:
-            # Missing badges are not proof that a weapon is absent. Reuse the
-            # shared read-only character page, then reopen this exact source.
-            from ..game_ui.character_equipment import inspect_unreleased_equipment
-            from .task_home import ToHomePage
-            self.enter()
-            confirmed = False
-            for name in unknown:
-                self.report_progress('露娜塔 · 补查专武状态 · '+name)
-                self.equipment_checked.add(name)
-                # Each lookup can end on the character-strengthening page, which
-                # neither the next lookup nor the tower entry can leave.
-                ToHomePage(self.robot).run(timeout=60)
-                proof = inspect_unreleased_equipment(self.ui, name)
-                ToHomePage(self.robot).run(timeout=60)
-                if proof:
-                    self.formation.unreleased[normalized(name)] = (time.time(), proof)
-                    confirmed = True
-            if confirmed:
-                refreshed = self.candidate(candidate['floor'],set(),wanted=candidate,
-                                           simulate=not candidate.get('real',False))
-                if refreshed is None:
-                    raise EventUIError('专武只读核验后原通关队伍不再可用')
-                candidate.update(refreshed)
-                return self.audit(candidate)
-        if (len(actual) != 5 or any(n and normalized(a.name) != n for a,n in zip(actual,candidate['names']))
-                or any(not a.identity_verified or any(getattr(a, k) is None for k in
-                       ('level', 'rank', 'stars', 'skill_level', 'unique', 'unique2'))
-                       or any(type(getattr(a,k)) is not int or getattr(a,k) <= 0
-                              for k in ('level','rank','stars','skill_level'))
-                       or a.stars > 6 or type(a.unique) is not bool or type(a.unique2) is not bool
-                       for a in actual)):
-            raise EventUIError('露娜塔推荐队伍身份、培养或独立专武未核实，未开战')
-        candidate['names'] = [normalized(a.name) for a in actual]
-        self.report.setdefault('audits', []).append(dict(floor=candidate['floor'], observed=[asdict(a) for a in actual]))
-        return EventParty('楼层通关队伍', candidate['source'], [MemberRequirement(
-            a.name, a.level, a.rank, a.stars, a.unique, a.unique2,
-            candidate['mode'] == '立即发动', a.skill_level) for a in actual],
-            auto=True, max_attempts=1, build_basis='game_recommendation_current_account')
-
     def simulation_party(self,candidate):
         # Source-to-formation portrait matching already establishes the five
         # slots. Unknown public names do not require opening character pages.
@@ -655,7 +612,8 @@ class LunaTowerClimb(TowerTask):
             won=self._result == 'win' and result.outcome == 'settled'
             if not won and not candidate.get('multi_party'):
                 self.state.setdefault('failed_parties',[]).append(dict(floor=candidate['floor'],before=simulation_before,
-                    target=field.target_signature(after),at=time.time(),profile_generation=self.state.get('profile_generation',0)))
+                    target=field.target_signature(after),at=time.time(),profile_generation=self.state.get('profile_generation',0),
+                    equipment_mode=True,gear_policy=self.gear_policy()))
                 self.save()
             return won
         if result.outcome=='retreated':
@@ -768,24 +726,43 @@ class LunaTowerClimb(TowerTask):
         if len(order)!=5 or set(order)!=set(plan['names']):raise EventUIError('塔顶五人身份与阶段计划不符')
         return self.phase_equipment(screen,order,plan,simulate=simulate),order
 
+    def remembered(self, failure):
+        """Whether a recorded failure still rules out the same five here."""
+        if failure.get('profile_generation',0)!=self.state.get('profile_generation',0):
+            return False
+        age=time.time()-failure.get('at',0)
+        if not 0<=age<FAILURE_MEMORY_SECONDS:
+            return False
+        # Older failures without the current special-equipment policy (or a
+        # retreat from a real knife) only block briefly.
+        return (bool(failure.get('equipment_mode')) and failure.get('gear_policy')==self.gear_policy()
+                or age<900)
+
+    def gear_policy(self):
+        return {'weapon':'rarity',**self.options['auto_equip_priorities']}
+
+    def equip_special(self,screen,order):
+        """Every free simulation uses the game's automatic special-equipment
+        loadout; real battles reuse the loadout that was just simulated."""
+        from ..game_ui.special_equipment import auto_equip_special
+        # Another party may borrow equipment from the previously tested
+        # five. Their HP/TP alone cannot preserve that older battle proof.
+        self.state.pop('phase_trial',None)
+        self.state.pop('phase_simulation',None)
+        self.save()
+        original_faces=field.formation_faces(screen)
+        self.report.setdefault('special_equipment',[]).append(
+            auto_equip_special(self.ui,order,priorities=self.gear_policy(),verify_slots=False))
+        # Rebind the already identified five portraits after the panel
+        # closes; no need to recognize every outfit from scratch again.
+        return self.ui.wait(lambda s:field.formation(s) and
+            field.same_faces(original_faces,field.formation_faces(s)),
+            '特别装备返回后原五人编队',timeout=5)
+
     def phase_equipment(self,screen,order,plan,*,simulate):
-        if simulate and self.options['auto_equip'] and not plan.get('support'):
-            from ..game_ui.special_equipment import auto_equip_special
-            # Another party may borrow equipment from the previously tested
-            # five. Their HP/TP alone cannot preserve that older battle proof.
-            self.state.pop('phase_trial',None)
-            self.state.pop('phase_simulation',None)
-            self.save()
-            original_faces=field.formation_faces(screen)
-            priorities=dict(weapon='rarity')
-            priorities.update(self.options['auto_equip_priorities'])
-            self.report.setdefault('phase_equipment',[]).append(
-                auto_equip_special(self.ui,order,priorities=priorities,verify_slots=False))
-            # Rebind the already identified five portraits after the panel
-            # closes; no need to recognize every outfit from scratch again.
-            screen=self.ui.wait(lambda s:field.formation(s) and
-                field.same_faces(original_faces,field.formation_faces(s)),
-                '特别装备返回后原五人编队',timeout=5)
+        # A borrowed support character's gear is not ours to assign.
+        if simulate and not plan.get('support'):
+            return self.equip_special(screen,order)
         return screen
 
     def pause_battle_early(self):
@@ -895,9 +872,7 @@ class LunaTowerClimb(TowerTask):
                     before=evidence,at=time.time(),names=order,support=plan.get('support'),
                     instant=dict(plan['instant']),
                     hp_samples=record['hp_samples'],shadow_samples=record['shadow_samples'],
-                    equipment_mode=self.options['auto_equip'],
-                    gear_policy=({'weapon':'rarity',**self.options.get('auto_equip_priorities',{})}
-                                 if self.options['auto_equip'] else None),
+                    equipment_mode=True,gear_policy=self.gear_policy(),
                     goal_version=PHASE_GOAL_VERSION,
                     profile_generation=self.state.get('profile_generation',0)))
         else:
@@ -989,10 +964,10 @@ class LunaTowerClimb(TowerTask):
             failed=[f for f in self.state.get('failed_phase_parties',[]) if f.get('target')==target
                     and f.get('goal_version')==PHASE_GOAL_VERSION
                     and f.get('profile_generation',0)==self.state.get('profile_generation',0)
-                    and f.get('equipment_mode',False)==self.options['auto_equip']
-                    and (not self.options['auto_equip'] or f.get('gear_policy')==
-                         {'weapon':'rarity',**self.options.get('auto_equip_priorities',{})})]
-            recent=[f for f in failed if 0<=time.time()-f.get('at',0)<3600]
+                    # Failures without special equipment do not rule out
+                    # the same five with the current loadout policy.
+                    and f.get('equipment_mode',False) and f.get('gear_policy')==self.gear_policy()]
+            recent=[f for f in failed if self.remembered(f)]
             interrupted=[f for f in self.state.get('runtime_failed_phase_trials',[])
                 if f.get('target')==target and f.get('profile_generation',0)==self.state.get('profile_generation',0)
                 and 0<=time.time()-f.get('at',0)<3600]
@@ -1107,8 +1082,6 @@ class LunaTowerClimb(TowerTask):
             from ..game_ui.avatar_assets import ensure_avatar_index
             self.formation.avatars, avatar_manifest = ensure_avatar_index(self.options.get('avatars'), check=self.check_deadline)
             self.avatar_manifest=avatar_manifest
-            if self.options['auto_equip']:
-                prepare_character_database(self.formation, self.options, check=self.check_deadline)
             for _ in range(self.options['max_floors']):
                 s = self.enter()
                 floor = field.floor_number(s)
@@ -1135,9 +1108,8 @@ class LunaTowerClimb(TowerTask):
                         break
                     tried.add(candidate['key'])
                     try:
-                        party = self.audit(candidate) if self.options['auto_equip'] else self.simulation_party(candidate)
-                        gear = (prepare_special(self.formation,party,candidate['names'],auto=True)
-                                if self.options['auto_equip'] else None)
+                        party = self.simulation_party(candidate)
+                        self.equip_special(self.capture(), candidate['combat_order'])
                     except EventUIError as error:
                         self.report['rejected'].append(dict(floor=floor, names=candidate['names'], reason=str(error)))
                         self.save()
@@ -1166,15 +1138,9 @@ class LunaTowerClimb(TowerTask):
                 real['real'] = True
                 real['simulated'] = True
                 real['target_before']=before
-                if self.options['auto_equip']:
-                    real_party = self.audit(real)
-                    if [asdict(m) for m in real_party.members] != [asdict(m) for m in party.members]:
-                        raise EventUIError('模拟后角色培养或专武状态变化，必须重新模拟')
-                    prepare_special(self.formation, party, candidate['names'], auto=False, expected=gear)
-                else:
-                    if not field.same_faces(candidate['formation_portraits'],real['formation_portraits']):
-                        raise EventUIError('实战五人头像或顺序与模拟不同，未开战')
-                    real['combat_order']=candidate['combat_order']
+                if not field.same_faces(candidate['formation_portraits'],real['formation_portraits']):
+                    raise EventUIError('实战五人头像或顺序与模拟不同，未开战')
+                real['combat_order']=candidate['combat_order']
                 self.report_progress(f'露娜塔 · {floor}层 · 模拟通过，实战推进')
                 s = self.battle(real, party, simulate=False)
                 if s is None:

@@ -31,7 +31,6 @@ RecollectionFirstClear:
   source_urls: []
   discover_sources: true
   allow_local_trials: false
-  auto_equip: false
   auto_equip_priorities: {}
   retry_failed_parties: false
   mastery_preparation: {}
@@ -63,9 +62,9 @@ Recollection:
 
 攻略指定专武等级或强化阶段、编队徽标只能确认开关时，程序转到人物页只读核对数值，再返回重新选择五人。已有明确缺员的队伍直接继续后续来源，避免不能补齐队伍的装备往返；不会自动安装或训练专武。
 
-`auto_equip: true` 可在五人核验通过、槽位已读清时，使用游戏保存的自动装备设置重新分配现有特别装备，再核对提交后的槽位。已填满的槽位也会检查分配，避免沿用之前队伍的装备；无变化时取消预览。游戏可能取用其他角色的装备；默认关闭。此选项不能代替来源指定装备或全局培养要求的核验。
+首通每次开战前，在五人核验通过、槽位已读清后，总是使用游戏保存的自动装备设置重新分配现有特别装备，再核对提交后的槽位；这不是可关闭的选项，旧配置里的 `auto_equip` 会被忽略。已填满的槽位也会检查分配，避免沿用之前队伍的装备；无变化时取消预览。游戏可能取用其他角色的装备。此选项不能代替来源指定装备或全局培养要求的核验。
 
-可用 `auto_equip_priorities: {armor: magic_defense, accessory: hp}` 显式设置防具优先魔法防御、饰品优先生命值；需要同时开启 `auto_equip`。类别为 `weapon`、`armor`、`accessory`，属性为 `rarity`、`skill`、`physical_attack`、`magic_attack`、`physical_defense`、`magic_defense`、`hp`、`physical_critical`、`magic_critical`、`physical_penetration` 或 `magic_penetration`。省略的类别沿用游戏设置。程序核对选中状态及返回页的属性回显后才预览装备；未知选项或回显冲突取消并停止。这只调整现有装备的分配，不训练装备，也不保证某套优先级能通关。
+可用 `auto_equip_priorities: {armor: magic_defense, accessory: hp}` 显式设置防具优先魔法防御、饰品优先生命值。类别为 `weapon`、`armor`、`accessory`，属性为 `rarity`、`skill`、`physical_attack`、`magic_attack`、`physical_defense`、`magic_defense`、`hp`、`physical_critical`、`magic_critical`、`physical_penetration` 或 `magic_penetration`。省略的类别沿用游戏设置。程序核对选中状态及返回页的属性回显后才预览装备；未知选项或回显冲突取消并停止。这只调整现有装备的分配，不训练装备，也不保证某套优先级能通关。
 
 开启 `allow_local_trials` 时，直接从战斗开始的视频可通过首领全名、等级、生命上限和计时，与程序刚读取的当前层详情对应。必须保留两侧画面证据并取得至少两帧完整五人及固定 SET/AUTO；其他层或冲突范围不会归入当前层。该候选保留账号试打标记；来源未声明培养时按头像选入、不读取培养。国服失败是否消耗次数尚未确认，头像试打失败的同组成员在该层默认不再自动开战；开启 `retry_failed_parties` 时改为逐人核验培养与装备后再试。
 

@@ -491,6 +491,9 @@ class RecollectionTests(TestCase):
         self.addCleanup(clock.stop);self.addCleanup(sleep.stop)
         special=patch('pcrscript.game_ui.special_equipment.inspect_special_equipment',return_value=dict(unknown=0))
         special.start();self.addCleanup(special.stop)
+        # First clears always assign existing special equipment.
+        equip=patch('pcrscript.game_ui.special_equipment.auto_equip_special',return_value=dict(unknown=0))
+        equip.start();self.addCleanup(equip.stop)
 
     def make_task(self,folder,game,cls=Recollection,**options):
         robot=Robot(Mock(get_screen_size=Mock(return_value=(960,540))),show_progress=False)
@@ -984,6 +987,8 @@ class RecollectionTests(TestCase):
             task.combat=Mock(run=Mock(side_effect=fail))
             with patch('pcrscript.game_ui.screen.EventScreen.number',return_value=500000), \
                  patch('pcrscript.game_ui.special_equipment.inspect_special_equipment',
+                       return_value=details['special_equipment']), \
+                 patch('pcrscript.game_ui.special_equipment.auto_equip_special',
                        return_value=details['special_equipment']):
                 first=task.battle('记忆领域',9,party)
                 self.assertFalse(first['progressed'])
@@ -1031,12 +1036,12 @@ class RecollectionTests(TestCase):
                 changed.combat.run.assert_called_once()
                 self.assertEqual((game.tickets,game.remaining[field.AREAS['kaiser']]),(100,3))
 
-    def test_auto_equip_is_optional_and_requires_known_before_and_after_slots(self):
-        cases=[(False,0,0,True,15),(True,0,0,True,15),(True,1,0,False,15),
-               (True,0,1,False,15),(True,0,0,True,0),(False,0,0,True,0)]
-        for enabled,before_unknown,after_unknown,can_battle,before_empty in cases:
-            with self.subTest(auto_equip=enabled,before=before_unknown,after=after_unknown), TemporaryDirectory() as root:
-                game=Game();task=self.make_task(root,game,RecollectionFirstClear,auto_equip=enabled)
+    def test_special_equipment_is_always_assigned_with_known_before_and_after_slots(self):
+        cases=[(0,0,True,15),(1,0,False,15),(0,1,False,15),(0,0,True,0)]
+        for before_unknown,after_unknown,can_battle,before_empty in cases:
+            enabled=True
+            with self.subTest(before=before_unknown,after=after_unknown), TemporaryDirectory() as root:
+                game=Game();task=self.make_task(root,game,RecollectionFirstClear)
                 party=parties_for_floor(dict(parties=[source_party()]),field.AREAS['memory'],9)[0]
                 names=[m.name for m in party.members]
                 task.formation=Mock()
@@ -1720,6 +1725,5 @@ class RecognitionAndStrategyTests(TestCase):
         self.assertEqual(raw,dict(areas=['记忆领域']))
         for cls,options in ((Recollection,dict(max_sweeps=True)),(Recollection,dict(areas=['memory'])),
                             (RecollectionFirstClear,dict(areas=[{}])),(RecollectionFirstClear,dict(max_attempts_per_stage=0)),
-                            (RecollectionFirstClear,dict(auto_equip_priorities={'armor':'hp'})),
-                            (RecollectionFirstClear,dict(auto_equip=True,auto_equip_priorities={'armor':True}))):
+                            (RecollectionFirstClear,dict(auto_equip_priorities={'armor':True}))):
             with self.assertRaises(ValueError):cls.prepare({cls.config_section:options})

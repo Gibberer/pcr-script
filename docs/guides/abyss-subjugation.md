@@ -32,7 +32,6 @@ AbyssSubjugation:
   max_simulations: 30
   max_source_batches: 3
   allow_local_trials: true
-  auto_equip_special: true
   allow_five_star_upgrade: false
   allow_divine_amulets: false
   on_demand_cultivation: true
@@ -58,7 +57,7 @@ AbyssSubjugation:
 
 来源未声明培养要求时，程序按头像选入五人后直接以实战（前哨，失败不扣资源）或免费模拟（首领）的结果判断，不逐人读取等级、技能和专武，`party_audits` 中标记为 `portrait_trial`。来源明确的 Rank、星数、技能和专武要求必须满足，此时走完整核验：只有缺失字段才绑定账号观察，报告保留缺项与适配假设；五人身份、属性和专武状态未知时停止。完整攻略队伍与账号适配队伍在模拟后都固定已核验的培养要求，不能在实战前以新的账号状态覆盖要求。同一次运行中，前哨已解析到可用队伍后，其他难度直接复用该解析结果。选人、培养差距与战前装备复用[公共准备流程](../party-preparation.md)。
 
-`auto_equip_special: true` 在试打前分配现有特别装备，可能从其他角色调装备；关闭时仍只读检查。首领实战前须核对与模拟时相同的五人及配装，变化后不能沿用模拟授权。
+试打前总是按游戏自动装备分配现有特别装备，可能从其他角色调装备；这不是可关闭的选项，旧配置里的 `auto_equip_special` 会被忽略。首领实战前须核对与模拟时相同的五人及配装，变化后不能沿用模拟授权。
 
 `on_demand_cultivation` 默认开启：实测未达标时，对上场成员按需升到五星并补齐空专武，确有变化就用同一攻略重测；每名角色每次运行只处理一次。专武 1 缺记忆碎片时会消耗女神的秘石买到 50 个（当期观察约每个 4 秘石）；专武 2 素材不足时放弃，列在报告的 `needs_user` 里由你处理。不强化已有专武，也不使用专用装备辉光球；报告见 `on_demand_cultivation`、`star_upgrades`、`unique_installs`。全员等级、装备和品级由日常的 `upgrade_all_characters` 负责，标准见[公共准备流程](../party-preparation.md#能力边界)。`allow_five_star_upgrade` 默认关闭，开启后在实测前就培养拟上场且允许升到五星的成员；`allow_divine_amulets` 独立控制碎片兑换。报告的 `party_audits[].cultivation` 区分检查、补装和强化。
 

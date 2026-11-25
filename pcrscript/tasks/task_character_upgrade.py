@@ -41,10 +41,25 @@ class UpgradeAllCharacters(BaseTask):
     def save_report(self) -> None:
         atomic_json(self.ui.output/'report.json', self.report)
 
+    def dismiss_returns(self, s) -> None:
+        # Rank-up can refund enhancement materials from removed equipment.
+        # The notice only reports items already returned; it spends nothing.
+        if not s.find('返还装备强化道具', (250, 20, 710, 70), exact=True):
+            return
+        button = s.find('确认', (380, 450, 580, 510), exact=True)
+        if not button:
+            return
+        returned = self.report.setdefault('returned_items', [])
+        self.ui.save(f'returned_{len(returned):02d}', s)
+        returned.append(s.text((250, 95, 710, 390)))
+        self.ui.click(button)
+
     def bulk(self):
         return self.ui.wait(lambda s: s.find('一键强化', (300, 20, 670, 60), exact=True)
                             and selected_count(s) is not None
-                            and not s.find('正在进行数据连接'), '一键强化选择页')
+                            and not s.find('返还装备强化道具', (250, 20, 710, 70), exact=True)
+                            and not s.find('正在进行数据连接'), '一键强化选择页',
+                            handle=self.dismiss_returns)
 
     def enter(self) -> bool:
         for _ in range(12):

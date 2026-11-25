@@ -13,6 +13,9 @@ from ..game_ui.event_layout import event_layout, map_dialogue
 from ..game_ui.screen import EventUIError
 from ..run_session import atomic_json
 
+# Label row under the Adventure menu's circular entries (960x540).
+ENTRY_LABELS = (0, 395, 465, 460)
+
 
 @register("revival_event_once")
 class RevivalEventOnce(CampaignClean):
@@ -43,8 +46,27 @@ class RevivalEventOnce(CampaignClean):
         # Always traverse the explicit revival entrance, even if another event
         # is already open. The calendar describes the edition, not the layout.
         s = self.ui.capture()
-        if s.find('BOSS详情|队伍编组', (0,0,750,80)):
-            self.ui.expect_click('取消', (250,420,950,525), exact=True)
+        # An interrupted run can leave an event-map story playing over the
+        # bottom bar; advance it rather than refusing to start.
+        # Character entrances between lines show no panel: keep waiting until
+        # the bottom bar or a known page returns, within a bounded budget.
+        for _ in range(80):
+            if map_dialogue(s):
+                self.ui.click((775, 495))
+            elif self.story_dialog(s):
+                pass
+            elif (s.find('我的主页|主菜单|冒险', (0, 470, 960, 540))
+                    or s.find('BOSS详情|队伍编组|自动推进设定', (0,0,750,80))):
+                break
+            else:
+                time.sleep(.5)
+            s = self.ui.capture()
+        # Auto-advance settings → formation → stage detail each need a cancel.
+        for _ in range(4):
+            if not (s.find('BOSS详情|队伍编组|自动推进设定', (0,0,750,80)) or s.find('剩余挑战次数')):
+                break
+            self.ui.expect_click('取消', (150,420,950,525), exact=True)
+            time.sleep(.8)
             s = self.ui.capture()
         adventure = s.find('冒险', (460, 470, 600, 540), exact=True)
         if not adventure and s.find('我的主页|主菜单', (0, 470, 960, 540)):
@@ -58,6 +80,10 @@ class RevivalEventOnce(CampaignClean):
                 self.ui.click((32, 30))
                 continue
             entry = s.find('复刻', (0, 280, 465, 465), exact=True)
+            if not entry and s.find('主线关卡'):
+                # The circular entry's decorative lettering is often missed
+                # by full-frame OCR; re-read only the entry label row.
+                entry = self.ui.read_region(s, ENTRY_LABELS).find('复刻', exact=True)
             if entry and s.find('主线关卡'):
                 self.ui.save('revival_entry', s)
                 self.ui.click(entry)

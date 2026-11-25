@@ -17,7 +17,7 @@ CASES = (
     (DawnLabyrinthFirstClear, task_dawn_labyrinth_first_clear.validate_options, 'max_battles', 60, 'retry_failed_boss'),
     (Recollection, recollection_flow.validate_options, 'max_sweeps', 99, 'preview_only'),
     (RecollectionFirstClear, partial(recollection_flow.validate_options, first_clear=True),
-     'max_attempts_per_stage', 5, 'auto_equip'),
+     'max_attempts_per_stage', 5, 'retry_failed_parties'),
     (TeamBattle, task_team_battle.validate_options, 'max_real_attacks', 3, 'simulation_only'),
 )
 

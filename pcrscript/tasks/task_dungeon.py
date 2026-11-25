@@ -396,8 +396,8 @@ class DungeonFirstClear(BaseTask):
                     continue
                 if self.deadline-time.monotonic() < self.options.get('battle_timeout', 220)+30:
                     raise EventUIError('剩余任务时间不足以安全完成一次战斗，未开战')
-                if self.options.get('auto_equip', False):
-                    record['special_equipment'] = auto_equip_party(self.ui, entry.key)
+                # Always assign existing special equipment; not a user option.
+                record['special_equipment'] = auto_equip_party(self.ui, entry.key)
                 self.state['used'].append(entry.key)
                 self.state['in_flight'] = record
                 self.save_state()

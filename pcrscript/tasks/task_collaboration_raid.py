@@ -24,7 +24,7 @@ def validate_options(options):
         integers=(('timeout', 5400, 14400), ('battle_timeout', 240, 600),
                   ('max_battles', 6, 30), ('max_tickets', 99, 999), ('max_exchange_batches', 200, 200)),
         flags=(('first_clear', True), ('claim_rewards', True), ('exchange', True),
-               ('discover_sources', True), ('allow_local_trials', True), ('auto_equip', False)))
+               ('discover_sources', True), ('allow_local_trials', True)))
     value['source_urls'] = validate_urls(value.get('source_urls', []))
     if not isinstance(value.setdefault('sources', {}), dict):
         raise ValueError('CollaborationRaid.sources必须为对象')
@@ -566,10 +566,10 @@ class CollaborationRaid(BaseTask):
             special = inspect_special_equipment(self.ui, audit['order'])
             if special.get('unknown'):
                 raise EventUIError('特别装备状态未知')
-            if self.options['auto_equip']:
-                special = auto_equip_special(self.ui, audit['order'])
-                if special.get('unknown'):
-                    raise EventUIError('分配现有特别装备后的状态未知')
+            # Always assign existing special equipment; not a user option.
+            special = auto_equip_special(self.ui, audit['order'])
+            if special.get('unknown'):
+                raise EventUIError('分配现有特别装备后的状态未知')
             from .recollection_retry import trial_context, same_trial, same_roster
             audit['special_equipment'] = special
             scope = dict(area=TITLE, floor=DIFFICULTIES.index(difficulty)+1)
