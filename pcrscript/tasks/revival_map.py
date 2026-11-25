@@ -451,15 +451,11 @@ class RevivalMap:
             self.home()
             self.r.report_progress('复刻地图 · 领取奖励')
             return self.rewards()
-        else:
-            self.boss_detail('困难')
-            self.hard_boss_open = False
-            self.hard_trial_from_detail()
-            if self.hard_boss_open:
-                # Observed 2026-11-14: VH stays padlocked until Hard is beaten.
-                self.r.report['pending'].append('高难与特别首领需先讨伐困难首领，留待接续')
-                self.r.report_progress('复刻地图 · 领取奖励')
-                return self.rewards()
+        self.boss_detail('困难')
+        self.hard_boss_open = False
+        self.hard_trial_from_detail()
+        # Cleared Hard stages are swept even while the Hard boss stays
+        # unauthorized: the tickets they drop wait for VH/SP.
         self.r.report_progress('复刻地图 · 困难扫荡')
         try:
             self.sweep_hard()
@@ -472,6 +468,11 @@ class RevivalMap:
             else:
                 self.r.report['pending'].append(str(error)+'；未购买体力')
             self.home()
+        if self.hard_boss_open:
+            # Observed 2026-11-14: VH stays padlocked until Hard is beaten.
+            self.r.report['pending'].append('高难与特别首领需先讨伐困难首领，留待接续')
+            self.r.report_progress('复刻地图 · 领取奖励')
+            return self.rewards()
         if self.special_complete():
             # In this event SP unlocks after VH; VH becomes locked after its
             # daily clear and cannot be reopened just to inspect the counter.

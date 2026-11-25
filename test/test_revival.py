@@ -221,6 +221,25 @@ class RevivalTests(unittest.TestCase):
         self.assertIn('普通关卡', flow.r.report['pending'][0])
         flow.clear_quests.assert_called_once_with('普通')
 
+    def test_unauthorized_hard_boss_still_sweeps_hard_stages(self):
+        flow, ui = self.exchange_runner([])
+        flow.r.report = {'pending': []}
+        flow.r.report_progress = Mock()
+        flow.clear_quests = Mock()
+        flow.boss_detail = Mock(return_value=frame())
+        flow.ui.number = Mock(return_value=1)
+        flow.home = Mock()
+        def unauthorized():
+            flow.hard_boss_open = True
+        flow.hard_trial_from_detail = unauthorized
+        flow.sweep_hard = Mock()
+        flow.special_complete = Mock()
+        flow.rewards = Mock(return_value='rewarded')
+        self.assertEqual(flow.run(), 'rewarded')
+        flow.sweep_hard.assert_called_once()
+        flow.special_complete.assert_not_called()
+        self.assertIn('高难与特别首领需先讨伐困难首领', flow.r.report['pending'][-1])
+
     def test_visible_special_row_marks_very_hard_cleared(self):
         flow, ui = self.exchange_runner([frame(('特别',740,157))])
         self.assertFalse(flow.special_complete())
