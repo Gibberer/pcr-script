@@ -472,8 +472,9 @@ class LunaTowerClimb(TowerTask):
                 names = [normalized(n) if n and not str(n).startswith('unit:') else None for n in names]
                 key = self.source_key(row)
                 rejected=False
-                for failed in (self.state.get('retreated',[])+self.state.get('failed_parties',[])
-                               +self.state.get('failed_phase_parties',[])):
+                # Ordinary-floor simulation failures are compared with the
+                # live party power after equipment assignment instead.
+                for failed in (self.state.get('retreated',[])+self.state.get('failed_phase_parties',[])):
                     if (failed.get('floor')!=floor or failed.get('target')!=getattr(self,'_recommendation_target',None)
                             or not self.remembered(failed)):continue
                     prior=cv.imread(str(failed.get('before','')))
@@ -599,6 +600,7 @@ class LunaTowerClimb(TowerTask):
         if simulate:
             simulation_before=str(self.ui.save('simulation_before_'+str(candidate['floor'])+'_'+
                 str(len(self.state.get('failed_parties',[]))),s))
+            simulation_power=self.party_power(s)
         self.ui.click(button)
         result = self.combat.run(party, candidate.get('combat_order',candidate['names']), resume=True)
         after = self.enter()
@@ -613,7 +615,7 @@ class LunaTowerClimb(TowerTask):
             if not won and not candidate.get('multi_party'):
                 self.state.setdefault('failed_parties',[]).append(dict(floor=candidate['floor'],before=simulation_before,
                     target=field.target_signature(after),at=time.time(),profile_generation=self.state.get('profile_generation',0),
-                    equipment_mode=True,gear_policy=self.gear_policy()))
+                    equipment_mode=True,gear_policy=self.gear_policy(),power=simulation_power))
                 self.save()
             return won
         if result.outcome=='retreated':
@@ -725,6 +727,29 @@ class LunaTowerClimb(TowerTask):
             plan['support_proof']=support
         if len(order)!=5 or set(order)!=set(plan['names']):raise EventUIError('塔顶五人身份与阶段计划不符')
         return self.phase_equipment(screen,order,plan,simulate=simulate),order
+
+    def party_power(self, screen):
+        """Formation total power: changes with level, rank, gear and skills."""
+        if not screen.find('总战力', (390, 345, 480, 375), exact=True):
+            return None
+        value = self.ui.number(screen, (480, 343, 640, 377))
+        return value if type(value) is int and value > 0 else None
+
+    def reject_known_failure(self, candidate):
+        """Skip only the same five at the same power and gear policy."""
+        s = self.capture()
+        power = self.party_power(s)
+        if power is None:
+            return
+        for failed in self.state.get('failed_parties', []):
+            if (failed.get('floor') != candidate['floor'] or failed.get('power') != power
+                    or failed.get('target') != getattr(self, '_recommendation_target', None)
+                    or not self.remembered(failed)):
+                continue
+            prior = cv.imread(str(failed.get('before', '')))
+            if prior is not None and field.matches_formation(type(s)(prior, []), candidate['source_portraits'],
+                                                             self.formation.avatars):
+                raise EventUIError(f'同五人在相同战力{power}与配装策略下已模拟失败，跳过')
 
     def remembered(self, failure):
         """Whether a recorded failure still rules out the same five here."""
@@ -1110,6 +1135,7 @@ class LunaTowerClimb(TowerTask):
                     try:
                         party = self.simulation_party(candidate)
                         self.equip_special(self.capture(), candidate['combat_order'])
+                        self.reject_known_failure(candidate)
                     except EventUIError as error:
                         self.report['rejected'].append(dict(floor=floor, names=candidate['names'], reason=str(error)))
                         self.save()

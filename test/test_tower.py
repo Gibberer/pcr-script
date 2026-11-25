@@ -581,6 +581,28 @@ class TowerTests(TestCase):
         self.assertFalse(self.task.remembered(dict(at=now-3600,profile_generation=0)))
         self.assertTrue(self.task.remembered(dict(at=now-60,profile_generation=0)))
 
+    def test_failed_party_is_skipped_only_at_the_same_live_power(self):
+        import time
+        prior=self.root/'prior.png'
+        cv.imwrite(str(prior),np.zeros((540,960,3),np.uint8))
+        self.task._recommendation_target='target'
+        self.task.state['failed_parties']=[dict(floor=780,target='target',before=str(prior),at=time.time(),
+            profile_generation=0,equipment_mode=True,gear_policy=self.task.gear_policy(),power=531534)]
+        candidate=dict(floor=780,source_portraits=['faces'])
+        self.task.ui.number=Mock(side_effect=lambda s,roi:s.number(roi))
+        with patch.object(field,'matches_formation',return_value=True):
+            for power,skipped in (('531534',True),('540000',False)):
+                self.frames([screen(('总战力',433,360),(power,556,359))])
+                with self.subTest(power=power):
+                    if skipped:
+                        with self.assertRaisesRegex(EventUIError,'相同战力'):
+                            self.task.reject_known_failure(candidate)
+                    else:
+                        self.task.reject_known_failure(candidate)
+            # An unreadable power never skips; a free simulation decides.
+            self.frames([screen(('总战力',433,360))])
+            self.task.reject_known_failure(candidate)
+
     def test_invalid_budget_and_flag_rejected(self):
         for options in [dict(max_floors=True),dict(max_candidates=0),dict(target_floor=-1),dict(simulation_only=1)]:
             with self.subTest(options=options),self.assertRaises(ValueError):validate_options(options)

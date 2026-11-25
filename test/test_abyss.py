@@ -404,6 +404,14 @@ class AbyssTests(TestCase):
                          dict(before=6,after=6,empty=True,other_items=True))
         self.assertEqual([call.args[0].text for call in ui.click.call_args_list],
                          ['公会之家','全部收取','关闭'])
+        # A missed stamina line cannot hide a balance that actually rose.
+        gained=screen(('体力',434,24),('186/413',504,23),('全部收取',900,444))
+        ui=Mock();ui.wait.side_effect=[house,receipt,gained]
+        self.assertEqual(collect_produced_stamina(ui,abyss),dict(before=6,after=186))
+        unread=screen(('全部收取',900,444))
+        ui=Mock();ui.wait.side_effect=[house,receipt,unread]
+        with self.assertRaisesRegex(EventUIError,'领取后体力未确认'):
+            collect_produced_stamina(ui,abyss)
 
     def test_guild_house_recovery_requires_matching_stage_detail(self):
         task=object.__new__(AbyssPush);task.ui=Mock()
