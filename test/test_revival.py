@@ -54,6 +54,26 @@ class RevivalTests(unittest.TestCase):
             self.assertFalse(RevivalState(root,'a',event).complete)
             runner.exchange.assert_called_once()
 
+    def test_error_after_entry_is_journaled_but_entry_error_is_not(self):
+        import time
+        event = Event(time.time()-60,time.time()+600,'未来复刻',{'event_id':13})
+        for entered in (False, True):
+            with TemporaryDirectory() as root:
+                robot = SimpleNamespace(driver=Mock())
+                robot.driver.get_screen_size.return_value = (960,540)
+                runner = RevivalEventOnce(robot,event,{'account_key':'a','state_dir':root,'output':root})
+                def enter():
+                    if not entered:
+                        raise EventUIError('复刻入口未确认')
+                    runner.layout = 'list'
+                runner.enter = enter
+                runner.ui.save = Mock()
+                with patch('pcrscript.tasks.event_battle.EventBattles') as battles,                         patch('pcrscript.run_session.failure'):
+                    battles.return_value.first_clear.side_effect = EventUIError('兑换结算超时')
+                    with self.assertRaises(EventUIError):
+                        runner.run()
+                self.assertEqual('pending_unreconciled' in runner.state.data, entered)
+
     def exchange_runner(self, frames):
         ui = ReplayUI(frames)
         runner = SimpleNamespace(ui=ui, check_deadline=Mock(), log=Mock())

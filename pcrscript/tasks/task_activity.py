@@ -41,6 +41,7 @@ def handler_config(config, kind, options):
 def unsettled(child) -> bool:
     """A battle, spend, claim or exchange journal awaits reconciliation."""
     state = getattr(child, 'state', None)
+    state = getattr(state, 'data', state)  # RevivalState wraps its persisted report.
     return isinstance(state, dict) and any(str(k).startswith('pending_') and v for k, v in state.items())
 
 

@@ -185,6 +185,19 @@ class ActivityTests(TestCase):
                 task.run()
         self.assertEqual(calls, ['raid', 'home', 'story'])
 
+    def test_unreconciled_revival_error_stops_later_types(self):
+        from pcrscript.game_ui.screen import EventUIError
+        def broken(child, *args, **kwargs):
+            # RevivalEventOnce keeps its persisted report in RevivalState.data.
+            child.state = SimpleNamespace(data=dict(pending_unreconciled='exchange balance unknown'))
+            raise EventUIError('synthetic exchange timeout')
+        event = Event(0, 10**12, 'Synthetic revival', dict(event_id=1))
+        with patch('pcrscript.news.fetch_event_news', return_value=EventNews(revival=event)),              patch.object(RevivalEventOnce, 'run', autospec=True, side_effect=broken),              patch.object(CampaignClean, 'run') as story,              patch('pcrscript.tasks.task_home.ToHomePage.run') as home:
+            with self.assertRaisesRegex(EventUIError, 'synthetic exchange'):
+                ActivityDaily(self.robot(dict(Activities=dict(types=['revival', 'story'])))).run()
+        story.assert_not_called()
+        home.assert_not_called()
+
     def test_legacy_story_substep_does_not_dispatch_other_types(self):
         with patch.object(CampaignClean, 'run', return_value=dict(status='complete')) as story, \
              patch.object(CollaborationRaid, 'run') as raid, \

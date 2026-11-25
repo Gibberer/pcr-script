@@ -145,6 +145,10 @@ class RevivalEventOnce(CampaignClean):
             failure(error)
             self.report['status'] = 'error'
             self.report['pending'].append(str(error))
+            if self.layout:
+                # No per-click journal: past the entrance an error may sit
+                # between an exchange, sweep or battle and its balance check.
+                self.report['pending_unreconciled'] = '复刻活动中途中断，消费或战斗结果未核实：'+str(error)
             self.ui.save('error')
             raise
         finally:
