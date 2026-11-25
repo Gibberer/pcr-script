@@ -42,7 +42,9 @@ def unsettled(child) -> bool:
     """A battle, spend, claim or exchange journal awaits reconciliation."""
     state = getattr(child, 'state', None)
     state = getattr(state, 'data', state)  # RevivalState wraps its persisted report.
-    return isinstance(state, dict) and any(str(k).startswith('pending_') and v for k, v in state.items())
+    # Handlers without a persisted journal flag mid-flow errors in their report.
+    return any(isinstance(record, dict) and any(str(k).startswith('pending_') and v for k, v in record.items())
+               for record in (state, getattr(child, 'report', None)))
 
 
 @register('campaign_clean', requires_home=True)

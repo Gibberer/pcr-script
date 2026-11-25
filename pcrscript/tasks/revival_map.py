@@ -319,7 +319,15 @@ class RevivalMap:
             self.r.check_deadline()
             chapter, number = self.detail_stage(s)
             stage = f'{chapter}-{number}'
-            count = self.sweep_stage(s, stage)
+            try:
+                count = self.sweep_stage(s, stage)
+            except StaminaShort:
+                # The purchase prompt is cancelled; close the stage detail too.
+                self.record_sweeps(swept)
+                self.ui.wait(lambda f: f.find('剩余挑战次数') and not f.find('体力回复|购买体力'),
+                             '困难关卡详情')
+                self.ui.expect_click('取消', (550, 420, 755, 525), exact=True)
+                raise
             if count:
                 swept[stage] = count
             if count and self.short_sweep:
@@ -396,7 +404,8 @@ class RevivalMap:
             elif not confirmed and f.find('体力回复|购买体力'):
                 self.ui.save('hard_sweep_purchase', f)
                 self.ui.expect_click('取消', (200, 300, 760, 520), exact=True)
-                raise EventUIError(f'{stage} 扫荡要求购买，已取消')
+                # Never buy; the caller collects Guild House stamina once.
+                raise StaminaShort(f'困难 {stage} 扫荡体力不足，已取消购买')
             elif f.find('限定商店|限时商店'):
                 self.ui.expect_click('取消|关闭', (200, 300, 800, 525), exact=True)
             elif (confirmed and f.find('剩余挑战次数') and f.find('取消', (550, 420, 755, 525), exact=True)

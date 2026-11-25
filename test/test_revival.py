@@ -229,6 +229,17 @@ class RevivalTests(unittest.TestCase):
         self.assertIsNone(flow.short_sweep)
         self.assertEqual(ui.clicks[-1], '取消')
 
+    def test_hard_sweep_purchase_prompt_is_stamina_short(self):
+        from pcrscript.tasks.revival_map import StaminaShort
+        detail = frame(('一日店长的轨迹1-1',300,52),('剩余挑战次数',820,413),('3/3',880,413),('取消',667,455))
+        flow, ui = self.sweep_flow([detail, detail])
+        flow.scan_pages = Mock(return_value=[(None, {(1, 1): SimpleNamespace(center=(380, 380))})])
+        flow.r.report = {'pending': []}
+        flow.sweep_stage = Mock(side_effect=StaminaShort('困难 1-1 扫荡体力不足，已取消购买'))
+        with self.assertRaises(StaminaShort):
+            flow.sweep_hard()
+        self.assertEqual(ui.clicks[-1], '取消')
+
     def test_normal_stamina_short_still_claims_rewards(self):
         from pcrscript.tasks.revival_map import StaminaShort
         flow, ui = self.exchange_runner([])

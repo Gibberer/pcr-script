@@ -764,12 +764,19 @@ class CampaignClean(TimeLimitTask):
                 time.sleep(.5)
         raise EventUIError("活动券兑换达到步骤上限")
 
+    def unreconciled(self, entered: bool, error: Exception) -> None:
+        # No per-click journal: past the entrance an error may sit between a
+        # sweep, battle or exchange and its balance check.
+        if entered:
+            self.report['pending_unreconciled'] = '剧情活动中途中断，消费或战斗结果未核实：'+str(error)
+
     def run_only(self, step: str) -> TaskReport:
         if step not in ('stories', 'memoirs', 'missions', 'sweep', 'exchange'):
             raise ValueError(f'未知活动步骤: {step}')
+        entered = False
         try:
             self.report_progress(f'进入活动 · {step}')
-            if self.enter():
+            if entered := self.enter():
                 self.report_progress(f'处理活动步骤 · {step}', 0, 1)
                 getattr(self, step)()
                 self.report_progress(f'活动步骤已处理 · {step}', 1, 1)
@@ -780,6 +787,7 @@ class CampaignClean(TimeLimitTask):
         except Exception as error:
             self.report['status'] = 'error'
             self.report['pending'].append(str(error))
+            self.unreconciled(entered, error)
             self.ui.save('error')
             raise
         finally:
@@ -788,11 +796,13 @@ class CampaignClean(TimeLimitTask):
     def run(self, hard_chapter: bool = True, exhaust_power: bool = False, *, only: str = 'all') -> TaskReport:
         if only != 'all':
             return self.run_only(only)
+        entered = False
         try:
             self.report_progress('进入剧情活动')
             if not self.enter():
                 self.report["status"] = "unavailable"
                 return self.report
+            entered = True
             if self.options.get("first_clear", False) or self.options.get("bosses", False):
                 from .event_battle import EventBattles
                 battles = EventBattles(self)
@@ -826,6 +836,7 @@ class CampaignClean(TimeLimitTask):
             failure(error)
             self.report["status"] = "error"
             self.report["pending"].append(str(error))
+            self.unreconciled(entered, error)
             self.ui.save("error")
             raise
         finally:

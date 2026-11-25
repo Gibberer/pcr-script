@@ -198,6 +198,14 @@ class ActivityTests(TestCase):
         story.assert_not_called()
         home.assert_not_called()
 
+    def test_story_error_after_entry_stops_later_types(self):
+        from pcrscript.game_ui.screen import EventUI, EventUIError
+        with patch('pcrscript.news.fetch_event_news', return_value=EventNews()),              patch('pcrscript.tasks.task_story_event.failure'), patch.object(EventUI, 'save'),              patch.object(CampaignClean, 'enter', return_value=True),              patch.object(CampaignClean, 'sweep'), patch.object(CampaignClean, 'stories'),              patch.object(CampaignClean, 'memoirs'), patch.object(CampaignClean, 'missions'),              patch.object(CampaignClean, 'exchange', side_effect=EventUIError('synthetic exchange timeout')),              patch.object(CollaborationRaid, 'run') as raid,              patch('pcrscript.tasks.task_home.ToHomePage.run') as home:
+            with self.assertRaisesRegex(EventUIError, 'synthetic exchange'):
+                ActivityDaily(self.robot(dict(Activities=dict(types=['story', 'collaboration_raid'])))).run()
+        raid.assert_not_called()
+        home.assert_not_called()
+
     def test_legacy_story_substep_does_not_dispatch_other_types(self):
         with patch.object(CampaignClean, 'run', return_value=dict(status='complete')) as story, \
              patch.object(CollaborationRaid, 'run') as raid, \
