@@ -523,6 +523,27 @@ class TeamBattleTests(unittest.TestCase):
         self.assertEqual(outcome['actual_damage'], 34_000_000)
         task.map_after_battle.assert_called_once()
 
+    def test_real_attack_on_boss_killed_by_another_member_is_voided(self):
+        from pcrscript.tasks.task_team_battle import AttackVoided
+        image = np.zeros((540, 960, 3), np.uint8)
+        formation = EventScreen(image, [box('战斗开始', 850, 455)])
+        formation.blue_button = Mock(return_value=True)
+        # OCR layout from the 2026-11-26 dialog after an extension attack.
+        notice = EventScreen(image, [box('战斗结果确认', 479, 146),
+                                     box('其他成员已经击败了这个魔物。', 475, 255),
+                                     box('不会消耗挑战次数。', 476, 278), box('确认', 478, 370)])
+        task = TeamBattle.__new__(TeamBattle)
+        task.ui = Mock()
+        task.ui.capture.side_effect = [formation, notice]
+        task.options = {'battle_timeout': 220}
+        task.report = {'simulations': [], 'battles': []}
+        task.map_after_battle = Mock()
+        with self.assertRaises(AttackVoided) as raised:
+            task.battle(False, (), use_extension=True)
+        self.assertIsInstance(raised.exception, BossChanged)
+        task.ui.click.assert_called_with(notice.items[3])
+        task.map_after_battle.assert_called_once()
+
     def test_reference_damage_rule_distinguishes_kill_from_damage_target(self):
         self.assertFalse(meets_reference(35_671_598, 70_000_000, 70_000_000, False))
         self.assertTrue(meets_reference(35_671_598, 30_000_000, 70_000_000, False))
