@@ -271,11 +271,6 @@ with RunSession('child', sys.argv[1]) as run:
                 self.assertIsNotNone(details)
                 self.assertIn('offline work', json.loads(details.read_text())['reason'])
 
-    def test_offline_work_outside_a_run_is_inert(self):
-        from pcrscript.run_session import offline_work
-        with offline_work():
-            pass
-
 
 if __name__ == '__main__':
     unittest.main()

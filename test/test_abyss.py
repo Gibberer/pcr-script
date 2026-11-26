@@ -71,14 +71,33 @@ class AbyssTests(TestCase):
         self.assertEqual(next_stage(task.enter('fire'))[0],AbyssStage('fire',3,1))
         task.ui.click.assert_called_once_with((898.5,42.0))
 
-    def test_enter_closes_clan_battle_final_day_notice(self):
-        task=object.__new__(AbyssPush);task.deadline=float('inf');task.ui=Mock()
-        notice=screen(('9月团队战最终日！',475,88),
-                      ('团队战活动期间结束',480,288),('关闭',477,434))
-        task.ui.capture.side_effect=[notice,map_screen()]
-        task.ui.wait.return_value=map_screen()
-        self.assertEqual(next_stage(task.enter('fire'))[0],AbyssStage('fire',3,1))
-        task.ui.expect_click.assert_called_once_with('关闭',(365,395,590,475),exact=True)
+    def test_enter_resolves_verified_leftover_dialog_before_reading_map(self):
+        # Each leftover page must be closed by its own verified button region.
+        cases={
+            'clan_battle_final_day_notice':(screen(('9月团队战最终日！',475,88),
+                ('团队战活动期间结束',480,288),('关闭',477,434)),('关闭',(365,395,590,475))),
+            'stale_shard_purchase':(screen(('购买确认',480,42),('取消',370,479)),('取消',(250,440,490,515))),
+            'uncommitted_star_change':(screen(('★变更确认',480,42),('现在的★',550,110),
+                ('取消',370,479),('变更',590,479)),('取消',(250,440,490,515))),
+            'uncommitted_three_star_change':(screen(('★变更确认',480,42),('现在的★',315,110),
+                ('取消',370,479),('变更',590,479)),('取消',(250,440,490,515))),
+            'post_win_clan_battle_cp_notice':(screen(('挑战团队战吧',480,90),('团队战的挑战次数增加了1次',480,285),
+                ('取消',370,435),('前往团队战',585,435)),('取消',(260,400,490,475))),
+            'uncommitted_special_equipment_preview':(screen(('特别装备设定',480,42),('取消',145,479)),
+                ('取消',(35,445,265,520))),
+            'verified_character_detail':(screen(('角色详情',480,40),('确认',478,480)),('确认',(350,440,620,510))),
+            'stale_star_confirmation':(screen(('才能开花确认',480,42),('取消',370,480)),('取消',(250,440,490,515))),
+            'verified_star_receipt':(screen(('才能开花完毕',480,42),('确认',480,480)),('确认',(350,440,620,510))),
+            'stale_shard_source_list':(screen(('记忆碎片获取方法',480,42),('关闭',480,480)),('关闭',(350,440,620,510))),
+            'completed_shard_purchase':(screen(('购买完毕',480,145),('确认',480,370)),('确认',(370,340,585,410))),
+        }
+        for name,(dialog,(button,region)) in cases.items():
+            with self.subTest(name):
+                task=object.__new__(AbyssPush);task.deadline=float('inf');task.ui=Mock()
+                task.ui.capture.side_effect=[dialog,map_screen()]
+                task.ui.wait.return_value=map_screen()
+                self.assertEqual(next_stage(task.enter('fire'))[0],AbyssStage('fire',3,1))
+                task.ui.expect_click.assert_called_once_with(button,region,exact=True)
 
     def test_enter_closes_android_keyboard_before_formation(self):
         task=object.__new__(AbyssPush);task.deadline=float('inf');task.ui=Mock()
@@ -127,47 +146,6 @@ class AbyssTests(TestCase):
         decimal=screen(('深域关卡',110,30),('苍波深域',110,65),
                        ('NEXT',625,120),('0.5-3',625,272))
         self.assertIsNone(next_stage(decimal))
-
-    def test_enter_cancels_stale_shard_purchase_before_replanning(self):
-        task=object.__new__(AbyssPush);task.deadline=float('inf');task.ui=Mock()
-        task.ui.capture.side_effect=[screen(('购买确认',480,42),('取消',370,479)),map_screen()]
-        task.ui.wait.return_value=map_screen()
-        self.assertEqual(next_stage(task.enter('fire'))[0],AbyssStage('fire',3,1))
-        task.ui.expect_click.assert_called_once_with('取消',(250,440,490,515),exact=True)
-
-    def test_enter_cancels_uncommitted_star_change_before_rechecking(self):
-        task=object.__new__(AbyssPush);task.deadline=float('inf');task.ui=Mock()
-        dialog=screen(('★变更确认',480,42),('现在的★',550,110),
-                      ('取消',370,479),('变更',590,479))
-        task.ui.capture.side_effect=[dialog,map_screen()]
-        task.ui.wait.return_value=map_screen()
-        self.assertEqual(next_stage(task.enter('fire'))[0],AbyssStage('fire',3,1))
-        task.ui.expect_click.assert_called_once_with('取消',(250,440,490,515),exact=True)
-
-    def test_enter_cancels_uncommitted_three_star_change(self):
-        task=object.__new__(AbyssPush);task.deadline=float('inf');task.ui=Mock()
-        dialog=screen(('★变更确认',480,42),('现在的★',315,110),
-                      ('取消',370,479),('变更',590,479))
-        task.ui.capture.side_effect=[dialog,map_screen()]
-        task.ui.wait.return_value=map_screen()
-        self.assertEqual(next_stage(task.enter('fire'))[0],AbyssStage('fire',3,1))
-        task.ui.expect_click.assert_called_once_with('取消',(250,440,490,515),exact=True)
-
-    def test_enter_dismisses_post_win_clan_battle_cp_notice(self):
-        task=object.__new__(AbyssPush);task.deadline=float('inf');task.ui=Mock()
-        notice=screen(('挑战团队战吧',480,90),('团队战的挑战次数增加了1次',480,285),
-                      ('取消',370,435),('前往团队战',585,435))
-        task.ui.capture.side_effect=[notice,map_screen()]
-        task.ui.wait.return_value=map_screen()
-        self.assertEqual(next_stage(task.enter('fire'))[0],AbyssStage('fire',3,1))
-        task.ui.expect_click.assert_called_once_with('取消',(260,400,490,475),exact=True)
-
-    def test_enter_cancels_uncommitted_special_equipment_preview(self):
-        task=object.__new__(AbyssPush);task.deadline=float('inf');task.ui=Mock()
-        task.ui.capture.side_effect=[screen(('特别装备设定',480,42),('取消',145,479)),map_screen()]
-        task.ui.wait.return_value=map_screen()
-        self.assertEqual(next_stage(task.enter('fire'))[0],AbyssStage('fire',3,1))
-        task.ui.expect_click.assert_called_once_with('取消',(35,445,265,520),exact=True)
 
     def test_failure_budget_counts_prior_runs_and_interrupted_trials(self):
         with TemporaryDirectory() as folder:
@@ -275,13 +253,6 @@ class AbyssTests(TestCase):
         task.ui.wait.side_effect=wait
         self.assertEqual(next_stage(task.enter('fire'))[0],AbyssStage('fire',3,1))
 
-    def test_enter_returns_from_verified_character_detail(self):
-        task=object.__new__(AbyssPush);task.deadline=float('inf');task.ui=Mock()
-        task.ui.capture.side_effect=[screen(('角色详情',480,40),('确认',478,480)),map_screen()]
-        task.ui.wait.return_value=map_screen()
-        self.assertEqual(next_stage(task.enter('fire'))[0],AbyssStage('fire',3,1))
-        task.ui.expect_click.assert_called_once_with('确认',(350,440,620,510),exact=True)
-
     def test_enter_closes_finished_star_animation_and_character_pages(self):
         task=object.__new__(AbyssPush);task.deadline=float('inf');task.ui=Mock()
         task.ui.capture.side_effect=[screen(('开花完成',480,400)),
@@ -300,34 +271,6 @@ class AbyssTests(TestCase):
         task.ui.wait.return_value=map_screen()
         self.assertEqual(next_stage(task.enter('fire'))[0],AbyssStage('fire',3,1))
         self.assertEqual(task.ui.click.call_args.args[0].text,'我的主页')
-
-    def test_enter_cancels_stale_star_confirmation(self):
-        task=object.__new__(AbyssPush);task.deadline=float('inf');task.ui=Mock()
-        task.ui.capture.side_effect=[screen(('才能开花确认',480,42),('取消',370,480)),map_screen()]
-        task.ui.wait.return_value=map_screen()
-        self.assertEqual(next_stage(task.enter('fire'))[0],AbyssStage('fire',3,1))
-        task.ui.expect_click.assert_called_once_with('取消',(250,440,490,515),exact=True)
-
-    def test_enter_closes_verified_star_receipt(self):
-        task=object.__new__(AbyssPush);task.deadline=float('inf');task.ui=Mock()
-        task.ui.capture.side_effect=[screen(('才能开花完毕',480,42),('确认',480,480)),map_screen()]
-        task.ui.wait.return_value=map_screen()
-        self.assertEqual(next_stage(task.enter('fire'))[0],AbyssStage('fire',3,1))
-        task.ui.expect_click.assert_called_once_with('确认',(350,440,620,510),exact=True)
-
-    def test_enter_closes_stale_shard_source_list(self):
-        task=object.__new__(AbyssPush);task.deadline=float('inf');task.ui=Mock()
-        task.ui.capture.side_effect=[screen(('记忆碎片获取方法',480,42),('关闭',480,480)),map_screen()]
-        task.ui.wait.return_value=map_screen()
-        self.assertEqual(next_stage(task.enter('fire'))[0],AbyssStage('fire',3,1))
-        task.ui.expect_click.assert_called_once_with('关闭',(350,440,620,510),exact=True)
-
-    def test_enter_dismisses_completed_shard_purchase(self):
-        task=object.__new__(AbyssPush);task.deadline=float('inf');task.ui=Mock()
-        task.ui.capture.side_effect=[screen(('购买完毕',480,145),('确认',480,370)),map_screen()]
-        task.ui.wait.return_value=map_screen()
-        self.assertEqual(next_stage(task.enter('fire'))[0],AbyssStage('fire',3,1))
-        task.ui.expect_click.assert_called_once_with('确认',(370,340,585,410),exact=True)
 
     def test_enter_closes_verified_shop_price_notice(self):
         task=object.__new__(AbyssPush);task.deadline=float('inf');task.ui=Mock()
