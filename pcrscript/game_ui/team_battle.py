@@ -54,6 +54,16 @@ def map_ready(screen: EventScreen) -> bool:
                 and screen.find('讨伐信息', (180, 425, 310, 475), exact=True))
 
 
+def map_stage(screen: EventScreen) -> int | None:
+    """Stage number from the map header 「目前N轮 第M阶段」."""
+    if not isinstance(screen, EventScreen):
+        return None
+    label = screen.find(r'第\d+阶段', (235, 40, 420, 80), exact=True)
+    if label is None or label.score < .95:
+        return None
+    return int(re.search(r'\d+', normalized(label.text))[0])
+
+
 def map_bosses(screen: EventScreen) -> list[Boss]:
     if not map_ready(screen):
         raise EventUIError('团队战地图未确认')
@@ -130,6 +140,17 @@ def normal_simulation_ready(boss: Boss, simulation: dict) -> bool:
     return not boss.full or can_repeat(simulation.get('remaining'))
 
 
+def damage_simulation_ready(boss: Boss, simulation: dict, reference: int | None, percent: int) -> bool:
+    """Stage D and above: a damage attack passes on a kill or on simulated
+    damage within ``percent`` of the recommendation's reference damage."""
+    if simulation.get('win') is True:
+        return True
+    actual = simulation.get('actual_damage')
+    if type(actual) is not int or type(reference) is not int or reference <= 0:
+        return False
+    return actual*100 >= min(reference, boss.current_hp)*percent
+
+
 def validate_counter_transition(before, after, *, extension: bool, won: bool, returned=None):
     """A settled result must agree with both counters before another attack."""
     if any(type(n) is not int or not 0 <= n <= 3 for n in (*before, *after)):
@@ -155,11 +176,36 @@ def recommendation_time(screen: EventScreen, use_y: int, ui=None) -> int | None:
 
 
 def recommendation_damage(screen: EventScreen, use_y: int, ui=None) -> int | None:
-    """Read the reference damage belonging to one recommendation row."""
-    label = screen.find('参考伤害', (45, use_y-48, 185, use_y-15), exact=True)
+    """Read the reference damage belonging to one recommendation row.
+
+    The label's place beside 「使用」 depends on the layout: stage D rows have
+    no clear-time line and sit about 13 px lower (observed 2026-11-28). The
+    number is always about 21 px under its label, so the label anchors it."""
+    band = (45, use_y-70, 185, use_y+5)
+    label = screen.find('参考伤害', band, exact=True)
+    if label is None and ui is not None:
+        label = ui.read_region(screen, band, classify=False).find('参考伤害', band, exact=True)
     if label is None:
         return None
-    value = numeric_text(screen, r'[\d,]+', (55, use_y-20, 190, use_y+12), ui)
+    top = int(label.center[1])
+    roi = (55, top+5, 190, top+38)
+    value = numeric_text(screen, r'[\d,]+', roi, ui)
+    if value is None and ui is not None:
+        # The 3x crop can split a long number or score it just below .95
+        # (2026-11-28); the 4x/3x line read is the project's sturdier read.
+        for window in ((55, top+10, 190, top+34), roi):
+            number = ui.number_crop(screen, window)
+            if isinstance(number, int):
+                value = str(number)
+                break
+    if value is None and ui is not None:
+        # Two independent reads agreeing settles it. A full-frame number with
+        # an empty crop stays unknown: the frame can truncate wide numbers.
+        full = screen.find(r'[\d,]+', roi, exact=True)
+        crop = ui.read_region(screen, roi, classify=False).find(r'[\d,]+', roi, exact=True)
+        if (full is not None and full.score >= .95 and crop is not None
+                and normalized(crop.text) == normalized(full.text)):
+            value = normalized(full.text)
     if value is None:
         return None
     digits = value.replace(',', '')

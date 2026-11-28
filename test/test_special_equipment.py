@@ -130,3 +130,21 @@ class SpecialEquipmentTests(TestCase):
         states=preview_slots(before,preview,occupied_slots(before))
         self.assertIs(states[0][0],True)
         self.assertIs(states[1][0],False)
+
+    def test_own_gear_replaced_by_borrowed_item_stays_occupied(self):
+        # Observed 2026-11-28: auto-equip swapped an equipped item for another
+        # member's; the dim portrait reads as unknown on its own.
+        before=np.full((540,960,3),100,np.uint8)
+        preview=before.copy()
+        x,y=SPECIAL_COLUMNS[1],SPECIAL_ROWS[1]
+        preview[y-30:y+30,x-30:x+30]=160
+        occupied=[[True]*3 for _ in SPECIAL_COLUMNS]
+        unknown=[[True]*3 for _ in SPECIAL_COLUMNS]
+        unknown[1][1]=None
+        from unittest.mock import patch
+        with patch('pcrscript.game_ui.special_equipment.occupied_slots', return_value=unknown):
+            states=preview_slots(before,preview,occupied)
+        self.assertIs(states[1][1],True)
+        # An unchanged-looking but unreadable slot stays resolved only when identical.
+        with patch('pcrscript.game_ui.special_equipment.occupied_slots', return_value=unknown):
+            self.assertIs(preview_slots(before,before,occupied)[1][1],True)

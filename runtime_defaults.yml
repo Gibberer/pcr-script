@@ -96,6 +96,10 @@ TeamBattle:
   max_real_attacks: 3
   max_simulations: 0  # 免费模拟不限轮数；仍受 timeout 运行时限约束
   max_boss_failures: 3  # 仅适用A/B/C低难度：同一首领连续失败即换首领；0为不限
+  damage_attacks: true  # 第4阶段（D）起普通挑战改打伤害刀；false 则停止交给人工
+  damage_reference_percent: 70  # 伤害刀模拟须达到推荐参考伤害的百分比（击杀也算通过）
+  damage_min_reference_percent: 5  # 伤害刀只考虑参考伤害不低于首领最大血量该百分比的推荐行
+  damage_candidates: 3  # 伤害刀每个首领最多模拟几支候选队，均未达标再换首领
 CollaborationRaid:
   first_clear: true
   claim_rewards: true

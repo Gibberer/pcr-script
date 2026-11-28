@@ -166,7 +166,10 @@ def preview_slots(before_image, preview_image, before):
             difference=float(np.mean(np.abs(first[12:48,12:48]-second[12:48,12:48])))
             if before[i][j] is False and difference>30:
                 selected[i][j]=True
-            elif before[i][j] is True and difference<5:
+            elif before[i][j] is True and (difference<5 or difference>30):
+                # Unchanged, or own gear replaced by another member's item
+                # (a dim portrait, observed 2026-11-28); auto-equip never
+                # empties a slot and an empty slot is read as False above.
                 selected[i][j]=True
     return selected
 

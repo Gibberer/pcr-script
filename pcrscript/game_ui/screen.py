@@ -254,6 +254,10 @@ class EventUI:
                 return upright
         return value
 
+    def number_crop(self, screen, roi):
+        """Upright 4x/3x read of one numeric field; None unless confident."""
+        return self._number_patch(screen, roi)
+
     def _number_patch(self, screen, roi):
         x1, y1, x2, y2 = roi
         # A thin "1" can disappear at 4x and be read reliably at 3x. Require

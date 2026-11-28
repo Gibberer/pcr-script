@@ -14,8 +14,8 @@ from pcrscript.tasks.base import Event
 from pcrscript.tasks.task_team_battle import BossChanged, ORPHAN_EXTENSION, REBUILD_EXTENSION, TaskDeadline, TeamBattle, validate_options
 
 
-def box(text, x, y):
-    return TextBox(text, 1.0, [[x-18, y-8], [x+18, y-8], [x+18, y+8], [x-18, y+8]])
+def box(text, x, y, score=1.0):
+    return TextBox(text, score, [[x-18, y-8], [x+18, y-8], [x+18, y+8], [x-18, y+8]])
 
 
 def read_region_fixture(screen, roi, **options):
@@ -71,6 +71,33 @@ class TeamBattleTests(unittest.TestCase):
         ui.read_region.return_value = EventScreen(image, [])
         self.assertIsNone(recommendation_time(full, 277, ui))
         self.assertIsNone(recommendation_damage(full, 277, ui))
+        # Stage D row (2026-11-28 layout): no clear time, label and value lower.
+        stage_d = EventScreen(image, [box('参考伤害', 111, 263), box('328810000', 117, 285),
+                                      box('使用', 711, 276)])
+        ui.read_region.return_value = EventScreen(image, [box('328810000', 117, 285)])
+        self.assertEqual(recommendation_damage(stage_d, 276, ui), 328_810_000)
+        self.assertIsNone(recommendation_time(stage_d, 276, ui))
+        # The full frame missed the label: the enlarged band read finds it and
+        # the number is read under the label, not at a fixed offset.
+        missed = EventScreen(image, [box('使用', 711, 276)])
+        ui.read_region.side_effect = lambda screen, roi, **k: EventScreen(
+            image, [box('参考伤害', 111, 263), box('328810000', 117, 285)])
+        self.assertEqual(recommendation_damage(missed, 276, ui), 328_810_000)
+        ui.read_region.side_effect = None
+        # 2026-11-28: the 3x crop split 242240000 into two boxes; the 4x/3x
+        # line read recovers it.
+        row = EventScreen(image, [box('参考伤害', 111, 263), box('242240000', 114, 285)])
+        ui.read_region.return_value = EventScreen(image, [box('24224', 88, 284, .942), box('240000', 137, 284)])
+        ui.number_crop.return_value = 242_240_000
+        self.assertEqual(recommendation_damage(row, 276, ui), 242_240_000)
+        # The line read failing too, a low-score crop that agrees with the
+        # full frame settles it; one that disagrees (an extra 0) does not.
+        ui.number_crop.return_value = None
+        ui.read_region.return_value = EventScreen(image, [box('242240000', 114, 285, .877)])
+        self.assertEqual(recommendation_damage(row, 276, ui), 242_240_000)
+        ui.read_region.return_value = EventScreen(image, [box('2422400000', 114, 285, .831)])
+        self.assertIsNone(recommendation_damage(row, 276, ui))
+        ui.number_crop.reset_mock(return_value=True)
 
     def test_boss_hp_uses_real_region_pipeline_with_numeric_direction_disabled(self):
         image = np.full((540, 960, 3), 240, np.uint8)
@@ -327,6 +354,7 @@ class TeamBattleTests(unittest.TestCase):
         character = EventScreen(image, [box('角色强化', 105, 30)])
         task = TeamBattle.__new__(TeamBattle)
         task.ui = Mock()
+        task.ui.read_region.side_effect = read_region_fixture
         task.ui.wait.side_effect = [listed, character]
         task.ui.capture.return_value = listed
         task.check_deadline = Mock()
@@ -617,7 +645,7 @@ class TeamBattleTests(unittest.TestCase):
             task.try_boss(boss, 3, 0)
         task.battle.assert_called_once()
         task.prepare_boss.assert_called_once_with(boss, True)
-        task.recommendation.assert_called_once_with(boss_hp=70_000_000, boss_full=True)
+        task.recommendation.assert_called_once_with(boss_hp=70_000_000, boss_full=True, boss_max=70_000_000)
         # A full boss must still be killed even if a lower damage reference
         # was met. This used to bypass the double-kill requirement.
         task.report = {'simulations': [], 'battles': []}
@@ -880,15 +908,105 @@ class TeamBattleTests(unittest.TestCase):
             self.assertIs(task.enter(), mapped)
         task.ui.click.assert_not_called()
 
-    def test_stage_scope_blocks_high_and_unknown_before_mode_change(self):
+    def test_detail_stage_must_match_the_branch_and_be_known(self):
         task = TeamBattle.__new__(TeamBattle)
         task.ui = Mock(read_region=Mock(side_effect=lambda s,*a,**k:s))
+        task.report = {}
         image = np.zeros((540,960,3),np.uint8)
-        for stage in ('第1阶段','第2阶段','第3阶段','A阶段','阶段C'):
-            task.require_low_stage(EventScreen(image,[box(stage,85,130)]))
-        for stage in ('第4阶段','第10阶段','D阶段','阶段E','未知'):
-            with self.assertRaises(TaskDeadline):
+        low, high = ('第1阶段','第2阶段','第3阶段','A阶段','阶段C'), ('第4阶段','第10阶段','D阶段','阶段E')
+        for damage_mode, allowed, blocked in ((False, low, high), (True, high, low)):
+            task.damage_mode = damage_mode
+            for stage in allowed:
                 task.require_low_stage(EventScreen(image,[box(stage,85,130)]))
+            for stage in blocked + ('未知',):
+                with self.assertRaises(TaskDeadline):
+                    task.require_low_stage(EventScreen(image,[box(stage,85,130)]))
+
+    def test_map_header_stage(self):
+        from pcrscript.game_ui.team_battle import map_stage
+        image = np.zeros((540,960,3),np.uint8)
+        self.assertEqual(map_stage(EventScreen(image,[box('目前23轮',290,59), box('第4阶段',350,59)])), 4)
+        self.assertIsNone(map_stage(EventScreen(image,[box('第4阶段',85,130)])))
+        self.assertIsNone(map_stage(object()))
+
+    def damage_task(self, simulations, cp=1):
+        from pcrscript.tasks.team_battle_damage import DamageAttacks
+        task = TeamBattle.__new__(TeamBattle)
+        task.options = {'max_real_attacks': 3, 'max_simulations': 0, 'damage_candidates': 2,
+                        'damage_reference_percent': 70}
+        task.report = {'pending': [], 'simulations': [], 'battles': [], 'normal_attacks': 0}
+        task.spent = set()
+        task.teams = {}
+        task.ui = Mock()
+        task.check_deadline = task.report_progress = task.save_report = Mock()
+        task.reject_recommendation = Mock()
+        task.prepare_boss = Mock()
+        task.equipped = Mock(return_value={'slots': []})
+        task.map = Mock(return_value='map')
+        task.counts = Mock(side_effect=[(cp, 0), (0, 0)])  # The attack spends the last one.
+        far = Boss(1, 23, 290, 1_580_000_000, 1_580_000_000, '满血')
+        near = Boss(2, 23, 480, 1_460_000_000, 1_620_000_000, '残血')
+        task.wait_bosses = Mock(return_value=('map', [far, near]))
+        teams = iter(range(100))
+        def recommend(**kwargs):
+            key = f'team-{next(teams)}'
+            task.teams[key] = {'labels': (), 'reference_damage': 200_000_000}
+            return key
+        task.recommendation = Mock(side_effect=recommend)
+        task.battle = Mock(side_effect=[dict(win=False, actual_damage=d) for d in simulations])
+        task.real_attack = Mock(side_effect=lambda boss, names, *a, **k: dict(
+            boss=boss.name, team_key=names, cp_after=0, extension_after=0))
+        return DamageAttacks(task), task, far, near
+
+    def test_damage_branch_attacks_first_team_meeting_the_standard_on_any_boss(self):
+        # The more damaged boss first: two misses (below 70% of 200M), then
+        # the other boss's first team passes at 140M.
+        flow, task, far, near = self.damage_task([139_999_999, 100_000_000, 140_000_000])
+        report = flow.run()
+        self.assertEqual([c.args[0] for c in task.prepare_boss.call_args_list], [near, near, far])
+        task.real_attack.assert_called_once()
+        self.assertIs(task.real_attack.call_args.args[0], far)
+        self.assertEqual(report['normal_attacks'], 1)
+        self.assertEqual(report['status'], 'complete')
+
+    def test_damage_branch_leaves_attacks_when_no_team_meets_the_standard(self):
+        flow, task, far, near = self.damage_task([100_000_000]*4, cp=2)
+        report = flow.run()
+        task.real_attack.assert_not_called()
+        self.assertEqual(task.battle.call_count, 4)
+        self.assertEqual(report['status'], 'partial')
+        self.assertIn('剩余2次挑战需人工出刀', report['pending'][0])
+
+    def test_damage_rehearsal_runs_without_attempts_and_spends_nothing(self):
+        flow, task, far, near = self.damage_task([150_000_000, 100_000_000, 160_000_000, 170_000_000], cp=0)
+        task.options['simulation_only'] = True
+        task.counts = Mock(return_value=(0, 0))
+        report = flow.run()
+        task.real_attack.assert_not_called()
+        self.assertEqual([row['actual_damage'] for row in report['rehearsal']],
+                         [150_000_000, 160_000_000, 170_000_000])
+        self.assertEqual(len(task.spent), 3)
+        self.assertEqual(report['normal_attacks'], 0)
+        self.assertEqual(report['status'], 'complete')
+
+    def test_known_short_team_is_not_simulated_again_for_a_similar_reference(self):
+        task = TeamBattle.__new__(TeamBattle)
+        task.options = {'damage_reference_percent': 70}
+        task.damage_results = {'team-2': 7_713_260}
+        self.assertTrue(task.known_short('team-2', 105_450_000))
+        self.assertFalse(task.known_short('team-2', 10_000_000))
+        self.assertFalse(task.known_short('team-3', 105_450_000))
+
+    def test_damage_simulation_passes_on_kill_or_reference_percent(self):
+        from pcrscript.game_ui.team_battle import damage_simulation_ready
+        boss = Boss(0, 30, 125, 120_000_000, 300_000_000, '首领')
+        self.assertTrue(damage_simulation_ready(boss, dict(win=True), 50_000_000, 80))
+        self.assertTrue(damage_simulation_ready(boss, dict(win=False, actual_damage=40_000_000), 50_000_000, 80))
+        self.assertFalse(damage_simulation_ready(boss, dict(win=False, actual_damage=39_999_999), 50_000_000, 80))
+        self.assertFalse(damage_simulation_ready(boss, dict(win=False, actual_damage=None), 50_000_000, 80))
+        self.assertFalse(damage_simulation_ready(boss, dict(win=False, actual_damage=40_000_000), None, 80))
+        # A row expecting more than the remaining HP is judged against that HP.
+        self.assertTrue(damage_simulation_ready(boss, dict(win=False, actual_damage=96_000_000), 200_000_000, 80))
 
     def test_settled_real_result_is_left_and_dropped_next_tap_repeated(self):
         image = np.full((540, 960, 3), 240, np.uint8)
@@ -912,6 +1030,13 @@ class TeamBattleTests(unittest.TestCase):
         with patch('pcrscript.tasks.task_team_battle.time.sleep'):
             self.assertIs(task.map_after_battle(), mapped)
         task.ui.click.assert_called_once_with(result.items[2])
+        # A reward overlay over the partial result is closed first (2026-11-28).
+        reward = EventScreen(image, [box('RESULT',480,60), box('获得挑战报酬！',505,160), box('×30',215,320)])
+        task.ui.click.reset_mock()
+        task.ui.capture.side_effect = [reward, result, result, mapped]
+        with patch('pcrscript.tasks.task_team_battle.time.sleep'):
+            self.assertIs(task.map_after_battle(), mapped)
+        self.assertEqual([c.args[0] for c in task.ui.click.call_args_list], [(480, 390), result.items[2]])
 
     def test_own_stop_returns_to_map_but_never_replays_or_hides_errors(self):
         for error, raised in ((TaskDeadline('期限'), False), (EventUIError('识别'), True),
@@ -1312,6 +1437,43 @@ class TeamBattleTests(unittest.TestCase):
                 self.assertEqual(task.teams[key]['reference_damage'], 70_000_000)
                 self.assertEqual(state['used'], [kill])
                 self.assertEqual(task.report.get('candidate_rejections', {}), {'参考伤害不足以击杀': 1})
+
+                # Stage D damage attacks take the damage row itself; stage D
+                # rows show only the reference damage, no clear time.
+                damage_only = EventScreen(damage_only.image, [item for item in damage_only.items
+                                                              if item.text not in ('讨伐时间', '1:30')])
+                state.update(screen=damage_only, used=[])
+                task.recommendation_rows = []
+                task.tried = set()
+                task.tried_teams = set()
+                task.teams = {}
+                task.report = {}
+                task.damage_mode = True
+                with patch('pcrscript.tasks.task_team_battle.time.sleep'):
+                    key = task.recommendation(boss_hp=70_000_000, boss_full=full)
+                self.assertEqual(task.teams[key]['reference_damage'], 30_000_000)
+                self.assertEqual(state['used'], [damage_only])
+                self.assertEqual(task.report.get('candidate_rejections', {}), {})
+
+                # Below the HP floor (5% of 1e9 = 50M) the 30M row is skipped
+                # before any simulation; the 70M row after it is taken.
+                state.update(screen=damage_only, used=[])
+                task.recommendation_rows = []
+                task.tried = set()
+                task.tried_teams = set()
+                task.teams = {}
+                task.report = {}
+                task.options = {'damage_min_reference_percent': 5}
+                # Stage D rows carry no clear time; one that does is a kill record.
+                kill = EventScreen(kill.image, [item for item in kill.items
+                                                if item.text not in ('讨伐时间', '0:20')])
+                with patch('pcrscript.tasks.task_team_battle.time.sleep'):
+                    key = task.recommendation(boss_hp=70_000_000, boss_full=full, boss_max=1_000_000_000)
+                self.assertEqual(task.teams[key]['reference_damage'], 70_000_000)
+                self.assertEqual(state['used'], [kill])
+                self.assertIn('参考伤害低于首领最大血量下限', task.report['candidate_rejections'])
+                del task.options
+                task.damage_mode = False
 
                 # A pale but complete row is checked on the formation page
                 # instead of being rejected from portrait colour alone.

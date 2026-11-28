@@ -1,9 +1,8 @@
 """Daily team battle with a proven simulation before every real attack.
 
-Scope: low-difficulty stages (A/B/C) where the roster far exceeds the boss,
-so one recommended team kills two bosses (normal kill, then extension).
-Higher stages (D onward) are out of scope; repeated failures are reported
-as a scope or recognition problem instead of searching the whole timeout.
+Low stages (A/B/C), where the roster far exceeds the boss, are kill-only:
+one recommended team kills two bosses (normal kill, then extension). Stage D
+and above run the separate damage-attack branch in ``team_battle_damage``.
 """
 from __future__ import annotations
 
@@ -23,15 +22,16 @@ from ..game_ui.avatar_assets import read_json
 from ..constants import SERVER_TIMEZONE
 from ..game_ui.screen import EventUI, EventUIError, normalized
 from ..game_ui.special_equipment import auto_equip_special, cancel_special_equipment
-from ..game_ui.team_battle import Boss, boss_detail, can_repeat, can_repeat_clear_time, map_bosses, map_ready, meets_reference, normal_simulation_ready, parse_remaining_time, priority, recommendation_damage, recommendation_time, result_damage, validate_counter_transition
+from ..game_ui.team_battle import Boss, boss_detail, can_repeat, can_repeat_clear_time, map_bosses, map_stage, map_ready, meets_reference, normal_simulation_ready, parse_remaining_time, priority, recommendation_damage, recommendation_time, result_damage, validate_counter_transition
 from ..run_session import clock as time, atomic_json
 
 
 def validate_options(options: dict) -> dict:
     result = validated_options(options, 'TeamBattle',
         integers=(('timeout', 3600, 7200), ('battle_timeout', 220, 600),
-                  ('max_real_attacks', 3, 3)),
-        flags=(('simulation_only', False), ('rebuild_extension', False)))
+                  ('max_real_attacks', 3, 3), ('damage_reference_percent', 70, 100),
+                  ('damage_min_reference_percent', 5, 100), ('damage_candidates', 3, 10)),
+        flags=(('simulation_only', False), ('rebuild_extension', False), ('damage_attacks', True)))
     limit = result.setdefault('max_simulations', 0)
     if type(limit) is not int or not 0 <= limit <= 400:
         raise ValueError('TeamBattle.max_simulations必须是0到400的整数；0表示仅受运行时限约束')
@@ -54,6 +54,7 @@ class TaskDeadline(EventUIError):
 
 
 ORPHAN_EXTENSION = '__visible_extension_team__'
+INCOMPLETE_TEAM = object()  # The real formation lost a member; try another team.
 REBUILD_EXTENSION = '__rebuild_extension_team__'
 MAX_RECOMMENDATION_SWIPES = 120
 RECOMMENDATION_FACES = (224, 312, 402, 491, 581)
@@ -92,6 +93,11 @@ def portrait_groups_match(first, second):
 @register('team_battle')
 class TeamBattle(TimeLimitTask):
     config_section = 'TeamBattle'
+    # Stage D and above: normal attacks may deal damage instead of killing.
+    damage_mode = False
+    # Words that bar a recommended member. A stage D rehearsal only needs
+    # owned members: today's real-attack restriction does not stop simulations.
+    restricted_words = '未持有|限制实战|已参加团队'
 
     @staticmethod
     def map_clear(screen):
@@ -410,6 +416,13 @@ class TeamBattle(TimeLimitTask):
         enlarged = self.ui.read_region(screen, roi)
         return bool(enlarged.find('参加团队|限制实战', roi))
 
+    def known_short(self, names, reference) -> bool:
+        """This run already simulated these five below the damage standard."""
+        best = getattr(self, 'damage_results', {}).get(names)
+        if best is None:
+            return False
+        return best*100 < reference*self.options.get('damage_reference_percent', 70)
+
     def recommendation_signature(self, screen, button):
         center = button.center[1]-33
         if center-24 < 185 or center+24 > 421:
@@ -422,10 +435,10 @@ class TeamBattle(TimeLimitTask):
         self.recommendation_rows.append(faces)
         return len(self.recommendation_rows)-1
 
-    @staticmethod
-    def recommendation_text_restricted(screen, button):
+    @classmethod
+    def recommendation_text_restricted(cls, screen, button, words=None):
         center = button.center[1]-33
-        return bool(screen.find('未持有|限制实战|已参加团队', (175, center-50, 625, center+50)))
+        return screen.find(words or cls.restricted_words, (175, center-50, 625, center+50))
 
     @staticmethod
     def recommendation_gray_slots(screen, button):
@@ -452,7 +465,7 @@ class TeamBattle(TimeLimitTask):
         center = button.center[1]-33
         roi = (175, center-35, 625, center+35)
         enlarged = self.ui.read_region(screen, roi)
-        return bool(enlarged.find('未持有|限制实战|已参加团队', roi))
+        return enlarged.find(self.restricted_words, roi)
 
     @staticmethod
     def recommendation_list(screen):
@@ -531,7 +544,7 @@ class TeamBattle(TimeLimitTask):
         raise EventUIError('推荐列表滑动未生效且未确认到达边界，未按候选耗尽处理')
 
     def recommendation(self, wanted=None, boss_hp=None, *, use_extension=False, returned_time=None,
-                       boss_full=False):
+                       boss_full=False, boss_max=None):
         """Use advanced recommendations; a missing or occupied member rejects the row."""
         self.ui.expect_click('推荐编组', (770, 20, 925, 70), exact=True)
         screen = self.ui.wait(lambda s: s.find('推荐编组', (380, 15, 570, 70), exact=True), '团队战推荐编组')
@@ -556,27 +569,59 @@ class TeamBattle(TimeLimitTask):
                     reference = recommendation_damage(screen, button.center[1], self.ui)
                     # A row at the bottom can show "使用" while its damage or time
                     # is clipped. Revisit it after a short scroll instead of
-                    # recording it as a rejected recommendation.
-                    if estimate is None or reference is None:
+                    # recording it as a rejected recommendation. Stage D rows
+                    # show only the reference damage, never a clear time.
+                    if reference is None or (estimate is None and not self.damage_mode):
+                        # Stage D rows keep their damage beside fully visible
+                        # portraits, so this is an unread number, not clipping.
+                        # It used to vanish without a trace (2026-11-28): keep
+                        # one frame per row so wrongly skipped teams are checkable.
+                        logged = self.__dict__.setdefault('unreadable_rows', set())
+                        if self.damage_mode and signature not in logged:
+                            logged.add(signature)
+                            from ..run_session import emit
+                            emit('team_battle.recommendation', decision='unreadable',
+                                 reason='推荐行参考伤害或讨伐时间未读出', row=signature,
+                                 evidence=str(self.ui.save(f'team_battle_unreadable_{signature}', screen)))
+                        continue
+                    if (self.damage_mode and wanted is None
+                            and (estimate is not None or (boss_max and reference*2 > boss_max))):
+                        # Stage D rows show only damage; a clear time marks
+                        # another account's kill record, no damage reference.
+                        # Rows near full HP without a time are kills as well:
+                        # their teams dealt under 1M in simulation (2026-11-28).
+                        self.reject_recommendation('D阶段击杀记录行', reference_damage=reference,
+                                                   estimated_seconds=estimate)
+                        self.tried.add(f'{signature}-{reference}-{estimate}')
                         continue
                     # Damage/time belong to the source record. Rejecting that
                     # record must not blacklist every row with the same portraits.
                     signature = f'{signature}-{reference}-{estimate}'
                     if signature in self.tried and wanted is None:
                         continue
-                    if boss_hp is not None and reference > boss_hp:
+                    if boss_hp is not None and reference > boss_hp and not self.damage_mode:
                         self.reject_recommendation('参考伤害超过当前血量', reference_damage=reference,
                                                    current_hp=boss_hp, estimated_seconds=estimate)
                         self.tried.add(signature)
                         continue
-                    # Normal attacks are kill-only: in the supported A/B/C
-                    # stages a killing row exists and earns the extension.
-                    if not use_extension and boss_hp is not None and reference < boss_hp:
+                    # The damage-sorted list ends in low-level records: passing
+                    # 70% of a tiny reference must not spend an attack.
+                    if (self.damage_mode and not use_extension and boss_max
+                            and reference*100 < boss_max*self.options.get('damage_min_reference_percent', 5)):
+                        self.reject_recommendation('参考伤害低于首领最大血量下限', reference_damage=reference,
+                                                   maximum_hp=boss_max)
+                        self.tried.add(signature)
+                        continue
+                    # A/B/C normal attacks are kill-only: a killing row exists
+                    # and earns the extension. Stage D accepts damage rows.
+                    if (not use_extension and not self.damage_mode
+                            and boss_hp is not None and reference < boss_hp):
                         self.reject_recommendation('参考伤害不足以击杀', reference_damage=reference,
                                                    current_hp=boss_hp, estimated_seconds=estimate)
                         self.tried.add(signature)
                         continue
-                    if boss_hp is not None and reference == boss_hp and not can_repeat_clear_time(estimate):
+                    if (boss_hp is not None and reference == boss_hp and not self.damage_mode
+                            and not can_repeat_clear_time(estimate)):
                         self.reject_recommendation('参考耗时不满足双刀预算', reference_damage=reference,
                                                    current_hp=boss_hp, estimated_seconds=estimate)
                         self.tried.add(signature)
@@ -584,12 +629,15 @@ class TeamBattle(TimeLimitTask):
                     gray = self.recommendation_gray_slots(screen, button)
                     if gray is None:
                         continue
-                    if self.recommendation_text_restricted(screen, button):
-                        self.reject_recommendation('推荐缺员或角色受限', reference_damage=reference)
-                        self.tried.add(signature)
-                        continue
-                    if self.recommendation_restricted(screen, button):
-                        self.reject_recommendation('推荐局部核验缺员或角色受限', reference_damage=reference)
+                    hit = (self.recommendation_text_restricted(screen, button, self.restricted_words)
+                           or self.recommendation_restricted(screen, button))
+                    if hit:
+                        # Keep the frame and the matched words: the banner
+                        # blinks, so the decision must be checkable later.
+                        evidence = str(self.ui.save(f'team_battle_restricted_{signature}', screen))
+                        self.reject_recommendation('推荐缺员或角色受限', reference_damage=reference,
+                                                   matched=hit.text, at=[int(v) for v in hit.center],
+                                                   evidence=evidence)
                         self.tried.add(signature)
                         continue
                     if gray:
@@ -628,11 +676,14 @@ class TeamBattle(TimeLimitTask):
                         reason = '编队实际不足五人'
                     elif wanted is not None and names != wanted:
                         reason = '五头像与目标队伍不符'
-                    elif names in self.tried_teams:
+                    elif wanted is None and names in self.tried_teams:
                         reason = '同一五头像队伍已经模拟'
                     elif self.unavailable_team(names):
                         reason = '头像与本次已参战成员重复'
-                    elif self.used_member_marked(formation):
+                    elif self.damage_mode and self.known_short(names, reference):
+                        # A simulation is ~90 s: never repeat one that fell short.
+                        reason = '本次运行已模拟且伤害不足'
+                    elif self.restricted_words != '未持有' and self.used_member_marked(formation):
                         reason = '编队显示已参战或限制实战文字'
                     if reason is None:
                         self.teams[names]['estimated_seconds'] = estimate
@@ -877,6 +928,12 @@ class TeamBattle(TimeLimitTask):
         latest = None
         while time.monotonic() < end:
             screen = self.ui.capture()
+            if screen.find('获得挑战报酬', (300, 95, 720, 215)):
+                # Observed 2026-11-28: after a partial real result's 「下一步」
+                # the reward overlay covers the result; a tap closes it.
+                self.ui.save('team_battle_reward', screen)
+                self.ui.click((480, 390))
+                continue
             button = self.settled_result_next(screen)
             if button is not None:
                 # The game can drop the first 「下一步」 tap.
@@ -916,8 +973,12 @@ class TeamBattle(TimeLimitTask):
         value = normalized(stage.text)
         match = re.fullmatch(r'第(\d+)阶段', value)
         number = int(match[1]) if match else ord(re.search('[A-Z]', value)[0])-ord('A')+1
-        if number > 3:
-            raise TaskDeadline(f'{value}超出A/B/C低难度范围，需人工出刀')
+        self.report['stage'] = value
+        if number > 3 and not self.damage_mode:
+            # The guild crossed into stage D mid-run: the kill-only plan is void.
+            raise TaskDeadline(f'{value}超出A/B/C低难度范围；下次运行按D阶段伤害刀处理')
+        if number <= 3 and self.damage_mode:
+            raise TaskDeadline(f'{value}不是D阶段，停止伤害刀')
 
     def try_boss(self, boss: Boss, cp_before: int, extension_before: int, wanted=None,
                  available_time: int | None = None, *, simulation_only: bool = False):
@@ -935,7 +996,8 @@ class TeamBattle(TimeLimitTask):
             self.report_progress(f"团队战 · {boss.name} · 查找第 {len(self.report['simulations'])+1} 支模拟队伍")
             self.prepare_boss(boss, True)
             if wanted is None:
-                names = self.recommendation(boss_hp=boss.current_hp, boss_full=boss.full)
+                names = self.recommendation(boss_hp=boss.current_hp, boss_full=boss.full,
+                                            boss_max=boss.maximum_hp)
             elif rebuild_extension:
                 names = self.recommendation(boss_hp=boss.current_hp, use_extension=True,
                                             returned_time=available_time)
@@ -999,65 +1061,78 @@ class TeamBattle(TimeLimitTask):
             # be compared to the battle timer after a successful simulation.
             if wanted is not None and available_time is None:
                 return None
-            if time.monotonic() + self.options['battle_timeout'] + 60 >= self.deadline:
-                raise TaskDeadline('团队战剩余运行时间不足以安全完成实战，待下次运行')
-            self.report_progress(f'团队战 · {boss.name} · {mode}实战前复核')
+            row = self.real_attack(boss, names, gear, simulation, reference, cp_before, extension_before,
+                                   wanted=wanted, available_time=available_time)
+            if row is INCOMPLETE_TEAM:
+                continue
+            return row
+
+    def real_attack(self, boss: Boss, names, gear, simulation, reference, cp_before: int,
+                    extension_before: int, *, wanted=None, available_time: int | None = None,
+                    current=None):
+        """Re-check the simulated five and their gear, attack once and
+        reconcile both counters. ``current`` is an already open real formation."""
+        mode = '延长' if wanted is not None else '普通'
+        if time.monotonic() + self.options['battle_timeout'] + 60 >= self.deadline:
+            raise TaskDeadline('团队战剩余运行时间不足以安全完成实战，待下次运行')
+        self.report_progress(f'团队战 · {boss.name} · {mode}实战前复核')
+        if current is None:
             self.prepare_boss(boss, False)
             current = self.open_formation(use_extension=wanted is not None,
                                           returned_time=available_time,
-                                          **({'preserve_team': True} if rebuild_extension else {}))
-            for _ in range(5):
-                if self.team(current) == names:
-                    break
-                time.sleep(.6)
-                current = self.ui.capture()
-            else:
-                if wanted is None and self.reject_incomplete_real_team(current):
-                    continue
-                raise EventUIError('实战未保留模拟战的五人编队，停止开战')
-            if wanted is None and self.used_member_marked(current):
-                raise EventUIError('实战编队包含已参加团队战的角色，停止开战')
-            real_gear = self.equipped(names)
-            if real_gear['slots'] != gear['slots']:
-                raise EventUIError('实战与模拟战的特别装备不同，停止开战')
+                                          **({'preserve_team': True} if wanted == REBUILD_EXTENSION else {}))
+        for _ in range(5):
+            if self.team(current) == names:
+                break
+            time.sleep(.6)
             current = self.ui.capture()
-            if self.team(current) != names:
-                raise EventUIError('实战编队与模拟战五人不一致')
-            self.report['in_flight'] = dict(boss=boss.name, lane=boss.lane, lap=boss.lap,
-                                            team_key=names, team=self.teams[names]['labels'], cp_before=cp_before)
+        else:
+            if wanted is None and self.reject_incomplete_real_team(current):
+                return INCOMPLETE_TEAM
+            raise EventUIError('实战未保留模拟战的五人编队，停止开战')
+        if wanted is None and self.used_member_marked(current):
+            raise EventUIError('实战编队包含已参加团队战的角色，停止开战')
+        real_gear = self.equipped(names)
+        if real_gear['slots'] != gear['slots']:
+            raise EventUIError('实战与模拟战的特别装备不同，停止开战')
+        current = self.ui.capture()
+        if self.team(current) != names:
+            raise EventUIError('实战编队与模拟战五人不一致')
+        self.report['in_flight'] = dict(boss=boss.name, lane=boss.lane, lap=boss.lap,
+                                        team_key=names, team=self.teams[names]['labels'], cp_before=cp_before)
+        self.save_report()
+        self.report_progress(f'团队战 · {boss.name} · {mode}实战')
+        if wanted is None:
+            self.remember_extension_target(boss)
+        try:
+            real = self.battle(False, names, use_extension=wanted is not None,
+                               reference_damage=reference, boss_hp=boss.current_hp)
+        except AttackVoided:
+            # Trust the refund only when the map counters prove it.
+            if self.counts(self.map()) != (cp_before, extension_before):
+                raise EventUIError('首领被他人先击败后挑战次数变化，无法对账')
+            self.report.setdefault('voided_attacks', []).append(self.report.pop('in_flight'))
             self.save_report()
-            self.report_progress(f'团队战 · {boss.name} · {mode}实战')
-            if wanted is None:
-                self.remember_extension_target(boss)
-            try:
-                real = self.battle(False, names, use_extension=wanted is not None,
-                                   reference_damage=reference, boss_hp=boss.current_hp)
-            except AttackVoided:
-                # Trust the refund only when the map counters prove it.
-                if self.counts(self.map()) != (cp_before, extension_before):
-                    raise EventUIError('首领被他人先击败后挑战次数变化，无法对账')
-                self.report.setdefault('voided_attacks', []).append(self.report.pop('in_flight'))
-                self.save_report()
-                raise
-            # Preserve the settled result even if the following small map
-            # counters cannot yet be read. Never replay that submitted attack.
-            self.report['in_flight']['result'] = real
-            self.save_report()
-            after = self.map()
-            cp_after, extension_after = self.counts(after)
-            validate_counter_transition((cp_before, extension_before), (cp_after, extension_after),
-                                        extension=wanted is not None, won=real['win'], returned=real.get('remaining'))
-            row = dict(boss=boss.name, lane=boss.lane, lap=boss.lap,
-                       team_key=names, team=self.teams[names]['labels'],
-                       cp_before=cp_before, cp_after=cp_after, extension_after=extension_after,
-                       simulation=simulation, equipment=real_gear, **real)
-            self.report['battles'].append(row)
-            self.report['attempts'] += 1
-            self.report['remaining_normal'] = cp_after
-            self.report['remaining_extension'] = extension_after
-            self.report.pop('in_flight', None)
-            self.save_report()
-            return row
+            raise
+        # Preserve the settled result even if the following small map
+        # counters cannot yet be read. Never replay that submitted attack.
+        self.report['in_flight']['result'] = real
+        self.save_report()
+        after = self.map()
+        cp_after, extension_after = self.counts(after)
+        validate_counter_transition((cp_before, extension_before), (cp_after, extension_after),
+                                    extension=wanted is not None, won=real['win'], returned=real.get('remaining'))
+        row = dict(boss=boss.name, lane=boss.lane, lap=boss.lap,
+                   team_key=names, team=self.teams[names]['labels'],
+                   cp_before=cp_before, cp_after=cp_after, extension_after=extension_after,
+                   simulation=simulation, equipment=real_gear, **real)
+        self.report['battles'].append(row)
+        self.report['attempts'] += 1
+        self.report['remaining_normal'] = cp_after
+        self.report['remaining_extension'] = extension_after
+        self.report.pop('in_flight', None)
+        self.save_report()
+        return row
 
     def rehearse(self):
         """Free normal-attack chain: each passing team is treated as spent.
@@ -1113,6 +1188,15 @@ class TeamBattle(TimeLimitTask):
             if screen is None:
                 self.report['status'] = 'unavailable'
                 return self.report
+            stage = map_stage(screen)
+            if stage is not None and stage > 3:
+                if not self.options.get('damage_attacks', True):
+                    self.report['status'] = 'partial'
+                    self.report['pending'].append(f'第{stage}阶段超出A/B/C低难度范围，已关闭伤害刀'
+                                                  '（TeamBattle.damage_attacks），需人工出刀')
+                    return self.report
+                from .team_battle_damage import DamageAttacks
+                return DamageAttacks(self).run()
             if self.options['simulation_only']:
                 return self.rehearse()
             changed_retries = 0
@@ -1225,8 +1309,8 @@ class TeamBattle(TimeLimitTask):
                 if selected is None:
                     counts = self.report.get('candidate_rejections', {})
                     detail = '；累计淘汰：'+ '、'.join(f'{k}{v}条' for k, v in sorted(counts.items())) if counts else ''
-                    self.report['pending'].append('当前首领均无可核验的击杀队伍；本任务只适用于阵容远超首领的A/B/C阶段，'
-                                                  '此时通常有解，请先排查识别或页面异常，D阶段起需人工出刀'+detail)
+                    self.report['pending'].append('当前首领均无可核验的击杀队伍；A/B/C阶段阵容远超首领时通常有解，'
+                                                  '请先排查识别或页面异常'+detail)
                     break
                 self.report['normal_attacks'] += 1
                 if not selected['win']:
